@@ -9,8 +9,8 @@
  * beside this file in the source repository.
  */
 
-:root {
-  /* Palette — Material for MkDocs custom properties, mapped by role. */
+[data-md-color-scheme="default"] {
+  /* Palette (light scheme) — Material for MkDocs custom properties, mapped by role. */
   --md-primary-fg-color: #2E7D8C;
   --md-primary-fg-color--light: #6FAEBB;
   --md-primary-fg-color--dark: #1F5966;
@@ -36,7 +36,19 @@
   --md-footer-fg-color: #FFFFFF;
   --md-footer-fg-color--light: #F4F6F7;
   --md-footer-fg-color--lighter: #6FAEBB;
+}
 
+[data-md-color-scheme="slate"] {
+  /* Dark scheme — the brand accents only; Material's own slate surfaces carry the rest. */
+  --md-primary-fg-color: #2E7D8C;
+  --md-primary-fg-color--light: #6FAEBB;
+  --md-primary-fg-color--dark: #1F5966;
+  --md-accent-fg-color: #6FAEBB;
+  --md-accent-fg-color--transparent: #1F5966;
+  --md-typeset-a-color: #6FAEBB;
+}
+
+:root {
   /* Type — the family names; the stacks below carry the fallbacks. */
   --md-text-font: "Inter Variable";
   --md-code-font: "JetBrains Mono Variable";

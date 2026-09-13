@@ -15,18 +15,28 @@ theme:
   # itself in docs/stylesheets/fonts/. Nothing this site serves reaches a font CDN.
   font: false
   palette:
-    # ONE scheme, deliberately. The palette is no longer hand-set here: it is the Chippr brand
-    # token set, exported from chippr-robotics/chippr-bots and copied verbatim into
-    # docs/stylesheets/extra.css with its upstream commit in the header. That export is
-    # light-mode values only — the derivation reads the source theme's :root block and nothing
-    # else — and its :root declarations override Material's own [data-md-color-scheme="slate"]
-    # values (equal specificity; extra_css loads last), so a dark toggle would flip the
-    # attribute and change almost nothing on screen. A control that does not do what it says is
-    # worse than no control. Restoring dark mode means exporting a dark token set, not
-    # re-typing colours here.
-    - scheme: default
+    # The palette is not hand-set here: it is the Chippr brand token set, exported from
+    # chippr-robotics/chippr-bots and copied verbatim into docs/stylesheets/extra.css with its
+    # upstream commit in the header. That export scopes the light palette to the `default` scheme
+    # and gives `slate` the brand accents only (Material's own dark surfaces carry the rest), so
+    # the toggle below does exactly what it says in both directions. Change a colour by changing
+    # the pin THERE and re-copying; an edit here is overwritten by the next copy.
+    # Palette toggle for light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
       primary: custom
       accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    # Palette toggle for dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
   features:
     - navigation.instant
     - navigation.tracking
