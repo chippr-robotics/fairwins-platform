@@ -327,3 +327,7 @@ extra:
 
 extra_css:
   - stylesheets/extra.css
+
+# Accessibility fixes the theme's markup needs (docs/javascripts/*.js say which finding each closes).
+extra_javascript:
+  - javascripts/search-dialog-name.js
