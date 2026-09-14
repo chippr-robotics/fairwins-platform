@@ -26,12 +26,12 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 113 |
-| With a member-facing flow | 89 |
-| Member-facing flows | 206 |
+| Spec directories | 114 |
+| With a member-facing flow | 90 |
+| Member-facing flows | 210 |
 | 🟢 covered | 188 |
 | 🟡 partial | 5 |
-| 🔴 absent | 4 |
+| 🔴 absent | 8 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -40,7 +40,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Custody — member funds are escrowed, moved, bridged, swept or sent
 
-84 flows — 🟢 69 · 🟡 5 · 🔴 2 · ⚪ 8 · covered-but-not-proven 0
+86 flows — 🟢 69 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
 
 ### `001-cypress-e2e-flows` — Core wager lifecycle (create → accept → resolve → claim/refund)
 
@@ -336,9 +336,16 @@ establish the outcome. They are listed in full at the end of this document.
 | `trade.wrap-multi-currency-picker` | The Wrap view offers every cohort chain's base coin the member holds from one trading-view-style picker (icon, symbol, network, balance), with unreadable balances shown as unread (never zero) and unconfigured wrappers honestly absent | 🟢 covered | flow | `no-chain` | `48-wrap-multi-currency.cy.js` (WMC-01, WMC-02, WMC-03, WMC-04) |  |
 | `trade.wrap-cross-chain-submit` | Selecting a coin whose chain differs from the wallet's switches the wallet at submit time (settle loop), wraps against that chain's own wrapped-native contract, and a refused switch names both chains and sends nothing | 🟢 covered | settled | `on-chain` | `45-wrap-cross-chain.cy.js` (WXC-01, WXC-02, WXC-03) |  |
 
+### `110-multichain-write-seam` — Seamless multichain UX — chain-abstracted writes on a single EVM seam
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `multichain.claim-on-action-chain` | With the wallet on network B, tapping Claim on a wager living on network A resolves the target chain from the wager, moves the wallet through the one switch-and-settle seam, and completes the claim as a real settled transaction — no in-app 'switch network' step | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
+| `multichain.intent-signs-without-switch` | A relayed EIP-712 intent targeting network A is signed while connected to network B with no network change requested at all — the chain lives in the signature domain | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
+
 ## Disclosure — a member consents to a cost
 
-18 flows — 🟢 17 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
+19 flows — 🟢 17 · 🟡 0 · 🔴 1 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -408,9 +415,15 @@ establish the outcome. They are listed in full at the end of this document.
 | `byok.honest-failures` | GutterToken's 403 and 429 each get their own sentence and action, and neither produces a reply bubble | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-04) |  |
 | `provider.choice` | A paid member switches rails, and the badge and the transport agree about which one answered | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-05) |  |
 
+### `110-multichain-write-seam` — Seamless multichain UX — chain-abstracted writes on a single EVM seam
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `multichain.refused-switch-discloses` | A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface) | 🔴 absent | none | — (proposed: no-chain) | #1552 |  |
+
 ## Access — gating, identity and permission
 
-50 flows — 🟢 49 · 🟡 0 · 🔴 1 · ⚪ 0 · covered-but-not-proven 1
+51 flows — 🟢 49 · 🟡 0 · 🔴 2 · ⚪ 0 · covered-but-not-proven 1
 
 ### `003-polymarket-only-oracle-ui` — Polymarket-only oracle UI
 
@@ -586,6 +599,12 @@ establish the outcome. They are listed in full at the end of this document.
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
 | `controls.moved-to-tools` | The agent controls live on Tools ▸ Assistant, Settings no longer carries them, and the old Settings hashes redirect | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-07) |  |
+
+### `110-multichain-write-seam` — Seamless multichain UX — chain-abstracted writes on a single EVM seam
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `multichain.rail-unavailable-before-tap` | An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out — never a submit-time chain-support error | 🔴 absent | none | — (proposed: no-chain) | #1552 |  |
 
 ## Information — read-only surfaces
 

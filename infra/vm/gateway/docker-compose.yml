@@ -285,7 +285,16 @@ services:
   # key material ever lands there.
   finops:
     container_name: fairwins-gateway-finops
-    # finops-8e9c1730 — the first image that SERVES. The previous pin (spec107-1ac148bf, 2026-09-05)
+    # finops-52fdb6e2 — adds the two fixes that the first working image exposed (#1586):
+    #   * QuickNode reads `data.credits_used`, the field the API actually returns. The `quicknode`
+    #     source was `unreadable` for its whole life behind five guessed field names.
+    #   * The boot fan-out is bounded (4 concurrent) and outbound RPC paced (25/s, HALF the 50 req/s
+    #     the keyed endpoint shares with the gateway and bundler). On finops-8e9c1730 the unbounded
+    #     `Promise.all` took eleven sources `unreadable` with `-32007` for ~2 minutes per restart.
+    # Smoked under this file's own --memory 384m: healthz in 2s, still serving after 60s,
+    # oom=false restarts=0. A local boot with the deployed config shape hit 0 rate-limit errors.
+    #
+    # finops-8e9c1730 was the first image that SERVES. The pin before it (spec107-1ac148bf, 2026-09-05)
     # was OOM-killed before app.listen() on every boot: 5,966 restarts, not one scrape, every FinOps
     # panel blank. Verified on the built image itself under this file's own --memory 384m, twice:
     # healthz in 2s, still serving /metrics after a 60s settle window, oom=false restarts=0. The
@@ -295,7 +304,7 @@ services:
     # Also carries what spec107-1ac148bf predated: the spec-109 alphaday entry (dead on arrival — it
     # had no flatSubscriptions key and reported a QuickNode credential as its problem), the #1539
     # executor-nonce series, and the newly catalogued pinata + thegraph sources.
-    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-finops-exporter:finops-8e9c1730
+    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-finops-exporter:finops-52fdb6e2
     restart: unless-stopped
     pull_policy: missing
     network_mode: "service:gateway"

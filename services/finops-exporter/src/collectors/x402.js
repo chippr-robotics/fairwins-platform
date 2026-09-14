@@ -119,12 +119,15 @@ export function createX402Collector({ config, providers, cursors, log = console.
 
       const authorizedTxs = new Set()
       for (const block of candidateBlocks) {
-        const authLogs = await provider.getLogs({
-          address: token,
-          topics: [AUTHORIZATION_USED],
-          fromBlock: block,
-          toBlock: block,
-        })
+        // Through `scanLogs` on a single-block range rather than a bare `provider.getLogs`: it is
+        // exactly equivalent here, and it keeps this leg inside the shared RPC pace and the
+        // too-wide-filter cap instead of quietly being the one caller that escapes both.
+        const authLogs = await scanLogs(
+          provider,
+          { address: token, topics: [AUTHORIZATION_USED] },
+          block,
+          block,
+        )
         for (const entry of authLogs) authorizedTxs.add(entry.transactionHash)
       }
 

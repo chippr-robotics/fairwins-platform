@@ -1,7 +1,7 @@
 site_name: FairWins
 site_description: Self-custody digital asset infrastructure — embedded wallets, policy-governed custody, payments, markets connectivity, and compliance across major networks, available white-label
 site_author: Chippr Robotics
-site_url: https://docs.FairWins.app
+site_url: https://docs.fairwins.app/
 
 repo_name: chippr-robotics/prediction-dao-research
 repo_url: https://github.com/chippr-robotics/prediction-dao-research
@@ -9,7 +9,18 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  # Self-hosted faces only. `false` stops Material emitting its Google Fonts <link> and its
+  # --md-text-font/--md-code-font declarations; both families are declared instead in
+  # docs/stylesheets/extra.css, which carries the @font-face blocks and ships the woff2 beside
+  # itself in docs/stylesheets/fonts/. Nothing this site serves reaches a font CDN.
+  font: false
   palette:
+    # The palette is not hand-set here: it is the Chippr brand token set, exported from
+    # chippr-robotics/chippr-bots and copied verbatim into docs/stylesheets/extra.css with its
+    # upstream commit in the header. That export scopes the light palette to the `default` scheme
+    # and gives `slate` the brand accents only (Material's own dark surfaces carry the rest), so
+    # the toggle below does exactly what it says in both directions. Change a colour by changing
+    # the pin THERE and re-copying; an edit here is overwritten by the next copy.
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default

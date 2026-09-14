@@ -28,6 +28,7 @@ import { SOURCES, withinCohort, validateCatalogue } from '@fairwins/finops-catal
 import { loadConfig, describeConfig } from './config/index.js'
 import { buildProviders } from './chain/providers.js'
 import { createCursorStore } from './chain/logs.js'
+import { configureSharedRateLimit } from './chain/rateLimit.js'
 import { createRegistry } from './registry.js'
 import { createScheduler } from './scheduler.js'
 import { createBurnTracker } from './burnRate.js'
@@ -71,6 +72,10 @@ export function createApp(overrides = {}) {
   // chain and no source pinned to one, so testnet financial data cannot enter the same series.
   const sources = withinCohort(SOURCES, config.cohortChainIds)
 
+  // Set BEFORE any collector runs: `scanLogs` reads the shared limiter per call, so configuring it
+  // here covers collectors constructed below and the boot pass that follows (#1585).
+  configureSharedRateLimit(config.rpcMaxPerSec)
+
   const providers = overrides.providers ?? buildProviders(config, { log })
   const cursors = createCursorStore()
   const burn = createBurnTracker()
@@ -108,7 +113,7 @@ export function createApp(overrides = {}) {
     ...overrides.collectors,
   }
 
-  const scheduler = createScheduler({ sources, collectors, log })
+  const scheduler = createScheduler({ sources, collectors, log, bootConcurrency: config.bootConcurrency })
 
   /** Build a fresh registry from the scheduler's current readings. */
   function buildRegistry() {

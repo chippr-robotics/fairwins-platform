@@ -142,6 +142,35 @@ Two properties now stop that shape recurring, and both matter independently:
 heap from host RAM, not the cgroup**. Without it Node looks at the VM's ~2 GB, targets a heap far
 above the container ceiling, and feels no pressure to collect before the kernel intervenes.
 
+### the exporter is rate-limited by a vendor
+
+**`-32007 50/second request limit reached` on several on-chain sources at once, shortly after a
+restart.** That is the boot fan-out, and it is bounded now — but the shape is worth recognising,
+because the budget it spends is not the exporter's own.
+
+The keyed Polygon endpoint is capped at **50 req/s SHARED with the gateway and the bundler**
+(`docs/architecture/workbook/06-external-vendors.md`). A reporting service must never be able to
+spend a value path's headroom, so two separate bounds apply and they bound different things:
+
+| knob | default | bounds |
+|---|---|---|
+| `FINOPS_RPC_MAX_PER_SEC` | 25 | requests per SECOND (`chain/rateLimit.js`), evenly spaced |
+| `FINOPS_BOOT_CONCURRENCY` | 4 | how many sources collect AT ONCE (`scheduler.collectAll`) |
+
+**Concurrency is not a rate limit.** Four workers issuing 100ms requests is 40 req/s; the same four
+against a faster endpoint is 400. Concurrency bounds in-flight work, which is a proxy for rate only
+if you know the latency — and it breaks in the direction that hurts exactly when the endpoint gets
+quicker. The pace is what the vendor actually measures, which is why both exist.
+
+The default of 25 is half the shared ceiling **by construction**, not by measurement: taking half
+is a cheaper guarantee than checking afterwards whether we took too much. `0` disables pacing
+rather than deadlocking on a zero rate — a limiter that silently stopped every read would be a
+worse outage than the burst it prevents.
+
+**Do not raise these to make a slow boot faster.** The boot pass is a warm-up; since the listener
+comes up before it (see above), nothing waits on it. A source not yet reached reports `unreadable`,
+which is honest and renderable.
+
 ### fees-waived
 
 **Platform fees are being waived (no treasury configured).**

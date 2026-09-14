@@ -3362,6 +3362,57 @@
           "issue": "#1465"
         }
       ]
+    },
+    {
+      "id": "110-multichain-write-seam",
+      "title": "Seamless multichain UX \u2014 chain-abstracted writes on a single EVM seam",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "multichain.claim-on-action-chain",
+          "name": "With the wallet on network B, tapping Claim on a wager living on network A resolves the target chain from the wager, moves the wallet through the one switch-and-settle seam, and completes the claim as a real settled transaction \u2014 no in-app 'switch network' step",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "on-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1552"
+        },
+        {
+          "id": "multichain.refused-switch-discloses",
+          "name": "A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface)",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "disclosure",
+          "tests": [],
+          "issue": "#1552"
+        },
+        {
+          "id": "multichain.rail-unavailable-before-tap",
+          "name": "An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out \u2014 never a submit-time chain-support error",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "access",
+          "tests": [],
+          "issue": "#1552"
+        },
+        {
+          "id": "multichain.intent-signs-without-switch",
+          "name": "A relayed EIP-712 intent targeting network A is signed while connected to network B with no network change requested at all \u2014 the chain lives in the signature domain",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "on-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1552"
+        }
+      ]
     }
   ]
 }

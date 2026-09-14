@@ -9,6 +9,8 @@
  * revenue counter accumulates instead of re-reporting the same window forever.
  */
 
+import { sharedRateLimiter } from './rateLimit.js'
+
 const DEFAULT_CHUNK = 2_000
 
 /**
@@ -43,11 +45,15 @@ export async function scanLogs(
   filter,
   fromBlock,
   toBlock,
-  { chunk = DEFAULT_CHUNK, maxLogs = DEFAULT_MAX_LOGS } = {},
+  { chunk = DEFAULT_CHUNK, maxLogs = DEFAULT_MAX_LOGS, limiter = null } = {},
 ) {
+  // The process-wide pace (#1585). Resolved per CALL rather than captured at module load, so
+  // `configureSharedRateLimit` at boot is picked up by collectors that were built before it.
+  const pace = limiter ?? sharedRateLimiter()
   const out = []
   for (let start = fromBlock; start <= toBlock; start += chunk) {
     const end = Math.min(start + chunk - 1, toBlock)
+    await pace.acquire()
     const logs = await provider.getLogs({ ...filter, fromBlock: start, toBlock: end })
     out.push(...logs)
     if (out.length > maxLogs) {

@@ -1,9 +1,9 @@
 {
   "name": "@fairwins/miniapp-api-access",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
-  "description": "API Access \u2014 the member developer console, as a mini-app package (spec 095).",
+  "description": "API Access — the member developer console, as a mini-app package (spec 095).",
   "scripts": {
     "build": "vite build"
   },

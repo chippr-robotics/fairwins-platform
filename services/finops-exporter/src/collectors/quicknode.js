@@ -20,6 +20,8 @@ import { read, notConfigured, unreadable } from '../reading.js'
 export function createQuickNodeCollector({ config, fetchImpl = fetch, log = console.warn }) {
   /** @type {number|null} */
   let lastCredits = null
+  /** @type {{remaining: number|null, limit: number|null}|null} */
+  let lastQuota = null
 
   async function readCredits() {
     const { apiKey, endpoint, prometheusUrl } = config.quicknode
@@ -56,14 +58,45 @@ export function createQuickNodeCollector({ config, fetchImpl = fetch, log = cons
       throw new Error(`quicknode admin API returned an error: ${detail}`)
     }
 
-    // The Admin API's exact field naming is not pinned by public docs, so several plausible shapes
-    // are accepted — and an UNRECOGNISED shape is an error, never a zero. A zero here would report
-    // "no RPC usage" for an estate that is definitely making RPC calls.
+    /**
+     * THE REAL SHAPE, observed against the live Admin API on 2026-09-12:
+     *
+     *   { data: { start_time, end_time, credits_used, credits_remaining, limit, overages }, error: null }
+     *
+     * `data.credits_used` is the field. None of the five names this previously guessed
+     * (`data.credits`, `credits`, `usage.credits`, `data.apiCredits`, `apiCredits`) exist, so the
+     * source reported `unreadable` for its entire life with a message that read like a parser bug —
+     * which it was, but of the "we never checked" kind rather than the "they changed it" kind. The
+     * guesses are kept behind the real name: they cost nothing, and the docs still do not pin this.
+     *
+     * An UNRECOGNISED shape stays an error, never a zero. A zero would report "no RPC usage" for an
+     * estate that is definitely making RPC calls.
+     */
     const credits =
-      body?.data?.credits ?? body?.credits ?? body?.usage?.credits ?? body?.data?.apiCredits ?? body?.apiCredits
+      body?.data?.credits_used ??
+      body?.data?.credits ??
+      body?.credits ??
+      body?.usage?.credits ??
+      body?.data?.apiCredits ??
+      body?.apiCredits
     if (typeof credits !== 'number' || !Number.isFinite(credits)) {
-      throw new Error(`quicknode usage response had no recognisable credit field (keys: ${Object.keys(body ?? {}).join(',')})`)
+      const nested = body?.data && typeof body.data === 'object' ? ` data:{${Object.keys(body.data).join(',')}}` : ''
+      // Name the NESTED keys too. The old message said `keys: data,error` — true, and useless:
+      // it described the envelope while the answer was one level down.
+      throw new Error(
+        `quicknode usage response had no recognisable credit field (keys: ${Object.keys(body ?? {}).join(',')}${nested})`,
+      )
     }
+
+    // The plan's own headroom, which the same response carries for free. Not a dollar and not a
+    // guess — `credits_remaining` against `limit` is the one thing that says whether the 50 req/s
+    // ceiling this account keeps hitting is a rate problem or a quota problem. They are different
+    // failures and they are fixed differently.
+    lastQuota = {
+      remaining: typeof body?.data?.credits_remaining === 'number' ? body.data.credits_remaining : null,
+      limit: typeof body?.data?.limit === 'number' ? body.data.limit : null,
+    }
+
     return credits
   }
 
@@ -94,6 +127,7 @@ export function createQuickNodeCollector({ config, fetchImpl = fetch, log = cons
   }
 
   collectQuickNode._lastCredits = () => lastCredits
+  collectQuickNode._lastQuota = () => lastQuota
 
   return collectQuickNode
 }
@@ -111,11 +145,20 @@ export function createQuickNodeCollector({ config, fetchImpl = fetch, log = cons
 export function emitQuickNodeUsage(registry, collector, source) {
   const credits = collector._lastCredits?.()
   if (credits == null) return
-  registry.emit(
-    'vendor_usage',
-    'gauge',
-    'Raw vendor usage over the trailing window. Measured, unlike the modelled dollar figure beside it.',
-    { source: source.id, metric: 'api_credits' },
-    credits,
-  )
+  const emit = (metric, value) => {
+    // `null` means the vendor did not return that field — skipped, never zeroed. A 0 here would
+    // read as "no credits left", which is the opposite of "we could not see how many".
+    if (value == null) return
+    registry.emit(
+      'vendor_usage',
+      'gauge',
+      'Raw vendor usage over the trailing window. Measured, unlike the modelled dollar figure beside it.',
+      { source: source.id, metric },
+      value,
+    )
+  }
+  emit('api_credits', credits)
+  const quota = collector._lastQuota?.()
+  emit('api_credits_remaining', quota?.remaining)
+  emit('api_credits_limit', quota?.limit)
 }

@@ -71,6 +71,17 @@ export function loadConfig(env = process.env) {
       42161: num(env.FINOPS_CONFIRMATIONS_42161, 20),
     },
 
+    /**
+     * Outbound RPC pacing and boot fan-out (#1585).
+     *
+     * `rpcMaxPerSec` defaults to 25 — HALF the keyed Polygon endpoint's 50 req/s, because that
+     * budget is SHARED with the gateway and the bundler. A reporting service must not be able to
+     * spend a value path's headroom, and taking half by construction is a cheaper guarantee than
+     * measuring whether it happened to. 0 disables pacing.
+     */
+    rpcMaxPerSec: num(env.FINOPS_RPC_MAX_PER_SEC, 25),
+    bootConcurrency: num(env.FINOPS_BOOT_CONCURRENCY, 4),
+
     // How far back a cold start scans for revenue events. Bounded so a boot cannot walk the chain
     // from genesis; the counter is cumulative-since-start, which the dashboard states.
     lookbackBlocks: num(env.FINOPS_LOOKBACK_BLOCKS, 50_000),

@@ -1,6 +1,6 @@
 {
   "name": "@fairwins/miniapp-clearpath",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "private": true,
   "type": "module",
   "description": "ClearPath — external-DAO governance mini-app package (spec 073).",
