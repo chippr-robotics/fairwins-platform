@@ -11,7 +11,7 @@
 
 [data-md-color-scheme="default"] {
   /* Palette (light scheme) — Material for MkDocs custom properties, mapped by role. */
-  --md-primary-fg-color: #2E7D8C;
+  --md-primary-fg-color: #1F5966;
   --md-primary-fg-color--light: #6FAEBB;
   --md-primary-fg-color--dark: #1F5966;
   --md-primary-bg-color: #FFFFFF;
@@ -40,7 +40,7 @@
 
 [data-md-color-scheme="slate"] {
   /* Dark scheme — the brand accents only; Material's own slate surfaces carry the rest. */
-  --md-primary-fg-color: #2E7D8C;
+  --md-primary-fg-color: #1F5966;
   --md-primary-fg-color--light: #6FAEBB;
   --md-primary-fg-color--dark: #1F5966;
   --md-accent-fg-color: #6FAEBB;
@@ -136,4 +136,10 @@ textarea,
 .md-typeset kbd,
 .md-typeset samp {
   font-family: 'JetBrains Mono Variable', 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+/* links inside running text — Teal 700 against Gunmetal body text is 1.69:1, so colour cannot be the only cue (WCAG 1.4.1, axe link-in-text-block); the underline is */
+.md-typeset a:not(.md-button):not(.headerlink) {
+  text-decoration: underline;
+  text-underline-offset: 0.15em;
 }
