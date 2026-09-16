@@ -132,9 +132,23 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 
 **Capabilities first (each testable in isolation):**
 
-- [ ] T020 [P] Sync `verifyMessage`/`recoverAddress` on `@noble/curves` in
+- [x] T020 [P] Sync `verifyMessage`/`recoverAddress` on `@noble/curves` in
       `frontend/src/lib/verify/` — signature stays synchronous, takes no client; spec 084 fixture
-      suite (`src/test/fixtures/signedMessages.js`) passes unchanged.
+      suite (`src/test/fixtures/signedMessages.js`) passes unchanged. **Done**, and it turned up
+      the SEVENTH divergence — the first that fails toward a confident WRONG answer rather than
+      toward reporting less. ethers' encoder REFUSED a malformed `bytes` value (`0x123`, `0xZZ`,
+      even `nothex`); viem's `encodeFunctionData` accepts all three and encodes something. In
+      `checkErc1271` that meant garbage would be put to the contract and whatever it answered
+      reported as a verdict on the member's signature — the existing test caught it returning
+      `valid: true` for `0x123`. The shape check is now explicit rather than inherited from the
+      library. Two more: the recovery must also accept the 64-byte EIP-2098 COMPACT form (ethers
+      did, viem's `parseSignature` rejects it, and this surface verifies other people's proofs, so
+      refusing an encoding turns a good proof into "unverifiable"); and `Buffer` does not exist in
+      the browser, so the keccak output goes through viem's `bytesToHex`. Verified against
+      `ethers.verifyMessage` on 18 curated cases plus a 300-case fuzz over both encodings —
+      identical every time, negatives included. Two regression tests were added for the things no
+      value assertion can see: that the function is not a Promise, and that the compact form
+      recovers.
 - [ ] T021 [P] `lib/hardware/hardwareSigner.js` → viem `toAccount({ address, signMessage,
       signTransaction, signTypedData })`; recover-and-verify-before-broadcast behavior preserved.
 - [ ] T022 [P] `lib/recovery/legacyKeys.js`: nonce management re-derived on viem's account
