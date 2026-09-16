@@ -405,6 +405,27 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - **DIVERGENCE 14, found BEFORE converting `lib/clearpath/connectors/*` rather than after —
+        an indexed-address LOG TOPIC comes out in the wrong CASE.** The literal translation of
+        ethers' `zeroPadValue(getAddress(addr), 32)` is viem's `pad(getAddress(addr), {size: 32})`,
+        and it is wrong: ethers emits the padded topic LOWERCASE, viem's `pad` preserves the EIP-55
+        checksum casing. Measured on a real checksummed address — same bytes, different string.
+        That value is an `eth_getLogs` TOPIC FILTER. A node that matches the hex string exactly, or
+        a cache keyed on the request, returns NOTHING for the mixed-case form — and in
+        `ozGovernor.getVoteOf` "no logs" means "this member never voted", rendered as a fact with
+        no error anywhere. Use **`encodeEventTopics`**, which is lowercase and byte-identical to
+        ethers (verified), never `pad(getAddress(...))`.
+        Two other shapes on that path were checked and are SAFE: `ethers.id(sig)` equals viem's
+        `keccak256(stringToBytes(sig))` and `toEventSelector(...)` for the topic0; and viem's
+        `decodeEventLog` DOES return named args (`args.proposalId` works), unlike the error path of
+        divergence 13 — the `uint8 support` arrives a number rather than a bigint, which the call
+        site already wraps in `Number(...)`.
+        **Reconnaissance for that batch, so the next session does not redo it:** the connectors are
+        NOT dead code despite ClearPath being a mini-app — `data/notifications/sources/daoSource.js`
+        and two hooks (`useMembershipTreasuryStats`, `useCallsignRegistryMetrics`) import them, and
+        `packageBoundary.test.js` explicitly records that as legitimate. `getLogsRange` is a
+        recursive bisecting scan over `reader.getLogs`, so the `reader` is an ethers-provider-shaped
+        duck type its callers supply — the Phase-1 provider rule applies.
       - **`src/lib/evm/mnemonic.js` (new) + `src/lib/pools/bip39Lists.js` — divergence (h) is WORSE
         than "derives from an invalid mnemonic", and the BIP-39 allowlist entry was wrong TWICE.**
         Measured: viem's `mnemonicToAccount` returns a real, plausible, DIFFERENT address for a bad
