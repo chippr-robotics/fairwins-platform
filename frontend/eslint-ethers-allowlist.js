@@ -55,7 +55,6 @@ export const ETHERS_ALLOWLIST = [
   'src/data/wagers/EventsSource.js',
   'src/hooks/useFriendMarketCreation.js',
   'src/hooks/useFundingPools.js',
-  'src/hooks/useGroupPay.js',
   'src/hooks/useNullifierContracts.js',
   'src/hooks/useOpenChallengeAccept.js',
   'src/hooks/useOpenChallengeCreate.js',
