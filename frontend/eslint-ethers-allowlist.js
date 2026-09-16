@@ -96,7 +96,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/pools/bip39Lists.js',
   'src/lib/pools/gasless.js',
   'src/lib/pools/poolContracts.js',
-  'src/lib/predict/passkeyApprovals.js',
   'src/lib/recovery/bip39Suggest.js',
   'src/lib/recovery/legacyKeys.js',
   'src/lib/relay/__tests__/intentClient.test.js',
