@@ -7,7 +7,7 @@
  * this migration exists to remove. src/test/lint/ethersRatchet.test.js fails on a stale
  * entry (a listed file that no longer imports ethers), so the list cannot rot upward.
  *
- * FIVE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — four reasons over five files — and
+ * SIX ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — four reasons over six files — and
  * are called out so nobody spends an afternoon rediscovering it:
  *
  *   - `lib/pools/bip39Lists.js` is the MULTI-LANGUAGE BIP-39 registry (spec 034 SC-008: the same
@@ -28,8 +28,9 @@
  *     removing it breaks published packages, so it belongs to Phase 5 (#1596).
  *   - `utils/rpcProvider.js` is the seam being replaced; it leaves last, when its final
  *     caller does (T014).
- *   - `lib/bridge/__tests__/bridgeRouter.test.js` and `lib/liquidity/__tests__/liquidityRouter.test.js`
- *     decode viem-BUILT calldata with an ethers `Interface`, on purpose: that is a live
+ *   - `lib/bridge/__tests__/bridgeRouter.test.js`, `lib/liquidity/__tests__/liquidityRouter.test.js`
+ *     and `components/account/__tests__/CallsignPanel.passkey.test.jsx`
+ *     decode or encode viem-BUILT calldata with an ethers `Interface`, on purpose: that is a live
  *     cross-library byte-compatibility assertion over the exact code this migration is changing,
  *     and it fails loudly if the two encoders ever disagree. Each file says so at its import.
  *     Converting them to viem would make the check tautological — it would be asserting that
@@ -40,7 +41,6 @@
  * `src/test/helpers/encodeEventLog.js` — rather than reaching back for ethers.
  */
 export const ETHERS_ALLOWLIST = [
-  'src/components/account/CallsignPanel.jsx',
   'src/components/account/RecoverAccountPanel.jsx',
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
   'src/components/admin/BridgeTab.jsx',

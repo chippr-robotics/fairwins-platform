@@ -322,7 +322,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 56.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 55.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -405,6 +405,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - `src/components/account/CallsignPanel.jsx` — the commit→reveal registration path. Two
+        shapes were MEASURED before the swap rather than argued: (1) viem returns a NAMED OBJECT
+        for a lone tuple, so `resolve()`'s `CallsignInfo` still reads by name — the read seam's
+        comment is right; (2) `status` (`uint8`) comes back a NUMBER where ethers gave a bigint
+        (divergence (b), live on this exact field), and `toCallsignInfo`'s output is nevertheless
+        identical because it already wraps every integer in `Number(...)` — the Phase-1 "eighteen
+        reads already normalise" pattern holding. `provider` stays as the availability gate and
+        `chainId` becomes the argument, per the Phase-1 provider rule.
+        Its passkey test had **the same retired-mock problem as batch 8** (`vi.mock('ethers')`
+        stubbing `Contract`); it now mocks the CHAIN SEAM and records every read, so the assertions
+        name the chain and the registry address — neither of which the old fake could show, because
+        `new ethers.Contract(addr, …)` ignored its address. The file KEEPS its ethers import on
+        purpose (it encodes the expected calldata that the panel now builds with viem, so the
+        assertion is a live cross-library byte check) and is now the SIXTH documented decision entry
+        in the allowlist header rather than looking like pending work.
       - **DIVERGENCE 13, found while scoping `CallsignPanel` and fixed in the seam before converting
         it: ethers' `parseError` returned error args addressable BY NAME; viem's
         `decodeErrorResult` returns a bare array.** The error-path twin of the Phase-1 multi-output

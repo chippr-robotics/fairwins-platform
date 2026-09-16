@@ -18,30 +18,34 @@ const REGISTRY = '0x00000000000000000000000000000000000c0de5'
 const ACCOUNT = '0x1111111111111111111111111111111111111111'
 const COMMITMENT = '0x' + 'ab'.repeat(32)
 
-// Read transport used by readRegistry (isAvailable / makeCommitment / callsignOf).
-// A passkey session's `provider` is a plain RPC read provider — reads work, there is
-// simply no signer for writes.
+/**
+ * Registry reads. A passkey session's `provider` is a plain RPC read provider — reads work, there
+ * is simply no signer for writes.
+ *
+ * Spec 110 T028 — this mocks the CHAIN SEAM, not `ethers.Contract`. The panel no longer constructs
+ * one, so a `vi.mock('ethers')` here would be a mock on a retired path: it would intercept nothing
+ * while still looking like the thing keeping this test honest. Mocking the seam also lets the
+ * assertions read the REQUEST — which chain, which function, which arguments — instead of a method
+ * name on a fake object.
+ */
 const readContract = {
   isAvailable: vi.fn(async () => true),
   makeCommitment: vi.fn(async () => COMMITMENT),
   callsignOf: vi.fn(async () => ''),
   resolve: vi.fn(async () => ({})),
 }
-
-// Keep the real ethers surface (Interface, randomBytes, hexlify, isAddress) and only
-// stub Contract so the panel's read calls resolve without a live chain.
-vi.mock('ethers', async (importOriginal) => {
+/** Every read the panel performs, recorded as it was actually asked. */
+const reads = []
+vi.mock('../../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      // Regular function so `new ethers.Contract(...)` works (arrows can't construct);
-      // returning an object from a constructor yields that object.
-      Contract: vi.fn(function () {
-        return readContract
-      }),
-    },
+    readContract: vi.fn(async (chainId, call) => {
+      reads.push({ chainId, ...call })
+      const fn = readContract[call.functionName]
+      if (!fn) throw new Error(`unstubbed registry read: ${call.functionName}`)
+      return fn(...(call.args ?? []))
+    }),
   }
 })
 
@@ -60,6 +64,10 @@ vi.mock('../../../config/contracts', () => ({
 
 import CallsignPanel from '../CallsignPanel'
 
+// ethers stays HERE deliberately (spec 110 T028): the panel now builds this calldata with viem,
+// so encoding the expectation with ethers makes the assertion a live cross-library byte check over
+// the exact encoder that was replaced. Rewriting it in viem would assert that viem agrees with
+// itself — deleting the check while looking like a modernisation. See the allowlist header.
 const iface = new ethers.Interface(CALLSIGN_REGISTRY_ABI)
 const commitData = iface.encodeFunctionData('commit', [COMMITMENT])
 
@@ -74,6 +82,7 @@ function renderPanel() {
 beforeEach(() => {
   vi.clearAllMocks()
   localStorage.clear()
+  reads.length = 0
   readContract.isAvailable.mockResolvedValue(true)
   readContract.makeCommitment.mockResolvedValue(COMMITMENT)
   readContract.callsignOf.mockResolvedValue('')
@@ -111,6 +120,11 @@ describe('CallsignPanel — passkey (no-signer) write path', () => {
 
     // The commitment came from the read transport — a passkey session has no signer.
     expect(readContract.makeCommitment).toHaveBeenCalledWith('dontpanic', ACCOUNT, expect.any(String))
+    // …and the read NAMED its chain and its target, which the retired `new ethers.Contract(...)`
+    // fake could not show: it ignored the address it was constructed with entirely.
+    const commitRead = reads.find((r) => r.functionName === 'makeCommitment')
+    expect(commitRead).toMatchObject({ chainId: 137, address: REGISTRY })
+    expect(commitRead.args[2]).toMatch(/^0x[0-9a-f]{64}$/)
     // The dead "connect a wallet" branch must never appear for a connected passkey wallet.
     expect(screen.queryByText(/connect a wallet to continue/i)).toBeNull()
   })
