@@ -258,7 +258,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 60.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 59.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -319,6 +319,28 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         recovery, which is a real cross-library check — but a recovery check CANNOT see divergence
         10, because `ethers.Signature.from` accepts a bigint `v` perfectly happily. Both suites now
         also assert `typeof v === 'number'` and that the authorization serializes.
+      - `src/lib/passkey/intentSigner.js` — the ERC-1271 envelope and the intent digest. Tuple
+        encoding is byte-identical to `AbiCoder.defaultAbiCoder()` (empty / unicode / 300-byte /
+        max-uint256 cases, and viem accepts a JS number for a `uint256` exactly as ethers did), but
+        typed data is NOT: **`ethers.TypedDataEncoder.hash` INFERS the primary type and viem's
+        `hashTypedData` demands one** (divergence 11). `Object.keys(types)[0]` is the tempting fix
+        and it is wrong for a NESTED table, where the first key can be a SUB-type — viem will hash
+        against it whenever the message shape allows, producing a valid signature over the wrong
+        structure, which nothing downstream can detect. So ethers' own rule (the type no other type
+        references) is written out in **`src/lib/evm/typedData.js#primaryTypeOf`**, checked against
+        `TypedDataEncoder.from(...).primaryType` over all 27 real intent tables plus nested,
+        array-of-sub-type, two-level and declaration-order-reversed shapes. An ambiguous table
+        returns null and `hashTypedDataLike` throws — ethers refused too, and nothing guesses.
+        ONE deliberate difference is recorded in the module: a table carrying its own
+        `EIP712Domain` entry made ethers throw, and this answers normally.
+        Divergence 11b: **ethers' `hashMessage` accepted raw bytes, viem's refuses a bare
+        `Uint8Array`** (it wants `{ raw }`) — loud, but this adapter advertises ethers-signer
+        compatibility, so both forms are accepted. `src/test/passkey/intentSignerEncoding.test.js`
+        is new: these bytes are only verified on chain (`SignerIntentBase.erc1271`) and by the
+        gateway, neither of which runs in this tier, so a drift would have left the frontend suite
+        green and surfaced as a rejected signature in production.
+        **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
+        `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

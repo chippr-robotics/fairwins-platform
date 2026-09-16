@@ -89,7 +89,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/hardware/hardwareSigner.js',
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',
   'src/lib/miniapps/hostScope.js',
-  'src/lib/passkey/intentSigner.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
   'src/lib/pools/bip39Lists.js',
   'src/lib/pools/poolContracts.js',
