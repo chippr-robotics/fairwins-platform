@@ -29,13 +29,19 @@ function toBigIntStrict(value) {
   throw new TypeError(`invalid BigNumberish value: ${String(value)}`)
 }
 
-// ethers always emits a decimal point ('25.0'); viem trims to '25'. Surfaces render this
-// string raw (a Max button fills an input with it), so the ethers shape is preserved —
-// restyling every rendered balance is not a Phase 0 decision.
-const withPoint = (s) => (s.includes('.') ? s : `${s}.0`)
+// ethers emits a decimal point for a whole value ('25.0') where viem trims to '25'. Surfaces
+// render this string raw (a Max button fills an input with it), so the ethers shape is
+// preserved — restyling every rendered balance is not a Phase 0 decision.
+//
+// EXCEPT at zero decimals, where ethers emits no point at all (`formatUnits(123n, 0)` is
+// '123', not '123.0'). A 0-decimal unit has no fractional part to show, so appending one
+// would invent a precision the token does not have — and this seam's whole job is to be
+// indistinguishable from what it replaced.
+const withPoint = (s, decimals) => (decimals === 0 || s.includes('.') ? s : `${s}.0`)
 
 export function formatUnits(value, decimals = 18) {
-  return withPoint(viemFormatUnits(toBigIntStrict(value), Number(decimals)))
+  const places = Number(decimals)
+  return withPoint(viemFormatUnits(toBigIntStrict(value), places), places)
 }
 
 export function parseUnits(value, decimals = 18) {
@@ -43,7 +49,7 @@ export function parseUnits(value, decimals = 18) {
 }
 
 export function formatEther(value) {
-  return withPoint(viemFormatEther(toBigIntStrict(value)))
+  return withPoint(viemFormatEther(toBigIntStrict(value)), 18)
 }
 
 export function parseEther(value) {
