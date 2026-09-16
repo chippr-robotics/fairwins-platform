@@ -12,7 +12,7 @@
  * with no resolvable source is simply absent from the result — the caller
  * renders it unpriced rather than inventing a value.
  */
-import { Contract } from 'ethers'
+import { readContract } from '../chains/readContract'
 import { AGGREGATOR_V3_ABI } from '../../abis/AggregatorV3'
 import { UNISWAP_V3_FACTORY_ABI, UNISWAP_V3_POOL_ABI } from '../../abis/UniswapV3PoolReader'
 import { CHAINLINK_FEEDS, FEED_MAX_AGE_SECONDS, DEX_SPOT_FEE_TIERS } from '../../config/priceFeeds'
@@ -30,9 +30,10 @@ export function underlyingSymbolOf(asset) {
   return (asset.baselineSymbol || asset.symbol || '').toUpperCase()
 }
 
-async function readChainlinkUsd(provider, feedAddress, nowSeconds) {
-  const feed = new Contract(feedAddress, AGGREGATOR_V3_ABI, provider)
-  const [roundData, decimals] = await Promise.all([feed.latestRoundData(), feed.decimals()])
+async function readChainlinkUsd(chainId, feedAddress, nowSeconds) {
+  const view = (functionName) =>
+    readContract(chainId, { address: feedAddress, abi: AGGREGATOR_V3_ABI, functionName })
+  const [roundData, decimals] = await Promise.all([view('latestRoundData'), view('decimals')])
   const answer = roundData[1]
   const updatedAt = Number(roundData[3])
   if (answer <= 0n) throw new Error('non-positive feed answer')
@@ -45,22 +46,27 @@ async function readChainlinkUsd(provider, feedAddress, nowSeconds) {
  * existing pool across the probed fee tiers. Returns null when no pool
  * exists or the pool is empty.
  */
-async function readDexSpotUsd(provider, dex, token, stable) {
-  const factory = new Contract(dex.factory, UNISWAP_V3_FACTORY_ABI, provider)
+async function readDexSpotUsd(chainId, dex, token, stable) {
   for (const fee of DEX_SPOT_FEE_TIERS) {
     let poolAddress
     try {
-      poolAddress = await factory.getPool(token.address, stable.address, fee)
+      poolAddress = await readContract(chainId, {
+        address: dex.factory,
+        abi: UNISWAP_V3_FACTORY_ABI,
+        functionName: 'getPool',
+        args: [token.address, stable.address, fee],
+      })
     } catch {
       continue
     }
     if (!poolAddress || poolAddress === ZERO_ADDRESS) continue
     try {
-      const pool = new Contract(poolAddress, UNISWAP_V3_POOL_ABI, provider)
+      const poolView = (functionName) =>
+        readContract(chainId, { address: poolAddress, abi: UNISWAP_V3_POOL_ABI, functionName })
       const [slot0, token0, liquidity] = await Promise.all([
-        pool.slot0(),
-        pool.token0(),
-        pool.liquidity(),
+        poolView('slot0'),
+        poolView('token0'),
+        poolView('liquidity'),
       ])
       if (liquidity === 0n) continue
       const sqrtPriceX96 = BigInt(slot0[0])
@@ -97,7 +103,9 @@ function dexCandidateFor(underlying, chainId, registryEntries) {
 /**
  * Resolve USD prices for every non-stablecoin underlying in the registry.
  *
- * @param {Map<number, import('ethers').Provider>} providers - per-chain read providers
+ * @param {Map<number, object>} providers - the readable-chain roster; only its KEYS are used
+ *   (spec 110 Phase 1 — reads route through the chain seam; the values are legacy providers
+ *   callers still construct during the transition)
  * @param {Array} registryEntries - combined per-chain registry entries in scope
  * @param {number} [nowSeconds] - clock for feed staleness checks (testable)
  * @returns {Promise<Map<string, {usd: number, source: string, chainId: number}>>}
@@ -115,12 +123,11 @@ export async function fetchPortfolioPrices(providers, registryEntries, nowSecond
   const feedJobs = []
   for (const [chainIdKey, feeds] of Object.entries(CHAINLINK_FEEDS)) {
     const chainId = Number(chainIdKey)
-    const provider = providers.get(chainId)
-    if (!provider) continue
+    if (!providers.has(chainId)) continue
     for (const [symbol, feedAddress] of Object.entries(feeds)) {
       if (!underlyings.has(symbol) || prices.has(symbol)) continue
       feedJobs.push(
-        readChainlinkUsd(provider, feedAddress, nowSeconds)
+        readChainlinkUsd(chainId, feedAddress, nowSeconds)
           .then((usd) => ({ symbol, usd, chainId }))
           .catch(() => null),
       )
@@ -135,14 +142,14 @@ export async function fetchPortfolioPrices(providers, registryEntries, nowSecond
   // 2. DEX pool spot for whatever is still unpriced, chain by chain.
   for (const underlying of underlyings) {
     if (prices.has(underlying)) continue
-    for (const [chainIdKey, provider] of providers) {
+    for (const chainIdKey of providers.keys()) {
       const chainId = Number(chainIdKey)
       const net = NETWORKS[chainId]
       if (!net?.dex || !net?.stablecoin?.address) continue
       const candidate = dexCandidateFor(underlying, chainId, registryEntries)
       if (!candidate) continue
       try {
-        const usd = await readDexSpotUsd(provider, net.dex, candidate, net.stablecoin)
+        const usd = await readDexSpotUsd(chainId, net.dex, candidate, net.stablecoin)
         if (usd != null) {
           prices.set(underlying, { usd, source: 'dex', chainId })
           break
