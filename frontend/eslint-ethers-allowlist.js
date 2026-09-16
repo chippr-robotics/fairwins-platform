@@ -7,8 +7,8 @@
  * this migration exists to remove. src/test/lint/ethersRatchet.test.js fails on a stale
  * entry (a listed file that no longer imports ethers), so the list cannot rot upward.
  *
- * THREE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION, and are called out so nobody
- * spends an afternoon rediscovering it:
+ * FIVE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — three reasons over five files — and
+ * are called out so nobody spends an afternoon rediscovering it:
  *
  *   - `lib/pools/bip39Lists.js`, `lib/recovery/bip39Suggest.js`, `utils/claimCode/wordlist.js`
  *     import ethers' bundled BIP-39 `wordlists`. viem bundles none, so these cannot move
@@ -86,7 +86,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/miniapps/hostScope.js',
   'src/lib/passkey/intentSigner.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
-  'src/lib/perps/venues/gmx.js',
   'src/lib/pools/bip39Lists.js',
   'src/lib/pools/gasless.js',
   'src/lib/pools/poolContracts.js',

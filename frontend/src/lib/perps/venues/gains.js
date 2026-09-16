@@ -26,7 +26,9 @@
  * the wallet with the member's collateral attached. The event decoders below are the opposite:
  * they run over arbitrary logs in effects, so they are total and return null.
  */
-import { decodeEventLog, encodeEventTopics, encodeFunctionData, getAddress, isAddress, parseUnits, zeroAddress } from 'viem'
+import { decodeEventLog, encodeEventTopics, encodeFunctionData, parseUnits, zeroAddress } from 'viem'
+// Not viem's `isAddress`: neither of its settings reproduces ethers' (see the seam's table).
+import { getAddress, isAddress } from '../../evm/address'
 import { normalizeAbi } from '../../chains/readContract'
 import { GAINS_DIAMOND_ABI, GAINS_CANCEL_REASON, GAINS_TRADE_TYPE } from '../../../abis/perps/gainsDiamond'
 import { gainsDiamondFor } from '../../../config/perps'

@@ -37,8 +37,8 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       parameter names viem drops on multi-output results — see the note under T012.
 - [ ] T012 Convert the read-path files (~80, *(re-measure)*) onto `readContract`; delete the
       ethers `_lastFatalError` workaround in `frontend/src/utils/rpcProvider.js` rather than
-      porting it. Shrink the allowlist per file converted. **In progress: allowlist 134 → 86.**
-      Of what remains, 61 entries are the write/signer surface (Phase 2), and four are a
+      porting it. Shrink the allowlist per file converted. **In progress: allowlist 134 → 82.**
+      Of what remains, most entries are the write/signer surface (Phase 2), and five are a
       decision rather than pending work — the three BIP-39 wordlist files (viem bundles none, so
       moving them is a lockfile change and therefore the spec-075 rolldown hazard),
       `miniapps/hostScope.js` (ethers is part of the spec-073 host API, so Phase 5), and
@@ -53,7 +53,19 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       returns ethers-shaped objects, so no unit suite could see it; the on-chain tier did. It is
       fixed once in the seam rather than per call site. (b) For integers of 48 bits or fewer viem
       returns a NUMBER where ethers returned a bigint. Both classes were audited across every
-      converted file.
+      converted file. (c) `isAddress` — the first divergence about a VALIDATOR rather than a
+      decoder, and the only one where the obvious one-word fix is the unsafe direction. ethers
+      verifies a checksum only when the string CARRIES one, i.e. when it is mixed case; viem's
+      default `strict: true` additionally REFUSES a valid ALL-UPPERCASE address, and
+      `{ strict: false }` — the tempting "be permissive" fix — ACCEPTS a mistyped mixed-case one,
+      which is precisely what EIP-55 exists to catch, and silently, because viem's `getAddress`
+      (unlike ethers') does not throw on a bad checksum either. Both halves now come from
+      `lib/evm/address.js`, whose differential test asserts against BOTH viem settings so the seam
+      fails loudly if a future viem release makes it redundant. It was found by a safety-invariant
+      test in `venues/gmx.js` that deliberately case-shifts the FairWins address to prove the
+      receiver guard refuses it by identity rather than by format — and it had already landed
+      unnoticed in three earlier conversions (`venues/gains.js`, `perps/feeUnits.js`,
+      `screening/screenEstate.js`), which now take the seam too.
 - [x] T013 Estate reads (`lib/chains/estate.js`, spec-089 reading constructors) keep three-state
       semantics byte-for-byte — assert no `?? 0` path appears in conversion. `readAuthority` now
       names its chain while `provider` stays the availability gate, because that gate is also

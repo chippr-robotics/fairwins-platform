@@ -481,7 +481,7 @@ describe('the venue reads', () => {
 
   it('reports a GMX keeper fee it could not read as failed, never as zero', async () => {
     await expect(
-      defaultReadOpenQuote({ venue: 'gmx', chainId: ARBITRUM, deps: { getProvider: () => null } }),
+      defaultReadOpenQuote({ venue: 'gmx', chainId: ARBITRUM, deps: { getClient: () => null } }),
     ).resolves.toEqual({ failed: true })
   })
 

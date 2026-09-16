@@ -22,7 +22,8 @@
  * Cached per lowercase address for `SCREENING_TTL_MS` (same TTL as the per-chain screen) with
  * in-flight de-duplication, so five fields showing the same address cost one sweep.
  */
-import { getAddress, isAddress } from 'viem'
+// Not viem's `isAddress`: neither of its settings reproduces ethers' (see the seam's table).
+import { getAddress, isAddress } from '../evm/address'
 import { readProviderFor } from '../chains/estate'
 import { SCREENING_TTL_MS } from '../addressBook/constants'
 import { screeningChainIds, screeningSourcesFor } from './sources'

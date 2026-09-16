@@ -29,7 +29,9 @@
  * has no caller and every fee surface would have to re-derive the key locally — the second-source
  * failure this repo keeps paying for.
  */
-import { encodeAbiParameters, getAddress, isAddress, keccak256 } from 'viem'
+import { encodeAbiParameters, keccak256 } from 'viem'
+// Not viem's `isAddress`: neither of its settings reproduces ethers' (see the seam's table).
+import { getAddress, isAddress } from '../evm/address'
 
 /** GMX `Keys.uiFeeFactor` is a 1e30-precision float; 1 bps of it is 1e26. */
 export const GMX_UI_FEE_FACTOR_PER_BPS = 10n ** 26n
