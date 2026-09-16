@@ -118,5 +118,4 @@ export const ETHERS_ALLOWLIST = [
   'src/utils/encryption.js',
   'src/utils/keyRegistryService.js',
   'src/utils/rpcProvider.js',
-  'src/utils/sanctionsScreen.js',
 ]

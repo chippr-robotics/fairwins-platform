@@ -11,9 +11,10 @@
  * uncertain/blocked state rather than green-light).
  */
 
-import { ethers } from 'ethers'
 import { SANCTIONS_GUARD_ABI } from '../abis/SanctionsGuard'
 import { getContractAddress, getContractAddressForChain } from '../config/contracts'
+import { getCurrentChainId } from '../config/networks'
+import { readContract } from '../lib/chains/readContract'
 
 /**
  * Screen using an already-constructed guard contract (testable seam).
@@ -31,24 +32,38 @@ export async function screenWithContract(guard, account) {
 }
 
 /**
- * Screen an address against the configured on-chain SanctionsGuard.
+ * Screen an address against the configured on-chain SanctionsGuard, ON A NAMED CHAIN.
+ *
+ * `chainId` used to be inferred by ASKING THE PROVIDER (`provider.getNetwork()`) — the exact
+ * shape spec 110 exists to remove, and the reason is visible right here: the guard address was
+ * resolved for whatever chain the transport happened to be on, so the answer silently depended
+ * on a connection rather than on the chain the caller meant. The one caller
+ * (`useAddressScreening`) already refuses to screen unless the entry's chain IS the connected
+ * one, so it has always known the chain; it now says so. Omitting it falls back to the
+ * build-time chain, never to a guess taken off the wire.
+ *
+ * `provider` stays the availability gate it was: no connection, no screen, fail-closed.
+ *
  * @param {string} account - wallet address to screen
- * @param {import('ethers').Provider} provider - a read provider
+ * @param {object} provider - a read connection (presence is what matters)
+ * @param {number} [chainId] - the chain whose guard should answer
  * @returns {Promise<{ allowed: boolean, available: boolean }>}
  */
-export async function screenAddress(account, provider) {
-  // Resolve the SanctionsGuard for the chain the provider talks to, so a mainnet
-  // screen never reads a testnet guard (or vice versa). Fall back to the
-  // build-time chain only when the provider can't report its network.
-  let address
-  try {
-    const net = await provider.getNetwork()
-    address = getContractAddressForChain('sanctionsGuard', Number(net.chainId))
-  } catch {
-    address = getContractAddress('sanctionsGuard')
+export async function screenAddress(account, provider, chainId) {
+  const address =
+    chainId == null
+      ? getContractAddress('sanctionsGuard')
+      : getContractAddressForChain('sanctionsGuard', Number(chainId))
+  if (!address || !provider) return { allowed: false, available: false } // can't screen -> fail-closed
+  const guard = {
+    isAllowed: (who) =>
+      readContract(Number(chainId ?? getCurrentChainId()), {
+        address,
+        abi: SANCTIONS_GUARD_ABI,
+        functionName: 'isAllowed',
+        args: [who],
+      }),
   }
-  if (!address) return { allowed: false, available: false } // not configured on this chain -> can't screen
-  const guard = new ethers.Contract(address, SANCTIONS_GUARD_ABI, provider)
   return screenWithContract(guard, account)
 }
 

@@ -84,7 +84,9 @@ describe('useAddressScreening', () => {
     screenAddressMock.mockResolvedValue({ allowed: true, available: true })
     const { result } = renderHook(() => useAddressScreening())
     await expect(result.current.screenOne(ADDR, 137)).resolves.toBe('clear')
-    expect(screenAddressMock).toHaveBeenCalledWith(ADDR, walletState.provider)
+    // The entry's chain is NAMED, not inferred from the provider (spec 110): the guard that
+    // answers is decided by the chain the address belongs to, not by whatever the connection is.
+    expect(screenAddressMock).toHaveBeenCalledWith(ADDR, walletState.provider, 137)
 
     screenAddressMock.mockClear()
     await expect(result.current.screenOne(ADDR, 63)).resolves.toBe('uncertain')
