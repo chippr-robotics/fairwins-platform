@@ -266,6 +266,14 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       spec 102's, already pinned by `useActiveAccount`'s suite. Both Cypress specs now assert the
       shared guarantee, and **the unit test pins the PHRASE, not just the names**, so the next
       wording change fails locally instead of in CI.
+      **THE FAST TIER RUNS LOCALLY IN ~90 SECONDS, and nothing said so.** `CLAUDE.md` documents
+      only the heavy on-chain repro (`npm run node:e2e`, `npm run setup:e2e`,
+      `CYPRESS_NETWORK_ID=80002 …`), so the no-chain tier looked like a CI-only gate. It is not:
+      from `frontend/`, `npx start-server-and-test dev:fast http://localhost:5173 "npx cypress run
+      --spec cypress/e2e/fast/<spec>.cy.js"` runs it against a real browser with no chain at all
+      (verified: 48-wrap-multi-currency, 4/4 in 1m27s). EVERY fast-tier failure this session was
+      reproducible that way before pushing. Use it whenever a change touches member-facing copy or
+      a surface's behaviour — a unit suite with a loose assertion cannot stand in for it.
       **Method note:** the fourth copy was found by asking who actually CALLS the seam, not by
       searching for the loop. A later sweep confirmed there is no FIFTH: the only remaining
       `SETTLE_TIMEOUT_MS`/`SETTLE_POLL_MS` are `submitOn.js`'s, and every other `Date.now() + …`
