@@ -40,12 +40,25 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       porting it. Shrink the allowlist per file converted. **DONE at allowlist 134 → 70, verified
       green on b87bcf18 (50/50: 4 on-chain shards, 12 fast legs across both viewport profiles,
       passkey full stack, unit/lint/build).** The one read-path entry left is T012a below, which is
-      blocked on config rather than code. Of the remaining 70, most are the write/signer surface
-      (Phase 2), and seven are a decision rather than pending work — the three BIP-39 wordlist files (viem bundles none, so
-      moving them is a lockfile change and therefore the spec-075 rolldown hazard),
+      blocked on config rather than code. Of the remaining 67, most are the write/signer surface
+      (Phase 2), and five are a decision rather than pending work — `lib/pools/bip39Lists.js`, the
+      MULTI-LANGUAGE BIP-39 registry (ethers bundles ten wordlists, viem exports only English, so
+      converting it would silently drop nine languages and break spec 034 SC-008),
       `miniapps/hostScope.js` (ethers is part of the spec-073 host API, so Phase 5), and
       `utils/rpcProvider.js` itself, which leaves last with its final caller. The allowlist
       header says so too, so the list explains itself.
+
+      A CORRECTION WORTH KEEPING. This entry previously retired all THREE BIP-39 files on the
+      grounds that "viem bundles none, so moving them is a lockfile change and therefore the
+      spec-075 rolldown hazard". That was wrong: `viem/accounts` exports `english`, identical to
+      ethers' `en` word for word (2048 entries, same order — compared rather than assumed, because
+      a claim code is derived from word INDICES and a list differing anywhere would change every
+      code generated afterwards and invalidate every one already issued, with nothing failing at
+      the time). No lockfile change was ever needed and no rolldown hazard applied. Two of the
+      three used `wordlists.en` ONLY and are converted; only the multi-language registry is
+      genuinely stuck, for a different reason than the one written down. A wrong reason on an
+      exemption list is worse than an open task — an open task gets picked up, a wrong reason
+      retires the work permanently.
 
       TWO DECODER DIFFERENCES BIT DURING THIS AND ARE WORTH KNOWING BEFORE CONVERTING MORE.
       (a) viem returns a BARE ARRAY for a function with several named outputs where ethers
