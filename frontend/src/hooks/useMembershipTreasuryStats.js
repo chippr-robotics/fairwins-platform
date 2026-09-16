@@ -21,7 +21,7 @@ import { isAddress } from 'viem'
 import { formatUnits } from '../lib/evm/units'
 import { eventScanHandle } from '../lib/chains/eventScan'
 import { MEMBERSHIP_MANAGER_ABI } from '../abis/MembershipManager'
-import { getLogsRange } from '../lib/clearpath/connectors/ozGovernor'
+import { getLogsRange } from '../lib/chains/logRange'
 
 const CHUNK = 45_000
 const MAX_SPAN = 3_000_000

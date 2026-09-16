@@ -14,7 +14,7 @@ import { useCallback, useState } from 'react'
 import { isAddress } from 'viem'
 import { CALLSIGN_REGISTRY_ABI, CallsignStatus } from '../abis/callsignRegistry'
 import { eventScanHandle } from '../lib/chains/eventScan'
-import { getLogsRange } from '../lib/clearpath/connectors/ozGovernor'
+import { getLogsRange } from '../lib/chains/logRange'
 
 const CHUNK = 45_000
 const MAX_SPAN = 3_000_000

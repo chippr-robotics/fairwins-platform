@@ -405,6 +405,23 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - **`src/lib/chains/logRange.js` (new) — the conversion exposed an UPSIDE-DOWN dependency.**
+        `getLogsRange` lived in `lib/clearpath/connectors/ozGovernor.js`, a DAO-framework connector,
+        and two ALREADY-CONVERTED host hooks reached into it: `useMembershipTreasuryStats` and
+        `useCallsignRegistryMetrics`, neither of which has anything to do with governance — they
+        scan the MembershipManager and the CallsignRegistry. The function has no governance in it
+        and never had any ethers in it either; it is pure recursion over a reader's `getLogs`.
+        Moving it is not tidying: while it sat there, taking `ozGovernor.js` off ethers meant
+        touching a module two unrelated hooks depend on for reasons unrelated to either.
+        The reader stays a DUCK TYPE (one method, `getLogs`) — satisfied by both an ethers provider
+        and `eventScan`'s handle, which is exactly why the converted hooks kept calling it unchanged
+        through the move. Do NOT narrow it to a chainId: callers already hold the reader they mean,
+        and the spec-071 estate reads choose it for reasons a chainId cannot express.
+        It had **no test of its own** despite two host hooks depending on it. It has one now, and
+        every assertion is on the REQUESTS — a scan returning the right logs from the wrong ranges
+        would otherwise pass. The seam-loss case is pinned specifically: splitting `[from..mid]` /
+        `[mid+1..to]` wrongly drops the log on the boundary, and dropping it is invisible (a smaller
+        number renders, not an error). Verified non-vacuous by introducing that off-by-one.
       - **DIVERGENCE 14, found BEFORE converting `lib/clearpath/connectors/*` rather than after —
         an indexed-address LOG TOPIC comes out in the wrong CASE.** The literal translation of
         ethers' `zeroPadValue(getAddress(addr), 32)` is viem's `pad(getAddress(addr), {size: 32})`,
