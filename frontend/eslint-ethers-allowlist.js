@@ -47,8 +47,6 @@ export const ETHERS_ALLOWLIST = [
   'src/components/fairwins/MarketAcceptanceModal.jsx',
   'src/components/fairwins/MyMarketsModal.jsx',
   'src/components/miniapps/SubmitAppPanel.jsx',
-  'src/components/perps/openPositionActions.js',
-  'src/components/perps/positionSheetActions.js',
   'src/contexts/DexContext.jsx',
   'src/contexts/WalletContext.jsx',
   'src/contexts/Web3Context.jsx',
