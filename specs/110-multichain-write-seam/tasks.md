@@ -258,7 +258,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 64.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 63.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -285,6 +285,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         `requireCid` restores the refusal. The module had NO direct test — every suite mocked it
         whole — so `src/test/backup/backupRegistry.test.js` is new and keeps an ethers `Interface`
         as a live cross-library byte check over the exact encoder that was replaced.
+      - `src/lib/custody/proposalHub.js` — its header said it "leaves the ratchet when the write
+        rail does, not before", and that turned out to be untrue: `emitProposal`/`cancelProposal`
+        used an ethers `Contract` carrying a SECOND, hand-maintained copy of the propose/cancel
+        argument list, while pure viem twins (`emitProposalCall`/`cancelProposalCall`) already
+        built the same calldata a few lines below. The broadcasts now send the twins' own bytes —
+        one encoder, one argument order, instead of two that could drift — so the file comes off
+        ethers today with no write-rail dependency at all. Calldata verified byte-identical to the
+        ethers `Interface` across the value/data/nonce extremes.
+        `toBeHex` is REIMPLEMENTED rather than swapped for viem's `toHex`, because
+        `encodePayloadLink` is a WIRE FORMAT handed to another person's device and the two are not
+        the same function: ethers pads to whole bytes (`0n`->`0x00`, `15n`->`0x0f`,
+        `256n`->`0x0100`), viem emits minimal nibbles (`0x0`, `0xf`, `0x100`). Every form
+        round-trips through `BigInt()` so nothing would have broken — but a link is a string other
+        code may compare or key on, and three lines is cheaper than being sure nothing does. Both
+        new assertions were verified non-vacuous by reverting the code and watching them fail.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

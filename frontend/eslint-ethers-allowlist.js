@@ -82,7 +82,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
   'src/lib/clearpath/connectors/governorBravo.js',
   'src/lib/clearpath/connectors/ozGovernor.js',
-  'src/lib/custody/proposalHub.js',
   'src/lib/custody/safeVault.js',
   'src/lib/custody/submitAsActiveAccount.js',
   'src/lib/earn/vaultActions.js',

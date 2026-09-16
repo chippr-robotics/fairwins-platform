@@ -3,10 +3,11 @@
 // from the hub — every read proposal is reconstructed and its safeTxHash recomputed locally (verifyProposal);
 // a mismatch is discarded. See research.md Decision 4.
 
-// Still ethers, and deliberately: `emitProposal`/`cancelProposal` below broadcast through a SIGNER,
-// which is the Phase-2 write seam (#1593). Everything READ or ENCODED here is on viem already, so
-// this module leaves the ratchet when the write rail does, not before.
-import { Contract, toBeHex } from 'ethers'
+// Spec 110 T028 — off ethers. The broadcasts below used an ethers `Contract` with a second,
+// hand-maintained copy of the propose/cancel argument list; they now send the calldata their own
+// pure twins (`emitProposalCall` / `cancelProposalCall`) already build, so there is ONE encoder and
+// ONE argument order for each call instead of two that could drift apart. Verified byte-identical
+// to the ethers `Interface` over the value/data/nonce extremes before the swap.
 import { encodeFunctionData } from 'viem'
 import { SAFE_PROPOSAL_HUB_ABI } from '../../abis/SafeProposalHub'
 import { scanLogs } from '../chain/logScan'
@@ -17,24 +18,31 @@ import { buildSafeTx, computeSafeTxHash } from './vaultTransaction'
 
 const HUB = normalizeAbi(SAFE_PROPOSAL_HUB_ABI)
 
+/**
+ * ethers' `toBeHex`, kept byte-exact on purpose.
+ *
+ * This is a WIRE FORMAT — `encodePayloadLink` is the never-stranded fallback a member hands to
+ * somebody else's device — and viem's `toHex` is not the same function: ethers pads to whole BYTES
+ * (`0n` -> `0x00`, `15n` -> `0x0f`, `256n` -> `0x0100`) where viem emits minimal nibbles (`0x0`,
+ * `0xf`, `0x100`). Every form round-trips through `BigInt()` to the same value, so nothing would
+ * have BROKEN — but a link is a string that other code may compare, log or key on, and three lines
+ * is cheaper than being sure nothing does.
+ */
+function toBeHex(value) {
+  const body = BigInt(value).toString(16)
+  return '0x' + (body.length % 2 ? '0' + body : body)
+}
+
 /** Broadcast a proposal's preimage to the hub. */
 export async function emitProposal({ hubAddress, safe, safeTx, safeTxHash, signer }) {
-  const hub = new Contract(getAddress(hubAddress), SAFE_PROPOSAL_HUB_ABI, signer)
-  return hub.propose(
-    getAddress(safe),
-    safeTx.to,
-    safeTx.value,
-    safeTx.data,
-    safeTx.operation,
-    safeTx.nonce,
-    safeTxHash,
-  )
+  const call = emitProposalCall({ hubAddress, safe, safeTx, safeTxHash })
+  return signer.sendTransaction({ to: call.target, data: call.data })
 }
 
 /** Signal cancellation of a proposal (advisory). */
 export async function cancelProposal({ hubAddress, safe, safeTxHash, signer }) {
-  const hub = new Contract(getAddress(hubAddress), SAFE_PROPOSAL_HUB_ABI, signer)
-  return hub.cancel(getAddress(safe), safeTxHash)
+  const call = cancelProposalCall({ hubAddress, safe, safeTxHash })
+  return signer.sendTransaction({ to: call.target, data: call.data })
 }
 
 /**
