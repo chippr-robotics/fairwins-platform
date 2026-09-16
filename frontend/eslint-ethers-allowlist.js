@@ -80,7 +80,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',
   'src/lib/liquidity/__tests__/uniswapPositions.test.js',
   'src/lib/miniapps/hostScope.js',
-  'src/lib/miniapps/registryClient.js',
   'src/lib/passkey/intentSigner.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
   'src/lib/perps/venues/gains.js',

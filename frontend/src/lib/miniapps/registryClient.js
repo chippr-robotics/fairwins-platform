@@ -29,15 +29,15 @@
  *    no caller can render it as verified by accident.
  *
  * 3. **ONE CHAIN, RESOLVED HERE.** The registry lives on the cohort's single reference chain
- *    (`miniAppChainId()`, FR-025) and is read through `getReadProvider` so the member's own RPC
+ *    (`miniAppChainId()`, FR-025) and is read through the chain seam so the member's own RPC
  *    route applies (spec 069). Callers never pass a chain id or a provider: a mini-app catalog read
  *    against the wrong chain would approve packages under an authority this build must not trust.
  */
-import { Contract } from 'ethers'
+import { readContract } from '../chains/readContract'
 import { AppStatus, MINI_APP_REGISTRY_ABI } from '../../abis/miniAppRegistry'
 import { getContractAddressForChain } from '../../config/contracts'
 import { miniAppChainId } from '../../config/networks'
-import { getReadProvider } from '../../utils/rpcProvider'
+import { getPublicClient } from '../chains/publicClient'
 import { APP_ID_PATTERN } from './manifest'
 
 /** Discriminants every function in this module returns. Never a bare value, never a bare array. */
@@ -183,19 +183,23 @@ function unreachable({ chainId, registryAddress, reason, error }) {
 }
 
 /**
- * Resolve chain + address + provider, or the outcome explaining why we cannot read.
+ * Resolve chain + address + a reader, or the outcome explaining why we cannot read.
  *
- * The `!provider` case is UNREACHABLE, not not-deployed: a registry that exists on a chain this
+ * The no-route case is UNREACHABLE, not not-deployed: a registry that exists on a chain this
  * build currently has no route to is an unread registry, and reporting it as absent would tell a
  * member the platform has no apps when it has a catalog they simply cannot reach right now.
+ *
+ * Spec 110: the reader NAMES the registry's chain on every call. That matters more here than
+ * almost anywhere else in the app — the catalog decides which third-party packages the host
+ * EXECUTES, so a read that inherited its chain from an ambient connection could run
+ * mainnet-curated code against a testnet wallet (spec 073 rule 2).
  */
 function resolveRegistry() {
   const chainId = miniAppChainId()
   const registryAddress = miniAppRegistryAddress(chainId)
   if (!registryAddress) return { outcome: notDeployed(chainId) }
 
-  const provider = getReadProvider(chainId)
-  if (!provider) {
+  if (!getPublicClient(chainId)) {
     return {
       outcome: unreachable({
         chainId,
@@ -206,7 +210,16 @@ function resolveRegistry() {
     }
   }
 
-  return { chainId, registryAddress, contract: new Contract(registryAddress, MINI_APP_REGISTRY_ABI, provider) }
+  const call = (functionName) => (...args) =>
+    readContract(chainId, { address: registryAddress, abi: MINI_APP_REGISTRY_ABI, functionName, args })
+  const contract = {
+    appCount: call('appCount'),
+    getAppsPaged: call('getAppsPaged'),
+    getApp: call('getApp'),
+    idByName: call('idByName'),
+    appIdsByVendor: call('appIdsByVendor'),
+  }
+  return { chainId, registryAddress, contract }
 }
 
 /**
@@ -270,7 +283,7 @@ export function normalizeApp(raw) {
  * Page the whole catalog. Throws on any failure — a half-read catalog is not a catalog (rule 1).
  *
  * Pages are read SEQUENTIALLY rather than fired in parallel: each response is large (see
- * `CATALOG_PAGE_SIZE`), ethers batches concurrent calls into one request by default, and a failure
+ * `CATALOG_PAGE_SIZE`), the transport batches concurrent calls into one request by default, and a failure
  * on page one should abort rather than leave four more heavy requests in flight against a member's
  * endpoint. The loop is bounded by `appCount` — checked for plausibility first — so it cannot spin.
  */
@@ -407,12 +420,23 @@ export async function fetchApp(id) {
 /**
  * Whether a failed call was the registry saying "no such app" rather than the network saying nothing.
  *
- * ethers decodes a custom error into `error.revert.name` when the ABI carries the selector (it does —
- * `error AppNotFound()`), and older/wrapped shapes surface it as `errorName`. Anything else — missing
- * revert data, a transport error, undecodable bytes — is NOT a not-found: it is an unread record.
+ * This is the file's sharpest honest-state line, and it is decided by the shape of a decoded
+ * revert — which is library-specific, so all the shapes are read rather than one. viem raises a
+ * `ContractFunctionRevertedError` somewhere in the `cause` chain carrying `data.errorName`;
+ * ethers (still the shape some callers hand us, and what the fixtures assert) lifts it onto
+ * `error.revert.name`, with older/wrapped forms using `errorName`. Anything else — missing revert
+ * data, a transport error, undecodable bytes — is NOT a not-found: it is an unread record.
+ *
+ * Getting this wrong in the permissive direction is the dangerous one: an RPC failure reported as
+ * "no such app" tells a member the platform has no such package when it may simply be unreachable.
  */
 function isAppNotFound(error) {
-  return (error?.revert?.name || error?.errorName) === 'AppNotFound'
+  if ((error?.revert?.name || error?.errorName) === 'AppNotFound') return true
+  // viem nests the decoded revert; walk the cause chain rather than guessing its depth.
+  for (let e = error, hops = 0; e && hops < 8; e = e.cause, hops += 1) {
+    if (e?.data?.errorName === 'AppNotFound') return true
+  }
+  return false
 }
 
 /**
