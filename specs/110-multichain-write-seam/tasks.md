@@ -187,10 +187,22 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 
 **The seam:**
 
-- [ ] T024 Build `frontend/src/lib/chains/submitOn.js`: `submitOn(chainId, payload)` carrying the
+- [x] T024 Build `frontend/src/lib/chains/submitOn.js`: `submitOn(chainId, payload)` carrying the
       acting identity; rail resolution → passkey (`sendPasskeyBatch({ chainId })`, no switch) |
       intent (target chain's EIP-712 domain, no switch) | signer (the ONE switch-and-settle loop,
-      constants decided once, refusal names both chains and signs nothing).
+      constants decided once, refusal names both chains and signs nothing). **Built with tests; no
+      caller yet — T026 moves them.** Two things the build settled that were not obvious from the
+      task text. (1) THE CONSTANTS ACTUALLY DISAGREED: the three loops this replaces used 20s/150ms
+      in `useActiveAccount` and `useEarnSend` but 30s/250ms in `useVaultDeployment`, so the same
+      wallet on the same chain got ten seconds more patience depending on which button was pressed.
+      Nothing chose that — it is what a copied loop does. One pair is exported now. (2) THE TESTS
+      THAT MATTER ARE NEGATIVE: the passkey and intent rails must never call `switchNetwork`, and
+      every refusal must leave the wallet where it was. A value-only assertion passes just as
+      happily on a seam that prompts for a network change it does not need, or that switches and
+      then refuses — which is the worse half of a bad refusal, because the member is left somewhere
+      they never asked to be. `resolveWriteRail` is injectable so the ROUTING tests do not depend on
+      which chains happen to carry a deployed bundler (that is the estate, not this seam); one test
+      deliberately uses the real resolver so the two stay wired together.
 - [ ] T025 Generalize `lib/custody/writeRail.js#resolveWriteRail` out of custody; add
       reachability verification so availability is stated before the tap, never discovered at
       submit (`requireWriteRail` throwing form kept for callbacks).
