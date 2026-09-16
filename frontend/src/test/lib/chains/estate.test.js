@@ -8,11 +8,22 @@
  * T016's source-level check lives at the bottom: it asserts the spec-069 provider bypass this
  * helper used to carry cannot come back, which no behavioural test can catch.
  */
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { readAcrossEstate, estateNetworks, readProviderFor, networkName } from '../../../lib/chains/estate'
+import { keccak256, stringToHex } from 'viem'
+
+// The authority read rides the spec-110 chain seam; fake it there so the assertions below are
+// about what the helper DOES with an answer, not about reaching a network.
+const readContractMock = vi.hoisted(() => vi.fn())
+vi.mock('../../../lib/chains/readContract', async (orig) => ({
+  ...(await orig()),
+  readContract: (...args) => readContractMock(...args),
+}))
+
+const { readAcrossEstate, estateNetworks, readProviderFor, networkName, readAuthority, authorityGate, ROLE_HASHES } =
+  await import('../../../lib/chains/estate')
 import { isRead, isNotDeployed, isUnreadable } from '../../../lib/chains/chainReadResult'
 import { cohortChainIds, isInCohort, NETWORKS } from '../../../config/networks'
 
@@ -21,6 +32,10 @@ const A = COHORT[0]
 const B = COHORT[1]
 
 const byChain = (id) => (r) => r.chainId === id
+
+beforeEach(() => {
+  readContractMock.mockReset()
+})
 
 describe('estateNetworks — the roster is cohort-bounded (FR-002)', () => {
   it('lists only chains in this build\'s cohort', () => {
@@ -143,6 +158,63 @@ describe('networkName', () => {
   it('names a known chain and gives an honest placeholder for an unknown one', () => {
     expect(networkName(A)).toBe(NETWORKS[A].name)
     expect(networkName(999999)).toBe('Chain 999999')
+  })
+})
+
+// ── Spec 110 (#1592): the authority read moved onto the chain seam ──────────────────────────
+// The three answers it distinguishes are what keep an operator surface honest, and each one is
+// silent when it breaks: an unconfirmed read that hardened into a denial would take a killswitch
+// away from the operator who holds it, and one that softened into a grant would offer a control
+// that reverts. The read now names its chain instead of carrying a provider that implies one —
+// but `provider` stays the availability gate, so the cohort bound its callers enforce through
+// `readProviderFor` still decides whether the question is put at all.
+describe('readAuthority — three answers, over the chain seam', () => {
+  const CONTRACT = '0x00000000000000000000000000000000000000a1'
+  const ACCOUNT = '0x1111111111111111111111111111111111111111'
+  const gate = { __provider: true }
+
+  it('reports the roles the contract itself confirms', async () => {
+    const seen = []
+    readContractMock.mockImplementation(async (chainId, call) => {
+      seen.push({ chainId, role: call.args[0], account: call.args[1] })
+      return call.args[0] === ROLE_HASHES.guardian
+    })
+    const a = await readAuthority({
+      chainId: A,
+      provider: gate,
+      address: CONTRACT,
+      account: ACCOUNT,
+      roles: ['admin', 'guardian'],
+    })
+    expect(a).toMatchObject({ admin: false, guardian: true, readable: true, deployed: true })
+    // Asked of the named chain, of the contract that will enforce it.
+    expect(seen.every((s) => s.chainId === A && s.account === ACCOUNT)).toBe(true)
+  })
+
+  it('an undeployed contract is a DEFINITE no, and readable', async () => {
+    const a = await readAuthority({ chainId: A, provider: gate, address: '', account: ACCOUNT, roles: ['admin'] })
+    expect(a).toMatchObject({ admin: false, readable: true, deployed: false })
+    expect(readContractMock).not.toHaveBeenCalled()
+  })
+
+  it('a failed read is UNCONFIRMED, never a denial', async () => {
+    readContractMock.mockRejectedValue(new Error('rpc down'))
+    const a = await readAuthority({ chainId: A, provider: gate, address: CONTRACT, account: ACCOUNT, roles: ['admin'] })
+    expect(a).toMatchObject({ readable: false, deployed: true })
+    expect(a.reason).toMatch(/rpc down/)
+    // Unconfirmed keeps the control offered — the contract is the real gate (FR-044).
+    expect(authorityGate(a, ['admin'])).toMatchObject({ allowed: true, unconfirmed: true })
+  })
+
+  it('no gate (a chain this build must not read) is unconfirmed, not a denial', async () => {
+    const a = await readAuthority({ chainId: A, provider: null, address: CONTRACT, account: ACCOUNT, roles: ['admin'] })
+    expect(a).toMatchObject({ readable: false, deployed: true, reason: 'no read connection to this network' })
+    expect(readContractMock).not.toHaveBeenCalled()
+  })
+
+  it('role hashes match the on-chain constants (DEFAULT_ADMIN_ROLE is bytes32(0))', () => {
+    expect(ROLE_HASHES.admin).toBe(`0x${'00'.repeat(32)}`)
+    expect(ROLE_HASHES.guardian).toBe(keccak256(stringToHex('GUARDIAN_ROLE')))
   })
 })
 

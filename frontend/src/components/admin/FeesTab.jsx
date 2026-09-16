@@ -75,6 +75,7 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
   useEffect(() => {
     let cancelled = false
     readAuthority({
+      chainId: scopeChainId,
       provider: readProvider,
       address: routerAddr,
       account,
@@ -83,7 +84,7 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
       if (!cancelled) setAuthority(a)
     })
     return () => { cancelled = true }
-  }, [readProvider, routerAddr, account])
+  }, [readProvider, routerAddr, account, scopeChainId])
 
   const feeGate = authorityGate(authority, ['admin', 'feeAdmin'])
   const treasuryGate = authorityGate(authority, ['admin'])

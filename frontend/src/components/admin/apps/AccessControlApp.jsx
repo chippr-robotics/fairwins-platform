@@ -171,6 +171,7 @@ export default function AccessControlApp() {
     let cancelled = false
     setRoleAdminAuthority(null)
     readAuthority({
+      chainId: selectedWriteChainId,
       provider: authorityProvider,
       address: selectedRoleContract,
       account,
@@ -181,7 +182,7 @@ export default function AccessControlApp() {
     return () => {
       cancelled = true
     }
-  }, [authorityProvider, selectedRoleContract, account])
+  }, [authorityProvider, selectedRoleContract, account, selectedWriteChainId])
 
   const roleAdminGate = contractAuthorityGate({
     authority: roleAdminAuthority,

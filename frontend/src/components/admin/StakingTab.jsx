@@ -62,6 +62,7 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
   useEffect(() => {
     let cancelled = false
     readAuthority({
+      chainId: scopeChainId,
       provider: readProvider,
       address: routerAddr,
       account,
@@ -70,7 +71,7 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
       if (!cancelled) setAuthority(a)
     })
     return () => { cancelled = true }
-  }, [readProvider, routerAddr, account])
+  }, [readProvider, routerAddr, account, scopeChainId])
 
   const configGate = authorityGate(authority, ['admin', 'stakingAdmin'])
   const pauseGate = authorityGate(authority, ['admin', 'guardian'])

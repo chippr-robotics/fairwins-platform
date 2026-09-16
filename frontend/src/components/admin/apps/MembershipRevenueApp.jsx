@@ -144,6 +144,7 @@ export default function MembershipRevenueApp() {
     let cancelled = false
     setMembershipAuthority(null)
     readAuthority({
+      chainId: membershipAdminChainId,
       provider: membershipProvider,
       address: membershipManagerAddr,
       account,
@@ -154,7 +155,7 @@ export default function MembershipRevenueApp() {
     return () => {
       cancelled = true
     }
-  }, [membershipProvider, membershipManagerAddr, account])
+  }, [membershipProvider, membershipManagerAddr, account, membershipAdminChainId])
 
   const memberGate = contractAuthorityGate({
     authority: membershipAuthority,
@@ -220,6 +221,7 @@ export default function MembershipRevenueApp() {
     setWithdrawAuthority(null)
     if (withdrawChainId == null) return undefined
     readAuthority({
+      chainId: withdrawChainId,
       provider: withdrawProvider,
       address: withdrawManagerAddr,
       account,
