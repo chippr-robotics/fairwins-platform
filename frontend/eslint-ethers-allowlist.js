@@ -57,7 +57,6 @@ export const ETHERS_ALLOWLIST = [
   'src/hooks/useOpenChallengeAccept.js',
   'src/hooks/useOpenChallengeCreate.js',
   'src/hooks/useOracleConditions.js',
-  'src/hooks/usePerpsOrders.js',
   'src/hooks/usePools.js',
   'src/hooks/useTransfer.js',
   'src/hooks/useTreasuryVault.js',
