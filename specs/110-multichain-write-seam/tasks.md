@@ -405,6 +405,17 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - **DIVERGENCE 13, found while scoping `CallsignPanel` and fixed in the seam before converting
+        it: ethers' `parseError` returned error args addressable BY NAME; viem's
+        `decodeErrorResult` returns a bare array.** The error-path twin of the Phase-1 multi-output
+        defect, and it fails the same silent way — `revert.args.nextAllowedAt` is `undefined`, not
+        an error and not a failed decode, just a field that quietly is not there.
+        `CallsignPanel.describeError` reads exactly that name and survives ONLY because it carries
+        an `args?.[0]` fallback; without one the member would be told "try again later" instead of
+        when. `errorParser` now attaches the names from `decoded.abiItem.inputs`, non-enumerably,
+        the same way `readContract.js#withOutputNames` does — so the args still spread, serialize
+        and deep-equal as the plain array they are, and a parameter with no name is left alone
+        rather than guessed at. Verified non-vacuous by reverting to `Array.from`.
       - `src/components/admin/MiniAppReviewTab.jsx` — first consumer of `errorParser`, plus the
         curator writes off the ethers `Contract`. **Divergence 7 is NARROWER than recorded, and the
         scope matters at every future call site:** it is DYNAMIC `bytes` only. Measured encode-only

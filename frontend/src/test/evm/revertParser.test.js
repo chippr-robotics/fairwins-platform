@@ -65,6 +65,44 @@ describe('errorParser', () => {
     expect(parser.parseError(panic)).toEqual({ name: 'Panic', args: [0x11n] })
   })
 
+  it('gives args their NAMES back, which viem drops (divergence 13)', () => {
+    // The error-path twin of the multi-output read defect. `CallsignPanel.describeError` reads
+    // `revert.args.nextAllowedAt`; with a bare array that is `undefined` — no error, no failed
+    // decode, just a field that quietly is not there, and the member is told "try again later"
+    // instead of when.
+    const iface = new Interface(['error ChangeCooldownActive(uint64 nextAllowedAt)'])
+    const parserWithNames = errorParser(['error ChangeCooldownActive(uint64 nextAllowedAt)'])
+    const data = iface.encodeErrorResult('ChangeCooldownActive', [1893456000n])
+
+    const e = iface.parseError(data)
+    const v = parserWithNames.parseError(data)
+    expect(v.args.nextAllowedAt).toBe(e.args.nextAllowedAt)
+    expect(v.args[0]).toBe(e.args[0])
+  })
+
+  it('leaves the args behaving as the plain array they are', () => {
+    // Non-enumerable, so nothing that spreads, serializes or deep-equals them changes shape.
+    const iface = new Interface(['error Two(uint256 a, address b)'])
+    const who = '0x' + '11'.repeat(20)
+    const data = iface.encodeErrorResult('Two', [7n, who])
+    const { args } = errorParser(['error Two(uint256 a, address b)']).parseError(data)
+
+    expect(args).toEqual([7n, who])
+    expect([...args]).toEqual([7n, who])
+    expect(Object.keys(args)).toEqual(['0', '1'])
+    expect(JSON.parse(JSON.stringify(args, (k, x) => (typeof x === 'bigint' ? String(x) : x)))).toEqual(['7', who])
+    expect(args.a).toBe(7n)
+    expect(args.b).toBe(who)
+  })
+
+  it('does not invent names for an error whose parameters have none', () => {
+    const iface = new Interface(['error Anon(uint256)'])
+    const data = iface.encodeErrorResult('Anon', [5n])
+    const { args } = errorParser(['error Anon(uint256)']).parseError(data)
+    expect(args).toEqual([5n])
+    expect(Object.keys(args)).toEqual(['0'])
+  })
+
   it('reads a revert out of every payload shape a wallet nests it in', () => {
     // The whole point of issue #1267: the write path through an injected wallet leaves raw bytes
     // buried in the RPC payload, and ethers never lifts them onto `.revert`.
