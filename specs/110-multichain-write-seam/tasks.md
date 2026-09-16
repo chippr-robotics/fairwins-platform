@@ -370,6 +370,23 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         ethers implementation, so they are anchored to what shipped rather than to the code they
         guard; a one-character change to the domain tag fails them and nothing else in the file.
         **Never regenerate them to make a test pass** — a mismatch means the change is wrong.
+      - `src/utils/keyRegistryService.js` — **DEFERRED, and it is why (#1612).** Converting it forces
+        a decision about a branch that is unreachable today: `hasRegisteredKey` picks between
+        `hasKey` (v2) and `hasValidKey` (legacy ZKKeyManager) on
+        `typeof contract.hasKey === 'function'`, and the contract is ALWAYS built from
+        `KEY_REGISTRY_ABI`, whose functions are exactly `getPublicKey, hasKey, registerKey,
+        registerKeyWithEligibility`. ethers makes a method per ABI function, so the test is
+        unconditionally true (measured) — it checks WHICH ABI FILE WAS IMPORTED, not which contract
+        is deployed, while the address resolver still actively resolves a `zkKeyManager` address.
+        The failure mode is the honesty rule this repo enforces everywhere else: the `catch` returns
+        `false`, so an unreadable chain says "no registered key" — and `useEncryption.js:616`
+        (`opponentHasKey`) turns that into a PRIVACY decision about whether terms are encrypted to
+        the counterparty. The same module's `lookupPublicKeyState` already answers three ways for
+        exactly this reason. Fixing it changes what a member is told, so it is its own change with
+        its own review; this task does not smuggle it in behind a library swap.
+        (`registerEncryptionKey:203` and `buildRegisterKeyCalls:251` guard on the same always-true
+        condition — harmless, since the `try/catch` is the real fallback, but they read as
+        protection they do not provide.)
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
