@@ -35,11 +35,13 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       Also `lib/chains/eventScan.js`, the viem twin of a contract for `lib/chain/logScan`'s duck
       contract, so a scanning caller converts in one line. The seam additionally RESTORES the
       parameter names viem drops on multi-output results — see the note under T012.
-- [ ] T012 Convert the read-path files (~80, *(re-measure)*) onto `readContract`; delete the
+- [x] T012 Convert the read-path files (~80, *(re-measure)*) onto `readContract`; delete the
       ethers `_lastFatalError` workaround in `frontend/src/utils/rpcProvider.js` rather than
-      porting it. Shrink the allowlist per file converted. **In progress: allowlist 134 → 70; the READ path is done bar one recorded blocker (T012a).**
-      Of what remains, most entries are the write/signer surface (Phase 2), and five are a
-      decision rather than pending work — the three BIP-39 wordlist files (viem bundles none, so
+      porting it. Shrink the allowlist per file converted. **DONE at allowlist 134 → 70, verified
+      green on b87bcf18 (50/50: 4 on-chain shards, 12 fast legs across both viewport profiles,
+      passkey full stack, unit/lint/build).** The one read-path entry left is T012a below, which is
+      blocked on config rather than code. Of the remaining 70, most are the write/signer surface
+      (Phase 2), and seven are a decision rather than pending work — the three BIP-39 wordlist files (viem bundles none, so
       moving them is a lockfile change and therefore the spec-075 rolldown hazard),
       `miniapps/hostScope.js` (ethers is part of the spec-073 host API, so Phase 5), and
       `utils/rpcProvider.js` itself, which leaves last with its final caller. The allowlist
@@ -102,7 +104,29 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       (3) `contract.on(...)` has no like-for-like viem twin: `watchContractEvent` polls or installs a
       filter depending on the transport, so the live-update leg needs its own decision about cost on
       a sparse, owner-write-only adapter.
-- [ ] T014 Gates: full suite + both e2e tiers green; allowlist reflects every converted file.
+
+      T020 IS ALREADY DE-RISKED, and the reason it names `@noble/curves` rather than viem is not a
+      library preference. **viem's `verifyMessage` and `recoverAddress` are ASYNC** where ethers'
+      are synchronous, so converting to them would break the spec-084 invariant stated in CLAUDE.md
+      — "`verifyMessage` is OFFLINE and SYNCHRONOUS … never make it async: the type is what
+      enforces it." The type is the guard against someone later putting a network call inside
+      signature arithmetic, and an async signature removes it silently. Three facts checked rather
+      than assumed: `@noble/curves` is ALREADY a direct frontend dependency (^2.3.0), so T020 needs
+      no lockfile change and the spec-075 rolldown hazard does not apply; noble v2 RENAMED the point
+      serializer to `toBytes(false)` (`toRawBytes` is gone, so v1-era guidance reads fine and fails
+      at runtime); and a fully synchronous recovery —
+      `Signature.fromHex(r+s).addRecoveryBit(v).recoverPublicKey(hash).toBytes(false).slice(1)`,
+      keccak256, last 20 bytes — matches `ethers.verifyMessage` on 16/16 cases (4 keys × 4 messages
+      including empty, 200-char and unicode) and returns a string, not a Promise.
+- [x] T014 Gates: full suite + both e2e tiers green; allowlist reflects every converted file.
+      **Met on b87bcf18** — 50/50, nothing failing, every Cypress leg of both tiers green. Worth
+      recording HOW the two on-chain-only defects were caught, because no amount of local green
+      would have: the empty Supply list (multi-output names) and the empty Protect queue (the
+      cached scan head) each passed all ~9,100 unit tests, because every unit fake returns
+      ethers-shaped objects and so answers a question the chain no longer answers. Both were found
+      by a red on-chain shard and localized by bisecting against the last head that was green
+      there. Budget for that in Phase 2: a local sweep is a precondition for pushing, never
+      evidence that a conversion is correct.
 
 ## Phase 2 — The write seam (#1593) 🎯 the chain abstraction
 
