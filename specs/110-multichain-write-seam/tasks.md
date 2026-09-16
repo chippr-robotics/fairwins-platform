@@ -322,7 +322,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 54.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 53.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -405,6 +405,28 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - **`src/lib/evm/mnemonic.js` (new) + `src/lib/pools/bip39Lists.js` — divergence (h) is WORSE
+        than "derives from an invalid mnemonic", and the BIP-39 allowlist entry was wrong TWICE.**
+        Measured: viem's `mnemonicToAccount` returns a real, plausible, DIFFERENT address for a bad
+        checksum, for a word not in the wordlist, and for a ONE-CHARACTER typo — ethers refused all
+        three, and only a wrong word COUNT is refused by both. So a member recovering with one word
+        mistyped would be shown an address, told the import worked, and find an empty account while
+        their funds sit somewhere they were never shown, with nothing reporting an error. The guard
+        is replaced, never dropped: `isValidMnemonic` on `@scure/bip39`, already a DIRECT dependency
+        (2.4.0), so no lockfile change and no spec-075 rolldown hazard.
+        **The wordlist entry's reason was false for the second time.** It claimed only English was
+        available without ethers; `@scure/bip39` ships all TEN and each is identical to ethers' word
+        for word — 2048 entries, same order, cz/en/es/fr/it/ja/ko/pt/zh_cn/zh_tw — which matters
+        because a pool's phrase is stored as INDICES and a list differing anywhere would rename
+        every pool ever created, in one language only. Converted, with the comparison pinned in
+        `src/test/pools/bip39Lists.test.js` so the claim stays checkable rather than trusted.
+        **And a testing fact worth keeping: ETHERS' BIP-39 PATH IS BROKEN UNDER JSDOM.** Its
+        `sha256` receives a cross-realm Node `Buffer`, `instanceof Uint8Array` is false, and
+        `getBytes` rejects it — `HDNodeWallet.fromPhrase` throws and, worse,
+        `Mnemonic.isValidMnemonic` CATCHES that internally and returns `false` for a valid phrase.
+        So the shipped gate was not testable in this suite at all, cross-library parity had to be
+        measured in a plain-Node probe, and the swap makes the validator testable where it was not.
+        Never assert against ethers' BIP-39 functions in vitest; they answer wrongly there.
       - **`src/test/lint/ethersMockRatchet.test.js` (new) — the retired-mock class is a GATE now,
         not a discovery.** Three files in a row was enough: a test that mocks `ethers` must import,
         statically or dynamically, at least one module still on the ethers allowlist, or the mock

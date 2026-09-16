@@ -21,6 +21,7 @@
  */
 
 import { ethers } from 'ethers'
+import { isValidMnemonic } from '../evm/mnemonic'
 import { getPortfolioRegistry } from '../../config/assetTaxonomy'
 import { TRANSFER_ABI } from '../transfer/eip3009Transfer'
 import { loadLegacyRecoveredKeys, saveLegacyRecoveredKeys } from './legacyRecoveredKeysStore'
@@ -76,7 +77,12 @@ export function classifySecret(input) {
   if (VALID_WORD_COUNTS.includes(words.length)) {
     const phrase = words.join(' ').toLowerCase()
     try {
-      if (ethers.Mnemonic.isValidMnemonic(phrase)) {
+      // Spec 110 — the seam, NOT `ethers.Mnemonic.isValidMnemonic`, and never dropped as
+      // redundant. This gate is what stops viem's `mnemonicToAccount` deriving a real, plausible
+      // address from a phrase with one mistyped word (divergence h, measured): the member would be
+      // shown an address, told the import worked, and find an empty account while their actual
+      // funds sit somewhere they were never shown.
+      if (isValidMnemonic(phrase)) {
         const wallet = ethers.HDNodeWallet.fromPhrase(phrase)
         return { kind: 'mnemonic', address: wallet.address, secret: phrase, wordCount: words.length }
       }
