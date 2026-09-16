@@ -167,6 +167,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 - [ ] T022 [P] `lib/recovery/legacyKeys.js`: nonce management re-derived on viem's account
       `nonceManager` — port the reasoning ("a refused transaction never consumed its nonce"), with
       tests proving refusal/re-submit sequences.
+
+      **READ THIS BEFORE TOUCHING THE MNEMONIC PATH.** Derivation itself is safe: `mnemonicToAccount`
+      matches `ethers.HDNodeWallet.fromPhrase` on every address checked (three phrases on the default
+      `m/44'/60'/0'/0/0`, plus indices 0/1/5), and `privateKeyToAccount` matches `new ethers.Wallet`.
+      What is NOT safe is dropping the guard in front of it. This module currently reads
+      `if (ethers.Mnemonic.isValidMnemonic(phrase))` before deriving, and that check is doing real
+      work: **viem has no mnemonic validator at all, and `mnemonicToAccount` derives happily from an
+      INVALID phrase** — a bad BIP-39 checksum, one mistyped word, even `"aaa bbb ccc … lll"`, words
+      that are not in the wordlist. ethers threw on all three. So a member who mistypes ONE word of
+      their seed phrase would be shown a perfectly valid-looking recovered account at a completely
+      different address, holding nothing — which they would read as their money being gone. That is
+      the same silent failure spec 104 describes for passkey account lookup, arrived at from the
+      other direction, and it is the second divergence in this migration that fails toward a
+      CONFIDENT WRONG ANSWER rather than toward reporting less. Keep an explicit checksum check;
+      `viem/accounts` exports `english` but no `validateMnemonic`.
 - [ ] T023 [P] `lib/chain/revertError.js` → `decodeErrorResult` + `BaseError.walk()`; keep
       `useAdminTx`'s per-call `errorAbi` contract (#1267).
 
