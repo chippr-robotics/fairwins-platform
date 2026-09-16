@@ -258,7 +258,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 59.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 58.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -341,6 +341,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - `src/components/admin/useAdminTx.js` + **`src/lib/evm/revertParser.js`** (new) — this is the
+        T023 shape, arrived at from the caller side as planned. `lib/chain/revertError.js` is
+        UNTOUCHED: it still imports nothing and still takes any object with
+        `parseError(data) => {name, args}|null`, and `errorParser(abi)` is that object built on
+        viem. Named errors and BOTH builtins (`Error(string)`, `Panic(uint256)`) decode identically
+        to `new Interface(abi).parseError`, the builtins even when the ABI does not declare them.
+        **Divergence 12 — two shape differences, normalised in the adapter rather than left to
+        callers**: on an UNKNOWN selector ethers returned `null` and viem THROWS; for a
+        no-argument error ethers gave `[]` and viem gives `undefined`. Both happen to work today —
+        through `extractRevert`'s catch and `describeRevert`'s `?? []` respectively — which is
+        exactly the problem: they work by accident, and stop working for the first caller that
+        trusts the declared signature.
+        Three callers still construct an ethers `Interface` for this (`MiniAppReviewTab`,
+        `CallsignPanel`, `SubmitAppPanel`); each also does other ethers work, so they convert with
+        their own file.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

@@ -60,7 +60,6 @@ export const ETHERS_ALLOWLIST = [
   'src/components/admin/apps/LiquidityApp.jsx',
   'src/components/admin/apps/MembershipRevenueApp.jsx',
   'src/components/admin/perpsFeeRails.js',
-  'src/components/admin/useAdminTx.js',
   'src/components/fairwins/MarketAcceptanceModal.jsx',
   'src/components/fairwins/MyMarketsModal.jsx',
   'src/components/miniapps/SubmitAppPanel.jsx',
