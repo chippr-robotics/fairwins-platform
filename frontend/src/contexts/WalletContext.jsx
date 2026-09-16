@@ -2,8 +2,9 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi'
 import ConnectModal from '../components/wallet/ConnectModal'
 import { ethers } from 'ethers'
-import { isSupportedChainId, getNetwork, PRIMARY_CHAIN_ID, cohortChainIds } from '../config/networks'
+import { isSupportedChainId, getNetwork, NETWORKS, PRIMARY_CHAIN_ID, cohortChainIds } from '../config/networks'
 import { classifyEstateProbes } from '../lib/chains/estateSweep'
+import { ChainSwitchRefused } from '../lib/chains/submitOn'
 import { useWalletChainId } from '../hooks/useWalletChainId'
 import { makeReadProvider } from '../utils/rpcProvider'
 import {
@@ -14,6 +15,9 @@ import {
 import { hasRoleOnChain } from '../utils/blockchainService'
 import { WalletContext } from './WalletContext'
 import { beginTx, publishLifecycle, failTx } from '../lib/passkey/txProgressBus'
+
+/** Strict chain name — never `getNetwork()`, which names the DEFAULT network for an unknown id. */
+const strictChainName = (id) => NETWORKS[Number(id)]?.name || `chain ${Number(id)}`
 
 export function WalletProvider({ children }) {
   // Wagmi hooks for wallet connection
@@ -139,11 +143,22 @@ export function WalletProvider({ children }) {
    *   unchanged for existing users — SC-004).
    * Each call: { target, data, value? }.
    *
-   * `chainId` option (passkey rail only): pins the batch to a NAMED chain instead of the session's
-   * current one. A UserOp is chain-targeted by parameter, and a caller whose batch is only correct
-   * on one chain (Predict approvals → Polygon) must say so — the session's chain state is React
-   * state, so a just-completed switchChain is not yet visible to the closures already running.
-   * Classic wallets ignore it: an injected signer is bound to whatever chain the wallet is on.
+   * `chainId` option: pins the batch to a NAMED chain instead of the session's current one. A
+   * UserOp is chain-targeted by parameter, and a caller whose batch is only correct on one chain
+   * (Predict approvals → Polygon) must say so — the session's chain state is React state, so a
+   * just-completed switchChain is not yet visible to the closures already running.
+   *
+   * A CLASSIC WALLET CANNOT BE PINNED, SO IT REFUSES (spec 110 T028). An injected signer
+   * broadcasts on whatever network the wallet is on, and this used to IGNORE the option there —
+   * a caller that named a chain got its batch sent on a different one, silently, which is the
+   * defect T026 closed in `submitAsActiveAccount`'s personal branch. Nothing passes `chainId` on
+   * this path today (the two callers that pass it are on the passkey rail), so refusing costs
+   * nothing now and converts a silent wrong-chain send into a stated refusal later.
+   *
+   * It refuses rather than switching ON PURPOSE. `sendCalls` is the SUBMISSION primitive;
+   * `lib/chains/submitOn.js#settleWalletOn` is the chain-landing primitive, and composing them is
+   * the caller's job — which is exactly what `useEarnSend.sendOnChain` and `useWrapNative` already
+   * do. Switching from in here would inject a wallet prompt into a path that has never prompted.
    */
   const sendCalls = useCallback(
     async (calls, { onState, chainId: chainOverride } = {}) => {
@@ -192,6 +207,13 @@ export function WalletProvider({ children }) {
         }
       }
       if (!signer) throw new Error('No signer available')
+      if (chainOverride != null && Number(chainOverride) !== Number(chainId)) {
+        throw new ChainSwitchRefused(
+          `This goes to ${strictChainName(chainOverride)}, but the wallet is on ${strictChainName(chainId)} ` +
+            `and a connected wallet sends on the network it is on. Switch it there first — nothing has been sent.`,
+          { from: Number(chainId), to: Number(chainOverride) },
+        )
+      }
       const receipts = []
       for (const c of calls) {
         const tx = await signer.sendTransaction({ to: c.target ?? c.to, data: c.data, value: c.value ?? 0n })

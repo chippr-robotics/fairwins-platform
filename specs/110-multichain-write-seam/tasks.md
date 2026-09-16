@@ -216,6 +216,31 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       is byte-compatible. One answer DID change: a chainId absent from `NETWORKS` is now refused on
       every rail including the signer rail — there is no network definition to hand the wallet and
       no RPC behind it, so `available: true` there was a confident wrong answer.
+- [x] T026b **`WalletContext.sendCalls` silently ignored a named chain on the classic rail.** Its
+      own comment stated it as intended — "Classic wallets ignore it: an injected signer is bound
+      to whatever chain the wallet is on" — but the consequence is not that the option does
+      nothing: a caller naming a chain got its batch broadcast on a DIFFERENT one, with no prompt
+      and no error. Same defect T026 closed in `submitAsActiveAccount`'s personal branch, still
+      live in the function every money-moving surface routes through (transfer, vouchers, wagers,
+      tokens, swap, DAO, custody). It now REFUSES with both chains named.
+      Bounded on purpose: **nothing passes `chainId` on the classic path today** — the two callers
+      that pass it (`useVaultDeployment`, `useWrapNative`) are on the passkey rail — so this costs
+      nothing now and converts a silent wrong-chain send into a stated refusal later. It refuses
+      rather than SWITCHING because `sendCalls` is the submission primitive and `settleWalletOn` is
+      the chain-landing primitive; composing them is the caller's job, which `useEarnSend` and
+      `useWrapNative` already do. Switching from in here would inject a wallet prompt into a path
+      that has never prompted.
+      The function had **no test of its own** — the app's unified write abstraction was unexercised
+      at its own boundary. `src/test/wallet/sendCallsChain.test.jsx` is the first, and it pins the
+      case that must NOT change (no `chainId` still sends) alongside the new refusal.
+      **Still open here, and the reason `submitOn` has no production caller yet:** `sendCalls`
+      branches on `loginMethod === 'passkey'`, which `lib/chains/writeRail.js` documents as the one
+      thing no feature may do. Today that is near-equivalent (a passkey session holds no browser
+      signer) and `smartAccount.js#requirePasskeySupport` already refuses an unsupported chain at
+      the boundary, so the gap is the QUALITY of the refusal, not what succeeds:
+      `ChainNotSupportedError` names the chain by number and not the way out, where
+      `resolveWriteRail` names both. Routing `sendCalls` through `submitOn` is the real T028
+      endgame and wants on-chain verification, not a late-session push.
 - [x] T026a **There was a FOURTH settle loop, and it was the best of the four.** T026's task text
       named three hooks, so `hooks/useWrapNative.js` (spec 108) was not in the sweep — and it alone
       verified that the settled signer's OWN provider reports the target chain before letting it
