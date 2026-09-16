@@ -9,7 +9,7 @@ import { formatUnits } from '../../lib/evm/units'
 import { STATUS } from '../../lib/custody/proposalStatus'
 import { approvalsRemaining } from '../../lib/custody/proposalStatus'
 import { getContractAddressForChain } from '../../config/contracts'
-import { guardIface, NATIVE_ASSET, shortAddress, formatDuration } from '../../lib/custody/policy'
+import { GUARD_ABI, NATIVE_ASSET, shortAddress, formatDuration } from '../../lib/custody/policy'
 // Spec 068 — ordered-engine proposals (setRules / adopt) decode through the V2 classifier and render
 // the resulting rule list in order, since one call replaces the whole policy.
 import { classifyPolicyProposalV2, describeRulesV2 } from '../../lib/custody/policyV2'
@@ -42,8 +42,10 @@ function classifyPolicyProposal(p, chainId, vaultAddress) {
     const guardLc = guard.toLowerCase()
 
     if (to === guardLc) {
-      const parsed = guardIface.parseTransaction({ data: p.data })
-      if (!parsed || parsed.name !== 'configureRules') return null
+      // viem THROWS on calldata this ABI cannot decode where ethers' `parseTransaction` returned
+      // null; the surrounding try/catch already treats both as "not a policy proposal".
+      const parsed = decodeFunctionData({ abi: GUARD_ABI, data: p.data })
+      if (parsed?.functionName !== 'configureRules') return null
       const [limits, cooldown, allowlistEnabled, adds, removes] = parsed.args
       const changes = []
       for (const l of limits) {

@@ -4,6 +4,25 @@
 
 import { describe, it, expect, vi } from 'vitest'
 import { Interface, ZeroAddress, getAddress, parseEther, toBeHex, zeroPadValue } from 'ethers'
+
+/*
+ * The guard-slot read goes through the chain seam and NAMES its chain (spec 110), so the fake is
+ * the seam rather than a provider handed in. That is the stronger assertion: the old test passed a
+ * connection and could only check that whatever it passed got used, while this one checks that the
+ * read lands on the chain the vault belongs to.
+ */
+const storage = vi.hoisted(() => ({ byChain: {} }))
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: (chainId) => {
+      const value = storage.byChain[chainId]
+      if (value === undefined) return null
+      return { getStorageAt: async () => value }
+    },
+  }
+})
 import {
   GUARD_STORAGE_SLOT,
   NATIVE_ASSET,
@@ -15,13 +34,22 @@ import {
   encodeConfigureRules,
   getPolicyEngineAddresses,
   getPolicyStatus,
-  guardIface,
   isPolicySupported,
-  setupIface,
   summarizeRules,
   validatePolicyConfig,
 } from '../../lib/custody/policy'
+import { SAFE_POLICY_GUARD_ABI, POLICY_GUARD_SETUP_ABI } from '../../abis/SafePolicyGuard'
 import { getContractAddressForChain } from '../../config/contracts'
+
+/*
+ * The module ENCODES with viem since spec 110; these decode with ethers, on purpose. That makes
+ * every assertion below a live cross-library byte-compatibility check over calldata that
+ * configures a vault's spending policy — the same reasoning that keeps ethers in
+ * `bridgeRouter.test.js` and `liquidityRouter.test.js` (see the allowlist header). Decoding with
+ * viem would only assert that viem agrees with itself.
+ */
+const guardIface = new Interface(SAFE_POLICY_GUARD_ABI)
+const setupIface = new Interface(POLICY_GUARD_SETUP_ABI)
 
 const RECIPIENT = '0x1111111111111111111111111111111111111111'
 const TOKEN = getAddress('0x00000000000000000000000000000000000c0ffe')
@@ -212,26 +240,32 @@ describe('describeRules / summarizeRules (US2)', () => {
 })
 
 describe('getPolicyStatus (US2 / edge cases)', () => {
-  const slotValue = (addr) => zeroPadValue(addr, 32)
-  const providerWith = (guardAtSlot) => ({
-    getStorage: vi.fn(async (vault, slot) => {
-      expect(slot).toBe(GUARD_STORAGE_SLOT)
-      return slotValue(guardAtSlot)
-    }),
-  })
+  const guardOnChain = (guardAtSlot) => {
+    storage.byChain = { [CHAIN]: zeroPadValue(guardAtSlot, 32) }
+  }
 
+  it('reads the guard slot on the chain the VAULT is on, not on a connected one', async () => {
+    // Only chain 1337 answers; a read aimed anywhere else would find no client and throw.
+    guardOnChain(guardAddr)
+    await expect(getPolicyStatus(VAULT, CHAIN)).resolves.toBe('managed')
+    expect(GUARD_STORAGE_SLOT).toMatch(/^0x[0-9a-f]{64}$/)
+  })
   it("'none' when no guard is set", async () => {
-    expect(await getPolicyStatus(VAULT, CHAIN, providerWith(ZeroAddress))).toBe('none')
+    guardOnChain(ZeroAddress)
+    expect(await getPolicyStatus(VAULT, CHAIN)).toBe('none')
   })
   it("'managed' when our guard is set", async () => {
-    expect(await getPolicyStatus(VAULT, CHAIN, providerWith(guardAddr))).toBe('managed')
+    guardOnChain(guardAddr)
+    expect(await getPolicyStatus(VAULT, CHAIN)).toBe('managed')
   })
   it("'foreign' when another guard is set (unrecognized rules)", async () => {
-    expect(await getPolicyStatus(VAULT, CHAIN, providerWith(RECIPIENT))).toBe('foreign')
+    guardOnChain(RECIPIENT)
+    expect(await getPolicyStatus(VAULT, CHAIN)).toBe('foreign')
   })
   it("'unsupported' on networks without the engine — regardless of guard slot, with no RPC (FR-013)", async () => {
-    const provider = providerWith(RECIPIENT) // even a set guard reports unsupported here
-    expect(await getPolicyStatus(VAULT, 80002, provider)).toBe('unsupported')
-    expect(provider.getStorage).not.toHaveBeenCalled()
+    // A guard IS set here and 80002 has no client at all: the answer must come from config alone,
+    // without any read, so the absence of an endpoint cannot turn into an error the member sees.
+    guardOnChain(RECIPIENT)
+    expect(await getPolicyStatus(VAULT, 80002)).toBe('unsupported')
   })
 })
