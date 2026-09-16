@@ -48,7 +48,6 @@ export const ETHERS_ALLOWLIST = [
   'src/components/admin/DenyListAdmin.jsx',
   'src/components/admin/FeesTab.jsx',
   'src/components/admin/MaintenanceTab.jsx',
-  'src/components/admin/MiniAppReviewTab.jsx',
   'src/components/admin/OracleAdaptersTab.jsx',
   'src/components/admin/PaymasterOpsCard.jsx',
   'src/components/admin/PerpsFeesPanel.jsx',

@@ -322,7 +322,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 57.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 56.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -405,6 +405,23 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - `src/components/admin/MiniAppReviewTab.jsx` — first consumer of `errorParser`, plus the
+        curator writes off the ethers `Contract`. **Divergence 7 is NARROWER than recorded, and the
+        scope matters at every future call site:** it is DYNAMIC `bytes` only. Measured encode-only
+        (a first probe conflated encode with decode and briefly suggested the opposite — re-measured
+        before writing anything down): for `bytes`, viem accepts `0x123`, `0xZZ` and `nothex` where
+        ethers refused, exactly as T020 found; for FIXED `bytesN` (`bytes32`, `bytes4`) the two
+        agree completely, refusing null, undefined, short, odd-length, non-hex and wrong-length
+        alike. So spec 073's content commitment (`approveApp(id, expectedManifestHash)`, a `bytes32`)
+        cannot be weakened by the swap and needs no guard invented for it.
+        **The test had a mock on what became a retired path** — `vi.mock('ethers')` faking
+        `new ethers.Contract(...)`, which the component no longer constructs (standing lesson 2).
+        It failed LOUDLY only because the assertions read the calls that fake recorded. Replaced
+        with a signer whose `sendTransaction` DECODES the calldata via an ethers `Interface` against
+        the registry ABI — same `{method,args}` assertions, now over the actual bytes, and a live
+        cross-library check on the viem encoder. It also closed a gap the old fake made impossible:
+        `new ethers.Contract(addr, …)` ignored its address argument, so a curator write going to the
+        WRONG CONTRACT would have passed every assertion in the file. The target is asserted now.
       - `src/components/admin/useAdminTx.js` + **`src/lib/evm/revertParser.js`** (new) — this is the
         T023 shape, arrived at from the caller side as planned. `lib/chain/revertError.js` is
         UNTOUCHED: it still imports nothing and still takes any object with
