@@ -61,7 +61,6 @@ export const ETHERS_ALLOWLIST = [
   'src/hooks/useTransfer.js',
   'src/hooks/useTreasuryVault.js',
   'src/hooks/useVaultProposals.js',
-  'src/hooks/useVaultQueueAcrossChains.js',
   'src/hooks/useVouchers.js',
   'src/hooks/useWrapNative.js',
   'src/lib/apiAccess/apiKeys.js',

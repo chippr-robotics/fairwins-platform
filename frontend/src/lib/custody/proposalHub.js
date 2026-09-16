@@ -3,12 +3,19 @@
 // from the hub — every read proposal is reconstructed and its safeTxHash recomputed locally (verifyProposal);
 // a mismatch is discarded. See research.md Decision 4.
 
-import { Contract, Interface, getAddress, toBeHex } from 'ethers'
+// Still ethers, and deliberately: `emitProposal`/`cancelProposal` below broadcast through a SIGNER,
+// which is the Phase-2 write seam (#1593). Everything READ or ENCODED here is on viem already, so
+// this module leaves the ratchet when the write rail does, not before.
+import { Contract, toBeHex } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import { SAFE_PROPOSAL_HUB_ABI } from '../../abis/SafeProposalHub'
 import { scanLogs } from '../chain/logScan'
+import { eventScanHandle } from '../chains/eventScan'
+import { normalizeAbi, NoRpcEndpointError } from '../chains/readContract'
+import { getAddress } from '../evm/address'
 import { buildSafeTx, computeSafeTxHash } from './vaultTransaction'
 
-const hubIface = new Interface(SAFE_PROPOSAL_HUB_ABI)
+const HUB = normalizeAbi(SAFE_PROPOSAL_HUB_ABI)
 
 /** Broadcast a proposal's preimage to the hub. */
 export async function emitProposal({ hubAddress, safe, safeTx, safeTxHash, signer }) {
@@ -37,7 +44,7 @@ export async function cancelProposal({ hubAddress, safe, safeTxHash, signer }) {
 export function emitProposalCall({ hubAddress, safe, safeTx, safeTxHash }) {
   return {
     target: getAddress(hubAddress),
-    data: hubIface.encodeFunctionData('propose', [
+    data: encodeFunctionData({ abi: HUB, functionName: 'propose', args: [
       getAddress(safe),
       safeTx.to,
       safeTx.value,
@@ -45,7 +52,7 @@ export function emitProposalCall({ hubAddress, safe, safeTx, safeTxHash }) {
       safeTx.operation,
       safeTx.nonce,
       safeTxHash,
-    ]),
+    ] }),
     value: 0n,
   }
 }
@@ -54,7 +61,7 @@ export function emitProposalCall({ hubAddress, safe, safeTx, safeTxHash }) {
 export function cancelProposalCall({ hubAddress, safe, safeTxHash }) {
   return {
     target: getAddress(hubAddress),
-    data: hubIface.encodeFunctionData('cancel', [getAddress(safe), safeTxHash]),
+    data: encodeFunctionData({ abi: HUB, functionName: 'cancel', args: [getAddress(safe), safeTxHash] }),
     value: 0n,
   }
 }
@@ -101,8 +108,12 @@ export function verifyProposal(proposal, chainId) {
  *
  * @returns {Promise<{proposals: object[], cancelled: Set<string>, complete: boolean}>}
  */
-export async function readVerifiedProposals({ hubAddress, safeAddress, chainId, provider, fromBlock = 0, maxChunks }) {
-  const hub = new Contract(getAddress(hubAddress), SAFE_PROPOSAL_HUB_ABI, provider)
+export async function readVerifiedProposals({ hubAddress, safeAddress, chainId, contract, fromBlock = 0, maxChunks }) {
+  // The scan reads on the chain the vault's instance lives on — NAMED, never inferred from whatever
+  // transport was handed in (spec 110). `contract` stays injectable for tests and for a caller that
+  // already holds a handle; the default satisfies scanLogs' duck contract from the chain seam.
+  const hub = contract ?? eventScanHandle(chainId, { address: getAddress(hubAddress), abi: SAFE_PROPOSAL_HUB_ABI })
+  if (!hub) throw new NoRpcEndpointError(chainId)
   const safeTopic = getAddress(safeAddress)
   const { logs, complete } = await scanLogs({
     contract: hub,
@@ -179,5 +190,3 @@ function base64UrlDecode(s) {
   if (pad) b64 += '='.repeat(4 - pad) // some atob implementations require '=' padding
   return atob(b64)
 }
-
-export { hubIface }
