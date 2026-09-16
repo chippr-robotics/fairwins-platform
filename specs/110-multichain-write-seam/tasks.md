@@ -609,6 +609,73 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         this session DID take out of them is the part that never belonged: `getLogsRange`, which two
         unrelated host hooks depended on, now lives in `lib/chains/logRange.js` (above), so the
         connectors are no longer load-bearing for anything outside governance.
+      - **The FeeRouter cluster — `src/components/admin/{FeesTab.jsx, PerpsFeesPanel.jsx,
+        perpsFeeRails.js}` — and THREE new divergences, two of them dangerous.** One contract
+        family, one batch, one review. Probed first, as always: `ethers.id` is byte-identical to
+        `keccak256(stringToBytes(...))` over all nine registered service labels plus empty, unicode
+        and whitespace-padded fuzz (these strings KEY `KNOWN_SERVICES`, so a wrong byte does not
+        throw — it makes a live service fall through to the `Service 0x1234abcd…` label and read as
+        somebody else's registration), and `ethers.ZeroAddress` equals viem's `zeroAddress`.
+        **DIVERGENCE 15 — viem's `encodeFunctionData` COERCES a non-number into an INTEGER
+        parameter where ethers refused.** The integer twin of divergence 9. Measured on
+        `setFeeBps(bytes32, uint16)`: `[]` → 0, `''` → 0, `false` → 0, `true` → 1, `[7]` → 7;
+        ethers threw on all five. Three of those produce a rate of ZERO — a perfectly valid
+        transaction that sets a fee to nothing, with no error anywhere. Both libraries accept a
+        numeric STRING (`'250'`) and both refuse `null`/`undefined`, so the gap is exactly the
+        values a sloppy form binding produces. Nothing in this batch was exposed (`bps` arrives
+        through `Number.parseInt` + `Number.isInteger`, the GMX factor is a bigint behind a null
+        guard) — but the next converted write that passes a raw field into an integer param is,
+        and the guard to copy is `requireStrings` in `SubmitAppPanel.jsx`.
+        **DIVERGENCE 16 — viem's `encodeFunctionData` REFUSES an ALL-UPPERCASE `address` that our
+        own `isAddress` accepts, and this one WAS live.** `lib/evm/address.js` deliberately
+        reproduces ethers' rule: an all-upper (or all-lower) address carries no checksum, so there
+        is nothing to verify and it is valid. viem's encoder disagrees and throws. So on
+        `setTreasury` — the control that decides where every platform fee on a chain lands — a
+        member pasting upper-case hex passed validation and then hit a raw viem error from
+        underneath the button. `getAddress(value)` before encoding produces calldata BYTE-IDENTICAL
+        to ethers' (measured, all three casings). **Normalise every address argument through
+        `getAddress` before encoding; `isAddress` alone is not enough.**
+        **DIVERGENCE 17 — viem preserves the input's hex CASE in calldata; ethers lowercased it.**
+        A `bytes32` passed in upper case comes back in the calldata in upper case. Same bytes when
+        read as hex, a different STRING — so anything that compares, caches, dedupes or asserts on
+        a calldata string breaks while the transaction itself is fine. The sibling of divergence 14
+        (which is the same root cause on a log topic, where it is far worse because a node matching
+        the string returns no logs). Not live here — the service ids come back lowercase from the
+        chain — but it is why calldata assertions in this batch DECODE rather than string-compare.
+        **A REAL DEFECT FOUND BY CONVERTING: the fee-history scan was reading TWO CHAINS AT ONCE.**
+        `FeesTab.fetchHistory` took its `latest` block and every entry's timestamp from
+        `provider` — the WALLET's — while the logs came from the scoped chain's router. This tab
+        exists because a fee schedule is per-chain and you read one chain while your wallet sits on
+        another; its own banner says so. So the mismatch was the NORMAL case: reading Polygon's fees
+        from a wallet on Ethereum measured the 200,000-block window against Ethereum's height and
+        then dated every Polygon change by whatever Ethereum block shared its number. Chains do not
+        advance together, so the window could miss every change outright, and the dates shown were
+        simply another chain's — rendered as fact, nothing failing. The rendered output is identical
+        either way, which is why it survived: the ethers fake carried its chain inside a `runner`
+        and could not be asked which one it used. Fixed to `scopeChainId` throughout, and the test
+        asserts on the REQUESTS (verified non-vacuous — it names both chains).
+        The same scan also asked for 200,000 blocks in ONE `eth_getLogs`. Public RPCs cap that at
+        ~10,000, so the old single `queryFilter` threw on them and the catch rendered an empty
+        history — a statement about the CHAIN made from a fact about the REQUEST. It bisects now
+        (`getLogsRange`, the module lifted out of the DAO connectors earlier in this task), with a
+        test that seeds a capped provider and is verified non-vacuous against the unbisected call.
+        Both test files had the retired-`vi.mock('ethers')` shape; both now mock the CHAIN SEAM and
+        record `{chainId, address, functionName, args}`. That is what made the two-chain defect
+        assertable at all, and `PerpsFeesPanel` gained the assertion its old fake made impossible —
+        each rail read on ITS OWN chain (GMX's DataStore on Arbitrum 42161, the FeeRouter service on
+        the build's mainnet chain), verified non-vacuous by pointing one rail at the other's chain.
+        Writes are `encodeFunctionData` + `signer.sendTransaction`, and both suites DECODE the
+        calldata with an ethers `Interface` against the same ABI — a live cross-library byte check
+        rather than a read-back of arguments a fake was handed. One SOURCE-shape assertion needed
+        updating with them: `PerpsFeesPanel`'s "exactly one write" test grepped for
+        `new Contract(ABI, signer).method(`, a pattern that no longer exists — left alone it would
+        have passed forever over an empty match set, which is the retired-mock failure wearing a
+        different hat.
+        `sameAddress` in `perpsFeeRails.js` kept its fail-closed property DELIBERATELY: ethers'
+        `getAddress` threw on a mis-checksummed mixed-case address, so the old `try/catch` refused
+        one and the `uiFeeReceiverGuard` withheld `setUiFeeFactor` with a reason. viem's re-checksums
+        silently. It validates with `isAddress` first now, which is the original BEHAVIOUR rather
+        than the original code.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

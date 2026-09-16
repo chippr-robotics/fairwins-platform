@@ -23,6 +23,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ethers } from 'ethers'
 
 import { GMX_ADDRESSES_BY_CHAIN } from '../../config/perps'
+import { MAINNET_CHAIN_ID } from '../../config/networks'
 import { GMX_MAX_UI_FEE_FACTOR_KEY, gmxUiFeeFactorKey } from '../../lib/perps/feeUnits'
 
 const GMX_CHAIN = 42161
@@ -44,6 +45,7 @@ const m = vi.hoisted(() => ({
   // observations
   dataStoreKeys: [],
   serviceIds: [],
+  readCalls: [],
   writes: [],
   txCalls: 0,
 }))
@@ -77,43 +79,48 @@ vi.mock('../../lib/chains/estate', async (orig) => {
   return { ...real, readProviderFor: () => m.provider }
 })
 
-// One fake Contract routing by ADDRESS: the whole point of this panel is that the two rails read
-// two different contracts, so a mock that could not tell them apart would prove nothing.
-vi.mock('ethers', async (orig) => {
+/**
+ * Reads route by ADDRESS **and by CHAIN** — the whole point of this panel is that the two rails
+ * read two different contracts on two different chains (GMX's DataStore on Arbitrum, the FairWins
+ * FeeRouter on the build's mainnet chain), so a mock that could not tell them apart proves nothing.
+ *
+ * The ethers fake this replaced could tell them apart by address but not by chain: it was handed a
+ * `runner` and the chain lived inside it, so a rail read against the WRONG chain's endpoint passed
+ * every assertion in this file. `m.readCalls` records the chain now.
+ */
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract(addr, _abi, runner) {
-    if (runner?.isSigner) {
-      return {
-        setUiFeeFactor: (...args) => {
-          m.writes.push({ addr, args })
-          return Promise.resolve({ hash: '0xdeadbeef' })
-        },
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      m.readCalls.push({ chainId, address, functionName, args })
+      if (functionName === 'getUint') {
+        m.dataStoreKeys.push(args[0])
+        return m.getUint(args[0])
       }
-    }
-    if (String(addr).toLowerCase() === GMX.dataStore.toLowerCase()) {
-      return {
-        getUint: async (key) => {
-          m.dataStoreKeys.push(key)
-          return m.getUint(key)
-        },
+      if (functionName === 'getService') {
+        m.serviceIds.push(args[0])
+        return m.getService(args[0])
       }
-    }
-    return {
-      getService: async (id) => {
-        m.serviceIds.push(id)
-        return m.getService(id)
-      },
-    }
+      throw new Error('unmocked read: ' + functionName)
+    },
   }
-  return { ...actual, ethers: { ...actual.ethers, Contract: FakeContract }, Contract: FakeContract }
 })
 
 import PerpsFeesPanel from '../../components/admin/PerpsFeesPanel'
 import { HL_BUILDER_SERVICE_ID, uiFeeReceiverGuard } from '../../components/admin/perpsFeeRails'
+import { GMX_EXCHANGE_ROUTER_ABI } from '../../abis/perps/gmxExchangeRouter'
 import panelSource from '../../components/admin/PerpsFeesPanel.jsx?raw'
 import railsSource from '../../components/admin/perpsFeeRails.js?raw'
 
-const SIGNER = { isSigner: true }
+/** Writes are calldata now — the signer records what it was asked to send so it can be decoded. */
+const SIGNER = {
+  isSigner: true,
+  sendTransaction: async (tx) => {
+    m.writes.push(tx)
+    return { hash: '0xdeadbeef' }
+  },
+}
 const RECEIVER_KEY = gmxUiFeeFactorKey(RECEIVER)
 
 /** 5 bps in GMX's uiFeeFactor units, and 10 bps as the venue ceiling. */
@@ -146,10 +153,11 @@ beforeEach(() => {
   m.feeRouterAddr = FEE_ROUTER
   m.dataStoreKeys = []
   m.serviceIds = []
+  m.readCalls = []
   m.writes = []
   m.txCalls = 0
   m.getUint = async (key) => (key === GMX_MAX_UI_FEE_FACTOR_KEY ? MAX_FACTOR_10_BPS : FACTOR_5_BPS)
-  m.getService = async () => ({ capBps: 10n, feeBps: 0n, kind: 2n })
+  m.getService = async () => ({ capBps: 10, feeBps: 0, kind: 2 })
 })
 
 /* --------------------------------------------------------------------------------------------- *
@@ -168,6 +176,29 @@ describe('AC1 — the authority for each rail', () => {
     expect(new Set(m.dataStoreKeys).size).toBe(2)
   })
 
+  it('reads each rail on ITS OWN chain — Arbitrum for GMX, the mainnet chain for the FeeRouter', async () => {
+    // What the ethers fake could not show. It routed by address and got the chain from a `runner`
+    // object, so a rail read against the wrong chain's endpoint passed every assertion in this
+    // file. These are two rails on two chains by design, and reading one on the other's endpoint
+    // returns no code at the address — which surfaces as "unreadable", not as a wrong number, but
+    // is still a fee screen reporting nothing while both rails are live.
+    render(<PerpsFeesPanel {...props()} />)
+    await screen.findByText(/5 bps \(0\.05%\) of notional/)
+    await waitFor(() => expect(m.readCalls.length).toBeGreaterThanOrEqual(3))
+
+    for (const call of m.readCalls) {
+      if (call.functionName === 'getUint') {
+        expect(Number(call.chainId)).toBe(Number(GMX_CHAIN))
+        expect(call.address).toBe(GMX.dataStore)
+      } else {
+        expect(Number(call.chainId)).toBe(Number(MAINNET_CHAIN_ID))
+        expect(call.address).toBe(FEE_ROUTER)
+      }
+    }
+    // And the two chains really are different here, or the assertion above proves nothing.
+    expect(Number(GMX_CHAIN)).not.toBe(Number(MAINNET_CHAIN_ID))
+  })
+
   it('names GMX’s DataStore as the authority and says the FeeRouter is not it', async () => {
     render(<PerpsFeesPanel {...props()} />)
     await screen.findByText(/5 bps \(0\.05%\) of notional/)
@@ -175,7 +206,7 @@ describe('AC1 — the authority for each rail', () => {
   })
 
   it('reads the Hyperliquid rate from the FeeRouter service that enforces it', async () => {
-    m.getService = async () => ({ capBps: 10n, feeBps: 4n, kind: 2n })
+    m.getService = async () => ({ capBps: 10, feeBps: 4, kind: 2 })
     render(<PerpsFeesPanel {...props()} />)
     await screen.findByText(/4 bps \(0\.04%\) of order notional/)
     expect(m.serviceIds).toEqual([HL_BUILDER_SERVICE_ID])
@@ -221,7 +252,7 @@ describe('honest read states', () => {
   })
 
   it('an unregistered Hyperliquid service says nothing is charged, not that the rate is 0', async () => {
-    m.getService = async () => ({ capBps: 0n, feeBps: 0n, kind: 0n })
+    m.getService = async () => ({ capBps: 0, feeBps: 0, kind: 0 })
     render(<PerpsFeesPanel {...props()} />)
     expect(await screen.findByText(/not registered on this FeeRouter — nothing is charged/)).toBeInTheDocument()
   })
@@ -374,16 +405,22 @@ describe('AC2 — a rate above the venue ceiling is refused, and the ceiling is 
   it('sends the correct uiFeeFactor to the ExchangeRouter for a valid rate', async () => {
     await typeAndSubmit('5')
     await waitFor(() => expect(m.writes).toHaveLength(1))
-    expect(m.writes[0].addr).toBe(GMX.exchangeRouter)
+    expect(m.writes[0].to).toBe(GMX.exchangeRouter)
+    // The calldata is built by viem and decoded here by ETHERS against the same ABI — a live
+    // cross-library byte check, not a read-back of arguments a fake was handed.
+    const parsed = new ethers.Interface(GMX_EXCHANGE_ROUTER_ABI).parseTransaction({
+      data: m.writes[0].data,
+    })
+    expect(parsed.name).toBe('setUiFeeFactor')
     // 5 bps = 5e26. A missing ×10 anywhere here is a rate the venue would happily enforce.
-    expect(m.writes[0].args[0]).toBe(FACTOR_5_BPS)
+    expect(parsed.args[0]).toBe(FACTOR_5_BPS)
   })
 
   it('sends to the ExchangeRouter, never to the Router or the DataStore', async () => {
     await typeAndSubmit('5')
     await waitFor(() => expect(m.writes).toHaveLength(1))
-    expect(m.writes[0].addr).not.toBe(GMX.router)
-    expect(m.writes[0].addr).not.toBe(GMX.dataStore)
+    expect(m.writes[0].to).not.toBe(GMX.router)
+    expect(m.writes[0].to).not.toBe(GMX.dataStore)
   })
 })
 
@@ -477,8 +514,15 @@ describe('structure', () => {
   })
 
   it('has exactly one write, and it is setUiFeeFactor', () => {
-    const writes = [...source.matchAll(/GMX_EXCHANGE_ROUTER_ABI, signer\)\.(\w+)\(/g)].map((mm) => mm[1])
+    // Writes are `encodeFunctionData` + `signer.sendTransaction` now (spec 110), so the shape this
+    // greps for is the function NAME in the encode — the one place a second write would have to
+    // name itself. The old pattern matched `new Contract(ABI, signer).method(`, which no longer
+    // exists; leaving it in place would have made this assertion pass over an empty match set.
+    const writes = [...source.matchAll(/functionName:\s*'(\w+)'/g)]
+      .map((mm) => mm[1])
+      .filter((name) => name.startsWith('set'))
     expect(writes).toEqual(['setUiFeeFactor'])
+    expect(source).toMatch(/signer\.sendTransaction\(/)
     // The Hyperliquid rate is edited in the Fees tab; this panel must not learn to set it.
     expect(source).not.toMatch(/setFeeBps\(/)
   })
