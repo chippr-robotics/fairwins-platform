@@ -7,28 +7,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const m = vi.hoisted(() => ({ fns: {} }))
 
-vi.mock('../../utils/rpcProvider', () => ({ makeReadProvider: () => ({}) }))
-vi.mock('ethers', async (orig) => {
+// Spec 110 Phase 1: earnSource reads through the chain seam; the fixture registry keeps the
+// same shape (functionName -> impl, unmocked throws) it had under the ethers Contract proxy.
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          return (...args) => {
-            const fn = m.fns[prop]
-            if (!fn) throw new Error('unmocked contract method: ' + String(prop))
-            return fn(...args)
-          }
-        },
-      },
-    )
-  }
   return {
     ...actual,
-    Contract: vi.fn(FakeContract),
-    ethers: { ...actual.ethers, Contract: vi.fn(FakeContract) },
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      const fn = m.fns[functionName]
+      if (!fn) throw new Error('unmocked contract method: ' + String(functionName))
+      return fn(...args)
+    },
   }
 })
 
