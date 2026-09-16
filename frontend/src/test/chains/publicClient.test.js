@@ -4,7 +4,8 @@
 // only). The twin ethers suite is src/test/network/rpcProvider.endpoints.test.js; these run
 // side by side until the last read caller leaves utils/rpcProvider.js.
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
+import { createPublicClient, custom, encodeAbiParameters, parseAbi } from 'viem'
 
 // The global setup mocks the client factory with the canned test world (its ethers-Contract
 // parity); THIS suite is the one place that must see the real thing.
@@ -20,6 +21,7 @@ const { readContract, NoRpcEndpointError, normalizeAbi } = await import(
   '../../lib/chains/readContract'
 )
 const { NETWORKS } = await import('../../config/networks')
+const publicClientModule = await import('../../lib/chains/publicClient')
 
 const MEMBER_RPC = 'https://polygon-mainnet.g.alchemy.com/v2/member-key'
 const MEMBER_FAILOVER = 'https://polygon.drpc.org'
@@ -133,5 +135,84 @@ describe('readContract — the seam contract', () => {
   it('passes JSON ABIs through untouched', () => {
     const abi = [{ type: 'function', name: 'decimals', inputs: [], outputs: [], stateMutability: 'view' }]
     expect(normalizeAbi(abi)).toBe(abi)
+  })
+})
+
+/*
+ * A function with SEVERAL named outputs is the one place viem is not a drop-in for ethers, and it
+ * is silent: ethers handed back a Result addressable as both `r[2]` and `r.token0`; viem returns a
+ * bare array, so `r.token0` is `undefined` — not an error, not a failed read, just a field that
+ * quietly is not there. A caller that reads it by name concludes the record is unreadable and
+ * renders an empty list, which a member reads as "you have none".
+ *
+ * This is driven through a REAL viem client over a fake transport, encoding and decoding real ABI
+ * bytes, because that is the part a mock cannot stand in for: every unit fake in this migration
+ * returns ethers-shaped objects, and so answers a question the chain no longer answers.
+ */
+describe('readContract — multi-output results keep their names (the ethers Result shape)', () => {
+  const NFPM = [
+    'function positions(uint256 tokenId) view returns (uint96 nonce, address operator, address token0, address token1, uint24 fee, int24 tickLower, int24 tickUpper, uint128 liquidity, uint256 feeGrowthInside0LastX128, uint256 feeGrowthInside1LastX128, uint128 tokensOwed0, uint128 tokensOwed1)',
+    'function balanceOf(address owner) view returns (uint256)',
+    'function pooled(address t) view returns (address lpToken, bool isEnabled)',
+  ]
+  const TOKEN0 = '0x2222222222222222222222222222222222222222'
+  const TOKEN1 = '0x3333333333333333333333333333333333333333'
+
+  /** A client whose eth_call answers with real encoded bytes for `positions`. */
+  function installChain(encodedFor) {
+    const client = createPublicClient({
+      transport: custom({
+        async request({ method, params }) {
+          if (method !== 'eth_call') throw new Error(`unexpected ${method}`)
+          return encodedFor(params[0].data)
+        },
+      }),
+    })
+    vi.spyOn(publicClientModule, 'getPublicClient').mockReturnValue(client)
+  }
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it('addresses a 12-output result by NAME as well as by index', async () => {
+    const parsed = parseAbi(NFPM)
+    const outputs = parsed.find((f) => f.name === 'positions').outputs
+    const encoded = encodeAbiParameters(outputs, [
+      1n, '0x1111111111111111111111111111111111111111', TOKEN0, TOKEN1,
+      3000, -100, 100, 500n, 0n, 0n, 7n, 9n,
+    ])
+    installChain(() => encoded)
+
+    const raw = await readContract(137, {
+      address: '0x00000000000000000000000000000000000000a1',
+      abi: NFPM,
+      functionName: 'positions',
+      args: [1n],
+    })
+
+    // The read that broke: by name.
+    expect(raw.token0).toBe(TOKEN0)
+    expect(raw.token1).toBe(TOKEN1)
+    expect(raw.fee).toBe(3000)
+    expect(raw.liquidity).toBe(500n)
+    expect(raw.tokensOwed0).toBe(7n)
+    // …and it is still the array viem returned, unchanged in every other respect.
+    expect(Array.isArray(raw)).toBe(true)
+    expect(raw[2]).toBe(TOKEN0)
+    expect(raw).toHaveLength(12)
+  })
+
+  it('leaves a SINGLE output alone — a lone tuple already carries its own names', async () => {
+    const parsed = parseAbi(NFPM)
+    const encoded = encodeAbiParameters(parsed.find((f) => f.name === 'balanceOf').outputs, [4n])
+    installChain(() => encoded)
+    const raw = await readContract(137, {
+      address: '0x00000000000000000000000000000000000000a1',
+      abi: NFPM,
+      functionName: 'balanceOf',
+      args: ['0x1111111111111111111111111111111111111111'],
+    })
+    expect(raw).toBe(4n)
   })
 })

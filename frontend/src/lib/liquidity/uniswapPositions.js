@@ -282,19 +282,24 @@ export function compositionShares({ amount0, amount1, sqrtPriceX96 }) {
  */
 export function normalizePosition(tokenId, raw) {
   if (!raw) return null
-  const token0 = raw.token0
-  const token1 = raw.token1
+  // `positions()` returns TWELVE named outputs. The read seam restores those names (see
+  // `withOutputNames`), but this function is exported and can be handed a decoder's raw array
+  // directly, so each field also names its position — the same belt-and-braces `?? raw[i]` the
+  // rest of this file and acrossLpPositions already use. Reading only by name is what turned a
+  // member's position list into an empty one.
+  const token0 = raw.token0 ?? raw[2]
+  const token1 = raw.token1 ?? raw[3]
   if (!token0 || !token1) return null
-  const liquidity = BigInt(raw.liquidity)
-  const tokensOwed0 = BigInt(raw.tokensOwed0)
-  const tokensOwed1 = BigInt(raw.tokensOwed1)
+  const liquidity = BigInt(raw.liquidity ?? raw[7])
+  const tokensOwed0 = BigInt(raw.tokensOwed0 ?? raw[10])
+  const tokensOwed1 = BigInt(raw.tokensOwed1 ?? raw[11])
   return {
     tokenId: BigInt(tokenId),
     token0,
     token1,
-    feeTier: Number(raw.fee),
-    tickLower: Number(raw.tickLower),
-    tickUpper: Number(raw.tickUpper),
+    feeTier: Number(raw.fee ?? raw[4]),
+    tickLower: Number(raw.tickLower ?? raw[5]),
+    tickUpper: Number(raw.tickUpper ?? raw[6]),
     liquidity,
     tokensOwed0,
     tokensOwed1,

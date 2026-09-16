@@ -44,6 +44,36 @@ export function normalizeAbi(abi) {
 }
 
 /**
+ * Give a multi-output result its parameter NAMES back.
+ *
+ * This is the one ethers behaviour viem does not reproduce, and it fails silently. A function
+ * declared `returns (address token0, address token1, uint24 fee, …)` came back from ethers as a
+ * Result addressable BOTH ways — `r[2]` and `r.token0`. viem returns a bare array, so `r.token0`
+ * is `undefined`: not an error, not a rejected read, just a field that quietly is not there.
+ *
+ * That is exactly how it escaped. A caller reading `raw.token0` got `undefined`, treated the
+ * position as unreadable, and rendered an EMPTY list — which is indistinguishable from "you have
+ * no positions". Every unit test kept passing, because their fakes returned ethers-shaped objects
+ * and so answered a question the chain no longer answers. Only the on-chain tier saw it.
+ *
+ * A single output is left exactly as viem returns it (a lone tuple is already an object with its
+ * component names, and wrapping it would change every existing caller). Names are attached
+ * non-enumerably so the value still behaves as, spreads as, and compares equal to the array it is.
+ */
+function withOutputNames(abi, functionName, result) {
+  if (!Array.isArray(result)) return result
+  const fn = abi.find((f) => f?.type === 'function' && f.name === functionName)
+  const outputs = fn?.outputs
+  if (!outputs || outputs.length < 2 || outputs.length !== result.length) return result
+  for (let i = 0; i < outputs.length; i += 1) {
+    const name = outputs[i]?.name
+    if (!name || name in result) continue
+    Object.defineProperty(result, name, { value: result[i], enumerable: false, configurable: true })
+  }
+  return result
+}
+
+/**
  * Read one contract function on a named chain.
  *
  * @param {number} chainId - the chain the contract lives on (never ambient state)
@@ -60,9 +90,10 @@ export function normalizeAbi(abi) {
 export async function readContract(chainId, { address, abi, functionName, args, blockNumber, account }) {
   const client = getPublicClient(chainId)
   if (!client) throw new NoRpcEndpointError(chainId)
-  return client.readContract({
+  const normalized = normalizeAbi(abi)
+  const result = await client.readContract({
     address,
-    abi: normalizeAbi(abi),
+    abi: normalized,
     functionName,
     ...(args !== undefined ? { args } : {}),
     ...(account !== undefined ? { account } : {}),
@@ -72,4 +103,5 @@ export async function readContract(chainId, { address, abi, functionName, args, 
         : { blockTag: blockNumber }
       : {}),
   })
+  return withOutputNames(normalized, functionName, result)
 }
