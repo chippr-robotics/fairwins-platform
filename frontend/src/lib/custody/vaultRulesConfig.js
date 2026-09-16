@@ -11,7 +11,8 @@
 // A chain with no configured stable realizes only cooldown + catch-all and REPORTS the tiles that
 // do not apply there — disclosed, never silently skipped (spec edge case).
 
-import { parseUnits, getAddress } from 'ethers'
+import { getAddress } from 'viem'
+import { parseUnits } from '../evm/units'
 import { ANY_ASSET, validateRulesConfig, describeRulesV2 } from './policyV2'
 import { starterStableAsset } from './policyTemplates'
 

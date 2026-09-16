@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ethers } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import SensitiveValue from '../common/SensitiveValue'
 import UniversalAssetSelect from '../ui/UniversalAssetSelect'
 import { useWrapNative, WRAP_DIRECTION } from '../../hooks/useWrapNative'
@@ -99,7 +99,7 @@ export default function WrapView() {
   const parsed = useMemo(() => {
     if (!amount) return null
     try {
-      const v = ethers.parseUnits(amount, decimals)
+      const v = parseUnits(amount, decimals)
       return v > 0n ? v : null
     } catch {
       return null
@@ -123,7 +123,7 @@ export default function WrapView() {
 
   const handleMax = useCallback(() => {
     if (spendable == null) return
-    setAmount(ethers.formatUnits(spendable, decimals))
+    setAmount(formatUnits(spendable, decimals))
   }, [spendable, decimals])
 
   const handleSubmit = useCallback(async () => {

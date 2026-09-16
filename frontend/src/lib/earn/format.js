@@ -3,8 +3,7 @@
  * missing protocol data renders as "—", never a fabricated zero
  * (constitution III).
  */
-import { formatUnits } from 'ethers'
-
+import { formatUnits } from '../evm/units'
 /**
  * Normalize a base-unit (wei-scale) amount from ANY source into a canonical
  * integer string, or null when it cannot be represented.

@@ -9,10 +9,18 @@ privileged surface — anything not listed is unreachable by design (FR-013).
 ## Shared module scope (build-time)
 
 `globalThis[Symbol.for('fairwins.miniapp.host')]` (frozen) provides singleton
-`react`, `react-dom`, `react/jsx-runtime`, `ethers`, and `@fairwins/miniapp-sdk`.
+`react`, `react-dom`, `react/jsx-runtime`, `ethers`, `viem`, and `@fairwins/miniapp-sdk`.
 The `tools/miniapp-build/` preset externalizes these bare imports to scope reads —
 packages ship none of them. `manifest.hostApi` must be ≤ the host's supported version
 or launch is refused.
+
+`viem` joined the scope ADDITIVELY under spec 110 Phase 0 (issue #1591), still at
+`hostApi: 2`: packages that do not declare it are unaffected, and a package declaring
+`viem` in `sharedDeps` on a host predating the entry is refused at install by the
+`sharedDeps ⊆ HOST_SHARED_MODULES` check — a loud refusal, so no version bump. The
+breaking half — `ethers` LEAVING the scope — ships later as its own `hostApi` major
+(spec 110 Phase 5, issue #1596), after all first-party packages are rebuilt and
+re-approved at new CIDs.
 
 ## `host` context object
 

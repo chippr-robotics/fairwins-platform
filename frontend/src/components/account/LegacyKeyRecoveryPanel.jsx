@@ -18,7 +18,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import PropTypes from 'prop-types'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
+import { formatUnits } from '../../lib/evm/units'
 import { useWallet } from '../../hooks/useWalletManagement'
 import { useAddressBook } from '../../hooks/useAddressBook'
 import { getNetwork } from '../../config/networks'
@@ -153,9 +154,9 @@ function LegacyKeyRecoveryPanel({ deps = {}, defaultOpen = false }) {
 
   const destTarget = useMemo(() => {
     const r = (destResolved || '').trim()
-    if (ethers.isAddress(r)) return r
+    if (isAddress(r)) return r
     const i = destInput.trim()
-    return ethers.isAddress(i) ? i : ''
+    return isAddress(i) ? i : ''
   }, [destResolved, destInput])
 
   const refreshStored = useCallback(() => setStored(vault.list()), [vault])
@@ -759,13 +760,13 @@ function LegacyKeyRecoveryPanel({ deps = {}, defaultOpen = false }) {
                     {quote.holdings.map((h) => (
                       <div key={h.asset.id || h.asset.symbol}>
                         <span>{h.asset.symbol}</span>
-                        <strong>{ethers.formatUnits(h.balance, h.asset.decimals ?? 18)}</strong>
+                        <strong>{formatUnits(h.balance, h.asset.decimals ?? 18)}</strong>
                       </div>
                     ))}
                     {quote.hasNative && (
                       <div className="lkr-quote__fee">
                         <span>Estimated network fee</span>
-                        <strong>≈ {ethers.formatUnits(quote.nativeGasReserve ?? 0n, nativeDecimals)} {nativeSymbol}</strong>
+                        <strong>≈ {formatUnits(quote.nativeGasReserve ?? 0n, nativeDecimals)} {nativeSymbol}</strong>
                       </div>
                     )}
                   </>

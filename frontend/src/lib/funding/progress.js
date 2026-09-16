@@ -2,8 +2,7 @@
  * Pure helpers for the funding-pool surfaces (spec 103): progress, votes, buckets, formatting.
  * No chain, no React — unit-tested directly.
  */
-import { formatUnits } from 'ethers'
-
+import { formatUnits } from '../evm/units'
 const DAY = 86400
 const HOUR = 3600
 

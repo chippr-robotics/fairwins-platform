@@ -45,6 +45,7 @@ import * as react from 'react'
 import * as reactDom from 'react-dom'
 import * as jsxRuntime from 'react/jsx-runtime'
 import * as ethers from 'ethers'
+import * as viem from 'viem'
 
 import { HOST_SHARED_MODULES, SUPPORTED_HOST_API } from './manifest'
 import { useMiniAppHost } from './hostContext'
@@ -92,6 +93,7 @@ function buildHostScope() {
     'react-dom': reactDom,
     'react/jsx-runtime': jsxRuntime,
     ethers,
+    viem,
     '@fairwins/miniapp-sdk': miniAppSdk,
   }
 

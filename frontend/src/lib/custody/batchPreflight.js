@@ -20,7 +20,7 @@
 // that like a denial (propose the per-action shape, which every guard evaluates normally) but they
 // must SAY "could not confirm", because an RPC timeout is not a policy.
 
-import { ZeroAddress, getAddress } from 'ethers'
+import { getAddress, zeroAddress } from 'viem'
 import { getSafeContracts } from '../../config/safeContracts'
 import { getPolicyEngineAddresses, previewPolicy, readVaultGuard } from './policy'
 import { getPolicyEngineV2Addresses, previewPolicyV2 } from './policyV2'
@@ -67,7 +67,7 @@ export async function previewBatchSupport(vaultAddress, chainId, provider) {
   } catch {
     return unknown(null, 'The vault’s guard slot could not be read.')
   }
-  if (!guard || guard === ZeroAddress) return ok('none')
+  if (!guard || guard === zeroAddress) return ok('none')
 
   const payload = { to: getAddress(multiSend), value: 0n, data: '0x', operation: DELEGATECALL }
 

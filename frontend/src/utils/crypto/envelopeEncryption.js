@@ -22,7 +22,7 @@ import { sha3_256 } from '@noble/hashes/sha3.js'
 import { chacha20poly1305, xchacha20poly1305 } from '@noble/ciphers/chacha'
 import { randomBytes } from '@noble/ciphers/webcrypto'
 import { bytesToHex, hexToBytes, utf8ToBytes, concatBytes } from '@noble/ciphers/utils'
-import { keccak256, toUtf8Bytes, getBytes } from 'ethers'
+import { keccak256, stringToBytes, toBytes } from 'viem'
 import {
   CURRENT_ENCRYPTION_VERSION,
   getMarketSigningMessage,
@@ -181,8 +181,8 @@ function xwingDecapsulate(cipherText, secretKey) {
 export async function deriveKeyPair(signer, version = CURRENT_ENCRYPTION_VERSION) {
   const message = getMarketSigningMessage(version)
   const signature = await signer.signMessage(message)
-  const hash = keccak256(toUtf8Bytes(signature))
-  const privateKey = getBytes(hash)
+  const hash = keccak256(stringToBytes(signature))
+  const privateKey = toBytes(hash)
   const publicKey = x25519.getPublicKey(privateKey)
 
   return {
@@ -201,8 +201,8 @@ export async function deriveKeyPair(signer, version = CURRENT_ENCRYPTION_VERSION
  * @returns {Uint8Array} - Their X25519 public key
  */
 export function publicKeyFromSignature(signature) {
-  const hash = keccak256(toUtf8Bytes(signature))
-  const privateKey = getBytes(hash)
+  const hash = keccak256(stringToBytes(signature))
+  const privateKey = toBytes(hash)
   return x25519.getPublicKey(privateKey)
 }
 
@@ -214,8 +214,8 @@ export function publicKeyFromSignature(signature) {
  * @returns {{publicKey: Uint8Array, privateKey: Uint8Array, signature: string}}
  */
 export function deriveKeyPairFromSignature(signature) {
-  const hash = keccak256(toUtf8Bytes(signature))
-  const privateKey = getBytes(hash)
+  const hash = keccak256(stringToBytes(signature))
+  const privateKey = toBytes(hash)
   const publicKey = x25519.getPublicKey(privateKey)
 
   return {
@@ -279,8 +279,8 @@ export function deriveXWingKeyPairFromSeed(seed) {
 export async function deriveXWingKeyPair(signer, version = CURRENT_ENCRYPTION_VERSION) {
   const message = getMarketSigningMessage(version)
   const signature = await signer.signMessage(message)
-  const hash = keccak256(toUtf8Bytes(signature))
-  const seed = getBytes(hash)
+  const hash = keccak256(stringToBytes(signature))
+  const seed = toBytes(hash)
 
   // X-Wing keygen with 32-byte seed produces deterministic keypair
   const { publicKey, secretKey } = xwingKeygen(seed)
@@ -302,8 +302,8 @@ export async function deriveXWingKeyPair(signer, version = CURRENT_ENCRYPTION_VE
  * @returns {Uint8Array} - Their X-Wing public key (1216 bytes)
  */
 export function xwingPublicKeyFromSignature(signature) {
-  const hash = keccak256(toUtf8Bytes(signature))
-  const seed = getBytes(hash)
+  const hash = keccak256(stringToBytes(signature))
+  const seed = toBytes(hash)
   const { publicKey } = xwingKeygen(seed)
   return publicKey
 }
@@ -315,8 +315,8 @@ export function xwingPublicKeyFromSignature(signature) {
  * @returns {{publicKey: Uint8Array, secretKey: Uint8Array, signature: string}}
  */
 export function deriveXWingKeyPairFromSignature(signature) {
-  const hash = keccak256(toUtf8Bytes(signature))
-  const seed = getBytes(hash)
+  const hash = keccak256(stringToBytes(signature))
+  const seed = toBytes(hash)
   const { publicKey, secretKey } = xwingKeygen(seed)
 
   return {

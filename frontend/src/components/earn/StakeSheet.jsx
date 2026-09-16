@@ -16,7 +16,7 @@
  * records to the notification feed + ledger (T034).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import { useStakingActions } from '../../hooks/useStakingActions'
 import { earnActingRefusal } from '../../hooks/useEarnSend'
 import { useActivityOptional } from '../../hooks/useActivity'

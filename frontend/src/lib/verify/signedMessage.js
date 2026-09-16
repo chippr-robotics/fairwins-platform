@@ -19,8 +19,7 @@
  *    hand-rolled block format.
  */
 
-import { ethers } from 'ethers'
-
+import { getAddress } from 'viem'
 /** Format tag. Bump the suffix only for a breaking field change; `parseSignedMessage` gates on it. */
 export const SIGNED_MESSAGE_FORMAT = 'fairwins-signed-message/1'
 
@@ -48,7 +47,7 @@ export function buildSignedMessage({ address, chainId, message, signature, schem
   }
   return {
     format: SIGNED_MESSAGE_FORMAT,
-    address: ethers.getAddress(address),
+    address: getAddress(address),
     chainId: chainId == null ? null : Number(chainId),
     scheme,
     message,
@@ -96,7 +95,7 @@ export function parseSignedMessage(text) {
   let address = null
   if (raw.address != null) {
     try {
-      address = ethers.getAddress(String(raw.address))
+      address = getAddress(String(raw.address))
     } catch {
       return { ok: false, error: `The document's address (${String(raw.address)}) is not a valid address.` }
     }
