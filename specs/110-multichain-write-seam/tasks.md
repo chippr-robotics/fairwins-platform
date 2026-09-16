@@ -23,18 +23,43 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 
 ## Phase 1 — The read seam (#1592)
 
-- [ ] T010 Pin current provider semantics with tests before converting: spec-069 endpoint
+- [x] T010 Pin current provider semantics with tests before converting: spec-069 endpoint
       precedence, header credential attachment, failover behavior, `useEndpointsRevision`
-      reactivity (extend `src/test/network/` as needed).
-- [ ] T011 Build `frontend/src/lib/chains/readContract.js`:
+      reactivity (extend `src/test/network/` as needed). — `src/test/chains/publicClient.test.js`
+      runs against the REAL endpoint store and real viem transports, beside the surviving ethers
+      twin, so both seams are pinned to the same spec-069 rules while they coexist.
+- [x] T011 Build `frontend/src/lib/chains/readContract.js`:
       `readContract(chainId, { address, abi, functionName, args })` on a viem `PublicClient` per
       chain, member-endpoint resolution via the one seam, `fallback` transport at quorum-1
       semantics, stable client identity per chain (mini-app `readProvider` caching precedent).
+      Also `lib/chains/eventScan.js`, the viem twin of a contract for `lib/chain/logScan`'s duck
+      contract, so a scanning caller converts in one line. The seam additionally RESTORES the
+      parameter names viem drops on multi-output results — see the note under T012.
 - [ ] T012 Convert the read-path files (~80, *(re-measure)*) onto `readContract`; delete the
       ethers `_lastFatalError` workaround in `frontend/src/utils/rpcProvider.js` rather than
-      porting it. Shrink the allowlist per file converted.
-- [ ] T013 Estate reads (`lib/chains/estate.js`, spec-089 reading constructors) keep three-state
-      semantics byte-for-byte — assert no `?? 0` path appears in conversion.
+      porting it. Shrink the allowlist per file converted. **In progress: allowlist 134 → 86.**
+      Of what remains, 61 entries are the write/signer surface (Phase 2), and four are a
+      decision rather than pending work — the three BIP-39 wordlist files (viem bundles none, so
+      moving them is a lockfile change and therefore the spec-075 rolldown hazard),
+      `miniapps/hostScope.js` (ethers is part of the spec-073 host API, so Phase 5), and
+      `utils/rpcProvider.js` itself, which leaves last with its final caller. The allowlist
+      header says so too, so the list explains itself.
+
+      TWO DECODER DIFFERENCES BIT DURING THIS AND ARE WORTH KNOWING BEFORE CONVERTING MORE.
+      (a) viem returns a BARE ARRAY for a function with several named outputs where ethers
+      returned a Result addressable both ways, so `raw.token0` became `undefined` — not an error,
+      a field that quietly is not there. A caller read it, judged the record unreadable, and
+      rendered an EMPTY position list, which a member reads as "you have none". Every unit fake
+      returns ethers-shaped objects, so no unit suite could see it; the on-chain tier did. It is
+      fixed once in the seam rather than per call site. (b) For integers of 48 bits or fewer viem
+      returns a NUMBER where ethers returned a bigint. Both classes were audited across every
+      converted file.
+- [x] T013 Estate reads (`lib/chains/estate.js`, spec-089 reading constructors) keep three-state
+      semantics byte-for-byte — assert no `?? 0` path appears in conversion. `readAuthority` now
+      names its chain while `provider` stays the availability gate, because that gate is also
+      where the cohort bound lives. Its three answers gained direct coverage they lacked, and the
+      UNCONFIRMED one — the answer that is silent when it breaks, since hardening it into a denial
+      takes a killswitch from the operator who holds it — is asserted to keep the control offered.
 - [ ] T014 Gates: full suite + both e2e tiers green; allowlist reflects every converted file.
 
 ## Phase 2 — The write seam (#1593) 🎯 the chain abstraction
