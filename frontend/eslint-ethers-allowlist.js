@@ -95,7 +95,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/relay/__tests__/intentClient.test.js',
   'src/lib/relay/__tests__/poolIntents.test.js',
   'src/utils/blockchainService.js',
-  'src/utils/claimCode/deriveFromCode.js',
   'src/utils/keyRegistryService.js',
   'src/utils/rpcProvider.js',
 ]

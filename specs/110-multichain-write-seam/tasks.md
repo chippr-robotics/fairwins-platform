@@ -258,7 +258,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 58.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 57.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -356,6 +356,20 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         Three callers still construct an ethers `Interface` for this (`MiniAppReviewTab`,
         `CallsignPanel`, `SubmitAppPanel`); each also does other ethers work, so they convert with
         their own file.
+      - `src/utils/claimCode/deriveFromCode.js` — WALLET-BREAKING and a MONEY path, and it converted
+        with **zero divergences**: private key, `claimAddress` and symmetric key identical to ethers
+        over eight codes (empty, 200-char, unicode, mixed-case, trailing space); the 15 open-accept
+        signatures identical; and `privateKeyToAccount` refuses EXACTLY what `new SigningKey`
+        refused — zero, n, n+1, all-ones, short hex, non-hex. That last one was the open question
+        (the file's own comment calls the scalar check load-bearing) and it is now measured rather
+        than assumed.
+        **The suite could not have caught a derivation change.** It proved determinism and that the
+        acceptance signature verifies — both of which stay true when the derivation MOVES, while
+        every open challenge ever created is orphaned, because `claimAddress` IS the on-chain
+        `claimAuthority`. `claimCode.test.js` now carries FROZEN fixtures computed with the ORIGINAL
+        ethers implementation, so they are anchored to what shipped rather than to the code they
+        guard; a one-character change to the domain tag fails them and nothing else in the file.
+        **Never regenerate them to make a test pass** — a mismatch means the change is wrong.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
