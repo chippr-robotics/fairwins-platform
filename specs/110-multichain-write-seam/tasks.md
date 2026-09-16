@@ -258,7 +258,33 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths.
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 64.**
+      - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
+        and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
+        It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
+        does not export** (the v6 spelling is the `SigningKey.recoverPublicKey` static), so
+        `derivePublicKeyFromSignature` and both exported functions that call it would have thrown
+        `TypeError` on first use — presumably since the v5->v6 migration. Converting it would have
+        made dead, unrunnable code look maintained. R7 is closed in
+        `docs/architecture/workbook/05-cryptographic-bom.md`. `tweetnacl`/`tweetnacl-util` are now
+        unused but deliberately LEFT DECLARED: dropping them re-resolves the root lockfile, which
+        is the npm/cli#4828 rolldown-binary hazard (spec 075). Do it in a dependencies-only change.
+      - `src/lib/apiAccess/apiKeys.js` — `hexlify(randomBytes(32))` -> `toHex(crypto.getRandomValues(
+        new Uint8Array(32)))`, `getAddress` from `lib/evm/address`. The refusal moved: the shape
+        regex passed a mistyped mixed-case address and it was `ethers.getAddress` that threw a line
+        later, where viem's just re-checksums. `isAddress` from the seam now refuses it cleanly.
+        Verified non-vacuous by reverting the guard and watching the test fail.
+      - `src/lib/backup/backupRegistry.js` — onto `readContract` + `encodeFunctionData`, and it
+        turned up the **NINTH divergence, the third that fails toward a confident WRONG answer**:
+        **viem's `encodeFunctionData` STRINGIFIES a non-string argument for a `string` parameter**
+        where ethers' `Interface` refused it. Not just `bytes` (divergence 7) — `string` too, and
+        the conversions are silent: `null` encodes as the four-character CID `"null"`, `undefined`
+        and `{}` as `""` and `"[object Object]"`. On THIS contract `""` is the documented CLEAR
+        value, so a stray `undefined` erases the member's backup locator, and `"null"` leaves a
+        pointer that resolves to nothing while reading, on every surface, as a backup that exists.
+        `requireCid` restores the refusal. The module had NO direct test — every suite mocked it
+        whole — so `src/test/backup/backupRegistry.test.js` is new and keeps an ethers `Interface`
+        as a live cross-library byte check over the exact encoder that was replaced.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

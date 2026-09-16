@@ -79,8 +79,6 @@ export const ETHERS_ALLOWLIST = [
   'src/hooks/useVaultProposals.js',
   'src/hooks/useVouchers.js',
   'src/hooks/useWrapNative.js',
-  'src/lib/apiAccess/apiKeys.js',
-  'src/lib/backup/backupRegistry.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
   'src/lib/clearpath/connectors/governorBravo.js',
   'src/lib/clearpath/connectors/ozGovernor.js',
@@ -104,7 +102,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/transfer/eip3009Transfer.js',
   'src/utils/blockchainService.js',
   'src/utils/claimCode/deriveFromCode.js',
-  'src/utils/encryption.js',
   'src/utils/keyRegistryService.js',
   'src/utils/rpcProvider.js',
 ]
