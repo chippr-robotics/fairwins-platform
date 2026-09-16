@@ -50,7 +50,9 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { errorParser } from '../../lib/evm/revertParser'
+import { normalizeAbi, readContract } from '../../lib/chains/readContract'
 
 import './miniapps.css'
 import EmptyState from '../account/EmptyState'
@@ -72,7 +74,6 @@ import {
   fetchVendorApps,
   registryLocation,
 } from '../../lib/miniapps/registryClient'
-import { getReadProvider } from '../../utils/rpcProvider'
 import {
   CID_MAX_BYTES,
   DESCRIPTION_MAX_BYTES,
@@ -1024,10 +1025,33 @@ function VendorAppCard({ app, openAction, onToggle, onSubmitPackage, onSubmitMet
  *   matching the one `loader.js` exposes for the same reason: the check is a network read, and a test
  *   that could not stub it would either hit the internet or not exercise the check at all.
  */
+const ABI = normalizeAbi(MINI_APP_REGISTRY_ABI)
+
+/**
+ * The registry's fragments for decoding a revert the wallet did not decode for us — the seam, not
+ * an ethers `Interface`, so `revert.args` keeps its parameter NAMES (spec 110 divergence 13).
+ */
+const REGISTRY_ERRORS = errorParser(MINI_APP_REGISTRY_ABI)
+
+/**
+ * Every `string` argument the registry is handed, checked before it is encoded.
+ *
+ * Spec 110 divergence 9: ethers' encoder REFUSED a non-string for a `string` parameter; viem's
+ * STRINGIFIES it, so a `null` name or CID would be committed on chain as the four characters
+ * "null" and an `undefined` as "". A vendor submission is reviewed by a curator and then served to
+ * members by CID — a fabricated one is not a value anybody would catch by reading the screen.
+ */
+function requireStrings(fields) {
+  for (const [key, value] of Object.entries(fields)) {
+    if (typeof value !== 'string') {
+      throw new TypeError(`SubmitAppPanel: ${key} must be a string — nothing has been submitted.`)
+    }
+  }
+}
+
 export default function SubmitAppPanel({ fetchImpl } = {}) {
   const { address, chainId, isConnected, sendCalls } = useWallet()
   const { chainId: registryChainId, registryAddress } = useMemo(() => registryLocation(), [])
-  const iface = useMemo(() => new Interface(MINI_APP_REGISTRY_ABI), [])
   const networkNoteId = useId()
 
   const [gate, setGate] = useState(null)
@@ -1052,12 +1076,14 @@ export default function SubmitAppPanel({ fetchImpl } = {}) {
     let cancelled = false
     ;(async () => {
       try {
-        // Reads go through `getReadProvider`, which applies the member's own RPC route (spec 069).
-        // Never `new JsonRpcProvider(NETWORKS[chainId].rpcUrl)`.
-        const provider = getReadProvider(registryChainId)
-        if (!provider) return
-        const contract = new Contract(registryAddress, MINI_APP_REGISTRY_ABI, provider)
-        const [manager, minTier] = await Promise.all([contract.membershipManager(), contract.minTier()])
+        // `readContract` names the chain and resolves the member's own RPC route through the same
+        // spec-069 seam `getReadProvider` used. A chain with no route throws `NoRpcEndpointError`,
+        // which the catch below turns into "gate unknown" — the same outcome the old `if
+        // (!provider) return` produced, and the same honest degradation.
+        const [manager, minTier] = await Promise.all([
+          readContract(registryChainId, { address: registryAddress, abi: ABI, functionName: 'membershipManager' }),
+          readContract(registryChainId, { address: registryAddress, abi: ABI, functionName: 'minTier' }),
+        ])
         if (cancelled) return
         setGate({
           enabled: String(manager).toLowerCase() !== ZERO_ADDRESS,
@@ -1141,7 +1167,7 @@ export default function SubmitAppPanel({ fetchImpl } = {}) {
         setOpenAction(null)
         return true
       } catch (error) {
-        setNotice({ kind: 'error', text: describeRegistryError(error, iface, gate) })
+        setNotice({ kind: 'error', text: describeRegistryError(error, REGISTRY_ERRORS, gate) })
         return false
       } finally {
         setBusy(false)
@@ -1156,7 +1182,6 @@ export default function SubmitAppPanel({ fetchImpl } = {}) {
       walletChainId,
       sendCalls,
       loadVendorApps,
-      iface,
       gate,
     ],
   )
@@ -1164,28 +1189,31 @@ export default function SubmitAppPanel({ fetchImpl } = {}) {
   const submitNew = useCallback(
     ({ name, description, category, cid, manifestHash }) =>
       send(
-        iface.encodeFunctionData('submitApp', [name, description, category, cid, manifestHash]),
+        (requireStrings({ name, description, cid }),
+        encodeFunctionData({ abi: ABI, functionName: 'submitApp', args: [name, description, category, cid, manifestHash] })),
         `“${name}” was submitted for review as version 1. It is not in the catalog and cannot be launched until a curator approves this package.`,
       ),
-    [send, iface],
+    [send],
   )
 
   const submitPackage = useCallback(
     ({ id, cid, manifestHash }) =>
       send(
-        iface.encodeFunctionData('submitUpdate', [id, cid, manifestHash]),
+        (requireStrings({ cid }),
+        encodeFunctionData({ abi: ABI, functionName: 'submitUpdate', args: [id, cid, manifestHash] })),
         'The new package is queued for review. Your app is not offline: members keep running the approved package until a curator approves this one.',
       ),
-    [send, iface],
+    [send],
   )
 
   const submitMetadata = useCallback(
     ({ id, name, description, category }) =>
       send(
-        iface.encodeFunctionData('updateMetadata', [id, name, description, category]),
+        (requireStrings({ name, description }),
+        encodeFunctionData({ abi: ABI, functionName: 'updateMetadata', args: [id, name, description, category] })),
         'The listing details are queued for review. Members keep running the approved package in the meantime — nothing about what is served has changed.',
       ),
-    [send, iface],
+    [send],
   )
 
   function toggleAction(id, kind) {

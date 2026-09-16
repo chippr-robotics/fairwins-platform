@@ -322,7 +322,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 55.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 54.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -405,6 +405,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - `src/components/miniapps/SubmitAppPanel.jsx` — the last of the three `extractRevert` callers,
+        and **the THIRD file running in a row whose test mocked `ethers.Contract`** (after
+        MiniAppReviewTab and CallsignPanel). That is a pattern, not three incidents: every one of
+        them faked a constructor that IGNORES the address it is handed, so in all three a write or
+        read aimed at the wrong contract would have passed every assertion in the file. All three
+        now mock the chain seam and record the request; this one asserts the gate is read on the
+        REGISTRY'S OWN chain, which matters because spec 073 pins the registry to one chain per
+        cohort and reading the wallet's would state another deployment's gate as this one's.
+        `requireStrings` is added at the three encode boundaries: `submitApp`'s name/description/cid
+        are `string` parameters, and divergence 9 means a `null` would be committed on chain as the
+        four characters `"null"` and an `undefined` as `""` — a fabricated CID is then reviewed by a
+        curator and served to members, which is not a value anybody catches by reading the screen.
+        The gate read keeps its honest degradation: `getReadProvider` returning null became
+        `NoRpcEndpointError`, which the existing catch turns into "gate unknown" exactly as the old
+        `if (!provider) return` did.
       - `src/components/account/CallsignPanel.jsx` — the commit→reveal registration path. Two
         shapes were MEASURED before the swap rather than argued: (1) viem returns a NAMED OBJECT
         for a lone tuple, so `resolve()`'s `CallsignInfo` still reads by name — the read seam's
