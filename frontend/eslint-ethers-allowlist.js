@@ -96,8 +96,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/recovery/legacyKeys.js',
   'src/lib/relay/__tests__/intentClient.test.js',
   'src/lib/relay/__tests__/poolIntents.test.js',
-  'src/lib/relay/intentClient.js',
-  'src/lib/transfer/eip3009Transfer.js',
   'src/utils/blockchainService.js',
   'src/utils/claimCode/deriveFromCode.js',
   'src/utils/keyRegistryService.js',

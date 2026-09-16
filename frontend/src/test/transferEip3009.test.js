@@ -43,6 +43,11 @@ describe('Pay & Transfer — EIP-3009 transferWithAuthorization', () => {
       ethers.Signature.from({ v: auth.v, r: auth.r, s: auth.s })
     )
     expect(recovered).toBe(wallet.address)
+    // Spec 110 divergence 10 — the authorization is JSON-serialized to a relayer, and viem's
+    // parseSignature would have made `v` a bigint, which JSON.stringify refuses. A recovery check
+    // cannot see this: ethers' Signature.from accepts a bigint v perfectly happily.
+    expect(typeof auth.v).toBe('number')
+    expect(() => JSON.stringify(auth, (k, x) => (typeof x === 'bigint' ? x.toString() : x))).not.toThrow()
     expect(auth.from).toBe(wallet.address)
     expect(auth.to).toBe(to)
     expect(auth.validBefore).toBe(1_000_000 + 3600)

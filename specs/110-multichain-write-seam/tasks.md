@@ -258,7 +258,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 62.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 60.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -313,6 +313,12 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         `ethers.Signature.from` over 200 real typed-data signatures in BOTH encodings — 400
         comparisons, r/s/v identical every time — before the swap, and `src/test/evm/signature.test.js`
         keeps ethers as the live oracle over the function that was replaced.
+      - `src/lib/transfer/eip3009Transfer.js` and `src/lib/relay/intentClient.js` — the same two
+        primitives (`hexlify(randomBytes(32))`, `Signature.from`) on the same money path, now on
+        the shared seam. Both files' suites already reassembled the parts with ethers and verified
+        recovery, which is a real cross-library check — but a recovery check CANNOT see divergence
+        10, because `ethers.Signature.from` accepts a bigint `v` perfectly happily. Both suites now
+        also assert `typeof v === 'number'` and that the authorization serializes.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
