@@ -60,6 +60,36 @@ const num = (v) => (v == null ? null : Number(v))
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * Is this signer ACTUALLY on `target`, or does it merely exist?
+ *
+ * A truthy signer is not a settled one. The wallet context's `chainId` updates from the
+ * connector's `chainChanged` event, while the chain-scoped signer is rebuilt by an async effect a
+ * beat later — so the snapshot can pair the NEW chain with the PRE-switch signer, still bound to a
+ * provider whose static network is the old chain. ethers rejects that with `network changed: A =>
+ * B` **only after broadcasting**, which is the worst possible moment: the member has signed, and
+ * the error arrives with the transaction already gone.
+ *
+ * This check came from `useWrapNative` (spec 108), which had met the race and written it down.
+ * T026 extracted the shared loop from the three hooks that had NOT met it, so the shared one was
+ * the weaker of the two; this closes that.
+ *
+ * A signer with no provider to ask is the ABSENCE of a check, not a failed one — it is accepted,
+ * exactly as it was before. Waiting for an answer that can never come would spin to the deadline
+ * and refuse a write that was fine.
+ */
+async function signerIsOn(signer, target) {
+  const getNetwork = signer?.provider?.getNetwork
+  if (typeof getNetwork !== 'function') return true
+  try {
+    const net = await signer.provider.getNetwork()
+    return num(net?.chainId) === target
+  } catch {
+    // Provider mid-teardown, or still bound to the old chain. Not an answer — keep waiting.
+    return false
+  }
+}
+
+/**
  * Land the wallet on `chainId`, then return the SETTLED wallet snapshot. Exported because the
  * three hooks that grew their own copy of this loop — `useEarnSend`, `useActiveAccount`,
  * `useVaultDeployment` — do not all end in one `submitOn` payload: a vault deployment settles once
@@ -115,7 +145,9 @@ export async function settleWalletOn(
   const deadline = Date.now() + SETTLE_TIMEOUT_MS
   for (;;) {
     const now = readWallet() || {}
-    if (num(now.chainId) === target && (!needsSigner || now.signer)) return now
+    if (num(now.chainId) === target && (!needsSigner || (now.signer && (await signerIsOn(now.signer, target))))) {
+      return now
+    }
     if (Date.now() > deadline) {
       throw new ChainSwitchRefused(
         `The switch to ${chainName(target)} did not complete, so nothing has been signed.`,

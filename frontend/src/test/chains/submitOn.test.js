@@ -138,6 +138,62 @@ describe('submitOn — the signer rail is the only one that switches', () => {
   })
 })
 
+/**
+ * The race `useWrapNative` (spec 108) had already met and written down, which T026's shared loop
+ * did not carry because the three hooks it was extracted from had not met it.
+ *
+ * The context's chainId comes from the connector's `chainChanged` event; the chain-scoped signer is
+ * rebuilt by an async effect a beat later. In between, the snapshot pairs the NEW chain with the
+ * PRE-switch signer — and ethers only rejects that with "network changed: A => B" AFTER
+ * broadcasting, so the member has signed and the transaction is already gone.
+ */
+describe('submitOn — a signer that exists is not yet a signer that is THERE', () => {
+  const signerOn = (id, chainId) => ({ id, provider: { getNetwork: async () => ({ chainId: BigInt(chainId) }) } })
+
+  it('keeps waiting while the snapshot pairs the new chain with the PRE-switch signer', async () => {
+    const stale = signerOn('stale', POLYGON)
+    const fresh = signerOn('fresh', BASE)
+    const w = wallet({ chainId: POLYGON, signer: stale })
+    let polls = 0
+    const deps = io({
+      wallet: w,
+      // The chain lands first, still carrying the Polygon-bound signer — the exact window.
+      switchNetwork: vi.fn(async () => w.moveTo(BASE, { signer: stale })),
+      sleep: async () => {
+        polls += 1
+        if (polls === 2) w.moveTo(BASE, { signer: fresh })
+      },
+    })
+    await submitOn(BASE, PAYLOAD, deps)
+
+    // THE POINT: the stale signer was on screen as `signer` with the right chainId, and was not used.
+    expect(deps.sendWithSigner).toHaveBeenCalledWith(expect.objectContaining({ signer: fresh }))
+    expect(deps.sendWithSigner).not.toHaveBeenCalledWith(expect.objectContaining({ signer: stale }))
+    expect(polls).toBeGreaterThanOrEqual(2)
+  })
+
+  it('accepts a signer with no provider to ask — an absent check is not a failed one', async () => {
+    // Waiting for an answer that can never come would spin to the deadline and refuse a write that
+    // was fine, which is how the check would turn into the bug it exists to prevent.
+    const w = wallet({ chainId: POLYGON, signer: { id: 'plain' } })
+    const deps = io({ wallet: w, switchNetwork: vi.fn(async () => w.moveTo(BASE, { signer: { id: 'plain' } })) })
+    await submitOn(BASE, PAYLOAD, deps)
+    expect(deps.sendWithSigner).toHaveBeenCalledWith(expect.objectContaining({ signer: { id: 'plain' } }))
+  })
+
+  it('is not consulted on a passkey session, which has no browser signer to verify', async () => {
+    const w = wallet({ chainId: POLYGON, signer: null })
+    const deps = io({
+      wallet: w,
+      loginMethod: 'passkey',
+      resolveRail: railing(RAILS.SIGNER),
+      switchNetwork: vi.fn(async () => w.moveTo(BASE, { signer: null })),
+    })
+    const out = await submitOn(BASE, PAYLOAD, deps)
+    expect(out).toMatchObject({ rail: RAILS.SIGNER, chainId: BASE })
+  })
+})
+
 describe('submitOn — a refusal names both chains and signs nothing', () => {
   it('names where the wallet is AND where the write was going when the switch is refused', async () => {
     const deps = io({

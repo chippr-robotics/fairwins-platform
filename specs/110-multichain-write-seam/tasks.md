@@ -216,6 +216,24 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       is byte-compatible. One answer DID change: a chainId absent from `NETWORKS` is now refused on
       every rail including the signer rail — there is no network definition to hand the wallet and
       no RPC behind it, so `available: true` there was a confident wrong answer.
+- [x] T026a **There was a FOURTH settle loop, and it was the best of the four.** T026's task text
+      named three hooks, so `hooks/useWrapNative.js` (spec 108) was not in the sweep — and it alone
+      verified that the settled signer's OWN provider reports the target chain before letting it
+      sign. The three the shared loop was extracted from had never met that race, so the loop
+      T026 shipped was the WEAKER one: the wallet context's `chainId` updates from the connector's
+      `chainChanged` event while the chain-scoped signer is rebuilt by an async effect a beat
+      later, so the snapshot pairs the NEW chain with the PRE-switch signer — and ethers reports
+      `network changed: A => B` **only AFTER broadcasting**, i.e. the member has signed and the
+      transaction is already gone. The check is now INSIDE `settleWalletOn`, so the other three
+      carry it too, and `useWrapNative` stops maintaining a private copy (four → one).
+      A signer with no provider to ask is accepted — the ABSENCE of a check, not a failed one;
+      waiting for an answer that can never come would spin to the deadline and refuse a write that
+      was fine, which is how the guard would become the bug it prevents. All three new assertions
+      were verified non-vacuous by reverting the check.
+      **Method note:** the fourth copy was found by asking who actually CALLS the seam, not by
+      searching for the loop. `settleWalletOn` had four consumers and `submitOn` had NONE outside
+      its own test — which is also the honest state of T024 and is now said plainly rather than
+      implied.
 - [x] T026 Replace `submitAsActiveAccount`'s chain-blind personal branch with the seam (vault
       branch keeps spec-102 tap-time switching semantics through the same loop); retire the three
       settle-loop copies in `hooks/useEarnSend.js`, `hooks/useActiveAccount.js`,
