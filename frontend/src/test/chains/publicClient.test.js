@@ -124,6 +124,12 @@ describe('readContract — the seam contract', () => {
     expect(normalizeAbi(abi)).toBe(parsed)
   })
 
+  it("parses ethers-v6 'tuple(...)' struct spellings (the repo's ABI files)", () => {
+    const abi = ['function getRoute(bytes32 id) view returns (tuple(address inputToken, bool enabled) route)']
+    const parsed = normalizeAbi(abi)
+    expect(parsed[0].outputs[0].components.map((c) => c.name)).toEqual(['inputToken', 'enabled'])
+  })
+
   it('passes JSON ABIs through untouched', () => {
     const abi = [{ type: 'function', name: 'decimals', inputs: [], outputs: [], stateMutability: 'view' }]
     expect(normalizeAbi(abi)).toBe(abi)

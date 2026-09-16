@@ -75,7 +75,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/apiAccess/apiKeys.js',
   'src/lib/backup/backupRegistry.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
-  'src/lib/bridge/bridgeRouter.js',
   'src/lib/bridge/bridgeStatus.js',
   'src/lib/chains/estate.js',
   'src/lib/clearpath/connectors/governorBravo.js',

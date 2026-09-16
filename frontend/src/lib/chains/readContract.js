@@ -34,7 +34,10 @@ export function normalizeAbi(abi) {
   if (!Array.isArray(abi) || abi.length === 0 || typeof abi[0] !== 'string') return abi
   let parsed = parsedAbiCache.get(abi)
   if (!parsed) {
-    parsed = parseAbi(abi)
+    // ethers v6 spells a struct `tuple(address x, …)`; abitype wants the bare
+    // parenthesized form `(address x, …)`. Same grammar otherwise — rewrite the keyword
+    // so the repo's ethers-era ABI files parse unchanged.
+    parsed = parseAbi(abi.map((fragment) => fragment.replace(/\btuple\(/g, '(')))
     parsedAbiCache.set(abi, parsed)
   }
   return parsed
