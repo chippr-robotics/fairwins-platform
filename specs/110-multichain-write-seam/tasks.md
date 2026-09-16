@@ -255,8 +255,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       waiting for an answer that can never come would spin to the deadline and refuse a write that
       was fine, which is how the guard would become the bug it prevents. All three new assertions
       were verified non-vacuous by reverting the check.
+      **It changed member-facing copy, and I first reported it as a pure deduplication — wrong.**
+      Wrap's refusal tail moved from spec 108's "— nothing was sent" to the shared (spec 102)
+      "so nothing has been signed". `useWrapNative.test.jsx` stayed green because it asserted a
+      LOOSE REGEX (`/Polygon.*Mordor|Mordor.*Polygon/s`) — both chain names still appeared — so the
+      change was invisible locally and surfaced as three CI failures: fast `48-wrap-multi-currency`
+      at BOTH viewports and on-chain `45-wrap-cross-chain` (shard 1, 53/54 otherwise green, and
+      nothing there related to the `sendCalls` change). Resolved by unifying rather than reverting:
+      four surfaces had four sentences for one event, none of them chosen, and the shared one is
+      spec 102's, already pinned by `useActiveAccount`'s suite. Both Cypress specs now assert the
+      shared guarantee, and **the unit test pins the PHRASE, not just the names**, so the next
+      wording change fails locally instead of in CI.
       **Method note:** the fourth copy was found by asking who actually CALLS the seam, not by
-      searching for the loop. `settleWalletOn` had four consumers and `submitOn` had NONE outside
+      searching for the loop. A later sweep confirmed there is no FIFTH: the only remaining
+      `SETTLE_TIMEOUT_MS`/`SETTLE_POLL_MS` are `submitOn.js`'s, and every other `Date.now() + …`
+      near a `switchNetwork` is a wager deadline, not a chain poll. `settleWalletOn` had four consumers and `submitOn` had NONE outside
       its own test — which is also the honest state of T024 and is now said plainly rather than
       implied.
 - [x] T026 Replace `submitAsActiveAccount`'s chain-blind personal branch with the seam (vault

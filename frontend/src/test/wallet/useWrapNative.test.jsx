@@ -343,7 +343,14 @@ describe('the target chain (spec 108) — the asset is the entry point', () => {
     const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
     await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
     await act(async () => {
-      await expect(view.result.current.wrap('1')).rejects.toThrow(/Polygon.*Mordor|Mordor.*Polygon/s)
+      // Spec 110 T026a — the GUARANTEE, not just "both names appear somewhere". This assertion used
+      // to be the loose regex alone, so when the refusal moved to the shared `settleWalletOn` its
+      // tail changed from "— nothing was sent" to "so nothing has been signed" and this suite stayed
+      // green; only the Cypress spec, which pinned the sentence, caught it. Pinning the phrase here
+      // means a wording change is a LOCAL failure rather than a CI one.
+      const err = await view.result.current.wrap('1').catch((e) => e)
+      expect(err.message).toMatch(/Polygon.*Mordor|Mordor.*Polygon/s)
+      expect(err.message).toMatch(/nothing has been signed/i)
     })
     expect(switchNetwork).toHaveBeenCalledWith(POLYGON)
     expect(sendTransaction).not.toHaveBeenCalled()
