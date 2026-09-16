@@ -65,7 +65,24 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       test in `venues/gmx.js` that deliberately case-shifts the FairWins address to prove the
       receiver guard refuses it by identity rather than by format — and it had already landed
       unnoticed in three earlier conversions (`venues/gains.js`, `perps/feeUnits.js`,
-      `screening/screenEstate.js`), which now take the seam too.
+      `screening/screenEstate.js`), which now take the seam too. (d2) TRANSACTION RECEIPTS: viem
+      reports `status: 'success' | 'reverted'` where ethers used `1 | 0`, so the repo-wide idiom
+      `Number(receipt.status) === 0` stops seeing reverts entirely (`Number('reverted')` is NaN,
+      which compares false). Normalized once in the bridge status handle rather than at each
+      reader. (e) THE BLOCK-NUMBER CACHE, and the only one a unit test cannot see from the value:
+      viem caches `eth_blockNumber` for `cacheTime` — 4000ms by default, shared across every caller
+      of the client — where ethers cached it for 250ms. `scanLogs` records "I have scanned up to
+      HEAD", so a head from before the caller's own transaction completes a scan over a range that
+      excludes it. It emptied the Protect vault queue for a member who proposed and opened the
+      Queue within four seconds, and those surfaces read on mount and do not poll, so it did not
+      recover. Every scan head now passes `cacheTime: 0`, and the seam's test asserts on the
+      REQUEST — the stale value is a real block number, just the wrong one, so nothing about the
+      returned value can distinguish it.
+
+      THE PATTERN ACROSS ALL FIVE: viem and ethers disagree on a DEFAULT, silently, and always in
+      the direction of reporting LESS than there is — a missing field, a narrower range, a refused
+      address, a revert that reads as a success. None of them throws. Read each conversion for
+      what it makes impossible to OBSERVE, not only for what it changes.
 - [x] T013 Estate reads (`lib/chains/estate.js`, spec-089 reading constructors) keep three-state
       semantics byte-for-byte — assert no `?? 0` path appears in conversion. `readAuthority` now
       names its chain while `provider` stays the availability gate, because that gate is also

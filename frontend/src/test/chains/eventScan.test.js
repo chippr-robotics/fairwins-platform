@@ -76,4 +76,33 @@ describe('eventScanHandle × scanLogs', () => {
   it('returns null for a routeless chain, matching the provider factories', () => {
     expect(eventScanHandle(424242, { address: GUARD, abi: ABI })).toBeNull()
   })
+
+  /*
+   * The scan head must never come from viem's block-number cache.
+   *
+   * viem caches `eth_blockNumber` for `cacheTime` — 4000ms by default and shared across every
+   * caller of the client — where ethers cached it for 250ms. `scanLogs` records "I have scanned
+   * up to HEAD", so a head from before the caller's own transaction makes the scan complete over
+   * a range that excludes it. The surface then reads as "nothing here" and, since these surfaces
+   * read on mount and do not poll, stays that way until the member presses Refresh.
+   *
+   * This was not hypothetical: it emptied the Protect vault queue for a member who proposed a
+   * governance change and opened the Queue within four seconds, and it is invisible to every
+   * assertion about the RETURNED value — only the request carries it.
+   */
+  it('asks for an UNCACHED head — a stale one silently completes a scan over the wrong range', async () => {
+    const seen = []
+    client.current = {
+      async getBlockNumber(opts) {
+        seen.push(opts)
+        return 120n
+      },
+      async request() {
+        return []
+      },
+    }
+    const guard = eventScanHandle(137, { address: GUARD, abi: ABI })
+    await guard.runner.provider.getBlockNumber()
+    expect(seen).toEqual([{ cacheTime: 0 }])
+  })
 })

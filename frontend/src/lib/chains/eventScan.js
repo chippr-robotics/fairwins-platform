@@ -64,8 +64,21 @@ export function eventScanHandle(chainId, { address, abi }) {
         }),
       )
     },
+    /**
+     * THE SCAN HEAD IS NEVER SERVED FROM CACHE (`cacheTime: 0`).
+     *
+     * viem caches `eth_blockNumber` for `cacheTime` — 4000ms by default, and shared by every
+     * caller of this client. ethers cached it for 250ms. That 16× difference is not a performance
+     * detail here: `scanLogs` records "I have scanned up to HEAD" and a caller that mounts right
+     * after a write (propose a vault transaction, then open the Queue) gets a head from before
+     * its own transaction, scans to it, finds nothing, and marks the range complete. The surface
+     * reads as "nothing pending" and — because these surfaces read on mount and do not poll —
+     * stays that way until the member presses Refresh. A stale head is a silent under-report, the
+     * one failure mode the whole honest-state rule exists to prevent, so it is refused here rather
+     * than in each scanning caller.
+     */
     async getBlockNumber() {
-      return Number(await client.getBlockNumber())
+      return Number(await client.getBlockNumber({ cacheTime: 0 }))
     },
   }
 

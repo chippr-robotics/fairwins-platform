@@ -135,7 +135,9 @@ function getProvider(opts = {}) {
   }
   return {
     async getBlockNumber() {
-      return Number(await client.getBlockNumber())
+      // Never cached: this head bounds a log scan, and a report that silently stops short of the
+      // chain's tip under-reports rather than failing. See the note in `lib/chains/eventScan.js`.
+      return Number(await client.getBlockNumber({ cacheTime: 0 }))
     },
     async getBlock(blockNumber) {
       const block = await client.getBlock({ blockNumber: BigInt(blockNumber) })

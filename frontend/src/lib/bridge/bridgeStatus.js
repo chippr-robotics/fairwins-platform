@@ -351,7 +351,9 @@ function defaultProvider(chainId) {
       return { ...receipt, status: receipt.status === 'reverted' ? 0 : 1 }
     },
     async getBlockNumber() {
-      return Number(await client.getBlockNumber())
+      // Never cached: this head bounds a log scan, and a stale one silently narrows the window a
+      // fill could be found in. See the note in `lib/chains/eventScan.js`.
+      return Number(await client.getBlockNumber({ cacheTime: 0 }))
     },
     async getLogs({ address, topics, fromBlock, toBlock }) {
       return client.request({
