@@ -6,6 +6,20 @@
  * (Phases 1-2) removes its line, and a PR that adds a line is reintroducing the dependency
  * this migration exists to remove. src/test/lint/ethersRatchet.test.js fails on a stale
  * entry (a listed file that no longer imports ethers), so the list cannot rot upward.
+ *
+ * THREE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION, and are called out so nobody
+ * spends an afternoon rediscovering it:
+ *
+ *   - `lib/pools/bip39Lists.js`, `lib/recovery/bip39Suggest.js`, `utils/claimCode/wordlist.js`
+ *     import ethers' bundled BIP-39 `wordlists`. viem bundles none, so these cannot move
+ *     without adding a wordlist dependency (`@scure/bip39`) — a lockfile change, which under
+ *     spec 075 is the one that drops the platform rolldown binary. That is a deliberate,
+ *     separately-reviewed step, not a mechanical swap.
+ *   - `lib/miniapps/hostScope.js` hands ethers to third-party mini-app packages as a shared
+ *     module. That is the spec-073 host API contract (hostApi 2), not an internal dependency:
+ *     removing it breaks published packages, so it belongs to Phase 5 (#1596).
+ *   - `utils/rpcProvider.js` is the seam being replaced; it leaves last, when its final
+ *     caller does (T014).
  */
 export const ETHERS_ALLOWLIST = [
   'src/components/account/CallsignPanel.jsx',
@@ -86,7 +100,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/perps/venues/gmx.js',
   'src/lib/pools/bip39Lists.js',
   'src/lib/pools/gasless.js',
-  'src/lib/pools/payout.js',
   'src/lib/pools/poolContracts.js',
   'src/lib/predict/passkeyApprovals.js',
   'src/lib/recovery/bip39Suggest.js',
