@@ -36,8 +36,9 @@
  * on every chain — Base's differs from the set Ethereum, Polygon, Arbitrum and Optimism share
  * — so nothing here hardcodes or infers one (research R4b, FR-016b).
  */
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import { UNISWAP_V3_POOL_ABI } from '../../abis/UniswapV3PoolReader'
+import { readContract, normalizeAbi } from '../chains/readContract'
 
 /**
  * Uniswap V3's absolute tick bounds. Full range is these, ALIGNED DOWN to the pool's own tick
@@ -67,7 +68,7 @@ export const NFPM_ABI = [
   'function collect(tuple(uint256 tokenId, address recipient, uint128 amount0Max, uint128 amount1Max) params) payable returns (uint256 amount0, uint256 amount1)',
 ]
 
-const NFPM_IFACE = new Interface(NFPM_ABI)
+const NFPM_ABI_PARSED = normalizeAbi(NFPM_ABI)
 
 /** The pool reads: the shared spot-price surface plus the extra fields a position needs. */
 const POOL_ABI = [
@@ -306,10 +307,11 @@ export function normalizePosition(tokenId, raw) {
 /**
  * Read one position by token id. Null when the read fails (honest unavailable, not "empty").
  */
-export async function readPosition({ provider, positionManager, tokenId }) {
+export async function readPosition({ chainId, provider, positionManager, tokenId }) {
   if (!provider || !positionManager) return null
-  const nfpm = new Contract(positionManager, NFPM_ABI, provider)
-  const raw = await safe(nfpm.positions(tokenId))
+  const raw = await safe(
+    readContract(chainId, { address: positionManager, abi: NFPM_ABI, functionName: 'positions', args: [BigInt(tokenId)] }),
+  )
   if (raw === undefined) return null
   return normalizePosition(tokenId, raw)
 }
@@ -324,14 +326,15 @@ export async function readPosition({ provider, positionManager, tokenId }) {
  *
  * @returns {Promise<null | {tokenIds: bigint[], complete: boolean}>}
  */
-export async function listPositionTokenIds({ provider, positionManager, owner }) {
+export async function listPositionTokenIds({ chainId, provider, positionManager, owner }) {
   if (!provider || !positionManager || !owner) return null
-  const nfpm = new Contract(positionManager, NFPM_ABI, provider)
-  const balance = await safe(nfpm.balanceOf(owner))
+  const nfpmRead = (functionName, args) =>
+    readContract(chainId, { address: positionManager, abi: NFPM_ABI, functionName, args })
+  const balance = await safe(nfpmRead('balanceOf', [owner]))
   if (balance === undefined) return null
 
   const n = Number(balance)
-  const raw = await Promise.all(Array.from({ length: n }, (_, i) => safe(nfpm.tokenOfOwnerByIndex(owner, i))))
+  const raw = await Promise.all(Array.from({ length: n }, (_, i) => safe(nfpmRead('tokenOfOwnerByIndex', [owner, BigInt(i)]))))
   const tokenIds = []
   let complete = true
   for (const id of raw) {
@@ -358,12 +361,13 @@ export function matchesPool(position, pool) {
  * there is no composition to show — so a failed `slot0` returns null. The rest are optional
  * and come back undefined rather than blanking the read.
  */
-export async function readPoolState({ provider, poolAddress }) {
+export async function readPoolState({ chainId, provider, poolAddress }) {
   if (!provider || !poolAddress) return null
-  const pool = new Contract(poolAddress, POOL_ABI, provider)
-  const slot0 = await safe(pool.slot0())
+  const poolRead = (functionName) =>
+    readContract(chainId, { address: poolAddress, abi: POOL_ABI, functionName })
+  const slot0 = await safe(poolRead('slot0'))
   if (slot0 === undefined) return null
-  const [tickSpacing, fee] = await Promise.all([safe(pool.tickSpacing()), safe(pool.fee())])
+  const [tickSpacing, fee] = await Promise.all([safe(poolRead('tickSpacing')), safe(poolRead('fee'))])
   return {
     sqrtPriceX96: BigInt(slot0.sqrtPriceX96 ?? slot0[0]),
     tick: Number(slot0.tick ?? slot0[1]),
@@ -386,16 +390,20 @@ export async function readPoolState({ provider, poolAddress }) {
  *
  * @returns {Promise<null | {amount0: bigint, amount1: bigint, source: 'simulated'|'accrued-snapshot', isEstimate: true}>}
  */
-export async function readUncollectedFees({ provider, positionManager, tokenId, owner, position }) {
+export async function readUncollectedFees({ chainId, provider, positionManager, tokenId, owner, position }) {
   if (!provider || !positionManager) return null
-  const nfpm = new Contract(positionManager, NFPM_ABI, provider)
 
   if (owner) {
+    // ethers' `collect.staticCall(..., { from: owner })` — an eth_call from the owner, which is
+    // the only address the simulation pays out for. The seam's `account` carries the same from.
     const simulated = await safeCall(() =>
-      nfpm.collect.staticCall(
-        { tokenId, recipient: owner, amount0Max: MAX_UINT128, amount1Max: MAX_UINT128 },
-        { from: owner },
-      ),
+      readContract(chainId, {
+        address: positionManager,
+        abi: NFPM_ABI,
+        functionName: 'collect',
+        args: [{ tokenId: BigInt(tokenId), recipient: owner, amount0Max: MAX_UINT128, amount1Max: MAX_UINT128 }],
+        account: owner,
+      }),
     )
     if (simulated !== undefined) {
       return {
@@ -407,7 +415,7 @@ export async function readUncollectedFees({ provider, positionManager, tokenId, 
     }
   }
 
-  const snapshot = position ?? (await readPosition({ provider, positionManager, tokenId }))
+  const snapshot = position ?? (await readPosition({ chainId, provider, positionManager, tokenId }))
   if (!snapshot) return null
   return {
     amount0: snapshot.tokensOwed0,
@@ -427,13 +435,13 @@ export async function readUncollectedFees({ provider, positionManager, tokenId, 
  *
  * @returns {Promise<null | object>}
  */
-export async function readPositionSnapshot({ provider, positionManager, tokenId, owner, poolAddress }) {
-  const position = await readPosition({ provider, positionManager, tokenId })
+export async function readPositionSnapshot({ chainId, provider, positionManager, tokenId, owner, poolAddress }) {
+  const position = await readPosition({ chainId, provider, positionManager, tokenId })
   if (!position) return null
 
   const [poolState, earnings] = await Promise.all([
-    poolAddress ? readPoolState({ provider, poolAddress }) : Promise.resolve(null),
-    readUncollectedFees({ provider, positionManager, tokenId, owner, position }),
+    poolAddress ? readPoolState({ chainId, provider, poolAddress }) : Promise.resolve(null),
+    readUncollectedFees({ chainId, provider, positionManager, tokenId, owner, position }),
   ])
 
   const composition = poolState
@@ -471,14 +479,14 @@ export async function readPositionSnapshot({ provider, positionManager, tokenId,
  *
  * @returns {Promise<null | {positions: Array, complete: boolean}>}
  */
-export async function readMemberPositions({ provider, positionManager, owner, pools }) {
-  const listed = await listPositionTokenIds({ provider, positionManager, owner })
+export async function readMemberPositions({ chainId, provider, positionManager, owner, pools }) {
+  const listed = await listPositionTokenIds({ chainId, provider, positionManager, owner })
   if (!listed) return null
 
   let complete = listed.complete
   const positions = []
   const raw = await Promise.all(
-    listed.tokenIds.map((tokenId) => readPosition({ provider, positionManager, tokenId })),
+    listed.tokenIds.map((tokenId) => readPosition({ chainId, provider, positionManager, tokenId })),
   )
   for (const position of raw) {
     if (!position) {
@@ -541,18 +549,22 @@ export function buildExitCalls({
   if (L > 0n) {
     calls.push({
       target: positionManager,
-      data: NFPM_IFACE.encodeFunctionData('decreaseLiquidity', [
-        { tokenId: id, liquidity: L, amount0Min: BigInt(amount0Min ?? 0n), amount1Min: BigInt(amount1Min ?? 0n), deadline: dl },
-      ]),
+      data: encodeFunctionData({
+        abi: NFPM_ABI_PARSED,
+        functionName: 'decreaseLiquidity',
+        args: [{ tokenId: id, liquidity: L, amount0Min: BigInt(amount0Min ?? 0n), amount1Min: BigInt(amount1Min ?? 0n), deadline: dl }],
+      }),
       value: 0n,
     })
   }
 
   calls.push({
     target: positionManager,
-    data: NFPM_IFACE.encodeFunctionData('collect', [
-      { tokenId: id, recipient, amount0Max: MAX_UINT128, amount1Max: MAX_UINT128 },
-    ]),
+    data: encodeFunctionData({
+      abi: NFPM_ABI_PARSED,
+      functionName: 'collect',
+      args: [{ tokenId: id, recipient, amount0Max: MAX_UINT128, amount1Max: MAX_UINT128 }],
+    }),
     value: 0n,
   })
 

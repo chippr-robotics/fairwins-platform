@@ -49,15 +49,16 @@
  * Bitcoin id arriving here is a caller bug, not a runtime failure.
  * ---------------------------------------------------------------------------
  */
-import { AbiCoder, Contract, Interface, ZeroAddress, keccak256 } from 'ethers'
+import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../chains/readContract'
 import { LIQUIDITY_ROUTER_ABI } from '../../abis/LiquidityRouter'
 import { getContractAddressForChain } from '../../config/contracts'
 import { splitFee } from '../fees/feeQuote'
 import { PIN_MODE, createPin, filterByPin, revalidateSelection, samePair } from '../assets/networkPin'
 import { assertEvmChainId } from '../bridge/bridgeRouter'
 
-const ROUTER_IFACE = new Interface(LIQUIDITY_ROUTER_ABI)
-const ERC20_APPROVE_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+const ROUTER_ABI = normalizeAbi(LIQUIDITY_ROUTER_ABI)
+const ERC20_APPROVE_ABI = parseAbi(['function approve(address spender, uint256 amount) returns (bool)'])
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -97,19 +98,19 @@ const safe = (p) => p.then((v) => v).catch(() => undefined)
  * @param {{kind: number, poolAddress: string, token0: string, token1?: string}} args
  * @returns {string} bytes32 hex
  */
-export function computePoolId({ kind, poolAddress, token0, token1 = ZeroAddress }) {
+export function computePoolId({ kind, poolAddress, token0, token1 = zeroAddress }) {
   if (kind !== POOL_KIND.BRIDGE_LP && kind !== POOL_KIND.TRADING_LP) {
     throw new Error(`computePoolId: kind must be BRIDGE_LP or TRADING_LP, received ${JSON.stringify(kind)}`)
   }
   // A trading pool with a defaulted token1 would hash to an id the router has never listed,
   // and the caller would read back "not curated" for a pool that is. Fail on the mistake.
-  if (kind === POOL_KIND.TRADING_LP && (!token1 || token1 === ZeroAddress)) {
+  if (kind === POOL_KIND.TRADING_LP && (!token1 || token1 === zeroAddress)) {
     throw new Error('computePoolId: a trading pool has two legs — token1 is required')
   }
   return keccak256(
-    AbiCoder.defaultAbiCoder().encode(
-      ['uint8', 'address', 'address', 'address'],
-      [kind, poolAddress, token0, token1 || ZeroAddress],
+    encodeAbiParameters(
+      [{ type: 'uint8' }, { type: 'address' }, { type: 'address' }, { type: 'address' }],
+      [Number(kind), poolAddress, token0, token1 || zeroAddress],
     ),
   )
 }
@@ -171,28 +172,31 @@ export async function readLiquidityRouterConfig({ chainId, provider }) {
   const routerAddress = getLiquidityRouterAddress(chainId)
   if (!routerAddress || !provider) return null
 
-  const router = new Contract(routerAddress, LIQUIDITY_ROUTER_ABI, provider)
+  // Spec 110 Phase 1: reads go through the chain seam; `provider` stays the caller-side
+  // availability gate (null means "do not read") until callers convert.
+  const routerRead = (functionName, args) =>
+    readContract(chainId, { address: routerAddress, abi: ROUTER_ABI, functionName, args })
   // `paused` is the load-bearing read — if even it fails, treat the router as unreadable and
   // withhold availability (never guess that supplying is open).
-  const paused = await safe(router.paused())
+  const paused = await safe(routerRead('paused'))
   if (paused === undefined) return null
 
   const [feeRouter, positionManager, sanctionsGuard, liquidityDepositServiceId, maxFeeBps, count] =
     await Promise.all([
-      safe(router.feeRouter()),
-      safe(router.positionManager()),
-      safe(router.sanctionsGuard()),
-      safe(router.liquidityDepositServiceId()),
-      safe(router.MAX_FEE_BPS()),
-      safe(router.poolCount()),
+      safe(routerRead('feeRouter')),
+      safe(routerRead('positionManager')),
+      safe(routerRead('sanctionsGuard')),
+      safe(routerRead('liquidityDepositServiceId')),
+      safe(routerRead('MAX_FEE_BPS')),
+      safe(routerRead('poolCount')),
     ])
 
   const pools = []
   let poolsComplete = count !== undefined
   if (count !== undefined) {
     const n = Number(count)
-    const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(router.poolAt(i))))
-    const raws = await Promise.all(ids.map((id) => (id ? safe(router.getPool(id)) : Promise.resolve(undefined))))
+    const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(routerRead('poolAt', [BigInt(i)]))))
+    const raws = await Promise.all(ids.map((id) => (id ? safe(routerRead('getPool', [id])) : Promise.resolve(undefined))))
     for (let i = 0; i < n; i += 1) {
       const id = ids[i]
       const raw = raws[i]
@@ -237,8 +241,9 @@ export async function readLiquidityPool({ chainId, provider, kind, poolAddress, 
   if (!routerAddress || !provider) return null
 
   const poolId = computePoolId({ kind, poolAddress, token0, token1 })
-  const router = new Contract(routerAddress, LIQUIDITY_ROUTER_ABI, provider)
-  const raw = await safe(router.getPool(poolId))
+  const raw = await safe(
+    readContract(chainId, { address: routerAddress, abi: ROUTER_ABI, functionName: 'getPool', args: [poolId] }),
+  )
   if (raw === undefined) return null
   return normalizePool(poolId, raw)
 }
@@ -259,7 +264,7 @@ export async function readLiquidityPool({ chainId, provider, kind, poolAddress, 
 export function findPool(pools, { kind, poolAddress, token0, token1 }) {
   if (!Array.isArray(pools)) return null
   const eq = (a, b) => String(a || '').toLowerCase() === String(b || '').toLowerCase()
-  const wantToken1 = token1 || ZeroAddress
+  const wantToken1 = token1 || zeroAddress
   return (
     pools.find(
       (p) =>
@@ -432,28 +437,24 @@ export function buildSupplyCalls({
   if (a0 > 0n) {
     calls.push({
       target: pool.token0,
-      data: ERC20_APPROVE_IFACE.encodeFunctionData('approve', [routerAddress, a0]),
+      data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [routerAddress, a0] }),
       value: 0n,
     })
   }
   if (a1 > 0n) {
     calls.push({
       target: pool.token1,
-      data: ERC20_APPROVE_IFACE.encodeFunctionData('approve', [routerAddress, a1]),
+      data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [routerAddress, a1] }),
       value: 0n,
     })
   }
   calls.push({
     target: routerAddress,
-    data: ROUTER_IFACE.encodeFunctionData('mintFullRangeWithFee', [
-      pool.poolId,
-      a0,
-      a1,
-      BigInt(amount0Min ?? 0n),
-      BigInt(amount1Min ?? 0n),
-      dl,
-      maxFeeBps,
-    ]),
+    data: encodeFunctionData({
+      abi: ROUTER_ABI,
+      functionName: 'mintFullRangeWithFee',
+      args: [pool.poolId, a0, a1, BigInt(amount0Min ?? 0n), BigInt(amount1Min ?? 0n), dl, BigInt(maxFeeBps)],
+    }),
     // The router is ERC-20 only — a native leg is wrapped before it gets here.
     value: 0n,
   })

@@ -15,26 +15,20 @@ import { PIN_MODE } from '../../assets/networkPin'
 
 const m = vi.hoisted(() => ({ address: null, methods: {}, calls: [] }))
 
-vi.mock('ethers', async (orig) => {
+// Spec 110 Phase 1: the module reads through the chain seam; the driveable method registry
+// keeps its exact shape. ethers Interface imports elsewhere in this file stay deliberately —
+// decoding viem-built calldata with ethers is a live cross-library byte-compatibility check.
+vi.mock('../../chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          const key = String(prop)
-          return (...args) => {
-            m.calls.push([key, ...args])
-            const f = m.methods[key]
-            if (!f) throw new Error('unmocked method: ' + key)
-            return f(...args)
-          }
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      m.calls.push([functionName, ...args])
+      const f = m.methods[functionName]
+      if (!f) throw new Error('unmocked method: ' + functionName)
+      return f(...args)
+    },
   }
-  return { ...actual, Contract: vi.fn(FakeContract) }
 })
 
 const getContractAddressForChain = vi.hoisted(() => vi.fn())

@@ -53,9 +53,11 @@ export function normalizeAbi(abi) {
  * @param {string} call.functionName
  * @param {Array}  [call.args]
  * @param {bigint|'latest'|string} [call.blockNumber] - optional pinned block / tag
+ * @param {string} [call.account] - optional caller for the eth_call (ethers' staticCall
+ *   `{ from }`) — a simulation that pays out to msg.sender reads differently per caller
  * @returns {Promise<unknown>} the decoded result (bigints for integers, as ethers v6 returned)
  */
-export async function readContract(chainId, { address, abi, functionName, args, blockNumber }) {
+export async function readContract(chainId, { address, abi, functionName, args, blockNumber, account }) {
   const client = getPublicClient(chainId)
   if (!client) throw new NoRpcEndpointError(chainId)
   return client.readContract({
@@ -63,6 +65,7 @@ export async function readContract(chainId, { address, abi, functionName, args, 
     abi: normalizeAbi(abi),
     functionName,
     ...(args !== undefined ? { args } : {}),
+    ...(account !== undefined ? { account } : {}),
     ...(blockNumber !== undefined
       ? typeof blockNumber === 'bigint'
         ? { blockNumber }

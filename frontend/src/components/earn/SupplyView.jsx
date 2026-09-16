@@ -209,7 +209,7 @@ async function loadNetwork(chainId, owner) {
   )
   const pools = enriched.filter(Boolean)
 
-  const positions = owner ? await loadPositions({ provider, config, pools, owner }) : []
+  const positions = owner ? await loadPositions({ chainId, provider, config, pools, owner }) : []
 
   return {
     network: { chainId, name, status: 'ready', poolsComplete: config.poolsComplete !== false },
@@ -318,7 +318,7 @@ async function enrichPool({ listing, chainId, name, provider, config, fee, feeKn
 }
 
 /** The member's positions on one network, in the curated pools only. */
-async function loadPositions({ provider, config, pools, owner }) {
+async function loadPositions({ chainId, provider, config, pools, owner }) {
   const out = []
 
   const tradingPools = pools.filter((p) => Number(p.kind) === POOL_KIND.TRADING_LP)
@@ -326,6 +326,7 @@ async function loadPositions({ provider, config, pools, owner }) {
     const listed = await safe(
       Promise.resolve(
         readMemberPositions({
+          chainId,
           provider,
           positionManager: config.positionManager,
           owner,
@@ -339,6 +340,7 @@ async function loadPositions({ provider, config, pools, owner }) {
       const snapshot = await safe(
         Promise.resolve(
           readPositionSnapshot({
+            chainId,
             provider,
             positionManager: config.positionManager,
             tokenId: position.tokenId,

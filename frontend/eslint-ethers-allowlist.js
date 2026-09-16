@@ -94,8 +94,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',
   'src/lib/liquidity/__tests__/uniswapPositions.test.js',
   'src/lib/liquidity/acrossLpPositions.js',
-  'src/lib/liquidity/liquidityRouter.js',
-  'src/lib/liquidity/uniswapPositions.js',
   'src/lib/miniapps/hostScope.js',
   'src/lib/miniapps/registryAuthority.js',
   'src/lib/miniapps/registryClient.js',

@@ -9,35 +9,23 @@ import { Interface } from 'ethers'
 
 const m = vi.hoisted(() => ({ methods: {}, calls: [] }))
 
-vi.mock('ethers', async (orig) => {
+// Spec 110 Phase 1: the module reads through the chain seam; the driveable registry keeps its
+// shape. A read carrying `account` is ethers' `collect.staticCall(..., { from })` — routed to
+// the same `<fn>.staticCall` key the suite already registers.
+vi.mock('../../chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          const key = String(prop)
-          const call = (...args) => {
-            m.calls.push([key, ...args])
-            const f = m.methods[key]
-            if (!f) throw new Error('unmocked method: ' + key)
-            return f(...args)
-          }
-          // ethers exposes `contract.fn.staticCall(...)` — the shape `readUncollectedFees` uses
-          // to SIMULATE a collect rather than guess at accrued fees.
-          call.staticCall = (...args) => {
-            m.calls.push([`${key}.staticCall`, ...args])
-            const f = m.methods[`${key}.staticCall`]
-            if (!f) throw new Error('unmocked staticCall: ' + key)
-            return f(...args)
-          }
-          return call
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [], account }) => {
+      const key = account !== undefined ? `${functionName}.staticCall` : functionName
+      // Record the caller the way the ethers harness did ({ from }) so assertions on the
+      // simulated collect's msg.sender keep reading naturally.
+      m.calls.push(account !== undefined ? [key, ...args, { from: account }] : [key, ...args])
+      const f = m.methods[key]
+      if (!f) throw new Error('unmocked method: ' + key)
+      return f(...args)
+    },
   }
-  return { ...actual, Contract: vi.fn(FakeContract) }
 })
 
 import {
