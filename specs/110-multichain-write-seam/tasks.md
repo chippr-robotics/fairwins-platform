@@ -676,6 +676,37 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         one and the `uiFeeReceiverGuard` withheld `setUiFeeFactor` with a reason. viem's re-checksums
         silently. It validates with `isAddress` first now, which is the original BEHAVIOUR rather
         than the original code.
+      - **`LiquidityApp.jsx`, `IncidentResponseApp.jsx`, `MaintenanceTab.jsx` — and a SPEC-069
+        BYPASS that both estate dashboards were carrying.** Three low-count files (one `Contract`
+        each, plus one in Maintenance's write helper), converted together. Allowlist 50 → 47.
+        Both pause dashboards read `readProviderFor(n.chainId, chainId, provider) ||
+        getProvider(n.chainId)`. The `||` is the bug: `readProviderFor`'s null is the availability
+        gate REFUSING (cohort bound, or no endpoint at all), not a gap to route around, and
+        `getProvider` hand-builds a provider from `NETWORKS[chainId].rpcUrl` — which spec 069
+        forbids outright, because it ignores the member's configured endpoint and its failover —
+        THROUGH `getNetwork`, which falls back to the default network for a chain it does not
+        know (`NETWORKS[chainId] || NETWORKS[getCurrentChainId()] || NETWORKS[PRIMARY_CHAIN_ID]`).
+        On a dashboard whose entire job is saying which chains are paused, that is one chain's
+        pause state rendered under another chain's name. The gate is honoured now and a chain with
+        no read connection reports `unreadable`, which is what it is.
+        `freezeAccount`/`unfreezeAccount` take the member-typed address through `getAddress` per
+        divergence 16 — `isValidEthereumAddress` is a bare regex (`/^0x[a-fA-F0-9]{40}$/`), so it
+        accepts ALL-UPPERCASE, which viem's encoder then refuses; it also tested `address.trim()`
+        while the caller passed the UNTRIMMED value, so a pasted address with a trailing space
+        passed validation and failed at the encoder. Both are fixed by normalising once at the
+        encode. Freezing the wrong account is not a recoverable mistake.
+        Two source-shape assertions in `adminIncidentEstate.test.jsx` moved with the code and were
+        STRENGTHENED rather than merely updated: they matched `incidentWrite().freezeAccount`, a
+        call shape that no longer exists, and now assert what they always meant — that the
+        transaction's `to` is `incidentRegistryAddr`, the scoped registry, which is the only thing
+        between "pause Polygon" and pausing whatever chain the wallet happens to be on.
+        **`BridgeTab.jsx` + `SupplyTab.jsx` are deliberately NOT in this batch.** They are the
+        spec-067 router pair, they share `liquidityAdminCommon.js`, and their `readProviderFor`
+        call passes `requireCohort: false` (their routers exist only on mainnets, so a testnet
+        build would otherwise blank them) — a deliberate opt-out from the very rule the three
+        files above were violating by accident. Converting them alongside files whose fix is
+        "honour the cohort gate" would put two opposite-looking changes in one review. They also
+        carry a real ops scan (`queryFilter` + receipts + gateway status). Their own batch.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

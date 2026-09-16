@@ -15,7 +15,7 @@
  * per cohort chain, three-state — an unreachable chain says so, never "Active".
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import AdminAppShell from '../AdminAppShell'
 import ServiceHealthCard from '../ServiceHealthCard'
 import AdminStatTile from '../charts/AdminStatTile'
@@ -30,7 +30,8 @@ import { useEnsResolution } from '../../../hooks/useEnsResolution'
 import { isValidEthereumAddress } from '../../../utils/validation'
 import { ACCOUNT_MODERATION_PATH } from '../../../constants/legalLinks'
 import { getContractAddressForChain } from '../../../config/contracts'
-import { getProvider } from '../../../utils/blockchainService'
+import { readContract, normalizeAbi } from '../../../lib/chains/readContract'
+import { getAddress } from '../../../lib/evm/address'
 import { networkName, readProviderFor, estateNetworks } from '../../../lib/chains/estate'
 import { readOk, notDeployed, unreadable, isRead } from '../../../lib/chains/chainReadResult'
 
@@ -64,9 +65,20 @@ function usePauseEstate() {
         const addr = getContractAddressForChain('wagerRegistry', n.chainId)
         if (!addr) return notDeployed(n.chainId)
         try {
-          const p = readProviderFor(n.chainId, chainId, provider) || getProvider(n.chainId)
-          const contract = new ethers.Contract(addr, WAGER_REGISTRY_INCIDENT_ABI, p)
-          const paused = await contract.paused()
+          // `readProviderFor`'s null is the availability gate REFUSING, not a gap to route
+          // around: the `|| getProvider(n.chainId)` this replaced hand-built a provider from
+          // `NETWORKS[chainId].rpcUrl` (spec 069 forbids it — it ignores the member's configured
+          // endpoint and its failover) through `getNetwork`, which FALLS BACK to the default
+          // network for a chain it does not know. On a pause dashboard that means one chain's
+          // paused state rendered under another chain's name.
+          if (!readProviderFor(n.chainId, chainId, provider)) {
+            return unreadable(n.chainId, `no read connection to ${n.name}`)
+          }
+          const paused = await readContract(n.chainId, {
+            address: addr,
+            abi: WAGER_REGISTRY_INCIDENT_ABI,
+            functionName: 'paused',
+          })
           return readOk(n.chainId, Boolean(paused), null, Date.now())
         } catch (err) {
           return unreadable(n.chainId, err?.message)
@@ -138,8 +150,15 @@ export default function IncidentResponseApp() {
 
   const { runTx, pendingTx } = useAdminTx({ onSuccess: pauseEstate.refresh })
 
-  const incidentWrite = () =>
-    new ethers.Contract(incidentRegistryAddr, WAGER_REGISTRY_INCIDENT_ABI, signer)
+  const incidentWrite = (functionName, args = []) =>
+    signer.sendTransaction({
+      to: incidentRegistryAddr,
+      data: encodeFunctionData({
+        abi: normalizeAbi(WAGER_REGISTRY_INCIDENT_ABI),
+        functionName,
+        args,
+      }),
+    })
 
   const requireIncidentChain = () => {
     if (onIncidentChain) return true
@@ -154,12 +173,12 @@ export default function IncidentResponseApp() {
   const freezeEns = useEnsResolution(freezeForm.address || '')
 
   const handlePause = () => requireIncidentChain() && runTx(
-    () => incidentWrite().pause(),
+    () => incidentWrite('pause'),
     `WagerRegistry paused on ${networkName(incidentChainId)}`
   )
 
   const handleUnpause = () => requireIncidentChain() && runTx(
-    () => incidentWrite().unpause(),
+    () => incidentWrite('unpause'),
     `WagerRegistry unpaused on ${networkName(incidentChainId)}`
   )
 
@@ -170,7 +189,7 @@ export default function IncidentResponseApp() {
       return showNotification('Reason is required (recorded on-chain)', 'error')
     if (!requireIncidentChain()) return false
     return runTx(
-      () => incidentWrite().freezeAccount(target, freezeForm.reason.trim()),
+      () => incidentWrite('freezeAccount', [getAddress(target.trim()), freezeForm.reason.trim()]),
       `Account ${shortAddr(target)} frozen on ${networkName(incidentChainId)}`,
     )
   }
@@ -180,7 +199,7 @@ export default function IncidentResponseApp() {
     if (!isValidEthereumAddress(target)) return showNotification('Invalid address', 'error')
     if (!requireIncidentChain()) return false
     return runTx(
-      () => incidentWrite().unfreezeAccount(target),
+      () => incidentWrite('unfreezeAccount', [getAddress(target.trim())]),
       `Account ${shortAddr(target)} unfrozen on ${networkName(incidentChainId)}`,
     )
   }
