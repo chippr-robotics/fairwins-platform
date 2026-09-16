@@ -95,7 +95,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/pools/gasless.js',
   'src/lib/pools/payout.js',
   'src/lib/pools/poolContracts.js',
-  'src/lib/portfolio/batchBalances.js',
   'src/lib/predict/passkeyApprovals.js',
   'src/lib/recovery/bip39Suggest.js',
   'src/lib/recovery/legacyKeys.js',
