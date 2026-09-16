@@ -405,6 +405,21 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         green and surfaced as a rejected signature in production.
         **For T021:** `lib/hardware/hardwareSigner.js:63` does the same
         `TypedDataEncoder.from(cleanTypes).primaryType` — use `primaryTypeOf`, do not re-roll it.
+      - **`src/test/lint/ethersMockRatchet.test.js` (new) — the retired-mock class is a GATE now,
+        not a discovery.** Three files in a row was enough: a test that mocks `ethers` must import,
+        statically or dynamically, at least one module still on the ethers allowlist, or the mock
+        cannot be intercepting anything its subject does. Deliberately a WEAK rule — a test may
+        import several modules and mock ethers for one of them, and transitive imports are not
+        followed — because a strict version would cry wolf and get suppressed. A sweep of all 35
+        current `vi.mock('ethers')` files found **no remaining orphans**: the three fixed this
+        session were all of them.
+        Two false positives were designed out during its own construction, both worth knowing.
+        (1) The scan matched its OWN PROSE — every file documenting a replaced mock, this one
+        included, reported as still having one — so comments are stripped before scanning. (2) The
+        specifier resolver missed a multi-line `await import(\n  '../../utils/rpcProvider'\n)`,
+        which is idiomatic here, and reported `rpcProvider.endpoints.test.js` as an orphan when its
+        subject is very much still on the list. Verified non-vacuous by reintroducing the retired
+        `ethers.Contract` fake in `MiniAppReviewTab.test.jsx` and watching it fail by name.
       - `src/components/miniapps/SubmitAppPanel.jsx` — the last of the three `extractRevert` callers,
         and **the THIRD file running in a row whose test mocked `ethers.Contract`** (after
         MiniAppReviewTab and CallsignPanel). That is a pattern, not three incidents: every one of
