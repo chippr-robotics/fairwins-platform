@@ -12,8 +12,8 @@
  * about curation administering itself), and a failure there must not downgrade a definite
  * `hasRole` yes — that would withdraw a curator's controls over a cosmetic read.
  *
- * `ethers.Contract` is stubbed rather than a provider: the module's job is to classify what the
- * contract call did, and driving that through ethers' own decoding would test ethers instead.
+ * The chain SEAM is stubbed rather than a transport: the module's job is to classify what the
+ * contract call did, and driving that through a real decoder would test the decoder instead.
  */
 import { describe, it, expect, vi } from 'vitest'
 
@@ -25,14 +25,19 @@ const s = vi.hoisted(() => ({
 }))
 
 vi.mock('../../config/contracts', () => ({ getContractAddressForChain: () => s.address }))
-vi.mock('../../utils/rpcProvider', () => ({ getReadProvider: () => s.provider }))
-vi.mock('ethers', async (io) => {
-  const actual = await io()
-  function FakeContract() {
-    return { hasRole: (...a) => s.hasRole(...a), getRoleAdmin: (...a) => s.getRoleAdmin(...a) }
-  }
-  return { ...actual, Contract: FakeContract }
-})
+// `provider` is the route: null means this build has no way to reach the registry's chain.
+vi.mock('../../lib/chains/publicClient', async (io) => ({
+  ...(await io()),
+  getPublicClient: () => s.provider,
+}))
+vi.mock('../../lib/chains/readContract', async (io) => ({
+  ...(await io()),
+  readContract: (_chainId, { functionName, args = [] }) => {
+    if (functionName === 'hasRole') return s.hasRole(...args)
+    if (functionName === 'getRoleAdmin') return s.getRoleAdmin(...args)
+    throw new Error('unmocked registry read: ' + functionName)
+  },
+}))
 
 import { APP_CURATOR_ROLE } from '../../abis/miniAppRegistry'
 import {

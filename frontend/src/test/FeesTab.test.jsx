@@ -46,6 +46,21 @@ vi.mock('ethers', async (orig) => {
   return { ...actual, ethers: { ...actual.ethers, Contract: FakeContract }, Contract: FakeContract }
 })
 
+// The estate AUTHORITY read (`hasRole` on the router that will enforce it) moved onto the
+// spec-110 chain seam; the tab's own FeeRouter reads still go through the contract mock above.
+// Both tables are `m.reads`, so what a test seeds is unchanged.
+vi.mock('../lib/chains/readContract', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      const f = m.reads[functionName]
+      if (!f) throw new Error('unmocked contract method: ' + functionName)
+      return f(...args)
+    },
+  }
+})
+
 import FeesTab from '../components/admin/FeesTab'
 
 const EARN_LEND = ethers.id('earn.lend')

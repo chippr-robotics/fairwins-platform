@@ -354,6 +354,7 @@ export default function SupplyTab({
       bridgePools.map(async (pool) => {
         // Per-pool, so one unreadable HubPool never blanks the others.
         const info = await readPooledToken({
+          chainId: scopeChainId,
           provider: readProvider,
           hubPool: pool.poolAddress,
           l1Token: pool.token0,
@@ -363,7 +364,7 @@ export default function SupplyTab({
     )
     // Stale runs drop their result rather than overwriting a newer network's.
     if (run === bridgePoolsRun.current) setBridgeSizes(Object.fromEntries(entries))
-  }, [readProvider, state?.pools])
+  }, [readProvider, state?.pools, scopeChainId])
 
   // ── THE FEE QUOTE GETS ITS OWN EFFECT, AND THAT SPLIT IS THE WHOLE POINT ──────────────────────
   //

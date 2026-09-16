@@ -43,6 +43,20 @@ const WALLET_CHAIN = cohortChainIds()[0]
 const ACCOUNT = '0x2222222222222222222222222222222222222222'
 
 import { ethers } from 'ethers'
+// The estate AUTHORITY read (`hasRole` on the router that will enforce it) moved onto the
+// spec-110 chain seam; the tab's own router reads still go through the contract mock above.
+// Both serve `m.reads`, so what a test seeds is unchanged.
+vi.mock('../../lib/chains/readContract', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      const f = m.reads[functionName]
+      return f ? f(...args) : undefined
+    },
+  }
+})
+
 import StakingTab from '../../components/admin/StakingTab'
 // Capability now comes from the router's own AccessControl, so "a guardian" in these tests means
 // the router answers hasRole(GUARDIAN_ROLE) — not that an app-wide prop said so. The props stay

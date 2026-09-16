@@ -257,7 +257,9 @@ async function enrichPool({ listing, chainId, name, provider, config, fee, feeKn
   } else {
     // Across's own record: its retirement flag and how much of the pot is here.
     const pooled = await safe(
-      Promise.resolve(readPooledToken({ provider, hubPool: listing.poolAddress, l1Token: listing.token0 })),
+      Promise.resolve(
+        readPooledToken({ chainId, provider, hubPool: listing.poolAddress, l1Token: listing.token0 }),
+      ),
     )
     if (!pooled) {
       unavailableReason = 'unreachable'
@@ -358,6 +360,7 @@ async function loadPositions({ chainId, provider, config, pools, owner }) {
     const lp = await safe(
       Promise.resolve(
         readLpPosition({
+          chainId,
           provider,
           hubPool: pool.listing.poolAddress,
           l1Token: pool.listing.token0,
