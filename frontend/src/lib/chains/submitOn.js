@@ -57,32 +57,59 @@ export class ChainSwitchRefused extends Error {
 }
 
 const num = (v) => (v == null ? null : Number(v))
+const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
- * Land the wallet on `target`, then return the SETTLED wallet snapshot.
+ * Land the wallet on `chainId`, then return the SETTLED wallet snapshot. Exported because the
+ * three hooks that grew their own copy of this loop — `useEarnSend`, `useActiveAccount`,
+ * `useVaultDeployment` — do not all end in one `submitOn` payload: a vault deployment settles once
+ * and then sends a deploy plus N rule installs off the same signer. They need the loop, not the
+ * whole seam, so the loop is the thing that is shared (T026).
  *
  * `readWallet()` must return the CURRENT snapshot, not one captured at tap time: a network switch
  * spans renders, so a closure captured when the button was pressed still holds the pre-switch
  * signer. Every copy of this loop kept a ref for exactly that reason and it is the part most
  * easily lost in a rewrite.
  *
- * A passkey session is not waited on for a chain-scoped signer — it has no key in the browser, so
- * waiting for one would always time out.
+ * A passkey session is not waited on for a chain-scoped signer (`needsSigner: false`) — it has no
+ * key in the browser, so waiting for one would spin to the deadline and refuse a write that was
+ * fine.
+ *
+ * @param {number} chainId
+ * @param {object} io
+ * @param {() => object} io.readWallet
+ * @param {(chainId: number) => Promise<unknown>} [io.switchNetwork]
+ * @param {(chainId: number|null) => string} io.chainName  strict lookup — never a default-network
+ *   fallback, which would name the wrong chain in the one sentence that has to be right.
+ * @param {boolean} [io.needsSigner]
+ * @param {string} [io.subject]  the noun the refusal opens with ("This proposal", "This
+ *   deployment"). The three surfaces were each saying something slightly different and only the
+ *   NOUN differed; unifying the sentence and keeping the noun loses nothing a member reads.
+ * @param {(ms: number) => Promise<void>} [io.sleep]
+ * @returns {Promise<object>} the settled wallet snapshot
+ * @throws {ChainSwitchRefused}
  */
-async function settleOn(target, { readWallet, switchNetwork, chainName, needsSigner, sleep }) {
+export async function settleWalletOn(
+  chainId,
+  { readWallet, switchNetwork, chainName, needsSigner = true, subject = 'This', sleep = defaultSleep },
+) {
+  const target = num(chainId)
   const here = num(readWallet()?.chainId)
   if (here === target) return readWallet()
 
-  const refusal = new ChainSwitchRefused(
-    `This goes to ${chainName(target)}, but the wallet is on ${chainName(here)}, so nothing has been signed.`,
-    { from: here, to: target },
-  )
-  if (typeof switchNetwork !== 'function') throw refusal
+  const refusal = () =>
+    new ChainSwitchRefused(
+      `${subject} goes to ${chainName(target)}, but the wallet stayed on ${chainName(here)}, so nothing has been signed.`,
+      { from: here, to: target },
+    )
+  if (typeof switchNetwork !== 'function') throw refusal()
 
   try {
     await switchNetwork(target)
   } catch (cause) {
-    throw new ChainSwitchRefused(refusal.message, { from: here, to: target, cause })
+    const err = refusal()
+    err.cause = cause
+    throw err
   }
 
   const deadline = Date.now() + SETTLE_TIMEOUT_MS
@@ -107,7 +134,7 @@ async function settleOn(target, { readWallet, switchNetwork, chainName, needsSig
  * @param {object} io  the seam's dependencies — every one injectable so the rail choice and the
  *   refusal wording are testable with no wallet, no network and no React.
  * @param {() => {chainId: number|null, signer: object|null, provider: object|null}} io.readWallet
- *   the LIVE wallet snapshot (see `settleOn`).
+ *   the LIVE wallet snapshot (see `settleWalletOn`).
  * @param {(chainId: number) => Promise<unknown>} [io.switchNetwork]
  * @param {string|null} [io.loginMethod]  informational only — the rail comes from the SIGNER
  *   (see `resolveWriteRail`), never from how the member logged in.
@@ -127,7 +154,7 @@ async function settleOn(target, { readWallet, switchNetwork, chainName, needsSig
  */
 export async function submitOn(chainId, payload, io) {
   const target = num(chainId)
-  const { readWallet, chainName, sleep = (ms) => new Promise((r) => setTimeout(r, ms)) } = io
+  const { readWallet, chainName, sleep = defaultSleep } = io
   if (target == null || !Number.isFinite(target)) {
     throw new Error('submitOn: a write must name the chain it lands on.')
   }
@@ -163,7 +190,7 @@ export async function submitOn(chainId, payload, io) {
 
   // --- the one rail that has to move the wallet first ---
 
-  const settled = await settleOn(target, {
+  const settled = await settleWalletOn(target, {
     readWallet,
     switchNetwork: io.switchNetwork,
     chainName,

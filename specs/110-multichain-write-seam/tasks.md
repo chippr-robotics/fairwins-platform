@@ -216,10 +216,28 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       is byte-compatible. One answer DID change: a chainId absent from `NETWORKS` is now refused on
       every rail including the signer rail — there is no network definition to hand the wallet and
       no RPC behind it, so `available: true` there was a confident wrong answer.
-- [ ] T026 Replace `submitAsActiveAccount`'s chain-blind personal branch with the seam (vault
+- [x] T026 Replace `submitAsActiveAccount`'s chain-blind personal branch with the seam (vault
       branch keeps spec-102 tap-time switching semantics through the same loop); retire the three
       settle-loop copies in `hooks/useEarnSend.js`, `hooks/useActiveAccount.js`,
       `hooks/useVaultDeployment.js`.
+      **Done.** The shared loop is `settleWalletOn` — exported from `submitOn.js` rather than
+      folded into it, because a vault deployment settles ONCE and then sends a deploy plus N rule
+      installs off the same signer; those hooks need the loop, not the whole seam. Two facts fell
+      out of unifying it: (a) the three copies had drifted to different patience (20s/150ms twice,
+      30s/250ms once) so the same wallet on the same chain got ten extra seconds depending on which
+      button was pressed — now one pair, and `useVaultDeployment` is the one that changed; (b) the
+      only thing that genuinely differed between the three refusals was the NOUN, so `subject` is
+      the one thing still passed in. `useEarnSend`'s retired wording ("Could not switch to Ethereum
+      — approve the network change and try again") named neither the chain the wallet was on nor
+      that nothing had been signed; two tests were updated to assert those PROPERTIES rather than
+      the old phrasing.
+      The personal-branch guard is the other half and it is the one that moves the member's own
+      money: `ctx.chainId` in, and the SAME wrong-chain refusal the vault branch has had since 043.
+      It bites hardest on spec-088's acting signer, which the ceremony binds to the wallet's CURRENT
+      chain and deliberately does not switch — a surface asking for Base while the wallet sat on
+      Polygon got a Polygon transaction and a success. `ctx.chainId` is OPTIONAL and omitting it
+      leaves the send unguarded exactly as before: a soft gate, closed by T028. A signer with no
+      provider to ask is the ABSENCE of a check, never a passed one, and a test asserts that.
 - [ ] T027 `lib/relay/useGaslessWrite.js` stops resolving signer/domain/verifier from the ambient
       chain — target chain in, domain out; no wallet switch on the intent rail.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
