@@ -4,7 +4,11 @@
 // only). The twin ethers suite is src/test/network/rpcProvider.endpoints.test.js; these run
 // side by side until the last read caller leaves utils/rpcProvider.js.
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
+
+// The global setup mocks the client factory with the canned test world (its ethers-Contract
+// parity); THIS suite is the one place that must see the real thing.
+vi.unmock('../../lib/chains/publicClient')
 
 const { AUTH_MODES, saveEndpointSettings, __resetEndpointStoreForTests } = await import(
   '../../lib/network/endpointStore'
