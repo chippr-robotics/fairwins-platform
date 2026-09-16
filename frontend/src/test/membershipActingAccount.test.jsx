@@ -28,28 +28,29 @@ const m = vi.hoisted(() => ({
 
 // A MembershipManager that answers GOLD for the CONNECTED wallet and nothing for the acting one,
 // so a hook reading the wrong address produces a visibly wrong tier rather than a subtle one.
-vi.mock('ethers', async (importOriginal) => {
+// The membership reads ride the spec-110 chain seam — what is asserted below is WHICH ACCOUNT
+// was asked about, which the seam carries as the read's first argument exactly as before.
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: class {
-        async getMembership(user) {
-          m.asked.push(String(user))
-          const gold = String(user).toLowerCase() === CONNECTED.toLowerCase()
-          return {
-            tier: gold ? 3n : 0n,
-            expiresAt: gold ? BigInt(Math.floor(Date.now() / 1000) + 86_400) : 0n,
-            activeCount: 0n,
-            monthAnchor: 0n,
-            monthCount: 0n,
-          }
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      if (functionName === 'getMembership') {
+        const user = args[0]
+        m.asked.push(String(user))
+        const gold = String(user).toLowerCase() === CONNECTED.toLowerCase()
+        return {
+          tier: gold ? 3n : 0n,
+          expiresAt: gold ? BigInt(Math.floor(Date.now() / 1000) + 86_400) : 0n,
+          activeCount: 0n,
+          monthAnchor: 0n,
+          monthCount: 0n,
         }
-        async getTierConfig() {
-          return { limits: { monthlyMarketCreation: 100n, maxConcurrentMarkets: 30n } }
-        }
-      },
+      }
+      if (functionName === 'getTierConfig') {
+        return { limits: { monthlyMarketCreation: 100n, maxConcurrentMarkets: 30n } }
+      }
+      throw new Error('unmocked membership read: ' + functionName)
     },
   }
 })
