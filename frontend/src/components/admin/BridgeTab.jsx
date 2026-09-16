@@ -38,7 +38,8 @@ import { FEE_SERVICES, fetchFeeQuote } from '../../lib/fees/feeQuote'
 import { getBlockscoutUrl, getTransactionUrl } from '../../config/blockExplorer'
 import { useGatewayStatus } from '../../hooks/useGatewayStatus'
 import { BRIDGE_SETTLEMENT, bridgeStateCopy } from '../../lib/bridge/bridgeCopy'
-import { SPOKE_POOL_IFACE, deriveBridgeState, evidenceFromGatewayStatus, fetchBridgeStatus } from '../../lib/bridge/bridgeStatus'
+import { decodeEventLog, toEventSelector } from 'viem'
+import { SPOKE_POOL_ABI, deriveBridgeState, evidenceFromGatewayStatus, fetchBridgeStatus } from '../../lib/bridge/bridgeStatus'
 import { BRIDGE_STATE } from '../../data/ledger/sources/bridgeLedgerSource'
 import { FeeRateCard, HistoryCard, NetworkScopeCard, WriteScopeNotice } from './liquidityAdminCards'
 import {
@@ -90,9 +91,11 @@ const OPS_LIMIT = 10
 
 const safe = (p) => p.then((v) => v).catch(() => undefined)
 
-/** Topic hashes for BOTH Across deposit vocabularies — see SPOKE_POOL_IFACE. */
+/** Topic hashes for BOTH Across deposit vocabularies — see SPOKE_POOL_ABI. */
 const DEPOSIT_TOPICS = new Set(
-  ['V3FundsDeposited', 'FundsDeposited'].map((n) => SPOKE_POOL_IFACE.getEvent(n).topicHash),
+  ['V3FundsDeposited', 'FundsDeposited'].map((n) =>
+    toEventSelector(SPOKE_POOL_ABI.find((i) => i.type === 'event' && i.name === n)),
+  ),
 )
 
 export default function BridgeTab({
@@ -1192,7 +1195,7 @@ async function readDepositId(provider, txHash) {
   for (const log of receipt.logs) {
     if (!DEPOSIT_TOPICS.has(log?.topics?.[0])) continue
     try {
-      const parsed = SPOKE_POOL_IFACE.parseLog({ topics: [...log.topics], data: log.data })
+      const parsed = decodeEventLog({ abi: SPOKE_POOL_ABI, topics: [...log.topics], data: log.data ?? '0x' })
       if (parsed?.args?.depositId != null) return parsed.args.depositId
     } catch {
       // Not one of the deposit events after all — ignore rather than count it.
