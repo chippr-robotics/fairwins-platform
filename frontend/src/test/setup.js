@@ -222,6 +222,11 @@ vi.mock('../lib/chains/publicClient', async () => {
     async getLogs() {
       return []
     },
+    // eventScanHandle's raw log read (eth_getLogs). Empty history, same as getLogs above.
+    async request({ method }) {
+      if (method === 'eth_getLogs') return []
+      throw new Error(`mock publicClient: unmocked request '${method}' — mock the seam in this suite`)
+    },
     async call() {
       // 1000 tokens, the MockJsonRpcProvider.call parity value.
       return { data: `0x${(1000n * 10n ** 18n).toString(16).padStart(64, '0')}` }

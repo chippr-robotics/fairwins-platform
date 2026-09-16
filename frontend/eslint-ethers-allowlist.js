@@ -82,7 +82,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/clearpath/connectors/ozGovernor.js',
   'src/lib/custody/describeProposal.js',
   'src/lib/custody/policy.js',
-  'src/lib/custody/policyEvents.js',
   'src/lib/custody/policyV2.js',
   'src/lib/custody/proposalHub.js',
   'src/lib/custody/safeVault.js',
