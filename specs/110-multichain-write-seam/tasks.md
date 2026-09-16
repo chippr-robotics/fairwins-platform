@@ -9,17 +9,17 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 
 ## Phase 0 — Free wins and the ratchet (#1591)
 
-- [ ] T001 Re-measure the ethers import inventory over `frontend/src` (non-test): pure-util-only /
+- [x] T001 Re-measure the ethers import inventory over `frontend/src` (non-test): pure-util-only /
       read-path / signer-touching classes; record the file lists in the PR (192 at plan time).
-- [ ] T002 Add ESLint `no-restricted-imports` for `ethers` scoped to `frontend/src`, allowlist
+- [x] T002 Add ESLint `no-restricted-imports` for `ethers` scoped to `frontend/src`, allowlist
       seeded at the T001 inventory. The allowlist only ever shrinks; shrinking it is part of every
       later phase's definition of done.
-- [ ] T003 [P] Codemod the pure-util-only files (~43) to viem equivalents (`formatUnits`,
+- [x] T003 [P] Codemod the pure-util-only files (67 measured at phase start; the issue estimated 43) to viem equivalents (`formatUnits`,
       `parseUnits`, `getAddress`, `isAddress`, `keccak256`, `zeroAddress`, …); shrink the
       allowlist by the same set. Full suite, not scoped runs (spec 075 stale-import caveat).
-- [ ] T004 [P] Add `viem` to `HOST_SHARED_MODULES` in `frontend/src/lib/miniapps/manifest.js` —
+- [x] T004 [P] Add `viem` to `HOST_SHARED_MODULES` in `frontend/src/lib/miniapps/manifest.js` —
       additive, minor `hostApi` bump; update `specs/073-miniapp-platform/contracts/host-context.md`.
-- [ ] T005 Gates: `npm run check:deps`, byte gates, full frontend suite; `deps:reinstall` only.
+- [x] T005 Gates: `npm run check:deps`, byte gates, full frontend suite; `deps:reinstall` only.
 
 ## Phase 1 — The read seam (#1592)
 

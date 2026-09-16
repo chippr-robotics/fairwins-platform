@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { formatUnits } from '../lib/evm/units'
 import { useWallet } from './useWalletManagement'
 import { useActiveAccount } from './useActiveAccount'
 import { listWrappableCoins } from '../config/wrappedNative'
@@ -70,7 +70,7 @@ export function useWrapCoinOptions({ direction = WRAP_DIRECTION.WRAP } = {}) {
         const decimals = wrapping ? coin.decimals : coin.wrapped.decimals
         next[coin.key] =
           res?.status === 'fulfilled'
-            ? { balance: ethers.formatUnits(res.value, decimals), readState: 'read' }
+            ? { balance: formatUnits(res.value, decimals), readState: 'read' }
             : { balance: null, readState: 'unreadable' }
       })
       return next

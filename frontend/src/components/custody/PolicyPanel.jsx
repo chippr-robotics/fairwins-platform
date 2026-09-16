@@ -8,7 +8,8 @@
 // (useVaultProposals.propose), inheriting FR-009 approval binding.
 
 import { useState, useEffect, useCallback } from 'react'
-import { formatUnits, parseUnits, getAddress } from 'ethers'
+import { getAddress } from 'viem'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import {
   getPolicyStatus,
   readPolicy,

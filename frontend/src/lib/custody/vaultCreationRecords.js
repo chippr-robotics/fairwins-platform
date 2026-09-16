@@ -10,7 +10,7 @@
 // creation parameters. Absence is a first-class state: a vault loaded by address has no record and
 // "Add a network" says so honestly (FR-018) instead of guessing an initializer.
 
-import { getAddress } from 'ethers'
+import { getAddress } from 'viem'
 import { getUserPreference, saveUserPreference } from '../../utils/userStorage'
 
 const STORAGE_KEY = 'vault_creation_records'

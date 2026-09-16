@@ -3,11 +3,11 @@
  * into valued transfers the dashboard's pure helpers consume (spec 020).
  *
  * Mirrors the report builder's enrichment: resolve token meta (ticker +
- * decimals), convert base units → human with ethers `formatUnits`, then value
+ * decimals), convert base units → human with `formatUnits`, then value
  * at the stablecoin par baseline (`valuation.valueTransfer`). I/O (token meta
  * lookup) is injected so this is unit-testable without a provider.
  */
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../evm/units'
 import { resolveTokenMeta } from '../../data/reports/tokenMeta'
 import { valueTransfer } from '../../data/reports/valuation'
 

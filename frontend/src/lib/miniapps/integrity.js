@@ -30,7 +30,7 @@
  * integrity boundary.
  */
 
-import { keccak256 } from 'ethers'
+import { keccak256 } from 'viem'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { bytesToHex } from '@noble/hashes/utils.js'
 

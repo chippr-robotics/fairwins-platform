@@ -28,7 +28,8 @@
  *   the amount the calls carry.
  */
 
-import { formatUnits, isAddress, parseUnits } from 'ethers'
+import { isAddress } from 'viem'
+import { formatUnits, parseUnits } from '../evm/units'
 import { BATCH_SUPPORT } from '../custody/batchPreflight'
 import { classifyAddress } from '../bitcoin/addresses'
 import { isBitcoinNetworkId } from '../../config/bitcoinNetworks'

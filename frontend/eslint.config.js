@@ -3,6 +3,7 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import { defineConfig, globalIgnores } from 'eslint/config'
+import { ETHERS_ALLOWLIST } from './eslint-ethers-allowlist.js'
 
 export default defineConfig([
   // 'dist' alone matches only the top-level build; each mini-app package emits its own
@@ -38,6 +39,28 @@ export default defineConfig([
       // disagrees with but plain React semantics do not require. Kept as warnings, not silenced.
       'react-hooks/purity': 'warn',
       'react-hooks/preserve-manual-memoization': 'warn',
+    },
+  },
+  // The ethers import ratchet (spec 110, Phase 0 — issue #1591). New code takes viem (or the
+  // lib/evm/units seam); the allowlist is the set of not-yet-converted files and only ever
+  // shrinks — without this rule the tree regrows ethers imports faster than phases remove
+  // them (188 → 192 in the four days between issue #1552 and its plan).
+  {
+    files: ['src/**/*.{js,jsx}'],
+    ignores: ['src/test/**', ...ETHERS_ALLOWLIST],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          paths: [
+            {
+              name: 'ethers',
+              message:
+                "spec 110: new code imports 'viem' (units via src/lib/evm/units). A file may only join eslint-ethers-allowlist.js as part of an explicitly-scoped exception on issue #1552.",
+            },
+          ],
+        },
+      ],
     },
   },
   // Configuration for Cypress test files

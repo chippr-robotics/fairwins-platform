@@ -73,7 +73,7 @@
  * ─────────────────────────────────────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import UniversalAssetSelect from '../ui/UniversalAssetSelect'
 import InfoTip from '../ui/InfoTip'
 import { useWallet } from '../../hooks/useWalletManagement'

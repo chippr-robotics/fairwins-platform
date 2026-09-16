@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../lib/evm/units'
 import { useWallet } from './useWalletManagement'
 import { makeReadProvider } from '../utils/rpcProvider'
 import { useEndpointsRevision } from './useRpcEndpoints'

@@ -1,4 +1,4 @@
-import { ethers } from 'ethers'
+import { getAddress } from 'viem'
 import { rawRevertData } from '../chain/revertError'
 
 /**
@@ -64,7 +64,7 @@ export function sanctionedAddressFrom(error) {
   if (!data || data.slice(0, 10) !== SANCTIONED_ADDRESS_SELECTOR) return null
   if (data.length < 10 + 64) return null // truncated: one 32-byte word must follow the selector
   try {
-    return ethers.getAddress(`0x${data.slice(34, 74)}`)
+    return getAddress(`0x${data.slice(34, 74)}`)
   } catch {
     return null
   }

@@ -18,7 +18,7 @@
  * orchestration is deterministic and unit-testable (FR-010).
  */
 
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { deriveTransfers } from './transferDerivation'
 import { enrichTransfers } from './receiptEnrichment'
 import { valueTransfer, PAR_VALUATION_NOTE } from './valuation'

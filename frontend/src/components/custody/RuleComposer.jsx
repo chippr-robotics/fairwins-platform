@@ -7,7 +7,7 @@
 // token limit and an approved-contract list is one rule, not three).
 
 import { useMemo, useState } from 'react'
-import { parseUnits } from 'ethers'
+import { parseUnits } from '../../lib/evm/units'
 import { ANY_ASSET, NATIVE_ASSET, validateRulesConfig } from '../../lib/custody/policyV2'
 import { getServiceCatalog } from '../../config/serviceCatalog'
 import CustodyAddressField from './CustodyAddressField'

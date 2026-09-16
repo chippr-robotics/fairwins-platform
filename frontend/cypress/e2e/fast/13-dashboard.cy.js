@@ -338,8 +338,13 @@ describe('Dashboard', () => {
      * This widens a WAIT, not an assertion: what must be true is unchanged below, and a
      * banner that never renders still fails. Shortening the wait itself would mean making
      * that role sweep concurrent, which is a WalletContext change, not a spec one.
+     *
+     * Second occurrence: 30s tipped again on desktop shard 1 (run 35043312703, spec-110
+     * Phase 0 head 33d0c57c — a diff that does not touch the role-sync path, but does grow
+     * the bundle every page load pays for). Same remedy, same reasoning: the budget follows
+     * what the wait depends on, and the assertion is unchanged.
      */
-    cy.get('.dashboard-cta-banner', { timeout: 30000 }).should('be.visible')
+    cy.get('.dashboard-cta-banner', { timeout: 60000 }).should('be.visible')
     cy.get('.dashboard-cta-banner').invoke('text').should((text) => {
       expect(text.includes('Get access') || text.includes('Wager Participant'), text).to.be.true
     })

@@ -8,8 +8,8 @@
  * No consideration item ever pays a FairWins address — attribution is OpenSea's referral, never a
  * surcharge (FR-015).
  */
-import { parseUnits, formatUnits, ZeroAddress } from 'ethers'
-
+import { zeroAddress } from 'viem'
+import { formatUnits, parseUnits } from '../evm/units'
 // Seaport EIP-712 types (protocol standard; kept in one place).
 export const SEAPORT_ORDER_TYPES = {
   OrderComponents: [
@@ -93,7 +93,7 @@ export function buildOrder(item, price, feeBreakdown, opts) {
   const nowSec = Math.floor((now ?? Date.now()) / 1000)
   const { sellerUnits, feeItems, net, feeLines, belowFloor } = computeNet(price, feeBreakdown)
 
-  const payToken = price.native ? ZeroAddress : price.tokenAddress
+  const payToken = price.native ? zeroAddress : price.tokenAddress
   const payItemType = price.native ? ITEM_TYPE.NATIVE : ITEM_TYPE.ERC20
   const nftItemType = item.standard === 'erc1155' ? ITEM_TYPE.ERC1155 : ITEM_TYPE.ERC721
   const nftAmount = String(item.quantity && item.standard === 'erc1155' ? item.quantity : 1)
@@ -121,7 +121,7 @@ export function buildOrder(item, price, feeBreakdown, opts) {
 
   const message = {
     offerer,
-    zone: ZeroAddress,
+    zone: zeroAddress,
     offer: [
       {
         itemType: nftItemType,

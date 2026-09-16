@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { parseUnits } from 'ethers'
+import { parseUnits } from '../../lib/evm/units'
 import { useSwitchChain } from 'wagmi'
 import { useDex } from '../../hooks/useDex'
 import {
