@@ -584,6 +584,31 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         (`registerEncryptionKey:203` and `buildRegisterKeyCalls:251` guard on the same always-true
         condition — harmless, since the `try/catch` is the real fallback, but they read as
         protection they do not provide.)
+      - `src/lib/clearpath/connectors/*` (`ozGovernor.js` 28 `ethers.*` uses, `governorBravo.js` 16) —
+        **DEFERRED, and the reason is stronger than the other four: `reader` is a PUBLISHED
+        CONTRACT, not a parameter.** `specs/042-clearpath-multi-network/contracts/connector-interface.md`
+        declares it as the first argument of every method a connector exposes — `detectFramework`,
+        `matches`, `readSummary`, `readTreasuries`, `fetchProposals`, `readVoterState` — and the
+        ClearPath MINI-APP PACKAGE is built against it: `frontend/miniapps/clearpath/src/`
+        (`ExternalDaoView.jsx` imports `getConnector`/`detectFramework`; `ClearPathPanel.jsx` passes
+        `reader` / `readerFor(selected.chainId)`). A spec-073 package is frozen at an immutable CID
+        and approved on chain per cohort, so narrowing `reader` to a `chainId` is a spec-042
+        interface change that orphans a published package — not a caller-signature edit, and not
+        something a library migration gets to do as a side effect. The host tree keeps its own copy
+        of the connectors (the package boundary forbids sharing), so a change here means the same
+        change there, a rebuild, re-recorded digests and re-approval at new CIDs on Polygon 137 and
+        Mordor 63 — which is T050's work, in Phase 5, with that lifecycle.
+        The bodies convert cleanly otherwise: the uses are `Contract` (19), `isAddress` (11 —
+        divergence (d), take it from `lib/evm/address`), `ZeroAddress` (5), `Interface` (4),
+        `id` (3), `getAddress` and `zeroPadValue` (1 each), all of which now have measured
+        equivalents. Divergence 14 above is the only trap on this path and it is written down.
+        The blocker is the signature, nothing in the arithmetic.
+        Note also that these are NOT dead code — `data/notifications/sources/daoSource.js` imports
+        `getConnector`/`detectFramework` and `packageBoundary.test.js:142` records that as
+        legitimate — so leaving them on ethers is a real allowlist entry, not an oversight. What
+        this session DID take out of them is the part that never belonged: `getLogsRange`, which two
+        unrelated host hooks depended on, now lives in `lib/chains/logRange.js` (above), so the
+        connectors are no longer load-bearing for anything outside governance.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
