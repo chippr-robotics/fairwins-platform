@@ -54,7 +54,7 @@ export function maxStakeable({ walletBalance, isNative }) {
 
 /**
  * Build the stake calls for an option, dispatching on providerKind.
- * `ctx` carries { account, amount, provider, polToken, feeQuote }.
+ * `ctx` carries { account, amount, chainId, polToken, feeQuote }.
  *
  * spec 066: when a LIQUID staking fee applies (a StakingRouter is deployed AND its
  * per-provider rate is > 0), route through the router's fee-and-forward entrypoint so
@@ -64,7 +64,8 @@ export function maxStakeable({ walletBalance, isNative }) {
  * Returns { calls, requiresApproval }.
  */
 export async function buildStakeForOption(option, ctx) {
-  const { account, amount, provider, polToken } = ctx
+  const { account, amount, polToken } = ctx
+  const chainId = ctx.chainId ?? option.chainId
   const feeQuote = ctx.feeQuote || option.feeQuote
   const routerAddress = option.stakingRouterAddress
   const feeApplies = Boolean(feeQuote?.available && feeQuote.bps > 0 && routerAddress)
@@ -77,7 +78,7 @@ export async function buildStakeForOption(option, ctx) {
     case 'spol':
       return feeApplies
         ? buildSpolRouterStakeCalls({ routerAddress, polToken, amount, maxFeeBps: feeQuote.bps })
-        : buildSpolStake({ contracts: option.contracts, polToken, account, amount, provider })
+        : buildSpolStake({ contracts: option.contracts, polToken, account, amount, chainId })
     case 'validator-share':
       return buildDelegateCalls({
         validatorShare: option.validatorShare,
@@ -85,7 +86,7 @@ export async function buildStakeForOption(option, ctx) {
         polToken,
         account,
         amount,
-        provider,
+        chainId,
       })
     default:
       throw new Error(`Unknown staking provider: ${option.providerKind}`)

@@ -14,12 +14,13 @@
  * sPOL approves the router then calls `stakeSpol`. Delegated staking never routes
  * here (fee-free v1 — a direct `ValidatorShare` call).
  */
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData, parseAbi } from 'viem'
 import { STAKING_ROUTER_ABI } from '../../abis/StakingRouter'
 import { getContractAddressForChain } from '../../config/contracts'
+import { readContract, normalizeAbi } from '../chains/readContract'
 
-const ROUTER_IFACE = new Interface(STAKING_ROUTER_ABI)
-const ERC20_APPROVE_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+const ROUTER_ABI = normalizeAbi(STAKING_ROUTER_ABI)
+const ERC20_APPROVE_ABI = parseAbi(['function approve(address spender, uint256 amount) returns (bool)'])
 
 /** Resolve the router address for a chain, or null when it isn't deployed. */
 export function getStakingRouterAddress(chainId) {
@@ -41,28 +42,30 @@ export async function readStakingRouterConfig({ chainId, provider }) {
   const routerAddress = getStakingRouterAddress(chainId)
   if (!routerAddress || !provider) return null
 
-  const router = new Contract(routerAddress, STAKING_ROUTER_ABI, provider)
+  // Spec 110 Phase 1: reads through the chain seam; `provider` stays the availability gate.
+  const routerRead = (functionName, args) =>
+    readContract(chainId, { address: routerAddress, abi: ROUTER_ABI, functionName, args })
   // `paused` is the load-bearing read — if even it fails, treat the router as unreadable
   // and fall back to the constants (never guess availability).
-  const paused = await safe(router.paused())
+  const paused = await safe(routerRead('paused'))
   if (paused === undefined) return null
 
   const [lidoSteth, lidoWsteth, spolController, spolToken, polToken, polygonStakeManager, count] =
     await Promise.all([
-      safe(router.lidoSteth()),
-      safe(router.lidoWsteth()),
-      safe(router.spolController()),
-      safe(router.spolToken()),
-      safe(router.polToken()),
-      safe(router.polygonStakeManager()),
-      safe(router.validatorCount()),
+      safe(routerRead('lidoSteth')),
+      safe(routerRead('lidoWsteth')),
+      safe(routerRead('spolController')),
+      safe(routerRead('spolToken')),
+      safe(routerRead('polToken')),
+      safe(routerRead('polygonStakeManager')),
+      safe(routerRead('validatorCount')),
     ])
 
   const validators = []
   if (count !== undefined) {
     const n = Number(count)
     const entries = await Promise.all(
-      Array.from({ length: n }, (_, i) => safe(router.validatorAt(i))),
+      Array.from({ length: n }, (_, i) => safe(routerRead('validatorAt', [BigInt(i)]))),
     )
     for (const v of entries) if (v) validators.push(v)
   }
@@ -88,7 +91,7 @@ export function buildLidoRouterStakeCalls({ routerAddress, amount, maxFeeBps }) 
     calls: [
       {
         target: routerAddress,
-        data: ROUTER_IFACE.encodeFunctionData('stakeLido', [maxFeeBps]),
+        data: encodeFunctionData({ abi: ROUTER_ABI, functionName: 'stakeLido', args: [BigInt(maxFeeBps)] }),
         value: amount,
       },
     ],
@@ -105,12 +108,12 @@ export function buildSpolRouterStakeCalls({ routerAddress, polToken, amount, max
     calls: [
       {
         target: polToken,
-        data: ERC20_APPROVE_IFACE.encodeFunctionData('approve', [routerAddress, amount]),
+        data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [routerAddress, amount] }),
         value: 0n,
       },
       {
         target: routerAddress,
-        data: ROUTER_IFACE.encodeFunctionData('stakeSpol', [amount, maxFeeBps]),
+        data: encodeFunctionData({ abi: ROUTER_ABI, functionName: 'stakeSpol', args: [amount, BigInt(maxFeeBps)] }),
         value: 0n,
       },
     ],

@@ -9,36 +9,41 @@
  * extends this with pending unbonds + ready detection + delegated rewards.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Contract } from 'ethers'
 import { useWallet } from './useWalletManagement'
 import { NETWORKS } from '../config/networks'
 import { STAKING_POLL_MS, POL_TOKEN_L1 } from '../config/staking'
-import { makeReadProvider } from '../utils/rpcProvider'
+import { getPublicClient } from '../lib/chains/publicClient'
+import { readContract } from '../lib/chains/readContract'
 import { readLidoPosition, readLidoWithdrawalStatuses } from '../lib/staking/lidoStaking'
 import { readSpolPosition, readSpolOpenNonces } from '../lib/staking/spolStaking'
 import { readDelegationPosition, readStakeManagerTiming, readOpenUnbonds } from '../lib/staking/polygonDelegation'
 
 const ERC20_BALANCE_ABI = ['function balanceOf(address) view returns (uint256)']
 
-async function readWalletBalance({ option, account, provider }) {
+async function readWalletBalance({ option, account }) {
   if (option.providerKind === 'lido') {
     // Native ETH balance.
-    return provider.getBalance(account)
+    return getPublicClient(option.chainId).getBalance({ address: account })
   }
   // sPOL + delegation stake POL (ERC-20).
-  const pol = new Contract(POL_TOKEN_L1, ERC20_BALANCE_ABI, provider)
-  return pol.balanceOf(account)
+  return readContract(option.chainId, {
+    address: POL_TOKEN_L1,
+    abi: ERC20_BALANCE_ABI,
+    functionName: 'balanceOf',
+    args: [account],
+  })
 }
 
-async function readOptionState({ option, account, provider, timingByChain }) {
-  const walletBalanceRaw = await readWalletBalance({ option, account, provider }).catch(() => null)
+async function readOptionState({ option, account, timingByChain }) {
+  const walletBalanceRaw = await readWalletBalance({ option, account }).catch(() => null)
   const timing = timingByChain.get(option.chainId)
+  const chainId = option.chainId
 
   if (option.providerKind === 'lido') {
-    const pos = await readLidoPosition({ account, provider, contracts: option.contracts })
+    const pos = await readLidoPosition({ account, chainId, contracts: option.contracts })
     // Open Lido withdrawal requests, read straight from the queue (ready =
     // finalized && !claimed). US2 exit surface.
-    const statuses = await readLidoWithdrawalStatuses({ contracts: option.contracts, account, provider })
+    const statuses = await readLidoWithdrawalStatuses({ contracts: option.contracts, account, chainId })
       .catch(() => [])
     const openExits = statuses
       .filter((s) => !s.claimed)
@@ -47,11 +52,11 @@ async function readOptionState({ option, account, provider, timingByChain }) {
   }
 
   if (option.providerKind === 'spol') {
-    const pos = await readSpolPosition({ account, provider, contracts: option.contracts })
+    const pos = await readSpolPosition({ account, chainId, contracts: option.contracts })
     const nonces = await readSpolOpenNonces({
       contracts: option.contracts,
       account,
-      provider,
+      chainId,
       currentEpoch: timing?.epoch,
       withdrawalDelay: timing?.withdrawalDelay,
     }).catch(() => [])
@@ -64,11 +69,11 @@ async function readOptionState({ option, account, provider, timingByChain }) {
   }
 
   // delegated — read ALL open unbonds (a delegator can have several in flight).
-  const pos = await readDelegationPosition({ validatorShare: option.validatorShare, account, provider })
+  const pos = await readDelegationPosition({ validatorShare: option.validatorShare, account, chainId })
   const unbonds = await readOpenUnbonds({
     validatorShare: option.validatorShare,
     account,
-    provider,
+    chainId,
     epoch: timing?.epoch,
     withdrawalDelay: timing?.withdrawalDelay,
   }).catch(() => [])
@@ -99,21 +104,18 @@ export function useStakingPositions(options) {
     if (!isConnected || !address || !options?.length) return
     const reqId = ++reqIdRef.current
     try {
-      const providers = new Map()
+      // The chain seam is the availability gate: a chain with no RPC route reads nothing.
+      const readable = new Map()
       const timingByChain = new Map()
       for (const chainId of new Set(options.map((o) => o.chainId))) {
-        try {
-          providers.set(chainId, makeReadProvider(NETWORKS[chainId].rpcUrl, chainId))
-        } catch {
-          providers.set(chainId, null)
-        }
+        readable.set(chainId, getPublicClient(chainId) != null)
       }
       // StakeManager timing (epoch/withdrawalDelay) once per chain for unbond readiness.
-      for (const [chainId, provider] of providers) {
+      for (const [chainId, ok] of readable) {
         const del = NETWORKS[chainId]?.staking?.delegated
-        if (del && provider) {
+        if (del && ok) {
           try {
-            timingByChain.set(chainId, await readStakeManagerTiming({ stakeManager: del.stakeManager, provider }))
+            timingByChain.set(chainId, await readStakeManagerTiming({ stakeManager: del.stakeManager, chainId }))
           } catch {
             /* best-effort */
           }
@@ -122,9 +124,8 @@ export function useStakingPositions(options) {
 
       const settled = await Promise.allSettled(
         options.map((option) => {
-          const provider = providers.get(option.chainId)
-          if (!provider) return Promise.reject(new Error('no provider'))
-          return readOptionState({ option, account: address, provider, timingByChain }).then((s) => ({
+          if (!readable.get(option.chainId)) return Promise.reject(new Error('no provider'))
+          return readOptionState({ option, account: address, timingByChain }).then((s) => ({
             optionId: option.id,
             state: s,
           }))
