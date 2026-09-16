@@ -92,7 +92,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/passkey/intentSigner.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
   'src/lib/pools/bip39Lists.js',
-  'src/lib/pools/gasless.js',
   'src/lib/pools/poolContracts.js',
   'src/lib/recovery/legacyKeys.js',
   'src/lib/relay/__tests__/intentClient.test.js',

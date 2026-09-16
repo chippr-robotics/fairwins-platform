@@ -40,6 +40,10 @@ import { keccak_256 } from '@noble/hashes/sha3.js'
 import { getPublicClient } from '../chains/publicClient'
 import { normalizeAbi } from '../chains/readContract'
 import { getAddress } from '../evm/address'
+// Spec 110 T028 — the split moved to `lib/evm/signature.js` so `lib/pools/gasless.js` uses the
+// same one. Neither of viem's answers is right for it (the compact form is refused, and `v` comes
+// back a bigint), so there must be exactly one place that gets it right.
+import { splitSignature } from '../evm/signature'
 import { SIGN_SCHEMES } from './signedMessage'
 
 /** bytes4(keccak256("isValidSignature(bytes32,bytes)")) — the ONLY accepted success value. */
@@ -74,36 +78,6 @@ const sameAddress = (a, b) => Boolean(a && b && a.toLowerCase() === b.toLowerCas
 const TOP_BIT = 1n << 255n
 
 /**
- * Split a signature into `{ r, s, yParity }`, or null when the bytes are not one.
- *
- * BOTH encodings ethers accepted are handled: the 65-byte `r‖s‖v` form, and the 64-byte EIP-2098
- * COMPACT form, where yParity is packed into the top bit of `s`. The compact form is not
- * hypothetical here — this surface verifies signatures OTHER people produced (spec 084: "a member
- * is usually answering somebody else's challenge"), so dropping an encoding ethers understood
- * would turn a perfectly good proof into "unverifiable". viem's own `parseSignature` rejects the
- * compact form outright, so the split is written out rather than delegated.
- */
-function splitSignature(signature) {
-  if (typeof signature !== 'string' || !/^0x[0-9a-fA-F]+$/.test(signature)) return null
-  const hex = signature.slice(2)
-  if (hex.length === 130) {
-    let yParity = parseInt(hex.slice(128, 130), 16)
-    if (yParity === 27 || yParity === 28) yParity -= 27
-    if (yParity !== 0 && yParity !== 1) return null
-    return { r: hex.slice(0, 64), s: hex.slice(64, 128), yParity }
-  }
-  if (hex.length === 128) {
-    const yParityAndS = BigInt('0x' + hex.slice(64, 128))
-    return {
-      r: hex.slice(0, 64),
-      s: (yParityAndS & (TOP_BIT - 1n)).toString(16).padStart(64, '0'),
-      yParity: Number((yParityAndS & TOP_BIT) >> 255n),
-    }
-  }
-  return null
-}
-
-/**
  * Recover the EIP-191 signer, or null when the bytes are not a recoverable ECDSA signature.
  * Never throws: a 900-byte WebAuthn envelope reaching here is expected, not exceptional.
  *
@@ -122,7 +96,7 @@ export function recoverPersonalSigner(message, signature) {
   try {
     const parts = splitSignature(signature)
     if (!parts) return null
-    const sig = new secp256k1.Signature(BigInt('0x' + parts.r), BigInt('0x' + parts.s), parts.yParity)
+    const sig = new secp256k1.Signature(BigInt(parts.r), BigInt(parts.s), parts.yParity)
     const digest = hashMessage(message, 'bytes')
     const publicKey = sig.recoverPublicKey(digest).toBytes(false).slice(1) // drop the 0x04 tag
     // `bytesToHex`, not `Buffer` — this runs in the browser, where Buffer does not exist.

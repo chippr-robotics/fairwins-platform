@@ -258,7 +258,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 63.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 62.**
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
@@ -300,6 +300,19 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         round-trips through `BigInt()` so nothing would have broken — but a link is a string other
         code may compare or key on, and three lines is cheaper than being sure nothing does. Both
         new assertions were verified non-vacuous by reverting the code and watching them fail.
+      - `src/lib/pools/gasless.js` (EIP-3009 MONEY path) — and it produced the **TENTH divergence,
+        which is two faults in one function**: `ethers.Signature.from` has no correct viem
+        replacement, because `parseSignature` (1) REFUSES the 64-byte EIP-2098 compact form ethers
+        accepted, and (2) returns `v` as a **BIGINT** where ethers returned a NUMBER. The second one
+        breaks this call site outright: the `v` rides into the authorization object handed to a
+        third-party relayer, and `JSON.stringify` throws on a bigint — loud rather than silent, but
+        "it will throw somewhere" is not a migration plan.
+        So the split now lives once, in **`src/lib/evm/signature.js`**, and `lib/verify/verifyMessage.js`
+        consumes it instead of keeping the private copy T020 wrote (two implementations of signature
+        splitting is the exact duplication this migration exists to remove). Checked against
+        `ethers.Signature.from` over 200 real typed-data signatures in BOTH encodings — 400
+        comparisons, r/s/v identical every time — before the swap, and `src/test/evm/signature.test.js`
+        keeps ethers as the live oracle over the function that was replaced.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
