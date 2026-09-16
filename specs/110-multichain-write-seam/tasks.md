@@ -89,6 +89,19 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       where the cohort bound lives. Its three answers gained direct coverage they lacked, and the
       UNCONFIRMED one — the answer that is silent when it breaks, since hardening it into a denial
       takes a killswitch from the operator who holds it — is asserted to keep the control offered.
+- [ ] T012a `hooks/useOracleConditions.js` is the LAST read-path entry and is deliberately not a
+      mechanical port. Three things have to be decided rather than translated. (1) It calls
+      `queryFilter(filter, 0, 'latest')` — one unbounded request from GENESIS, which is the exact
+      pathology `lib/chain/logScan` exists to prevent and which fails outright against any 10k-range
+      cap. Moving it to `scanLogs` fixes that but backfills thousands of chunks from block 0 unless
+      the adapter's DEPLOY BLOCK is recorded first (`getDeploymentBlockForChain`), so the conversion
+      is blocked on config, not on code. Do not paper over it by keeping a single unbounded
+      `getLogs`. (2) It takes NO chainId — it reads on whatever chain the wallet happens to be on,
+      through `useWeb3().provider`. An oracle adapter address belongs to a chain, so naming it is a
+      real behaviour change for the one caller (`OracleConditionPicker`), not a refactor.
+      (3) `contract.on(...)` has no like-for-like viem twin: `watchContractEvent` polls or installs a
+      filter depending on the transport, so the live-update leg needs its own decision about cost on
+      a sparse, owner-write-only adapter.
 - [ ] T014 Gates: full suite + both e2e tiers green; allowlist reflects every converted file.
 
 ## Phase 2 — The write seam (#1593) 🎯 the chain abstraction
