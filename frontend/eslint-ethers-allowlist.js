@@ -7,7 +7,7 @@
  * this migration exists to remove. src/test/lint/ethersRatchet.test.js fails on a stale
  * entry (a listed file that no longer imports ethers), so the list cannot rot upward.
  *
- * FIVE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — three reasons over five files — and
+ * SEVEN ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — four reasons over seven files — and
  * are called out so nobody spends an afternoon rediscovering it:
  *
  *   - `lib/pools/bip39Lists.js`, `lib/recovery/bip39Suggest.js`, `utils/claimCode/wordlist.js`
@@ -20,6 +20,16 @@
  *     removing it breaks published packages, so it belongs to Phase 5 (#1596).
  *   - `utils/rpcProvider.js` is the seam being replaced; it leaves last, when its final
  *     caller does (T014).
+ *   - `lib/bridge/__tests__/bridgeRouter.test.js` and `lib/liquidity/__tests__/liquidityRouter.test.js`
+ *     decode viem-BUILT calldata with an ethers `Interface`, on purpose: that is a live
+ *     cross-library byte-compatibility assertion over the exact code this migration is changing,
+ *     and it fails loudly if the two encoders ever disagree. Each file says so at its import.
+ *     Converting them to viem would make the check tautological — it would be asserting that
+ *     viem agrees with itself — so it deletes the test while appearing to modernise it.
+ *
+ * Adding a NEW line is always wrong, including in a test. When a fixture needs something ethers
+ * had and viem does not (`Interface.encodeEventLog`), write the viem version once — see
+ * `src/test/helpers/encodeEventLog.js` — rather than reaching back for ethers.
  */
 export const ETHERS_ALLOWLIST = [
   'src/components/account/CallsignPanel.jsx',
@@ -75,9 +85,7 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/earn/vaultActions.js',
   'src/lib/funding/fundingContracts.js',
   'src/lib/hardware/hardwareSigner.js',
-  'src/lib/liquidity/__tests__/acrossLpPositions.test.js',
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',
-  'src/lib/liquidity/__tests__/uniswapPositions.test.js',
   'src/lib/miniapps/hostScope.js',
   'src/lib/passkey/intentSigner.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
@@ -90,7 +98,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/relay/__tests__/poolIntents.test.js',
   'src/lib/relay/intentClient.js',
   'src/lib/transfer/eip3009Transfer.js',
-  'src/lib/uniswap/__tests__/quote.test.js',
   'src/lib/verify/verifyMessage.js',
   'src/utils/blockchainService.js',
   'src/utils/claimCode/deriveFromCode.js',

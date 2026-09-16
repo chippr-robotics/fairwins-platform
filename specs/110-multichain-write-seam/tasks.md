@@ -37,7 +37,7 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       parameter names viem drops on multi-output results — see the note under T012.
 - [ ] T012 Convert the read-path files (~80, *(re-measure)*) onto `readContract`; delete the
       ethers `_lastFatalError` workaround in `frontend/src/utils/rpcProvider.js` rather than
-      porting it. Shrink the allowlist per file converted. **In progress: allowlist 134 → 76.**
+      porting it. Shrink the allowlist per file converted. **In progress: allowlist 134 → 73.**
       Of what remains, most entries are the write/signer surface (Phase 2), and five are a
       decision rather than pending work — the three BIP-39 wordlist files (viem bundles none, so
       moving them is a lockfile change and therefore the spec-075 rolldown hazard),

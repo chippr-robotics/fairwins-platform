@@ -12,7 +12,8 @@
  * than zeros (FR-054), partial-withdrawal math (FR-022), and call construction.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Interface } from 'ethers'
+import { decodeFunctionData } from 'viem'
+import { normalizeAbi } from '../../chains/readContract'
 // The module's own source text, so the "no router import" assertion below reads what ships
 // rather than what a mock happens to expose.
 import acrossLpSource from '../acrossLpPositions.js?raw'
@@ -70,9 +71,32 @@ import { getLiquidityRouterAddress } from '../liquidityRouter'
 // The cohort roster the availability answers are bounded by (#1265).
 import { NETWORKS, cohortChainIds, isInCohort, listSupportedChainIds } from '../../../config/networks'
 
-const HUB_POOL_IFACE = new Interface(HUB_POOL_ABI)
-const ROUTER_IFACE = new Interface(LIQUIDITY_ROUTER_ABI)
-const ERC20_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+const HUB_POOL_PARSED = normalizeAbi(HUB_POOL_ABI)
+const ROUTER_PARSED = normalizeAbi(LIQUIDITY_ROUTER_ABI)
+const ERC20_PARSED = normalizeAbi(['function approve(address spender, uint256 amount) returns (bool)'])
+
+/**
+ * Decode one call's arguments, asserting it really is the function named (spec 110).
+ *
+ * ethers' `decodeFunctionData(name, data)` threw when the selector belonged to another function;
+ * viem's derives the name FROM the selector, so without this check it would decode the wrong call
+ * and hand back plausible arguments.
+ */
+function decodeAs(abi, name, data) {
+  const { functionName, args } = decodeFunctionData({ abi, data })
+  expect(functionName, `expected calldata for ${name}`).toBe(name)
+  return args
+}
+
+/** True when this ABI can decode the calldata at all. viem THROWS where ethers returned null. */
+function decodesWith(abi, data) {
+  try {
+    decodeFunctionData({ abi, data })
+    return true
+  } catch {
+    return false
+  }
+}
 
 const HUB_POOL = '0xc186fA914353c44b2E33eBE05f21846F1048bEda'
 const LIQUIDITY_ROUTER = '0x1111111111111111111111111111111111111111'
@@ -150,8 +174,8 @@ describe('T092 — the Across LP path never routes through liquidityRouter (rese
     for (const call of [...supply.calls, ...exit.calls]) {
       expect([HUB_POOL, USDC]).toContain(call.target)
       expect(call.target).not.toBe(LIQUIDITY_ROUTER)
-      // If any leg were a router call, the router's own interface would decode it.
-      expect(ROUTER_IFACE.parseTransaction({ data: call.data })).toBeNull()
+      // If any leg were a router call, the router's own ABI would decode it.
+      expect(decodesWith(ROUTER_PARSED, call.data), 'no leg is a router call').toBe(false)
     }
   })
 
@@ -171,7 +195,7 @@ describe('T092 — the Across LP path never routes through liquidityRouter (rese
 
     // The deposit itself carries exactly the token and the full amount — nothing is skimmed.
     const deposit = plain.calls.at(-1)
-    const decoded = HUB_POOL_IFACE.decodeFunctionData('addLiquidity', deposit.data)
+    const decoded = decodeAs(HUB_POOL_PARSED, 'addLiquidity', deposit.data)
     expect(decoded[0]).toBe(USDC)
     expect(decoded[1]).toBe(1_000_000n)
   })
@@ -430,13 +454,13 @@ describe('buildAddLiquidityCalls', () => {
     expect(calls).toHaveLength(2)
 
     expect(calls[0].target).toBe(USDC)
-    const approve = ERC20_IFACE.decodeFunctionData('approve', calls[0].data)
+    const approve = decodeAs(ERC20_PARSED, 'approve', calls[0].data)
     expect(approve[0]).toBe(HUB_POOL)
     expect(approve[1]).toBe(250_000_000n)
     expect(calls[0].value).toBe(0n)
 
     expect(calls[1].target).toBe(HUB_POOL)
-    expect(HUB_POOL_IFACE.decodeFunctionData('addLiquidity', calls[1].data)).toEqual([USDC, 250_000_000n])
+    expect(decodeAs(HUB_POOL_PARSED, 'addLiquidity', calls[1].data)).toEqual([USDC, 250_000_000n])
     expect(calls[1].value).toBe(0n)
   })
 
@@ -478,7 +502,7 @@ describe('buildRemoveLiquidityCalls', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].target).toBe(HUB_POOL)
     expect(calls[0].value).toBe(0n)
-    expect(HUB_POOL_IFACE.decodeFunctionData('removeLiquidity', calls[0].data)).toEqual([USDC, 2n * WAD, false])
+    expect(decodeAs(HUB_POOL_PARSED, 'removeLiquidity', calls[0].data)).toEqual([USDC, 2n * WAD, false])
   })
 
   it('supports a PARTIAL exit — the remainder stays supplied (FR-022)', () => {
@@ -487,7 +511,7 @@ describe('buildRemoveLiquidityCalls', () => {
       l1Token: USDC,
       lpTokenAmount: (2n * WAD) / 5n,
     })
-    expect(HUB_POOL_IFACE.decodeFunctionData('removeLiquidity', calls[0].data)[1]).toBe((2n * WAD) / 5n)
+    expect(decodeAs(HUB_POOL_PARSED, 'removeLiquidity', calls[0].data)[1]).toBe((2n * WAD) / 5n)
   })
 
   it('unwraps to ETH only for the WETH pool', () => {
@@ -498,7 +522,7 @@ describe('buildRemoveLiquidityCalls', () => {
       receiveNative: true,
       weth: WETH,
     })
-    expect(HUB_POOL_IFACE.decodeFunctionData('removeLiquidity', calls[0].data)[2]).toBe(true)
+    expect(decodeAs(HUB_POOL_PARSED, 'removeLiquidity', calls[0].data)[2]).toBe(true)
     expect(() =>
       buildRemoveLiquidityCalls({
         hubPool: HUB_POOL,
