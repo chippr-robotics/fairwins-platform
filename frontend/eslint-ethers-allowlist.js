@@ -59,7 +59,6 @@ export const ETHERS_ALLOWLIST = [
   'src/contexts/DexContext.jsx',
   'src/contexts/WalletContext.jsx',
   'src/contexts/Web3Context.jsx',
-  'src/data/wagers/EventsSource.js',
   'src/hooks/useFriendMarketCreation.js',
   'src/hooks/useFundingPools.js',
   'src/hooks/useNullifierContracts.js',

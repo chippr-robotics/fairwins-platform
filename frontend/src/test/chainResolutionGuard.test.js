@@ -65,8 +65,12 @@ const ALLOW = {
   'hooks/useTreasuryVault.js': { addr: 1, prov: 0 },
   // legacy: nullifierRegistry not deployed on v2 (module-scope address)
   'hooks/useNullifierContracts.js': { addr: 1, prov: 0 },
-  // legacy: v1 friendGroupMarketFactory event source (not deployed on v2)
-  'data/wagers/EventsSource.js': { addr: 1, prov: 5 },
+  // legacy: v1 friendGroupMarketFactory event source (not deployed on v2). The five build-time
+  // `getProvider()` calls are GONE since spec 110 — reads name the chain through the seam — and the
+  // baseline is tightened to 0 rather than left at 5, because a stale ceiling permits a regression
+  // it was only ever meant to record. The remaining `getContractAddress(` is the module-scope
+  // address for a contract no live network configures.
+  'data/wagers/EventsSource.js': { addr: 1, prov: 0 },
   // open-challenge hooks (spec 024): chain-aware via getContractAddressForChain(name, chainId|execChainId),
   // each with a getContractAddress fallback for the disconnected-wallet case (same pattern as blockchainService).
   'hooks/useOpenChallengeAccept.js': { addr: 2, prov: 0 },
