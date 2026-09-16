@@ -42,7 +42,6 @@ export const ETHERS_ALLOWLIST = [
   'src/components/admin/apps/IncidentResponseApp.jsx',
   'src/components/admin/apps/LiquidityApp.jsx',
   'src/components/admin/apps/MembershipRevenueApp.jsx',
-  'src/components/admin/liquidityAdminCommon.js',
   'src/components/admin/perpsFeeRails.js',
   'src/components/admin/useAdminTx.js',
   'src/components/earn/SupplyView.jsx',

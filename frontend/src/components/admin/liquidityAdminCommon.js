@@ -29,7 +29,12 @@
  *      the specific router on the specific network whether THIS account holds the role — see its
  *      own doc-comment for why the app-wide role flags cannot answer that question.
  */
-import { ethers } from 'ethers'
+import { isAddress, keccak256, stringToHex, zeroAddress, zeroHash } from 'viem'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
+import { readContract } from '../../lib/chains/readContract'
+
+/** keccak256 over a role name's UTF-8 bytes — byte-identical to ethers v6 `id()`. */
+const roleId = (name) => keccak256(stringToHex(name))
 import { NETWORKS, listSupportedChainIds } from '../../config/networks'
 import { networkName as estateNetworkName, readProviderFor as estateReadProviderFor } from '../../lib/chains/estate'
 
@@ -50,11 +55,11 @@ export const HISTORY_LOOKBACK_BLOCKS = 200_000
 export const HISTORY_LIMIT = 25
 
 export function shortAddr(a) {
-  return a && a !== ethers.ZeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
+  return a && a !== zeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
 }
 
 /** A settable address must be a real, non-zero address — the routers reject `ZeroAddress`. */
-export const isValidAddr = (a) => ethers.isAddress(a) && a !== ethers.ZeroAddress
+export const isValidAddr = (a) => isAddress(a) && a !== zeroAddress
 
 /** Display name for a chain, or an honest placeholder — never a guessed one. */
 export const networkName = estateNetworkName
@@ -112,9 +117,9 @@ const ACCESS_CONTROL_ABI = ['function hasRole(bytes32 role, address account) vie
 /** The three roles that gate a control on these two tabs, by their on-chain hashes. */
 export const ROUTER_ROLE_HASHES = {
   // DEFAULT_ADMIN_ROLE is bytes32(0), not a keccak of a name.
-  admin: ethers.ZeroHash,
-  guardian: ethers.id('GUARDIAN_ROLE'),
-  liquidityAdmin: ethers.id('LIQUIDITY_ADMIN_ROLE'),
+  admin: zeroHash,
+  guardian: roleId('GUARDIAN_ROLE'),
+  liquidityAdmin: roleId('LIQUIDITY_ADMIN_ROLE'),
 }
 
 /**
@@ -147,10 +152,12 @@ export const ROUTER_ROLE_HASHES = {
  * @returns {Promise<{readable: boolean, deployed: boolean, admin: boolean, guardian: boolean,
  *                    liquidityAdmin: boolean, reason: string|null}>}
  */
-export async function readRouterAuthority({ provider, routerAddress, account }) {
+export async function readRouterAuthority({ chainId, provider, routerAddress, account }) {
   const none = { admin: false, guardian: false, liquidityAdmin: false, reason: null }
   if (!routerAddress) return { ...none, readable: true, deployed: false }
-  if (!provider || !account) {
+  // `provider` stays the availability gate — these tabs resolve it through `readProviderFor`,
+  // which is also where the spec-067 cohort opt-out lives, so the gate must keep deciding.
+  if (!provider || !account || chainId == null) {
     return {
       ...none,
       readable: false,
@@ -159,11 +166,17 @@ export async function readRouterAuthority({ provider, routerAddress, account }) 
     }
   }
   try {
-    const c = new ethers.Contract(routerAddress, ACCESS_CONTROL_ABI, provider)
+    const hasRole = (role) =>
+      readContract(chainId, {
+        address: routerAddress,
+        abi: ACCESS_CONTROL_ABI,
+        functionName: 'hasRole',
+        args: [role, account],
+      })
     const [admin, guardian, liquidityAdmin] = await Promise.all([
-      c.hasRole(ROUTER_ROLE_HASHES.admin, account),
-      c.hasRole(ROUTER_ROLE_HASHES.guardian, account),
-      c.hasRole(ROUTER_ROLE_HASHES.liquidityAdmin, account),
+      hasRole(ROUTER_ROLE_HASHES.admin),
+      hasRole(ROUTER_ROLE_HASHES.guardian),
+      hasRole(ROUTER_ROLE_HASHES.liquidityAdmin),
     ])
     return {
       readable: true,
@@ -222,7 +235,7 @@ export function tokenMeta(chainId, address) {
 
 /** `"USDC"` for a token this build knows, else its short address — never a made-up ticker. */
 export function tokenLabel(chainId, address) {
-  if (!address || address === ethers.ZeroAddress) return '—'
+  if (!address || address === zeroAddress) return '—'
   return tokenMeta(chainId, address)?.symbol || shortAddr(address)
 }
 
@@ -235,7 +248,7 @@ export function formatLimit(chainId, address, raw) {
   if (value === 0n) return 'uncapped'
   const meta = tokenMeta(chainId, address)
   if (!meta) return `${value} (raw units)`
-  return `${ethers.formatUnits(value, meta.decimals)} ${meta.symbol}`
+  return `${formatUnits(value, meta.decimals)} ${meta.symbol}`
 }
 
 /**
@@ -247,7 +260,7 @@ export function formatAmount(chainId, address, raw) {
   const value = BigInt(raw ?? 0n)
   const meta = tokenMeta(chainId, address)
   if (!meta) return `${value} (raw units)`
-  return `${ethers.formatUnits(value, meta.decimals)} ${meta.symbol}`
+  return `${formatUnits(value, meta.decimals)} ${meta.symbol}`
 }
 
 /** The unit an operator is typing a limit in, so the input can label itself honestly. */
@@ -273,7 +286,7 @@ export function parseLimit(chainId, address, text) {
     return BigInt(raw)
   }
   try {
-    return ethers.parseUnits(raw, meta.decimals)
+    return parseUnits(raw, meta.decimals)
   } catch {
     throw new Error(`Enter an amount in ${meta.symbol} (up to ${meta.decimals} decimal places).`)
   }

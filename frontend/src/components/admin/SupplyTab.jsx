@@ -407,13 +407,13 @@ export default function SupplyTab({
   useEffect(() => {
     let live = true
     setAuthority(null)
-    readRouterAuthority({ provider: readProvider, routerAddress: routerAddr, account }).then((a) => {
+    readRouterAuthority({ chainId: scopeChainId, provider: readProvider, routerAddress: routerAddr, account }).then((a) => {
       if (live) setAuthority(a)
     })
     return () => {
       live = false
     }
-  }, [readProvider, routerAddr, account])
+  }, [readProvider, routerAddr, account, scopeChainId])
 
   const refresh = () => {
     fetchState()

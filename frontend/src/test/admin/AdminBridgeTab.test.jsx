@@ -68,6 +68,17 @@ vi.mock('ethers', async (orig) => {
   return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
 })
 
+// The router AUTHORITY read (`hasRole`) moved onto the spec-110 chain seam; the tab's own router
+// reads still go through the contract mock above. Both serve `m.reads`, so a test's seed is unchanged.
+vi.mock('../../lib/chains/readContract', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    readContract: (_chainId, { functionName, args = [] }) =>
+      (m.reads[functionName] ? m.reads[functionName](...args) : Promise.resolve(undefined)),
+  }
+})
+
 import BridgeTab from '../../components/admin/BridgeTab'
 
 const ROUTER = '0x1111111111111111111111111111111111111111'
