@@ -749,9 +749,29 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'package-lock.json'  # single root lockfile (spec 075)
 
+      # RESTORED BEFORE THE INSTALL, deliberately — same reasoning as the two tiers below, which
+      # have carried this pair for a while. This tier did NOT, and it is the one that runs TWELVE
+      # jobs (6 shards x 2 viewport profiles), so it was both the most exposed to a cold or evicted
+      # cache and the only one unprotected from it. Observed on PR #1607: `npm ci` reported 1431
+      # packages added, `cypress run` then said "the Cypress binary is missing", and the job failed
+      # having executed no spec at all — a red check that says nothing about the code under test.
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: cypress-${{ runner.os }}-
+
       - name: Install frontend dependencies
         run: npm ci --workspace frontend --workspace tools/miniapp-build --workspace @fairwins/miniapp-clearpath --include-workspace-root=false
         working-directory: .  # root install; the child has no lockfile (spec 075)
+
+      # Belt and braces, copied verbatim in intent from the full tier: `npm ci` normally installs
+      # the binary via cypress's postinstall, but a partial cache or a skipped script leaves the
+      # package without it, and `cypress run` then fails deep into the job rather than here.
+      - name: Ensure Cypress binary
+        run: npx cypress install
+        working-directory: .
 
       # Spec 030 pillar A — fast/46-clearpath-unavailable.cy.js serves the REAL ClearPath package
       # bytes (the loader verifies them), so this leg needs the package built. It needs no chain:
