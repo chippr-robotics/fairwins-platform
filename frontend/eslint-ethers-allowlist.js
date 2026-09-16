@@ -75,8 +75,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/custody/proposalHub.js',
   'src/lib/custody/safeVault.js',
   'src/lib/custody/submitAsActiveAccount.js',
-  'src/lib/custody/vaultDeployment.js',
-  'src/lib/custody/vaultTransaction.js',
   'src/lib/earn/vaultActions.js',
   'src/lib/funding/fundingContracts.js',
   'src/lib/hardware/hardwareSigner.js',
