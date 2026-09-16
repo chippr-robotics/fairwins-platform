@@ -65,12 +65,13 @@
  * would use.
  */
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Contract, formatUnits } from 'ethers'
+import { readContract } from '../../lib/chains/readContract'
+import { getPublicClient } from '../../lib/chains/publicClient'
+import { formatUnits } from '../../lib/evm/units'
 import { useWallet } from '../../hooks/useWalletManagement'
 import { useSelectableAssets } from '../../hooks/useSelectableAssets'
 import { ASSET_ACTIVITIES } from '../../lib/assets/assetActivity'
 import { NETWORKS, cohortChainIds } from '../../config/networks'
-import { makeReadProvider } from '../../utils/rpcProvider'
 import InfoTip from '../ui/InfoTip'
 import AssetLogo from '../wallet/AssetLogo'
 import SensitiveValue from '../common/SensitiveValue'
@@ -147,11 +148,11 @@ function formatTokenAmount(raw, decimals, symbol) {
 }
 
 /** Symbol/decimals for one token, or honest nulls when the reads fail. */
-async function readTokenMeta(provider, chainId, address) {
+async function readTokenMeta(chainId, address) {
   const key = `${chainId}:${String(address).toLowerCase()}`
   if (tokenMetaCache.has(key)) return tokenMetaCache.get(key)
-  const token = new Contract(address, ERC20_META_ABI, provider)
-  const [symbol, decimals] = await Promise.all([safe(token.symbol()), safe(token.decimals())])
+  const read = (functionName) => readContract(chainId, { address, abi: ERC20_META_ABI, functionName })
+  const [symbol, decimals] = await Promise.all([safe(read('symbol')), safe(read('decimals'))])
   const meta = {
     address,
     symbol: symbol == null ? null : String(symbol),
@@ -180,7 +181,10 @@ function compositionLabel(shares, assets) {
 async function loadNetwork(chainId, owner) {
   const net = NETWORKS[chainId]
   const name = net?.name || `chain ${chainId}`
-  const provider = net?.rpcUrl ? makeReadProvider(net.rpcUrl, chainId) : null
+  // The client is the AVAILABILITY GATE only — no endpoint configured for this chain is a
+  // different fact from a read that failed, and the helpers below still take it as that gate.
+  // Every actual read names `chainId` (spec 110), so nothing here can land on another network.
+  const provider = getPublicClient(chainId)
   const blank = { pools: [], positions: [] }
   if (!provider) return { network: { chainId, name, status: 'unreachable' }, ...blank }
 
@@ -227,7 +231,7 @@ async function enrichPool({ listing, chainId, name, provider, config, fee, feeKn
     : LIQUIDITY_PROTOCOLS.bridge.protocol
 
   const addresses = isTrading ? [listing.token0, listing.token1] : [listing.token0]
-  const assets = await Promise.all(addresses.map((a) => readTokenMeta(provider, chainId, a)))
+  const assets = await Promise.all(addresses.map((a) => readTokenMeta(chainId, a)))
 
   let totalSuppliedLabel = null
   // The same total, unjoined. A pair's total is two amounts, and "33.8M USDC + 32K
@@ -241,7 +245,16 @@ async function enrichPool({ listing, chainId, name, provider, config, fee, feeKn
   if (isTrading) {
     // A Uniswap pool's total is what the pool contract holds of each leg.
     const balances = await Promise.all(
-      addresses.map((a) => safe(new Contract(a, ERC20_META_ABI, provider).balanceOf(listing.poolAddress))),
+      addresses.map((a) =>
+        safe(
+          readContract(chainId, {
+            address: a,
+            abi: ERC20_META_ABI,
+            functionName: 'balanceOf',
+            args: [listing.poolAddress],
+          }),
+        ),
+      ),
     )
     const parts = balances
       .map((raw, i) => formatTokenAmount(raw, assets[i]?.decimals, assets[i]?.symbol))
