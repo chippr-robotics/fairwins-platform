@@ -10,7 +10,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '.'
 import { getProvider } from '../utils/blockchainService'
 import { getSafeContracts } from '../config/safeContracts'
-import { resolveWriteRail, RAILS } from '../lib/custody/writeRail'
+import { resolveWriteRail, RAILS } from '../lib/chains/writeRail'
 import { chainDisplayName } from '../lib/custody/chainName'
 import { buildCreateVaultCalldata } from '../lib/custody/safeVault'
 import {

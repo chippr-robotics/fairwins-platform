@@ -34,7 +34,7 @@
  * Nothing chose that; it is what happens when a loop is copied.
  */
 
-import { RAILS, resolveWriteRail } from '../custody/writeRail'
+import { RAILS, resolveWriteRail } from './writeRail'
 
 /** How long a wallet is given to land on the target chain after it AGREED to switch. */
 export const SETTLE_TIMEOUT_MS = 20_000

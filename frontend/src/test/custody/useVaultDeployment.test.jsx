@@ -10,7 +10,7 @@ let walletCtx
 vi.mock('../../hooks', () => ({ useWallet: () => walletCtx }))
 
 let railImpl
-vi.mock('../../lib/custody/writeRail', () => ({
+vi.mock('../../lib/chains/writeRail', () => ({
   RAILS: { SIGNER: 'signer', PASSKEY: 'passkey', NONE: 'none' },
   resolveWriteRail: (args) => railImpl(args),
 }))

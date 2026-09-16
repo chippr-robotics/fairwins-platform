@@ -203,9 +203,19 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       they never asked to be. `resolveWriteRail` is injectable so the ROUTING tests do not depend on
       which chains happen to carry a deployed bundler (that is the estate, not this seam); one test
       deliberately uses the real resolver so the two stay wired together.
-- [ ] T025 Generalize `lib/custody/writeRail.js#resolveWriteRail` out of custody; add
+- [x] T025 Generalize `lib/custody/writeRail.js#resolveWriteRail` out of custody; add
       reachability verification so availability is stated before the tap, never discovered at
       submit (`requireWriteRail` throwing form kept for callbacks).
+      **Done — now `lib/chains/writeRail.js`** (old module DELETED, not shimmed: a re-export would
+      have left `vi.mock('../../lib/custody/writeRail')` in `useVaultDeployment.test.jsx` pointing
+      at a module the hook no longer imports, which is the retired-mock trap — a mock that goes on
+      looking like protection while protecting nothing). Reachability answers three ways —
+      `unchecked` / `reachable` / `unreachable` — and `walletChainId`/`canSwitchChain` are
+      OPTIONAL: a caller that omits them gets `unchecked`, never `reachable`, because a gate that
+      reports "verified" from an absence of evidence is worse than no gate. Every pre-T025 caller
+      is byte-compatible. One answer DID change: a chainId absent from `NETWORKS` is now refused on
+      every rail including the signer rail — there is no network definition to hand the wallet and
+      no RPC behind it, so `available: true` there was a confident wrong answer.
 - [ ] T026 Replace `submitAsActiveAccount`'s chain-blind personal branch with the seam (vault
       branch keeps spec-102 tap-time switching semantics through the same loop); retire the three
       settle-loop copies in `hooks/useEarnSend.js`, `hooks/useActiveAccount.js`,

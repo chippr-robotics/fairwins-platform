@@ -256,7 +256,7 @@ describe('VaultQueueView', () => {
  *
  * Ethereum Classic and Mordor have no bundler, so a keyless passkey session cannot submit there —
  * but the buttons still rendered, and the refusal arrived from inside the batch sender after the
- * tap. The rail is knowable beforehand (lib/custody/writeRail.js), so it is said beforehand.
+ * tap. The rail is knowable beforehand (lib/chains/writeRail.js), so it is said beforehand.
  */
 describe('VaultQueueView — a network this session cannot sign on', () => {
   const RAIL_REASON =

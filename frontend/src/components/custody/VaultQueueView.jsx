@@ -95,7 +95,7 @@ export default function VaultQueueView({ group }) {
    * Can this session sign a custody write on the chain it is CONNECTED to? The queue's actions all
    * run through `useVaultProposals`, which is bound to the connected instance, so this is the fact
    * that decides whether a row's buttons can do anything — and it is a property of the signer, not
-   * of how the member logged in (lib/custody/writeRail.js).
+   * of how the member logged in (lib/chains/writeRail.js).
    */
   const writeRail = proposals?.writeRail
   const canAct = writeRail ? writeRail.available : true

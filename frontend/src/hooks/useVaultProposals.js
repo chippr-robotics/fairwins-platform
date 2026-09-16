@@ -23,7 +23,7 @@ import {
 } from '../lib/custody/proposalHub'
 import { readExecutionOutcomes } from '../lib/custody/vaultProposalReads'
 import { deriveProposalStatus, isQueued, STATUS } from '../lib/custody/proposalStatus'
-import { resolveWriteRail, requireWriteRail, RAILS } from '../lib/custody/writeRail'
+import { resolveWriteRail, requireWriteRail, RAILS } from '../lib/chains/writeRail'
 import { chainDisplayName } from '../lib/custody/chainName'
 
 const safeIface = new Interface(SAFE_ABI)
@@ -31,7 +31,7 @@ const safeIface = new Interface(SAFE_ABI)
 export function useVaultProposals(vault) {
   const { chainId, signer, provider, sendCalls, loginMethod } = useWallet()
   /*
-   * The rail is a property of the SIGNER, not the login (lib/custody/writeRail.js).
+   * The rail is a property of the SIGNER, not the login (lib/chains/writeRail.js).
    *
    * This used to be `loginMethod === 'passkey'`, which meant a member holding a key that signs
    * perfectly well on Ethereum Classic was routed down a rail that has no bundler there — and got
