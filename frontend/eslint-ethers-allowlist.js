@@ -7,14 +7,22 @@
  * this migration exists to remove. src/test/lint/ethersRatchet.test.js fails on a stale
  * entry (a listed file that no longer imports ethers), so the list cannot rot upward.
  *
- * SEVEN ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — four reasons over seven files — and
+ * FIVE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — four reasons over five files — and
  * are called out so nobody spends an afternoon rediscovering it:
  *
- *   - `lib/pools/bip39Lists.js`, `lib/recovery/bip39Suggest.js`, `utils/claimCode/wordlist.js`
- *     import ethers' bundled BIP-39 `wordlists`. viem bundles none, so these cannot move
- *     without adding a wordlist dependency (`@scure/bip39`) — a lockfile change, which under
- *     spec 075 is the one that drops the platform rolldown binary. That is a deliberate,
- *     separately-reviewed step, not a mechanical swap.
+ *   - `lib/pools/bip39Lists.js` is the MULTI-LANGUAGE BIP-39 registry (spec 034 SC-008: the same
+ *     pool resolves whatever language the member reads it in). ethers bundles TEN wordlists —
+ *     cz, en, es, fr, it, pt, ja, ko, zh_cn, zh_tw — and viem exports only English, so converting
+ *     this one would silently drop nine languages. That is a product decision, not a refactor.
+ *
+ *     An earlier version of this note claimed all three BIP-39 files were stuck because "viem
+ *     bundles none", and that was simply WRONG: `viem/accounts` exports `english`, and it is
+ *     identical to ethers' `en` word for word, 2048 entries in the same order (checked before the
+ *     swap — a claim code is derived from word INDICES, so a list differing anywhere would change
+ *     every code generated afterwards and invalidate every one issued before). No lockfile change
+ *     was ever needed, so no spec-075 rolldown hazard applied. `lib/recovery/bip39Suggest.js` and
+ *     `utils/claimCode/wordlist.js` used `wordlists.en` ONLY and have been converted. A wrong
+ *     reason on this list is worse than an open task: it retires work permanently.
  *   - `lib/miniapps/hostScope.js` hands ethers to third-party mini-app packages as a shared
  *     module. That is the spec-073 host API contract (hostApi 2), not an internal dependency:
  *     removing it breaks published packages, so it belongs to Phase 5 (#1596).
@@ -89,7 +97,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/pools/bip39Lists.js',
   'src/lib/pools/gasless.js',
   'src/lib/pools/poolContracts.js',
-  'src/lib/recovery/bip39Suggest.js',
   'src/lib/recovery/legacyKeys.js',
   'src/lib/relay/__tests__/intentClient.test.js',
   'src/lib/relay/__tests__/poolIntents.test.js',
@@ -97,7 +104,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/transfer/eip3009Transfer.js',
   'src/utils/blockchainService.js',
   'src/utils/claimCode/deriveFromCode.js',
-  'src/utils/claimCode/wordlist.js',
   'src/utils/encryption.js',
   'src/utils/keyRegistryService.js',
   'src/utils/rpcProvider.js',
