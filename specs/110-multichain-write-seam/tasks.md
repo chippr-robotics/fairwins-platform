@@ -238,8 +238,25 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       Polygon got a Polygon transaction and a success. `ctx.chainId` is OPTIONAL and omitting it
       leaves the send unguarded exactly as before: a soft gate, closed by T028. A signer with no
       provider to ask is the ABSENCE of a check, never a passed one, and a test asserts that.
-- [ ] T027 `lib/relay/useGaslessWrite.js` stops resolving signer/domain/verifier from the ambient
+- [x] T027 `lib/relay/useGaslessWrite.js` stops resolving signer/domain/verifier from the ambient
       chain — target chain in, domain out; no wallet switch on the intent rail.
+      **Done.** `cfg.chainId` drives all three things that used to come from wherever the wallet
+      happened to be: the EIP-712 domain, the verifier lookup, and which relayer is probed. The
+      domain is the one that matters — a correctly-typed intent under the WRONG domain is not an
+      error, it is a valid signature over something nobody will honour (issue #1038 by another
+      route), and no assertion about the params can see it. Optional, so all 31 call sites are
+      byte-compatible; T028 closes them.
+      The intent rail prompts for nothing: the signature names its own chain. The SELF-SUBMIT
+      fallback does need the wallet there, so when a target chain was named it settles first
+      (shared T026 loop) and refuses naming both chains rather than broadcasting on the wrong one.
+      The wrapper is applied ONLY when a chain was named AND `selfSubmit` is a function — wrapping
+      a missing one would hand `useIntentAction` a function and silence its never-stranded
+      wiring-time guard.
+      **Owed to T029, and not to be restated as settled:** some injected wallets validate a
+      typed-data domain's chainId against their own selected chain and refuse a mismatch. Where
+      that happens it lands as a signature failure and falls through to the settling self-submit,
+      so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
+      for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
       ethers allowlist for shipped `frontend/src` paths.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
