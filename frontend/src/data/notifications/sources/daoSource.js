@@ -7,7 +7,8 @@
  * omits the eligibility views. No hooks — runs in the engine; reads via a read-only provider. Strictly
  * network-scoped (FR-014): nothing crosses chains or accounts.
  */
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
+import { readContract } from '../../../lib/chains/readContract'
 import { getContractAddressForChain } from '../../../config/contracts'
 import { getNetwork } from '../../../config/networks'
 import { makeReadProvider } from '../../../utils/rpcProvider'
@@ -87,16 +88,19 @@ async function listTrackedDaos(provider, chainId, account) {
   const seen = new Set()
   const push = (addr, framework) => {
     const lc = String(addr).toLowerCase()
-    if (!ethers.isAddress(lc) || seen.has(lc)) return
+    if (!isAddress(lc) || seen.has(lc)) return
     seen.add(lc)
     out.push({ dao: addr, framework })
   }
   const registryAddr = getContractAddressForChain('externalDAORegistry', chainId)
-  if (registryAddr && ethers.isAddress(registryAddr)) {
-    const reg = new ethers.Contract(registryAddr, EXTERNAL_DAO_REGISTRY_ABI, provider)
-    const n = Number(await reg.externalCount())
+  if (registryAddr && isAddress(registryAddr)) {
+    // The registry read names its chain (spec 110). `provider` stays what the CONNECTORS are
+    // handed below — they are still ethers-shaped, and converting them is Phase 2 work.
+    const reg = (functionName, args) =>
+      readContract(chainId, { address: registryAddr, abi: EXTERNAL_DAO_REGISTRY_ABI, functionName, args })
+    const n = Number(await reg('externalCount'))
     for (let id = n; id >= 1; id -= 1) {
-      const info = await reg.getExternalDAO(id)
+      const info = await reg('getExternalDAO', [BigInt(id)])
       push(info[0] ?? info.dao, Number(info[1] ?? info.framework))
     }
   }
