@@ -851,6 +851,32 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         scope is off the wallet's chain (`onScopeNetwork`), and a testnet build's cohort does not
         contain 137 — so a test that interacts with a form must render on `cohortChainIds()[0]`,
         not on a hardcoded mainnet id. That is why the original suite never clicked anything.
+      - **`ProtocolConfigTab.jsx` + `OracleAdaptersTab.jsx` — and DIVERGENCE 19.** Allowlist
+        42 → 40. Between them these wire the sanctions guard, the Chainalysis oracle, the stake-token
+        allowlist, the authorized callers and all three oracle adapters — every address here decides
+        what the protocol trusts, so divergence 16 (`getAddress` before encoding) applies to all of
+        them, `address(0)` clearing included.
+        **DIVERGENCE 19 — viem's `encodeFunctionData` REFUSES a `Uint8Array` for a `bytes`
+        parameter; it requires HEX.** The trap is the name: ethers' `toUtf8Bytes` returns a
+        Uint8Array, and the obvious one-word translation `stringToBytes` is the one that THROWS.
+        `stringToHex` is the correct replacement and is byte-identical to `toUtf8Bytes` over the
+        empty string, 200 chars, unicode, emoji, embedded quotes and backslashes, and a
+        hex-looking claim. This is the sibling of 11b (viem's `hashMessage` refusing a bare
+        `Uint8Array`) and it fails LOUDLY, which makes it the safer kind — but it is live on
+        UMA's `registerCondition(bytes32, bytes claim, …)`, the text a dispute is judged against.
+        **THREE MORE ASSERTIONS DESCRIBED THE CALL SITE RATHER THAN THE TRANSACTION**, and all
+        three changed once the bytes became real: `op` from `0` to `0n` and `gasLimit` from
+        `300000` to `300000n` (ethers decodes `uint8`/`uint32` as bigints), and the UMA claim from
+        `toBeInstanceOf(Uint8Array)` to a hex string — which is divergence 19 visible in a test.
+        The components still pass numbers and viem encodes them identically; what changed is that
+        the assertions now read the transaction. Verified non-vacuous by swapping `stringToHex`
+        back to `stringToBytes` and watching the UMA test fail.
+        `OracleAdaptersTab`'s fake was another address-ROUTING one (the good kind — it is what made
+        "the UMA form wrote to the UMA adapter" assertable). It was kept, not traded away: the
+        decoding signer dispatches to the same per-address stub, so every
+        `expect(umaStub.registerCondition).toHaveBeenCalled…` reads unchanged and is now backed by
+        bytes. **The mock ratchet caught this file** the moment `OracleAdaptersTab` left the
+        allowlist — its second real catch.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

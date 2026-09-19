@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { getAddress } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { isValidEthereumAddress } from '../../utils/validation'
 import { estateNetworks, networkName, readProviderFor } from '../../lib/chains/estate'
@@ -55,7 +57,7 @@ const ORACLE_TYPES = [
 ]
 
 function shortAddr(a) {
-  return a && a !== ethers.ZeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
+  return a && a !== zeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
 }
 
 function WiringRow({ label, current, note }) {
@@ -64,13 +66,26 @@ function WiringRow({ label, current, note }) {
       <span className="status-label">{label}</span>
       <span className="status-value">
         {current === undefined ? '…'
-          : current && current !== ethers.ZeroAddress
+          : current && current !== zeroAddress
             ? <code title={current}>{shortAddr(current)}</code>
             : <span className="status-value paused">{note || 'unset'}</span>}
       </span>
     </div>
   )
 }
+
+/**
+ * A read bound to ONE chain and ONE contract, or null when the tab may not read there.
+ *
+ * `provider` stays the AVAILABILITY GATE: `readProviderFor` is cohort-bounded (spec 071), so a
+ * null from it means this build may not read that chain at all — a different answer from a read
+ * that was attempted and failed. The chain used to arrive inside an ethers `Contract`'s runner,
+ * which is why a caller could not be asked which one it had used.
+ */
+const makeReader = (chainId, address, abi, provider) =>
+  address && provider
+    ? (functionName, args = []) => readContract(chainId, { address, abi, functionName, args })
+    : null
 
 function ProtocolConfigTab({ signer, chainId, provider, runTx, pendingTx }) {
   // Spec 071 US4: wiring is per network — the three contracts below exist independently on each
@@ -97,16 +112,16 @@ function ProtocolConfigTab({ signer, chainId, provider, runTx, pendingTx }) {
     [scopeChainId, chainId, provider],
   )
   const registryRead = useMemo(
-    () => (registryAddr && readProvider ? new ethers.Contract(registryAddr, REGISTRY_ABI, readProvider) : null),
-    [registryAddr, readProvider]
+    () => makeReader(scopeChainId, registryAddr, REGISTRY_ABI, readProvider),
+    [registryAddr, readProvider, scopeChainId]
   )
   const membershipRead = useMemo(
-    () => (membershipAddr && readProvider ? new ethers.Contract(membershipAddr, MEMBERSHIP_ABI, readProvider) : null),
-    [membershipAddr, readProvider]
+    () => makeReader(scopeChainId, membershipAddr, MEMBERSHIP_ABI, readProvider),
+    [membershipAddr, readProvider, scopeChainId]
   )
   const sanctionsRead = useMemo(
-    () => (sanctionsAddr && readProvider ? new ethers.Contract(sanctionsAddr, SANCTIONS_ABI, readProvider) : null),
-    [sanctionsAddr, readProvider]
+    () => makeReader(scopeChainId, sanctionsAddr, SANCTIONS_ABI, readProvider),
+    [sanctionsAddr, readProvider, scopeChainId]
   )
 
   const fetchWiring = useCallback(async () => {
@@ -114,18 +129,18 @@ function ProtocolConfigTab({ signer, chainId, provider, runTx, pendingTx }) {
     const safe = (p) => p.catch(() => undefined)
     const [mm, pm, sg, ext, cdf, cf, uma, treasury, payToken, voucher, mmSg, oracle] =
       await Promise.all([
-        safe(registryRead.membershipManager()),
-        safe(registryRead.polymarketAdapter()),
-        safe(registryRead.sanctionsGuard()),
-        safe(registryRead.intentExtension()),
-        safe(registryRead.oracleAdapters(5)),
-        safe(registryRead.oracleAdapters(6)),
-        safe(registryRead.oracleAdapters(7)),
-        membershipRead ? safe(membershipRead.treasury()) : undefined,
-        membershipRead ? safe(membershipRead.paymentToken()) : undefined,
-        membershipRead ? safe(membershipRead.voucher()) : undefined,
-        membershipRead ? safe(membershipRead.sanctionsGuard()) : undefined,
-        sanctionsRead ? safe(sanctionsRead.sanctionsOracle()) : undefined,
+        safe(registryRead('membershipManager')),
+        safe(registryRead('polymarketAdapter')),
+        safe(registryRead('sanctionsGuard')),
+        safe(registryRead('intentExtension')),
+        safe(registryRead('oracleAdapters', [5])),
+        safe(registryRead('oracleAdapters', [6])),
+        safe(registryRead('oracleAdapters', [7])),
+        membershipRead ? safe(membershipRead('treasury')) : undefined,
+        membershipRead ? safe(membershipRead('paymentToken')) : undefined,
+        membershipRead ? safe(membershipRead('voucher')) : undefined,
+        membershipRead ? safe(membershipRead('sanctionsGuard')) : undefined,
+        sanctionsRead ? safe(sanctionsRead('sanctionsOracle')) : undefined,
       ])
     setWiring({ mm, pm, sg, ext, cdf, cf, uma, treasury, payToken, voucher, mmSg, oracle })
   }, [registryRead, membershipRead, sanctionsRead])
@@ -167,17 +182,28 @@ function ProtocolConfigTab({ signer, chainId, provider, runTx, pendingTx }) {
     },
   }
 
+  /** One write. The ABI is per target here — this tab wires three different contracts. */
+  const send = (address, abi, functionName, args) =>
+    signer.sendTransaction({
+      to: address,
+      data: encodeFunctionData({ abi: normalizeAbi(abi), functionName, args }),
+    })
+
   const selectedTarget = ADDRESS_TARGETS[addrForm.target]
 
   const handleSetAddress = () => {
     const value = addrForm.address.trim()
     // address(0) is a legitimate—but destructive—input for the guard slots, so
     // accept it explicitly rather than through the generic validator.
-    const isClearing = value === ethers.ZeroAddress
+    const isClearing = value === zeroAddress
     if (!isClearing && !isValidEthereumAddress(value)) return
     const target = selectedTarget
     runTx(
-      () => new ethers.Contract(target.addr(), target.abi, signer)[target.method](value),
+      () =>
+        // `getAddress` even for the clearing case (spec 110 divergence 16): `isValidEthereumAddress`
+        // is a bare regex that accepts an ALL-UPPERCASE address, which viem's encoder refuses, and
+        // these slots decide which sanctions guard and which oracle the protocol trusts.
+        send(target.addr(), target.abi, target.method, [getAddress(value)]),
       `${target.label} set to ${isClearing ? 'address(0)' : shortAddr(value)}`
     ).then(fetchWiring)
   }
@@ -186,23 +212,29 @@ function ProtocolConfigTab({ signer, chainId, provider, runTx, pendingTx }) {
     if (!registryAddr || !isValidEthereumAddress(oracleForm.address)) return
     const typeLabel = ORACLE_TYPES.find((t) => t.value === oracleForm.type)?.label
     runTx(
-      () => new ethers.Contract(registryAddr, REGISTRY_ABI, signer)
-        .setOracleAdapter(oracleForm.type, oracleForm.address),
+      () =>
+        send(registryAddr, REGISTRY_ABI, 'setOracleAdapter', [
+          oracleForm.type,
+          getAddress(oracleForm.address.trim()),
+        ]),
       `${typeLabel} adapter set to ${shortAddr(oracleForm.address)}`
     ).then(fetchWiring)
   }
 
   const handleCheckToken = async () => {
     if (!registryRead || !isValidEthereumAddress(tokenForm.address)) return
-    const allowed = await registryRead.isTokenAllowed(tokenForm.address).catch(() => null)
+    const allowed = await registryRead('isTokenAllowed', [tokenForm.address]).catch(() => null)
     setTokenForm((f) => ({ ...f, status: allowed }))
   }
 
   const handleSetTokenAllowed = () => {
     if (!registryAddr || !isValidEthereumAddress(tokenForm.address)) return
     runTx(
-      () => new ethers.Contract(registryAddr, REGISTRY_ABI, signer)
-        .setTokenAllowed(tokenForm.address, tokenForm.allowed),
+      () =>
+        send(registryAddr, REGISTRY_ABI, 'setTokenAllowed', [
+          getAddress(tokenForm.address.trim()),
+          Boolean(tokenForm.allowed),
+        ]),
       `Stake token ${shortAddr(tokenForm.address)} ${tokenForm.allowed ? 'allowed' : 'disallowed'}`
     ).then(() => setTokenForm((f) => ({ ...f, status: f.allowed })))
   }
@@ -210,8 +242,11 @@ function ProtocolConfigTab({ signer, chainId, provider, runTx, pendingTx }) {
   const handleSetAuthorizedCaller = () => {
     if (!membershipAddr || !isValidEthereumAddress(callerForm.address)) return
     runTx(
-      () => new ethers.Contract(membershipAddr, MEMBERSHIP_ABI, signer)
-        .setAuthorizedCaller(callerForm.address, callerForm.authorized),
+      () =>
+        send(membershipAddr, MEMBERSHIP_ABI, 'setAuthorizedCaller', [
+          getAddress(callerForm.address.trim()),
+          Boolean(callerForm.authorized),
+        ]),
       `Caller ${shortAddr(callerForm.address)} ${callerForm.authorized ? 'authorized' : 'deauthorized'} on MembershipManager`
     )
   }
