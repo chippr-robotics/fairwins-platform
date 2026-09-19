@@ -47,7 +47,6 @@ export const ETHERS_ALLOWLIST = [
   'src/contexts/Web3Context.jsx',
   'src/hooks/useFriendMarketCreation.js',
   'src/hooks/useFundingPools.js',
-  'src/hooks/useNullifierContracts.js',
   'src/hooks/useOpenChallengeAccept.js',
   'src/hooks/useOpenChallengeCreate.js',
   'src/hooks/useOracleConditions.js',

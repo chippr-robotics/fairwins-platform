@@ -940,6 +940,34 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         actual `writers` value was never seen. **CI's own Frontend Unit Tests job is the authority
         for the full suite and has been green on every commit in this PR.** If it recurs there,
         it is real and the assertion text will be available; do not write it off as this note.
+      - **`useNullifierContracts.js`, and THE READ SEAM ITSELF FINALLY GOT A TEST.** Allowlist
+        36 → 35. The hook predates spec 071 and resolves its address from the build default, so the
+        chain comes from `NETWORK_CONFIG.chainId` — which IS the same `ACTIVE_CHAIN_ID` that
+        `getContractAddress` uses, so address and chain cannot disagree. A literal `137` here would
+        have been a second source for one fact.
+        **This hook is the clearest live instance of divergence (a) in the codebase**:
+        `getStats` is a FIVE-output view whose result is read BY NAME (`stats.markets`,
+        `stats.addresses`, `stats.nullifications`, `stats.reinstatements`, `stats.lastUpdate`).
+        Converted naively, every one of those becomes `Number(undefined)` — **NaN on the screen**,
+        no error, no failed read. `withOutputNames` in the seam is the only thing preventing it.
+        **And that mechanism had NO DIRECT TEST**, which is the finding worth keeping. It is the
+        single guard against the worst of the nineteen divergences — the one that already shipped
+        an EMPTY POSITIONS LIST once — and every consumer mocks `readContract` wholesale, so a
+        regression in the naming would have surfaced as NaN counters on a dashboard rather than a
+        red suite. `src/test/chains/readContract.test.js` is new and covers: names attached for a
+        five-output read AND positional destructuring still working; the result still spreading,
+        deep-equalling and enumerating as the plain array it is (the names are non-enumerable ON
+        PURPOSE — if they enumerated, every `toEqual` against an array elsewhere would break); a
+        single output left exactly as viem returned it; an UNNAMED output not guessed at; a
+        length/arity mismatch left positional rather than mislabelled; `NoRpcEndpointError` instead
+        of a default; `blockNumber` bigint vs tag; and `normalizeAbi` on both ABI dialects plus its
+        identity caching. Verified non-vacuous by deleting the `withOutputNames` call.
+      - **`useFundingPools.js` — NOT converted, and this is the deferral's own trigger firing.**
+        It reaches `factory.interface.encodeFunctionData`, `factory.getAddress()` and `pool.runner`
+        — all ethers `Contract` idioms coming out of `lib/funding/fundingContracts.js`, which is
+        deferred with the note "contract factories; convert when their callers do". That condition
+        is now met, so this is a real batch (factory module + hook + the spec-103 pool clones), not
+        a tail-end addition to someone else's. Left whole rather than half-done.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
