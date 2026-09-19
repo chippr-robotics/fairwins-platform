@@ -1404,6 +1404,30 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         `signer.sendTransaction(...).wait()` against that shape. It converts with the contexts, not
         before. (T021's `primaryTypeOf` note stands and is separate.)
         `33-account-surfaces.cy.js` (6) run locally, green.
+      - **`MyMarketsModal.jsx` — six write rails, one read, and the NINTH invalid fixture.**
+        Allowlist 21 → 20. The file is 2,700 lines but the ethers surface is regular: six
+        `selfSubmit` closures with the identical `new Contract(addr, ABI, signer)` shape, one
+        `getWager` read, two `ZeroAddress` comparisons, and eight
+        `new Interface(ABI).encodeFunctionData(...)` calls that never needed a runner at all. One
+        module-level `registryCall` replaces all of them; `registry.interface.parseError` becomes
+        `errorParser(WAGER_REGISTRY_ABI)`, the seam built for exactly this and already pinned
+        against ethers' `Interface.parseError` by its own suite.
+        Five encoders fuzzed 2,000 rounds against ethers, byte-identical.
+        **`toMatch(/^0x/)` is not an assertion about calldata.** `actingWagerRefundResolve`
+        checked the acting rail's payload with exactly that — and the fake it was checking returned
+        the marker string `0xENC:<fn>:<args>`, which satisfies it. So the claim "resolves …
+        addressed to the registry" covered the ADDRESS and nothing about what was being sent there.
+        The selectors are frozen literals now (taken from ethers offline, so the cross-library
+        check survives without an ethers import in the file), and the resolve test additionally
+        asserts the winner came from the registry's OWN `getWager`, on the modal's chain.
+        **And the ids were never encodable**: `'w-refund'` / `'w-resolve'` going into
+        `claimRefund(uint256)` / `declareWinner(uint256,address)`. Neither library can encode
+        either — the fake's `encodeFunctionData` returned its marker for any input whatsoever, so
+        nothing ever tried. That is the ninth fixture in this task invalidated by the same root
+        cause, and the pattern is now unambiguous: **a fake of `new Contract(address, abi, runner)`
+        discards the address, the ABI and the arguments, so every assertion downstream of one is
+        weaker than it reads.**
+        `13-dashboard.cy.js` (16 + 2 pending) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

@@ -41,7 +41,6 @@
 export const ETHERS_ALLOWLIST = [
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
   'src/components/account/__tests__/RecoverAccountPanel.test.jsx',
-  'src/components/fairwins/MyMarketsModal.jsx',
   'src/contexts/WalletContext.jsx',
   'src/contexts/Web3Context.jsx',
   'src/hooks/useOracleConditions.js',
