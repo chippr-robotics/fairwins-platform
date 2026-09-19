@@ -1,5 +1,5 @@
 import { getAddress } from 'viem'
-import { rawRevertData } from '../chain/revertError'
+import { rawRevertData, extractRevert } from '../chain/revertError'
 
 /**
  * Sanctions-screening reverts, decoded and put into words (#1292).
@@ -47,7 +47,22 @@ export function revertReasonFrom(error) {
   const data = revertDataFrom(error)
   const selector = data && data.length >= 10 ? data.slice(0, 10) : null
   if (selector && UNDECODABLE_ERROR_BY_SELECTOR[selector]) return UNDECODABLE_ERROR_BY_SELECTOR[selector]
-  return error?.reason || error?.shortMessage || error?.message || ''
+  if (error?.reason) return error.reason
+  // DIVERGENCE 23 (spec 110): viem leaves a decoded CUSTOM ERROR's name in no message — it is on
+  // `cause.data.errorName`, while `shortMessage` says only that the function "reverted". Every
+  // caller of this matches on the returned string (`r.includes('NotOpenChallenge')`), so without
+  // this every named wager revert would fall through to its generic sentence and tell the member
+  // nothing. `Error`/`Panic` are the wrappers, not the failure — prefer the string they carry.
+  const decoded = extractRevert(error)
+  if (decoded) {
+    if (decoded.name === 'Error' || decoded.name === 'Panic') {
+      const carried = decoded.args?.[0]
+      if (carried != null && String(carried) !== '') return String(carried)
+    } else {
+      return decoded.name
+    }
+  }
+  return error?.shortMessage || error?.message || ''
 }
 
 /**

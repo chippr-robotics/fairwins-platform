@@ -1183,6 +1183,45 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         distinction that matters: a hand-built fixture would have agreed with whatever the walk was
         written to expect, which is precisely how the original list came to miss every viem shape.
         Verified non-vacuous by restoring the five-path list — all three viem cases fail.
+      - **Open challenges (`useOpenChallengeAccept` + `useOpenChallengeCreate`) — and DIVERGENCE 23,
+        the one that would have cost nine sentences.** Allowlist 28 → 26. The pair moved together
+        (siblings sharing `resolveRegistry`), and the first `staticCall` conversion in the task is
+        what surfaced both revert divergences.
+        **DIVERGENCE 23 — viem puts a decoded CUSTOM ERROR's name in NO MESSAGE.** ethers exposed it
+        as `error.reason`, which is exactly how every translator here is written:
+        `r.includes('NotOpenChallenge')`, `r.includes('MembershipDenied')`, nine of them on the
+        accept path alone. viem's `shortMessage` for the same revert is the whole of
+        `The contract function "acceptOpenWager" reverted.` — the name is on `cause.data.errorName`
+        and appears nowhere else. So converting the pre-flight without this would have replaced
+        nine distinct explanations with "Acceptance failed. Please try again." for every one of
+        them, with nothing red anywhere. (`Error(string)` happens to survive, because viem folds
+        the reason string into the message — which is what would have made this look fine in a
+        quick check.) `extractRevert` now finds a PRE-DECODED revert anywhere in the chain, and
+        `revertReasonFrom` prefers it over message text, unwrapping `Error`/`Panic` to the string
+        they carry. Tested with REAL viem errors driven through a throwing transport, and verified
+        non-vacuous.
+        Everything else was ordinary and byte-checked: `MaxUint256`/`ZeroAddress`/`ZeroHash` are
+        identical constants, `keccak256(toUtf8Bytes(s))` ≡ `keccak256(stringToHex(s))` over 3,000
+        fuzzed references including multi-byte UTF-8, and `createOpenWager` (eleven arguments) plus
+        `acceptOpenWager` byte-match over 1,000 rounds each. `createOpenWager.staticCall(...args,
+        {from: actor})` becomes `readContract(chainId, {…, account})` — the caller stays EXPLICIT
+        because `_runAcceptGuard` screens BOTH parties, so who is asking changes the answer.
+        **Two more fixtures that had never been looked at**: `deriveFromCode` returned
+        `claimAddress: '0xclaim'` and the wager's creator was `'0xCreator'` — neither is hex. Same
+        cause as the previous three: the claim address only ever reached a `FakeContract(address)`
+        that took it and ignored it.
+        **And the mocks' calldata was the mocks' own strings.** Both suites asserted that the
+        passkey batch carried `'0xapprovecalldata'` / `'0xacceptcalldata'` / `'0xcreatecalldata'` —
+        i.e. that the hook forwarded a fake's return value. Every write is now DECODED with the
+        real ethers `Interface`: the approve is checked to be for the REGISTRY at `MaxUint256`, the
+        accept to carry this wager id and this claim-code proof, the create to carry this claim
+        commitment, token and stake.
+        **Rule (d) earned again, sharper.** The first non-vacuity probe on the accept path patched
+        the passkey branch while the assertion covered the SIGNER branch — the suite stayed green
+        and the fault was real. Reintroducing it on the path the assertion actually covers failed
+        as it should, and the miss is what showed the passkey batch had no calldata assertion at
+        all. "Reintroduce the fault" is not enough; it has to be on the path under test.
+        `35-navigation-and-lookup.cy.js` (6) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

@@ -9,16 +9,29 @@ const TOKEN = '0x1111111111111111111111111111111111111111'
 const REGISTRY = '0x2222222222222222222222222222222222222222'
 const ACCOUNT = '0x3333333333333333333333333333333333333333'
 const STAKE = 10_000_000n // 10 USDC (6 decimals)
+const CREATOR = '0x4444444444444444444444444444444444444444'
+const reads = []
 
-const { state, calls } = vi.hoisted(() => ({
-  state: { allowance: 0n, balance: 100_000_000n, wagerId: 0n, throwLookup: false, metadataUri: '', acceptArgs: null, staticCallReject: null },
+const { state, calls, sent } = vi.hoisted(() => ({
+  state: { allowance: 0n, balance: 100_000_000n, wagerId: 0n, throwLookup: false, metadataUri: '', staticCallReject: null },
   calls: [],
+  sent: [],
 }))
-const wallet = vi.hoisted(() => ({
-  signer: {
+function makeSigner() {
+  return {
     getAddress: () => Promise.resolve(ACCOUNT),
     provider: { getNetwork: () => Promise.resolve({ chainId: 63n }) },
-  },
+    // The write rail. `to` is what names the call — the hook builds real calldata for both.
+    sendTransaction: async ({ to, data }) => {
+      calls.push(to === REGISTRY ? 'accept' : 'approve')
+      sent.push({ to, data })
+      return { hash: '0xtxhash', wait: async () => ({ status: 1, hash: '0xtxhash' }) }
+    },
+  }
+}
+
+const wallet = vi.hoisted(() => ({
+  signer: null,
   provider: { isFakeProvider: true },
   sendCalls: vi.fn(async () => ({ txHash: '0xpasskeytx' })),
   loginMethod: 'injected',
@@ -42,65 +55,67 @@ vi.mock('../config/contracts', () => ({
 }))
 
 vi.mock('../utils/claimCode/wordlist.js', () => ({ isValidCode: () => true }))
+// A REAL address. The placeholder here was '0xclaim', which is not one — it survived because the
+// claim address only ever reached a fake `Contract` that took it and ignored it. The hook
+// checksums it now (spec 110 divergence 16), and `signOpenAccept`'s signature must be 65 bytes
+// because it rides into `acceptOpenWager(uint256,bytes)` calldata that is decoded below.
+const CLAIM = '0x00000000000000000000000000000000000000c1'
+const SIGNATURE = `0x${'ab'.repeat(65)}`
 vi.mock('../utils/claimCode/deriveFromCode.js', () => ({
-  deriveFromCode: () => ({ claimAddress: '0xclaim', symKey: new Uint8Array(32) }),
-  signOpenAccept: () => Promise.resolve('0xsignature'),
+  deriveFromCode: () => ({ claimAddress: CLAIM, symKey: new Uint8Array(32) }),
+  signOpenAccept: () => Promise.resolve(SIGNATURE),
 }))
 // discover-only deps — not exercised by accept(), but imported at module top.
 vi.mock('../utils/ipfsService', () => ({ fetchEncryptedEnvelope: vi.fn(), parseEncryptedIpfsReference: vi.fn() }))
 vi.mock('../utils/crypto/envelopeEncryption.js', () => ({ decryptEnvelopeCode: vi.fn(), isCodeEnvelope: vi.fn() }))
 
-vi.mock('ethers', async () => {
-  const real = await vi.importActual('ethers')
-  function FakeContract(address) {
-    if (address === REGISTRY) {
-      const acceptOpenWager = (...a) => {
-        calls.push('accept')
-        state.acceptArgs = a
-        return Promise.resolve({ wait: () => Promise.resolve({ status: 1, hash: '0xtxhash' }) })
-      }
-      acceptOpenWager.staticCall = () => {
-        const spec = state.staticCallReject
-        if (!spec) return Promise.resolve()
-        // A string is a plain revert reason. An object is a raw ethers error shape — used for the
-        // custom errors the shipped ABI cannot decode, where all the information is in `data`.
-        if (typeof spec === 'string') return Promise.reject(Object.assign(new Error(spec), { reason: spec }))
-        return Promise.reject(
-          Object.assign(new Error(spec.message || 'execution reverted (unknown custom error)'), spec),
-        )
-      }
-      return {
-        interface: { encodeFunctionData: vi.fn(() => '0xacceptcalldata') },
-        openWagerIdForClaim: () => state.throwLookup
-          ? Promise.reject(new Error('rpc down'))
-          : Promise.resolve(state.wagerId),
-        getWager: () => Promise.resolve({
-          token: TOKEN, opponentStake: STAKE, creatorStake: STAKE, creator: '0xCreator',
-          metadataUri: state.metadataUri,
-          // Oracle linkage fields (spec 041) — already part of the on-chain struct.
-          resolutionType: 4n, polymarketConditionId: '0xc0ffee', creatorIsYes: true,
-        }),
-        acceptOpenWager,
-      }
-    }
-    // token contract
-    return {
-      interface: { encodeFunctionData: vi.fn(() => '0xapprovecalldata') },
-      decimals: () => Promise.resolve(6),
-      symbol: () => Promise.resolve('USDC'),
-      balanceOf: () => Promise.resolve(state.balance),
-      allowance: () => Promise.resolve(state.allowance),
-      approve: (..._a) => {
-        calls.push('approve')
-        return Promise.resolve({ wait: () => Promise.resolve({ status: 1 }) })
-      },
-    }
-  }
+/**
+ * Spec 110 — the reads go through the chain seam and the writes through `signer.sendTransaction`,
+ * so those are what is faked. The `vi.mock('ethers')` that stood here installed a `FakeContract`
+ * whose `interface.encodeFunctionData` returned the literal strings `'0xacceptcalldata'` and
+ * `'0xapprovecalldata'`, so the passkey assertions below checked that the hook passed a mock's
+ * return value through — never that the bytes a wallet would be asked to sign are the right ones.
+ * The calldata is real now and is DECODED with the real ethers `Interface` (divergence 17: never
+ * string-compare calldata against the encoder under test), which is also what recovers
+ * `state.acceptArgs`.
+ */
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
+  const actual = await importOriginal()
   return {
-    ...real,
-    ethers: {
-      ...real.ethers,
-      Contract: FakeContract,
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      reads.push({ chainId, address, functionName, args })
+      if (address === REGISTRY) {
+        if (functionName === 'openWagerIdForClaim') {
+          if (state.throwLookup) throw new Error('rpc down')
+          return state.wagerId
+        }
+        if (functionName === 'getWager') {
+          return {
+            token: TOKEN, opponentStake: STAKE, creatorStake: STAKE, creator: CREATOR,
+            metadataUri: state.metadataUri,
+            // Oracle linkage fields (spec 041) — already part of the on-chain struct.
+            resolutionType: 4n, polymarketConditionId: '0xc0ffee', creatorIsYes: true,
+          }
+        }
+        if (functionName === 'acceptOpenWager') {
+          // The pre-flight. A string is a plain revert reason; an object is a raw error shape —
+          // used for the custom errors the shipped ABI cannot decode, where all the information
+          // is in `data`.
+          const spec = state.staticCallReject
+          if (!spec) return undefined
+          if (typeof spec === 'string') throw Object.assign(new Error(spec), { reason: spec })
+          throw Object.assign(new Error(spec.message || 'execution reverted (unknown custom error)'), spec)
+        }
+      }
+      if (address === TOKEN) {
+        if (functionName === 'decimals') return 6
+        if (functionName === 'symbol') return 'USDC'
+        if (functionName === 'balanceOf') return state.balance
+        if (functionName === 'allowance') return state.allowance
+      }
+      if (functionName === 'hasActiveRole') return true
+      throw new Error(`unexpected read ${functionName} on ${address}`)
     },
   }
 })
@@ -111,14 +126,12 @@ import { SANCTIONED_ADDRESS_SELECTOR } from '../lib/wagers/sanctionsRevert'
 describe('useOpenChallengeAccept.accept (funding flow)', () => {
   beforeEach(() => {
     calls.length = 0
+    sent.length = 0
+    reads.length = 0
     state.allowance = 0n
     state.balance = 100_000_000n
-    state.acceptArgs = null
     state.staticCallReject = null
-    wallet.signer = {
-      getAddress: () => Promise.resolve(ACCOUNT),
-      provider: { getNetwork: () => Promise.resolve({ chainId: 63n }) },
-    }
+    wallet.signer = makeSigner()
     wallet.provider = { isFakeProvider: true }
     wallet.sendCalls.mockReset().mockResolvedValue({ txHash: '0xpasskeytx' })
     wallet.loginMethod = 'injected'
@@ -146,7 +159,14 @@ describe('useOpenChallengeAccept.accept (funding flow)', () => {
     await act(async () => {
       await result.current.accept('river tiger kite zoo', 4n)
     })
-    expect(state.acceptArgs).toEqual([4n, '0xsignature'])
+    // DECODED, not string-compared: the calldata the signer was handed really carries this wager
+    // id and this claim-code proof (divergence 17 — never compare calldata as text).
+    const { Interface } = await import('ethers')
+    const { WAGER_REGISTRY_ABI } = await import('../abis/WagerRegistry')
+    const accept = sent.find((c) => c.to === REGISTRY)
+    const [id, sig] = new Interface(WAGER_REGISTRY_ABI).decodeFunctionData('acceptOpenWager', accept.data)
+    expect(id).toBe(4n)
+    expect(sig).toBe(SIGNATURE)
   })
 
   it('skips approval when the existing allowance already covers the stake', async () => {
@@ -179,9 +199,26 @@ describe('useOpenChallengeAccept.accept (funding flow)', () => {
     })
     expect(res.txHash).toBe('0xpasskeytx')
     expect(wallet.sendCalls).toHaveBeenCalledTimes(1)
-    expect(wallet.sendCalls.mock.calls[0][0]).toHaveLength(2) // approve + accept
+    const batch = wallet.sendCalls.mock.calls[0][0]
+    expect(batch).toHaveLength(2) // approve + accept
     expect(calls).toEqual([]) // no direct signer contract write path used
     expect(steps).toEqual(expect.arrayContaining(['check', 'approve', 'sign', 'accept']))
+
+    // The batch a passkey member is asked to sign, DECODED. Its old assertion was that the two
+    // calls carried the mock's own `'0xapprovecalldata'`/`'0xacceptcalldata'` strings, which said
+    // nothing about the bytes; these are the real ones. The approve must be for the REGISTRY (the
+    // escrow puller), and the accept must carry this wager and this proof.
+    const { Interface, MaxUint256 } = await import('ethers')
+    const { WAGER_REGISTRY_ABI } = await import('../abis/WagerRegistry')
+    const erc20 = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+    expect(batch[0].target).toBe(TOKEN)
+    const [spender, amount] = erc20.decodeFunctionData('approve', batch[0].data)
+    expect(spender.toLowerCase()).toBe(REGISTRY)
+    expect(amount).toBe(MaxUint256)
+    expect(batch[1].target).toBe(REGISTRY)
+    const [id, sig] = new Interface(WAGER_REGISTRY_ABI).decodeFunctionData('acceptOpenWager', batch[1].data)
+    expect(id).toBe(4n)
+    expect(sig).toBe(SIGNATURE)
   })
 
   it('does not let the isolated pre-flight block a passkey taker on a not-yet-granted allowance', async () => {
@@ -240,7 +277,6 @@ describe('useOpenChallengeAccept.accept (funding flow)', () => {
     // reverts every accept — with the CREATOR's address. Telling the taker their own clean account
     // was stopped would be a false compliance accusation.
     wallet.loginMethod = 'passkey'
-    const CREATOR = '0x4444444444444444444444444444444444444444'
     state.staticCallReject = { data: encodeSanctioned(CREATOR) }
     const { result } = renderHook(() => useOpenChallengeAccept())
     let err
@@ -275,7 +311,7 @@ describe('useOpenChallengeAccept.lookup (structured outcome)', () => {
     await act(async () => { res = await result.current.lookup('river tiger kite zoo') })
     expect(res.status).toBe('matched')
     expect(res.payload.wagerId).toBe(4n)
-    expect(res.payload.wager.creator).toBe('0xCreator')
+    expect(res.payload.wager.creator).toBe(CREATOR)
     expect(calls).toEqual([])
   })
 

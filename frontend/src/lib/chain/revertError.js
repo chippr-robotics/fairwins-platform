@@ -88,6 +88,49 @@ export function rawRevertData(error) {
 }
 
 /**
+ * A revert a library ALREADY decoded, wherever in the chain it left it.
+ *
+ * DIVERGENCE 23 (spec 110) — VIEM PUTS A DECODED CUSTOM ERROR'S NAME IN NO MESSAGE AT ALL.
+ * ethers exposed it as `error.reason`, so `reason.includes('NotOpenChallenge')` — which is how
+ * every translated wager message is written — read it for free. viem's top-level `shortMessage`
+ * for the same revert is the whole of `The contract function "acceptOpenWager" reverted.`; the
+ * name is on `cause.data.errorName`, and `cause.reason` carries the string for an `Error(string)`.
+ *
+ * Measured, not remembered: driving a real `readContract` against a throwing transport gives
+ * `ContractFunctionRevertedError` at depth 1 with `data.errorName` set, and nothing above it
+ * mentions the error by name. So a translator matching on message text goes from naming nine
+ * distinct failures to falling through to "Acceptance failed. Please try again." for all of them
+ * — no error, no test, just a member told nothing.
+ *
+ * `Error`/`Panic` keep their arguments, so a caller can prefer the string a plain `revert("…")`
+ * carried over the wrapper's own name.
+ */
+function predecodedRevert(error) {
+  const seen = new Set()
+  let frontier = [error]
+  for (let depth = 0; depth <= MAX_REVERT_DEPTH && frontier.length > 0; depth += 1) {
+    const next = []
+    for (const node of frontier) {
+      if (!node || typeof node !== 'object' || seen.has(node)) continue
+      seen.add(node)
+      if (node.revert?.name) return { name: node.revert.name, args: node.revert.args ?? [] }
+      if (typeof node.errorName === 'string') {
+        return { name: node.errorName, args: node.errorArgs ?? node.args ?? [] }
+      }
+      if (typeof node.data?.errorName === 'string') {
+        return { name: node.data.errorName, args: node.data.args ?? [] }
+      }
+      for (const key of REVERT_CHAIN_KEYS) {
+        if (node[key] && typeof node[key] === 'object') next.push(node[key])
+      }
+      if (node.info?.error && typeof node.info.error === 'object') next.push(node.info.error)
+    }
+    frontier = next
+  }
+  return null
+}
+
+/**
  * Pull a decoded custom error out of a failure, whether it arrived pre-decoded on `.revert`, on
  * the older `errorName`/`errorArgs` pair, or as raw selector bytes somewhere in an RPC payload.
  *
@@ -104,8 +147,8 @@ export function rawRevertData(error) {
  */
 export function extractRevert(error, iface = null) {
   if (!error) return null
-  if (error.revert?.name) return { name: error.revert.name, args: error.revert.args ?? [] }
-  if (error.errorName) return { name: error.errorName, args: error.errorArgs ?? [] }
+  const predecoded = predecodedRevert(error)
+  if (predecoded) return predecoded
   if (!iface) return null
 
   for (const data of rawRevertCandidates(error)) {

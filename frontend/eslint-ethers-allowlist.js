@@ -46,8 +46,6 @@ export const ETHERS_ALLOWLIST = [
   'src/contexts/WalletContext.jsx',
   'src/contexts/Web3Context.jsx',
   'src/hooks/useFriendMarketCreation.js',
-  'src/hooks/useOpenChallengeAccept.js',
-  'src/hooks/useOpenChallengeCreate.js',
   'src/hooks/useOracleConditions.js',
   'src/hooks/useTreasuryVault.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
