@@ -87,13 +87,23 @@ export function eventScanHandle(chainId, { address, abi }) {
     {
       get(_t, eventName) {
         return (...args) => ({
-          getTopicFilter: () =>
-            encodeEventTopics({
+          getTopicFilter: () => {
+            const topics = encodeEventTopics({
               abi: normalizedAbi,
               eventName,
               // Trailing undefineds mean "any", exactly as ethers' filter factories did.
               args: args.length > 0 ? args : undefined,
-            }),
+            })
+            // viem pads the array to one slot per INDEXED parameter, so `Transfer(null, to)` on a
+            // three-indexed event comes out `[sig, null, to, null]` where ethers sent `[sig, null,
+            // to]`. A trailing null means "any" either way, so this is not a correctness
+            // difference — but it is a difference in the bytes on the wire to an `eth_getLogs`,
+            // and a provider that rejects the longer form would fail a scan into an EMPTY FEED,
+            // which reads exactly like "nothing happened". Trimmed so the request is the one this
+            // app has always sent.
+            while (topics.length > 1 && topics[topics.length - 1] == null) topics.pop()
+            return topics
+          },
         })
       },
     },

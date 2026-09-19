@@ -106,3 +106,38 @@ describe('eventScanHandle × scanLogs', () => {
     expect(seen).toEqual([{ cacheTime: 0 }])
   })
 })
+
+/*
+ * Spec 110. viem pads a topic filter to one slot per INDEXED parameter; ethers stopped at the last
+ * argument the caller named. `Transfer(null, to)` on a three-indexed event therefore went out as
+ * `[sig, null, to, null]` instead of `[sig, null, to]`.
+ *
+ * Both mean the same thing to a conforming `eth_getLogs`, so this is not a correctness difference —
+ * it is a difference in the bytes on the wire, and the failure it would cause is the quiet kind: a
+ * provider that rejects the longer form turns a scan into an EMPTY RESULT, which on every feed in
+ * this app renders identically to "nothing happened". Checked against ethers, because the claim is
+ * that the request is the one this app has always sent.
+ */
+describe('eventScanHandle topic filters', () => {
+  it('sends the topics ethers sent — no trailing "any" padding', async () => {
+    const { Interface } = await import('ethers')
+    const ERC721 = parseAbi([
+      'event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)',
+    ])
+    client.current = { async getBlockNumber() { return 1n }, async request() { return [] } }
+    const handle = eventScanHandle(137, { address: GUARD, abi: ERC721 })
+    const iface = new Interface(['event Transfer(address indexed from, address indexed to, uint256 indexed tokenId)'])
+
+    // The shape the voucher scan uses: "incoming to me, from anyone".
+    expect(handle.filters.Transfer(null, SAFE).getTopicFilter()).toEqual(
+      iface.encodeFilterTopics('Transfer', [null, SAFE]),
+    )
+    // No arguments at all, and a fully-specified filter, both unchanged.
+    expect(handle.filters.Transfer().getTopicFilter()).toEqual(
+      iface.encodeFilterTopics('Transfer', []),
+    )
+    expect(handle.filters.Transfer(SAFE, GUARD, 7n).getTopicFilter()).toEqual(
+      iface.encodeFilterTopics('Transfer', [SAFE, GUARD, 7n]),
+    )
+  })
+})

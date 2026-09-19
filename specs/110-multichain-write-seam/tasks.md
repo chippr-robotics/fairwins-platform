@@ -1088,6 +1088,52 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         address became load-bearing, the file's `HW` fixture turned out to be
         `'0xHaRd0000…'`, which is not hex. It had never been an address; nothing had ever looked.
         **The no-chain e2e spec was run locally** (`40-account-add-wrap-move.cy.js`, 8/8).
+      - **`useVouchers.js` — DIVERGENCE 21, a topic-filter difference in the shared seam, and the
+        read-routing decision the rest of the hooks all turn on.** Allowlist 30 → 29.
+        **THE READ-ROUTING DECISION, made once here and not per hook.** Every remaining hook
+        (`useTransfer`, `useVouchers`, `useOpenChallenge*`, `useFriendMarketCreation`) reads through
+        `new Contract(addr, ABI, provider)` where `provider` is `WalletContext`'s
+        `provider || rpcProvider` — i.e. the INJECTED WALLET's provider for a classic session.
+        Two things follow from that and neither is wanted: a member's own endpoint (spec 069) does
+        NOT apply to these reads, because the wallet wins the `||`; and on a chain the build does
+        not know, `getNetwork` falls back to the HOME network, so the app reads one chain's state
+        while the wallet sits on another — the ambient-chain defect Phase 3 exists to remove.
+        Converting a read to `readContract(chainId, …)` drops the wallet leg. That IS a behaviour
+        change, stated rather than slipped in: the member's configured endpoint now applies, and an
+        unreachable chain becomes an honest `NoRpcEndpointError` instead of silently-correct-looking
+        home-chain data. It is the direction both specs already point, so it is taken here and the
+        remaining hooks follow it.
+        **DIVERGENCE 21 — viem REFUSES a full signature as `functionName`.** ERC-721 overloads
+        `safeTransferFrom`, and this hook named the 3-argument form explicitly —
+        `encodeFunctionData('safeTransferFrom(address,address,uint256)', …)`, which ethers accepted.
+        viem throws `AbiFunctionNotFoundError`; given the BARE name it instead picks an overload by
+        matching the arguments it was handed. That lands on the same selector here, which is
+        exactly what makes it worth writing down: the tempting fix (drop the parameter list) turns a
+        choice the author STATED into a consequence of an argument list, and it is a one-word edit
+        that reviews clean. The ABI is narrowed to a one-entry `parseAbiItem` instead, so the
+        signature is still what selects the function.
+        **The event seam was padding topic filters.** viem's `encodeEventTopics` emits one slot per
+        INDEXED parameter, so `Transfer(null, to)` on a three-indexed event went out as
+        `[sig, null, to, null]` where ethers sent `[sig, null, to]`. Semantically identical to a
+        conforming `eth_getLogs` — but it is a difference in the bytes on the wire, and the failure
+        it would cause is the quiet kind: a provider that rejects the longer form turns the scan
+        into an EMPTY RESULT, which on every feed here renders as "nothing happened". Trimmed in
+        `eventScanHandle`, checked against `Interface.encodeFilterTopics` for three filter shapes,
+        verified non-vacuous.
+        Also confirmed live: `voucherInfo` returns `tier`/`durationDays` as NUMBERS under viem
+        where ethers gave bigints (**divergence b**) — the existing `Number(...)` wrappers already
+        covered it — and `getTierConfig`'s single STRUCT output decodes to a named object in both,
+        so `cfg.active`/`cfg.priceUSDC` are unchanged. Four encoders fuzzed 1,500 rounds × 3 address
+        casings against ethers, all byte-identical.
+        **The passkey test's fake was the documented shape again** — `FakeContract(_addr, abi)`,
+        underscore and all, so a tier-config read against the TOKEN or an allowance read against the
+        MANAGER satisfied every assertion. Each read now records its chain, address and arguments,
+        and the purchase path asserts both targets; verified non-vacuous by pointing `getTierConfig`
+        at the payment token. Its calldata decoding still uses the real ethers `Interface` as the
+        oracle, which is the one thing that mock got right.
+        **Vouchers have no no-chain e2e spec** (`33-transfers-swap-vouchers`,
+        `43-voucher-send-from-portfolio` and `40-acting-account-purchase` are all on-chain tier), so
+        as with the wager pools that leg is CI's, not a local run. Said rather than skipped.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
