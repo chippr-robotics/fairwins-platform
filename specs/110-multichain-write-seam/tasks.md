@@ -968,6 +968,42 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         deferred with the note "contract factories; convert when their callers do". That condition
         is now met, so this is a real batch (factory module + hook + the spec-103 pool clones), not
         a tail-end addition to someone else's. Left whole rather than half-done.
+      - **Funding pools (spec 103): `lib/funding/fundingContracts.js` + `useFundingPools.js` — the
+        deferral's own trigger, fired.** Allowlist 35 → 33. The factory module's deferral note said
+        "convert when their callers do"; it has exactly ONE caller, so both moved together. The two
+        `new Contract(...)` factories become `readFundingFactory` / `readFundingPool` /
+        `encodeFactoryCall` / `encodePoolCall`, and the "not deployed here" refusal stays a THROW
+        rather than becoming a null — a caller must not be able to mistake it for a read that
+        returned nothing.
+        Probed first on `createPool`, whose struct carries all three dangerous parameter kinds at
+        once, and all three divergences reproduce inside it: **9** (`purpose` — a non-string is
+        STRINGIFIED, and this is the pool's PUBLIC on-chain purpose, the sentence members read
+        before deciding to contribute; a `null` would be committed as the four characters "null"),
+        **15** (`goal` — `''`/`[]`/`false` become 0, i.e. a funding goal of nothing) and **16**
+        (an all-uppercase `token` refused). The existing `String(...)` and `parseUnits` wrappers
+        already covered 9 and 15; `getAddress` covers 16.
+        **Three shapes changed and each was a decision, not a translation.**
+        (1) `chainNow(contract)` → `chainNow(chainId)`: the clock is a property of the CHAIN, and it
+        was being reached by digging `contract.runner.provider` out of an ethers Contract — the
+        exact fusion of "where" with "who" this task exists to remove. Its test asserted the
+        runner-digging; the BEHAVIOUR it actually protects (chain clock, device clock only as
+        fallback, including a zero/absent timestamp) is unchanged and still asserted.
+        (2) `decodeActivity` read ethers' `e.fragment.name`; it reads `e.name`, the shape
+        `eventScanHandle(...).interface.parseLog` returns. Its fixtures moved with it — a fixture
+        keeping `fragment` would describe a decoder the code no longer uses.
+        (3) `resolvePool(factory, indices)` was NOT changed, because it lives in
+        `lib/pools/gateway.js` and is SHARED with the wager pools, whose contract module is still
+        deferred. A duck-typed `factoryReaderFor(chainId)` satisfies the one method it calls — the
+        same move `getLogsRange` and `scanLogs` make with their readers — so one batch does not
+        reach into another's.
+        `queryFilter('*')` (EVERY event the clone emitted) becomes a no-topics `getLogsRange`, so it
+        bisects on refusal where the single unbounded call it replaces made the whole feed throw on
+        a range-capping RPC; an undecodable log is still skipped rather than rendered blank.
+        **The no-chain e2e spec was run locally** (`42-funding-pools.cy.js`, 6/6) — the standing
+        lesson applied for the first time on a member-facing conversion. FP-FAST-06 is the one that
+        mattered: "a pool link the chain cannot answer renders as unreadable with a retry — never as
+        zeros". That honest-degradation path is exactly what this conversion could have broken,
+        because the read now raises `NoRpcEndpointError` where a contract call used to reject.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
