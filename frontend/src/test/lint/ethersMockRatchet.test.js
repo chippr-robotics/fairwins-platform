@@ -42,8 +42,12 @@ const ROOT = normalize(join(SRC, '..'))
 const EXEMPT = new Map([
   [
     'src/test/setup.js',
-    'Global setup, not a test. Its MockBrowserProvider serves every suite that mounts ' +
-      'WalletContext (still an ethers consumer), so it imports no subject of its own.',
+    'Global setup, not a test, so it imports no subject of its own. Its MockJsonRpcProvider and ' +
+      'MockContract still stand in for `utils/rpcProvider` (makeReadProvider), which every suite ' +
+      'reaches and which leaves ethers last. NOTE the reason CHANGED at T028: it used to say ' +
+      '"MockBrowserProvider serves every suite that mounts WalletContext", and WalletContext no ' +
+      'longer constructs one — it builds its signer with viem. A reason that outlives the thing ' +
+      'it describes is how a retired check keeps looking like protection.',
   ],
 ])
 
