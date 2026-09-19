@@ -53,7 +53,7 @@ vi.mock('../../hooks/useRoles', () => ({
   }),
 }))
 vi.mock('../../hooks/useWeb3', () => ({
-  useWeb3: () => ({ account: '0xabc', signer: {}, provider: null, chainId: m.chainId }),
+  useWeb3: () => ({ account: '0xabc', signer: m.signer, provider: null, chainId: m.chainId }),
 }))
 vi.mock('../../hooks/useUI', () => ({ useNotification: () => ({ showNotification: m.notify }) }))
 vi.mock('../../hooks/useMediaQuery', () => ({
@@ -119,6 +119,30 @@ vi.mock('ethers', async (importOriginal) => {
   }
   return { ...actual, ethers: { ...actual.ethers, Contract: RecordingContract } }
 })
+
+/**
+ * AccessControlApp's writes are calldata now (spec 110): `encodeFunctionData` +
+ * `sendTransaction`. The signer DECODES what it is asked to send back into the same
+ * `{address, method, args}` shape the ethers fake above records, so every assertion in this file
+ * reads unchanged — but the AccessControl ones are now backed by the actual bytes rather than by
+ * the argument list a fake was handed. MembershipRevenueApp still constructs an ethers Contract,
+ * so both producers feed one bag.
+ */
+m.signer = {
+  sendTransaction: async ({ to, data }) => {
+    const parsed = new realEthers.Interface([
+      'function grantRole(bytes32 role, address account)',
+      'function revokeRole(bytes32 role, address account)',
+    ]).parseTransaction({ data })
+    m.contractCalls.push({
+      address: to,
+      method: parsed.name,
+      // `parseTransaction` returns a Result; the assertions compare against plain arrays.
+      args: Array.from(parsed.args),
+    })
+    return { hash: '0xdeadbeef', wait: async () => ({}) }
+  },
+}
 
 import AccessControlApp from '../../components/admin/apps/AccessControlApp'
 import MembershipRevenueApp from '../../components/admin/apps/MembershipRevenueApp'

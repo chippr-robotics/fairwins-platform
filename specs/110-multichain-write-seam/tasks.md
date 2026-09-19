@@ -777,6 +777,23 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         One more shape moved with the chain: block timestamps come from the SCOPED chain's client,
         so a test seeding "this happened two hours ago" seeds it there rather than on the wallet's
         provider — which is a different chain whenever these tabs are doing the job they exist for.
+      - **`AccessControlApp.jsx` — the role grants, and the third file in a row where
+        `isValidEthereumAddress` was the whole guard on a member-typed address.** Allowlist 45 → 44.
+        Eight role hashes (`ethers.keccak256(ethers.toUtf8Bytes(name))` → `keccak256(stringToHex)`)
+        byte-compared before the swap, and `ZeroHash` is `zeroHash` exactly. These hashes ARE the
+        roles on chain: a wrong byte does not throw, it grants nothing and revokes nothing while
+        the surface reports success.
+        Divergence 16 again, and this is the sharpest instance of it so far — `grantRole` /
+        `revokeRole` normalise through `getAddress` because `isValidEthereumAddress` is a bare
+        regex that accepts an ALL-UPPERCASE address and tests `address.trim()` while handing the
+        caller the UNTRIMMED value. Both are refused by viem's encoder. The control in question
+        grants GUARDIAN_ROLE.
+        The test's fake was one of the GOOD ones — `RecordingContract` kept the address it was
+        constructed with — so rather than rewrite its assertions, the recording SIGNER decodes the
+        calldata back into the same `{address, method, args}` shape. Every assertion reads
+        unchanged and is now backed by the actual bytes; `MembershipRevenueApp` still constructs an
+        ethers `Contract` in the same file, so one bag has two producers and the mock ratchet stays
+        satisfied. Verified non-vacuous by substituting a wrong role hash.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
