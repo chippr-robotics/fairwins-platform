@@ -48,13 +48,15 @@ const RE_PROV = /(?<![\w.])getProvider\(\s*\)/g
 
 // file (relative to src/) -> { addr, prov } baseline of accepted occurrences
 const ALLOW = {
-  // resolver fallbacks (hasRoleOnChain / getUserTierOnChain / fetchFriendMarketsForUser),
-  // the generic getContract() helper, and legacy v1 reads (tierRegistry /
-  // roleManager / paymentProcessor / registerZKKey) not deployed on v2.
-  // +1 (spec 022): checkApprovalNeeded's legacy-path paymentProcessor pre-flight,
-  // mirroring purchaseRoleWithStablecoin's own legacy fallback (MM path is
-  // chain-aware via getContractAddressForChain).
-  'utils/blockchainService.js': { addr: 12, prov: 2 },
+  // resolver fallbacks (hasRoleOnChain / getUserTierOnChain / fetchFriendMarketsForUser) and
+  // the legacy v1 paymentProcessor reads (purchaseRoleWithStablecoin's fallback + spec 022's
+  // checkApprovalNeeded pre-flight), neither deployed on v2. 12 → 5 and 2 → 0 at spec 110: the
+  // two build-time `getProvider()` calls are gone (reads name their chain through the seam), and
+  // `getContract()` / `registerZKKey` / `grantRoleOnChain` / `checkRoleSyncNeeded` — four helpers
+  // with no caller in src/ or cypress/ — were deleted rather than converted. As on EventsSource
+  // below, the baseline is TIGHTENED rather than left where it was: a stale ceiling permits a
+  // regression it was only ever meant to record.
+  'utils/blockchainService.js': { addr: 5, prov: 0 },
   // catch-branch fallbacks in getKeyRegistryContract + registerEncryptionKey
   'utils/keyRegistryService.js': { addr: 4, prov: 0 },
   // catch-branch fallback in screenAddress

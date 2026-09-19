@@ -1428,6 +1428,45 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         discards the address, the ABI and the arguments, so every assertion downstream of one is
         weaker than it reads.**
         `13-dashboard.cy.js` (16 + 2 pending) run locally, green.
+      **`utils/blockchainService.js` — the last big one** (allowlist 20 → 19). 1,836 lines and
+        ~67 ethers uses, of which a third turned out to be reachable by nobody: `getContract()`,
+        `registerZKKey`, `grantRoleOnChain` and `checkRoleSyncNeeded` have **no importer in
+        `frontend/src` or `frontend/cypress`** (only an ARCHIVED doc mentions `getContract`), so
+        they were deleted rather than converted — writing tests for code nobody calls is the worse
+        half of that trade. 389 lines out, and the `chainResolutionGuard` baseline TIGHTENS with
+        them (12 → 5 build-bound address reads, 2 → 0 argless `getProvider()`), because a stale
+        ceiling permits a regression it was only ever meant to record.
+        **`getFriendMarketWithStatus` returns FOURTEEN outputs and is read by name** — the second
+        consumer of divergence (a) found in this task, after `normalizePosition`. The seam's
+        `withOutputNames` covers it; without it every legacy market would have rendered with an
+        undefined stake, status and description.
+        **`registerZKKey` had been returning `hash: undefined` since the v5→v6 migration**
+        (`receipt.transactionHash`, which ethers v6 spells `receipt.hash`). Noted rather than
+        fixed: the function had no caller, and it went out with the other three.
+        Role hashes, the five membership encoders and the ERC-20 approve were fuzzed 2,000 rounds
+        against ethers (14,012 comparisons in all, byte-identical, hex case included), and
+        `formatUnits` over 9,000 random values × 3 decimal places.
+        **Divergence 16 on a member path.** `fetchFriendMarketsForUser` validated with `isAddress`
+        — which accepts an ALL-UPPERCASE address, as ethers did — and then handed the string
+        straight to an encoder that refuses one. My Wagers would have shown an error where a
+        member's wagers belong. Checksummed once, immediately after the check that let it through:
+        the validator and the encoder move together.
+        **Divergence 15 on the legacy market id.** A decimal string encodes identically in both
+        libraries; the EMPTY one does not (ethers refused it, viem encodes 0). The ids come back
+        through `localStorage`, so `BigInt(marketId)` now refuses exactly what ethers refused,
+        inside the same try that already fell back to the cached market.
+        **Three `vi.mock('ethers')` fakes replaced, and one of them was argument-less**:
+        `intentParams`' `FakeContract()` took NO parameters at all, so every read satisfied it
+        whatever the address, ABI or chain. `membershipReferenceChain` proved the reference-chain
+        rule through a fixture spelled `0xmm${chainId}` — **not an address**; tenth invalid fixture
+        in this task, and it survived for the usual reason. Both now assert the CHAIN each read was
+        made on, which is the fact that decides where the answer comes from; the reference-chain
+        probe fails on `askedOn` alone when the read is aimed at the caller's chain, with the
+        address assertion still green.
+        `blockchainService.userWagers.test.js` is new: the My Wagers registry path had NO test at
+        all, and it is what two surfaces and the wager notification source call. Paging (100 at a
+        time, two reads zipped by index), the chain, the three-state-free empty case and the
+        uppercase-address path, each probed non-vacuous.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
