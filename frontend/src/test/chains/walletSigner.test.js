@@ -130,6 +130,54 @@ describe('walletSigner — the same wire behaviour as the ethers signer it repla
     expect(paramsFor(ours, 'eth_sendTransaction').value).toBe(paramsFor(theirs, 'eth_sendTransaction').value)
   })
 
+  /*
+   * DIVERGENCE 27 — a STALE signer must be identifiable as stale, and must not send.
+   *
+   * `settleWalletOn` (lib/chains/submitOn.js) waits for a signer whose OWN provider reports the
+   * target chain, because "the wallet switched" and "this signer belongs to the new chain" are
+   * different facts. ethers' fixed-network BrowserProvider made the first answer possible; an
+   * adapter that asks the wallet live makes a pre-switch signer look settled, the loop hands it
+   * back, and the send is refused — which is how the on-chain tier's `45-wrap-cross-chain`
+   * WXC-01 failed with no success notice.
+   */
+  describe('a signer built for one chain, after the wallet moved to another', () => {
+    const movedTransport = () => fakeTransport({ eth_chainId: '0x2105' }) // wallet now on 8453
+
+    /** What `signerIsOn` computes: the target chain, or "no answer" (its catch keeps waiting). */
+    const reportedChain = async (signer) => {
+      try {
+        return Number((await signer.provider.getNetwork())?.chainId)
+      } catch {
+        return null // signerIsOn's catch — "still bound to the old chain", keep waiting
+      }
+    }
+
+    it('never reports the chain the wallet moved to — so settleWalletOn keeps waiting', async () => {
+      // The invariant, not either library's spelling of it. ethers REJECTS here
+      // (`network changed: 137 => 8453`, from the fixed network WalletContext gave it) and this
+      // adapter ANSWERS 137; `signerIsOn` turns both into "not settled", which is the whole job.
+      expect(await reportedChain(makeAdapter(movedTransport()))).toBe(137)
+      expect(await reportedChain(makeEthersSigner(movedTransport()))).toBeNull()
+
+      expect(await reportedChain(makeAdapter(movedTransport()))).not.toBe(8453)
+      expect(await reportedChain(makeEthersSigner(movedTransport()))).not.toBe(8453)
+    })
+
+    it('and on its OWN chain it reports it, so a settled signer is accepted', async () => {
+      expect(await reportedChain(makeAdapter(fakeTransport()))).toBe(137)
+      expect(await reportedChain(makeEthersSigner(fakeTransport()))).toBe(137)
+    })
+
+    it('refuses to send, as ethers refused — neither signs on a chain it was not built for', async () => {
+      await expect(
+        makeAdapter(movedTransport()).sendTransaction({ to: TO, data: DATA }),
+      ).rejects.toThrow(/chain/i)
+      await expect(
+        makeEthersSigner(movedTransport()).sendTransaction({ to: TO, data: DATA }),
+      ).rejects.toThrow(/network changed/i)
+    })
+  })
+
   it('`wait()` returns a receipt shaped as ethers shaped it — status 1, not "success"', async () => {
     const tx = await makeAdapter(ours).sendTransaction({ to: TO, data: DATA })
     const receipt = await tx.wait()

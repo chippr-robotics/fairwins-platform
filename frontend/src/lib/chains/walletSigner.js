@@ -72,9 +72,37 @@ export function walletSigner({ walletClient, publicClient, address }) {
   const account = walletClient.account ?? address
 
   const providerLike = {
+    /*
+     * DIVERGENCE 27 — `getNetwork()` answers with the chain this signer was BUILT FOR, not the
+     * chain the wallet is on right now, and ethers' static network is what made that true.
+     *
+     * WalletContext built `new BrowserProvider(walletClient.transport, { chainId, name })` with
+     * a FIXED network, so a pre-switch signer kept answering with its OLD chain. That is
+     * load-bearing, not incidental: `settleWalletOn` tells a settled signer from a stale one by
+     * asking exactly this question (`signerIsOn`), and waits until the signer's OWN provider
+     * reports the target — because "the wallet is on the target chain" and "this signer belongs
+     * to the target chain" are different facts, and pairing the new chainId with the pre-switch
+     * signer is the race that check exists to lose safely.
+     *
+     * Asking the wallet live (`publicClient.getChainId()`) broke it: the moment the wallet
+     * switched, a STALE signer answered with the target, `signerIsOn` said yes, the settle loop
+     * handed back the pre-switch signer, and viem's chain assertion then refused the send. The
+     * cross-chain wrap never reached its success notice — `45-wrap-cross-chain` WXC-01 on the
+     * on-chain tier, with WXC-03's disabled Unwrap button following from the missing balance.
+     *
+     * The assertion in `sendTransaction` is KEPT for the same reason: ethers refused a stale send
+     * too, as `network changed: 63 => 80002` from its fixed-network provider. Both libraries
+     * refuse; only the way they answer `getNetwork` differed.
+     */
     async getNetwork() {
+      const configured = walletClient.chain?.id
+      if (configured != null) {
+        return { chainId: BigInt(configured), name: walletClient.chain?.name ?? `chain-${configured}` }
+      }
+      // No chain was configured (the window.ethereum fallback path): ask, as ethers' detecting
+      // BrowserProvider did when it was given no network.
       const chainId = await publicClient.getChainId()
-      return { chainId: BigInt(chainId), name: walletClient.chain?.name ?? `chain-${chainId}` }
+      return { chainId: BigInt(chainId), name: `chain-${chainId}` }
     },
     getCode: (addr) => publicClient.getBytecode({ address: addr }).then((code) => code ?? '0x'),
     getBalance: (addr) => publicClient.getBalance({ address: addr }),
