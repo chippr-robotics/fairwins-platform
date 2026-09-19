@@ -29,6 +29,12 @@ import { renderHook } from '@testing-library/react'
 const CONNECTED = '0x1111111111111111111111111111111111111111'
 const ACTING = '0x2222222222222222222222222222222222222222'
 const OPPONENT = '0x3333333333333333333333333333333333333333'
+// An ENCODABLE wager id. The fixture was the string "wager-1", which NEITHER library can encode
+// into acceptWager(uint256) — it only ever reached a fake `Contract` that ignored its arguments,
+// alongside a `contractABI={[]}` that ignored the ABI too. The batch shape was being asserted over
+// calldata no real encoder could have produced.
+const MARKET_ID = '1'
+
 const REGISTRY_IFACE = new Interface(WAGER_REGISTRY_ABI)
 const ERC20_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
 const REGISTRY = '0x4444444444444444444444444444444444444444'
@@ -102,10 +108,11 @@ vi.mock('../../lib/chains/readContract', async (importOriginal) => {
         if (functionName === 'balanceOf') return balances[String(args[0]).toLowerCase()] ?? 0n
         if (functionName === 'allowance') return allowances[String(args[0]).toLowerCase()] ?? 0n
       }
+      if (functionName === 'getWager') return { opponentStake: 5_000_000n, token: TOKEN, status: 1 }
       if (functionName === 'getMembership') return { tier: 0n, activeCount: 0n }
       if (functionName === 'getUserWagerCount') return 0n
       if (functionName === 'getUserWagers' || functionName === 'getUserWagerIds') return []
-      if (/^createWager/.test(functionName)) {
+      if (/^(createWager|acceptWager)/.test(functionName)) {
         // The pre-flight. `account` is who it is simulated AS.
         staticCallFrom({ from: account })
         return undefined
@@ -115,52 +122,10 @@ vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   }
 })
 
-// ---- ethers: real everywhere except the Contract factory, which is the chain seam -----
+// ---- the shared read state both surfaces are driven from --------------------------------
 const balances = { [ACTING.toLowerCase()]: 10_000_000n, [CONNECTED.toLowerCase()]: 10_000_000n }
 const allowances = {} // `${owner}` -> bigint
-const registryWrite = vi.fn(async () => ({ hash: '0xSIGNER-WRITE', wait: async () => ({ hash: '0xSIGNER-WRITE', logs: [] }) }))
-const tokenApproveWrite = vi.fn(async () => ({ hash: '0xSIGNER-APPROVE', wait: async () => ({ hash: '0xSIGNER-APPROVE' }) }))
 const staticCallFrom = vi.fn()
-
-function makeContract(address, _abi, runner) {
-  const iface = { encodeFunctionData: (fn, args) => `0xENC:${fn}:${JSON.stringify(args, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))}` }
-  if (String(address).toLowerCase() === TOKEN.toLowerCase()) {
-    const c = {
-      interface: iface,
-      runner,
-      decimals: async () => 6n,
-      symbol: async () => 'USDC',
-      balanceOf: async (who) => balances[String(who).toLowerCase()] ?? 0n,
-      allowance: async (owner) => allowances[String(owner).toLowerCase()] ?? 0n,
-      approve: tokenApproveWrite,
-    }
-    return c
-  }
-  const create = Object.assign((...args) => registryWrite(...args), {
-    staticCall: (...args) => { staticCallFrom(args[args.length - 1]); return Promise.resolve() },
-    estimateGas: async () => 100_000n,
-  })
-  return {
-    interface: iface,
-    runner,
-    address,
-    createWager: create,
-    createWagerWithTerms: create,
-    acceptWager: registryWrite,
-    getWager: async () => ({ opponentStake: 5_000_000n, token: TOKEN, status: 1 }),
-    getUserWagerCount: async () => 0n,
-    getUserWagers: async () => [],
-    getUserWagerIds: async () => [],
-    getMembership: async () => ({ tier: 0n, activeCount: 0n }),
-    batchExpireOpen: registryWrite,
-  }
-}
-
-vi.mock('ethers', async (importOriginal) => {
-  const actual = await importOriginal()
-  const Contract = function (address, abi, runner) { return makeContract(address, abi, runner) }
-  return { ...actual, Contract, ethers: { ...actual.ethers, Contract } }
-})
 
 vi.mock('../../config/contracts', () => ({
   getContractAddress: (name) => (name === 'wagerRegistry' ? REGISTRY : TOKEN),
@@ -211,13 +176,7 @@ const batchTargets = () => (submitAsActive.mock.calls[0]?.[0]?.batch || []).map(
  * fake had been told to write.
  */
 const nameForSelector = (data) => {
-  const text = String(data)
-  // `MarketAcceptanceModal` is still an ethers consumer (see the allowlist), so its half of this
-  // file still goes through the `Contract` fake above and its calldata is that fake's
-  // `0xENC:<fn>:<args>` marker, not real bytes. Named explicitly rather than silently tolerated:
-  // when the modal converts, this branch goes and the assertions get stronger for free.
-  if (text.startsWith('0xENC:')) return text.split(':')[1]
-  const selector = text.slice(0, 10)
+  const selector = String(data).slice(0, 10)
   for (const iface of [REGISTRY_IFACE, ERC20_IFACE]) {
     try {
       const fn = iface.getFunction(selector)
@@ -236,8 +195,6 @@ beforeEach(() => {
   submitAsActive.mockClear()
   sendCalls.mockClear()
   gaslessRun.mockClear()
-  registryWrite.mockClear()
-  tokenApproveWrite.mockClear()
   connectedSignerWrite.mockClear()
   staticCallFrom.mockClear()
   seamReads.length = 0
@@ -280,9 +237,7 @@ describe('createWager while acting as a recovered / hardware account (spec 088 F
 
     expect(gaslessRun).not.toHaveBeenCalled()   // no relayed intent signed by the connected wallet
     expect(sendCalls).not.toHaveBeenCalled()    // no passkey UserOp from the connected account
-    expect(registryWrite).not.toHaveBeenCalled() // no signer-bound contract write
-    expect(tokenApproveWrite).not.toHaveBeenCalled()
-    expect(connectedSignerWrite).not.toHaveBeenCalled() // nor the signer's own sendTransaction
+    expect(connectedSignerWrite).not.toHaveBeenCalled() // the signer rail is sendTransaction now
   })
 
   it('simulates the create AS the acting account, so a refusal is reported before any ceremony', async () => {
@@ -336,11 +291,11 @@ describe('acceptWager while acting as a recovered / hardware account (spec 088 F
       <MarketAcceptanceModal
         isOpen
         onClose={vi.fn()}
-        marketId="wager-1"
+        marketId={MARKET_ID}
         marketData={marketData}
         onAccepted={vi.fn()}
         contractAddress={REGISTRY}
-        contractABI={[]}
+        contractABI={WAGER_REGISTRY_ABI}
       />,
     )
     await user.click(screen.getByRole('button', { name: /^Accept Offer$/i }))
@@ -363,8 +318,7 @@ describe('acceptWager while acting as a recovered / hardware account (spec 088 F
     await waitFor(() => expect(submitAsActive).toHaveBeenCalled())
     expect(gaslessRun).not.toHaveBeenCalled()
     expect(sendCalls).not.toHaveBeenCalled()
-    expect(registryWrite).not.toHaveBeenCalled()
-    expect(tokenApproveWrite).not.toHaveBeenCalled()
+    expect(connectedSignerWrite).not.toHaveBeenCalled()
   })
 
   it('drops the approval leg when the ACTING account has already approved (FR-001)', async () => {

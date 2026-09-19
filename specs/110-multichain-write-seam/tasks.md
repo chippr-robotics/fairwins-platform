@@ -1289,6 +1289,33 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         all — focus ARRIVING on the heading is the claim; the instant it arrives never was.
         Verified non-vacuous by deleting the focus call from the component: the `waitFor` version
         still fails.
+      - **`MarketAcceptanceModal.jsx` — the accept-side twin, and TWO more fixtures that were never
+        valid.** Allowlist 24 → 23. Converting it closes the loop the friend-market batch left
+        open: that batch had to teach `actingWagerWrites.test.jsx`'s selector helper to fall back
+        to the ethers fake's `0xENC:<fn>:` marker because the modal was still an ethers consumer.
+        The modal is converted, so the fake, the `vi.mock('ethers')` and the fallback are all GONE
+        and both surfaces in that file now assert real calldata by real selector.
+        **DIVERGENCE 23 again, on the error path this time.** The modal's own comment said it
+        plainly — "selectors omitted — ethers v6 already surfaces the named error in
+        `err.shortMessage` / `err.reason`" — and five `knownRevertReasons` patterns plus four
+        decline-path patterns are matched against exactly that string. viem puts a decoded custom
+        error's name in neither. Both now read through `revertReasonFrom`, which knows both shapes;
+        without it every one of those nine would have degraded to its generic sentence the moment a
+        revert came back through the chain seam.
+        **The fixtures.** `marketId="wager-1"` was being encoded into `acceptWager(uint256)` and
+        `contractABI={[]}` was the ABI it was encoded against. NEITHER library can do either —
+        checked, both throw — so the batch shape this suite has been asserting was built over
+        calldata no real encoder could have produced. Sixth and seventh fixture in seven batches to
+        be invalid for the same reason: `new Contract(address, abi, …)` fakes ignore the address,
+        the ABI and the arguments, so nothing had ever looked at any of them. Real ABI, encodable
+        id, and the batch assertion is now a decode.
+        The connected wallet's write spies collapse to ONE (`connectedSignerWrite`), because after
+        conversion the signer rail is `sendTransaction` for both surfaces rather than two
+        signer-bound contract methods — and it is a spy rather than an absent method on purpose:
+        a missing method would make the acting-account tests pass by throwing, which proves the
+        write did not happen but not that it went anywhere right. Verified non-vacuous by swapping
+        `acceptWager` for `declineWager` in the acting batch (3 tests fail).
+        `04-wager-creation-validation.cy.js` (14) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
