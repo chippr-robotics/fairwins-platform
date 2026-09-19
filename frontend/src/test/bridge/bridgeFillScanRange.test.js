@@ -24,16 +24,21 @@
  *      null (no new information), never a false "not delivered".
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { encodeEventLog } from '../helpers/encodeEventLog'
 import {
   BRIDGE_STATUS_SOURCE,
   FILL_LOOKBACK_SECONDS,
-  SPOKE_POOL_IFACE,
+  SPOKE_POOL_ABI,
   deriveBridgeState,
   fillLookbackBlocksFor,
   readOnChainEvidence,
   spokePoolAddress,
 } from '../../lib/bridge/bridgeStatus'
 import { LOG_SCAN_CHUNK, clearLogScanCache } from '../../lib/chain/logScan'
+// Fixture logs are built from the SAME fragments the module parses, via the shared viem helper —
+// `Interface.encodeEventLog` has no single viem twin (spec 110). SPOKE_POOL_ABI is the parsed form.
+const encodeSpokeLog = (name, values) => encodeEventLog(SPOKE_POOL_ABI, name, values)
+
 import { BRIDGE_STATE } from '../../data/ledger/sources/bridgeLedgerSource'
 
 const ORIGIN = 137
@@ -56,7 +61,7 @@ const overCap = (req) => asBlock(req.toBlock) - asBlock(req.fromBlock) + 1 > CAP
 /** A real, ABI-encoded `FilledRelay` log, so the scan is exercised through actual decoding. */
 function fillLog(blockNumber = HEAD - 5, destinationChainId = 1) {
   const b32 = (addr) => `0x${'00'.repeat(12)}${addr.slice(2)}`
-  const encoded = SPOKE_POOL_IFACE.encodeEventLog(SPOKE_POOL_IFACE.getEvent('FilledRelay'), [
+  const encoded = encodeSpokeLog('FilledRelay', [
     b32(TOKEN), b32(TOKEN), 1_000_000n, 996_500n, BigInt(ORIGIN), BigInt(ORIGIN), BigInt(DEPOSIT_ID),
     1_800_003_600, 0, `0x${'00'.repeat(32)}`, b32(MEMBER), b32(MEMBER), b32(MEMBER), `0x${'00'.repeat(32)}`,
     [b32(MEMBER), `0x${'00'.repeat(32)}`, 996_500n, 0],

@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { decodeEventLog, encodeFunctionData, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { errorParser } from '../../lib/evm/revertParser'
 import { useWallet, useWeb3 } from '../../hooks'
 import { useActiveAccount } from '../../hooks/useActiveAccount'
 import { useLazyMarketDecryption } from '../../hooks/useEncryption'
@@ -34,12 +36,19 @@ import './WagerRow.css'
  * of the useGaslessWrite/signer path. Returns the same `{ txHash }` shape the classic `.run()` yields,
  * so callers stay branch-light. Claim/refund/resolve are single calls (no token approval).
  */
+const REGISTRY_ABI_PARSED = normalizeAbi(WAGER_REGISTRY_ABI)
+/** Calldata for a WagerRegistry call — one encoder for every rail in this file. */
+const registryCall = (functionName, args) =>
+  encodeFunctionData({ abi: REGISTRY_ABI_PARSED, functionName, args })
+/** The registry's own error table, for naming a revert this file turns into a sentence. */
+const REGISTRY_ERRORS = errorParser(WAGER_REGISTRY_ABI)
+
 async function sendRegistryCall(sendCalls, chainId, method, args) {
   if (typeof sendCalls !== 'function') {
     throw new Error('This wallet cannot submit this action on the current transaction rail.')
   }
   const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-  const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData(method, args)
+  const data = registryCall(method, args)
   const sent = await sendCalls([{ target: registryAddr, data, value: 0n }])
   return { txHash: sent?.txHash ?? sent?.userOpHash ?? sent?.intentId }
 }
@@ -649,7 +658,7 @@ function MyMarketsModal({
     const isOpponent = market.participants?.length > 1 &&
       market.participants[1]?.toLowerCase() === userAddr
     const isArbitrator = market.arbitrator &&
-      market.arbitrator !== ethers.ZeroAddress &&
+      market.arbitrator !== zeroAddress &&
       market.arbitrator.toLowerCase() === userAddr
 
     // Resolution authority depends on resolutionType
@@ -774,12 +783,10 @@ function MyMarketsModal({
   const claimPayoutTx = useGaslessWrite('claimPayout', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await registry.claimPayout(wagerId)
+      const tx = await signer.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('claimPayout', [wagerId]),
+      })
       return tx.wait()
     },
   })
@@ -806,7 +813,7 @@ function MyMarketsModal({
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to claim as the vault.")
         const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimPayout', [wagerId])
+        const data = registryCall('claimPayout', [wagerId])
         await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast('Vault claim proposed — awaiting co-owner approval')
@@ -819,7 +826,7 @@ function MyMarketsModal({
       // never-stranded fallback that rail already promises.
       if (actingAsSigner) {
         const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimPayout', [wagerId])
+        const data = registryCall('claimPayout', [wagerId])
         const res = await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast(res?.txHash ? 'Winnings claimed 🎉' : 'Claim submitted — confirming…')
@@ -869,12 +876,10 @@ function MyMarketsModal({
   const claimRefundRowTx = useGaslessWrite('claimRefund', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await registry.claimRefund(wagerId)
+      const tx = await signer.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('claimRefund', [wagerId]),
+      })
       return tx.wait()
     },
   })
@@ -902,7 +907,7 @@ function MyMarketsModal({
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to reclaim as the vault.")
         const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const data = registryCall('claimRefund', [wagerId])
         await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast('Vault refund proposed — awaiting co-owner approval')
@@ -914,7 +919,7 @@ function MyMarketsModal({
       // self-submit is the never-stranded fallback that rail already promises.
       if (actingAsSigner) {
         const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const data = registryCall('claimRefund', [wagerId])
         const res = await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast(res?.txHash ? 'Refund claimed' : 'Refund submitted — confirming…')
@@ -1617,12 +1622,10 @@ function MarketDetailView({
   const cancelOpenTx = useGaslessWrite('cancelOpen', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const contract = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await contract.cancelOpen(wagerId)
+      const tx = await signer.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('cancelOpen', [wagerId]),
+      })
       setWithdrawTxHash(tx.hash)
       return tx.wait()
     },
@@ -1698,12 +1701,10 @@ function MarketDetailView({
   const claimRefundTx = useGaslessWrite('claimRefund', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await registry.claimRefund(wagerId)
+      const tx = await signer.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('claimRefund', [wagerId]),
+      })
       setRefundTxHash(tx.hash)
       return tx.wait()
     },
@@ -1730,7 +1731,7 @@ function MarketDetailView({
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to reclaim as the vault.")
         const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const data = registryCall('claimRefund', [wagerId])
         await submitAsActive({ to: registryAddr, value: 0n, data })
         setRefundSuccess(true)
         onRefunded?.(market)
@@ -1740,7 +1741,7 @@ function MarketDetailView({
       // that account's own signer through the active-account seam, never the connected wallet's.
       if (actingAsSigner) {
         const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const data = registryCall('claimRefund', [wagerId])
         const res = await submitAsActive({ to: registryAddr, value: 0n, data })
         if (res?.txHash) {
           setRefundTxHash(res.txHash)
@@ -2179,7 +2180,7 @@ function ResolutionModal({
   // counterparty); the second SETTLES. Detected from the WagerDrawn event below.
   const [drawSettled, setDrawSettled] = useState(false)
   // Chain-aware explorer link for the payout receipt (avoids a hardcoded testnet host).
-  const { chainId, sendCalls, loginMethod, provider } = useWeb3()
+  const { chainId, sendCalls, loginMethod } = useWeb3()
   const isPasskey = loginMethod === 'passkey'
   // Spec 088 FR-002 — resolving (declareDraw/declareWinner) checks `actor` against the wager's
   // creator/opponent/arbitrator on-chain, so signing with the CONNECTED wallet while the switcher
@@ -2238,7 +2239,7 @@ function ResolutionModal({
   const isOpponent = market.participants?.length > 1 &&
     market.participants[1]?.toLowerCase() === userAddr
   const isArbitrator = market.arbitrator &&
-    market.arbitrator !== ethers.ZeroAddress &&
+    market.arbitrator !== zeroAddress &&
     market.arbitrator.toLowerCase() === userAddr
   const resType = market.resolutionType ?? 0
   const isOracleType = resType >= 4 // Polymarket(4), Chainlink(5,6), UMA(7)
@@ -2263,13 +2264,12 @@ function ResolutionModal({
   const declareDrawTx = useGaslessWrite('declareDraw', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
       const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await registry.declareDraw(wagerId, feeOverrides)
+      const tx = await signer.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('declareDraw', [wagerId]),
+        ...feeOverrides,
+      })
       const receipt = await tx.wait()
       if (receipt && receipt.status === 0) {
         throw new Error('Transaction reverted on-chain. Draw failed.')
@@ -2280,7 +2280,10 @@ function ResolutionModal({
       // A WagerDrawn event means the draw settled now; otherwise it's a pending
       // proposal awaiting the counterparty's confirmation.
       const settled = receipt.logs.some((l) => {
-        try { return registry.interface.parseLog(l)?.name === 'WagerDrawn' } catch { return false }
+        try {
+          return decodeEventLog({ abi: REGISTRY_ABI_PARSED, topics: l.topics, data: l.data })
+            .eventName === 'WagerDrawn'
+        } catch { return false }
       })
       setDrawSettled(settled)
       return receipt
@@ -2290,13 +2293,12 @@ function ResolutionModal({
   const declareWinnerTx = useGaslessWrite('declareWinner', {
     params: (wagerId, winner) => ({ wagerId, winner }),
     selfSubmit: async (wagerId, winner) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
       const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await registry.declareWinner(wagerId, winner, feeOverrides)
+      const tx = await signer.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('declareWinner', [wagerId, winner]),
+        ...feeOverrides,
+      })
       const receipt = await tx.wait()
       if (receipt && receipt.status === 0) {
         throw new Error('Transaction reverted on-chain. Resolution failed.')
@@ -2335,13 +2337,11 @@ function ResolutionModal({
     setError(null)
 
     const registryAddress = getContractAddressForChain('wagerRegistry', chainId)
-    // Reads (getWager for the winner address) use the signer when present, else the session read
-    // provider — a passkey session has no signer but WalletContext exposes an RPC reader.
-    const registry = new ethers.Contract(
-      registryAddress,
-      WAGER_REGISTRY_ABI,
-      signer || provider
-    )
+
+    // Named chain, not "whatever the signer is bound to" (spec 110 read-routing decision); the
+    // only read here is `getWager`, and the encoders never needed a runner.
+    const askRegistry = (functionName, args) =>
+      readContract(chainId, { address: registryAddress, abi: WAGER_REGISTRY_ABI, functionName, args })
 
     try {
       // Draw: returns each party their own stake. For participant types the
@@ -2353,7 +2353,7 @@ function ResolutionModal({
         // this signature cannot see ahead of co-owner approval, so drawSettled is left false.
         if (operatingAsVault) {
           if (!canActAsVault) throw new Error("Switch to the vault's network to resolve as the vault.")
-          const data = registry.interface.encodeFunctionData('declareDraw', [market.id])
+          const data = registryCall('declareDraw', [market.id])
           const res = await submitAsActive({ to: registryAddress, value: 0n, data })
           if (res?.safeTxHash) setTxHash(res.safeTxHash)
           setStep('success')
@@ -2362,7 +2362,7 @@ function ResolutionModal({
         // Spec 088 FR-002 — acting as a recovered or hardware account: the SAME single call,
         // signed by that account's own signer, never the connected wallet's.
         if (actingAsSigner) {
-          const data = registry.interface.encodeFunctionData('declareDraw', [market.id])
+          const data = registryCall('declareDraw', [market.id])
           const res = await submitAsActive({ to: registryAddress, value: 0n, data })
           if (res?.txHash) setTxHash(res.txHash)
           setStep('success')
@@ -2380,7 +2380,7 @@ function ResolutionModal({
       // outcome: true = first option wins (Pass/Yes/creator), false = second option (Fail/No/opponent)
       const outcomeBool = selectedOutcome === outcomes[0]
 
-      const w = await registry.getWager(market.id)
+      const w = await askRegistry('getWager', [market.id])
       const winner = outcomeBool ? w.creator : w.opponent
       console.log('Resolving wager on-chain:', {
         marketId: market.id,
@@ -2393,7 +2393,7 @@ function ResolutionModal({
       // Spec 088 FR-002 — acting as a vault → threshold-gated declareWinner proposal FROM the Safe.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to resolve as the vault.")
-        const data = registry.interface.encodeFunctionData('declareWinner', [market.id, winner])
+        const data = registryCall('declareWinner', [market.id, winner])
         const res = await submitAsActive({ to: registryAddress, value: 0n, data })
         if (res?.safeTxHash) setTxHash(res.safeTxHash)
         setStep('success')
@@ -2404,7 +2404,7 @@ function ResolutionModal({
       // leg below: a relayed intent has no acting-account twin, and self-submit is the
       // never-stranded fallback that rail already promises.
       if (actingAsSigner) {
-        const data = registry.interface.encodeFunctionData('declareWinner', [market.id, winner])
+        const data = registryCall('declareWinner', [market.id, winner])
         const res = await submitAsActive({ to: registryAddress, value: 0n, data })
         if (res?.txHash) setTxHash(res.txHash)
         setStep('success')
@@ -2426,7 +2426,7 @@ function ResolutionModal({
       if (!errorData && err.error?.data) errorData = err.error.data
       if (typeof errorData === 'string' && errorData.length >= 10) {
         try {
-          const decoded = registry.interface.parseError(errorData)
+          const decoded = REGISTRY_ERRORS.parseError(errorData)
           if (decoded?.name) {
             const decodedName = decoded.name
             if (decodedName === 'ResolveExpired') {

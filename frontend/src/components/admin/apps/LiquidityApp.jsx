@@ -11,7 +11,6 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ethers } from 'ethers'
 import AdminAppShell from '../AdminAppShell'
 import BridgeTab from '../BridgeTab'
 import SupplyTab from '../SupplyTab'
@@ -22,6 +21,7 @@ import { useAdminTx } from '../useAdminTx'
 import { useWeb3 } from '../../../hooks/useWeb3'
 import { getContractAddressForChain } from '../../../config/contracts'
 import { getProvider } from '../../../utils/blockchainService'
+import { readContract } from '../../../lib/chains/readContract'
 import { networkName, readProviderFor, estateNetworks } from '../../../lib/chains/estate'
 import { readOk, notDeployed, unreadable, isRead } from '../../../lib/chains/chainReadResult'
 
@@ -46,9 +46,21 @@ function useRouterEstate() {
           const addr = getContractAddressForChain(router.key, n.chainId)
           if (!addr) return notDeployed(n.chainId)
           try {
-            const p = readProviderFor(n.chainId, chainId, provider) || getProvider(n.chainId)
-            const contract = new ethers.Contract(addr, PAUSED_ABI, p)
-            const paused = await contract.paused()
+            // `readProviderFor` is the AVAILABILITY GATE and its null is a refusal, not a gap to
+            // route around. The `|| getProvider(n.chainId)` this replaced hand-built a provider
+            // from `NETWORKS[chainId].rpcUrl`, which spec 069 forbids: it ignores the member's
+            // configured endpoint and its failover, and `getProvider` resolves through
+            // `getNetwork`, which FALLS BACK to the default network for a chain it does not know —
+            // so an unroutable chain could report the DEFAULT chain's pause state as its own, on a
+            // dashboard whose entire job is saying which chains are paused.
+            if (!readProviderFor(n.chainId, chainId, provider)) {
+              return unreadable(n.chainId, `no read connection to ${n.name}`)
+            }
+            const paused = await readContract(n.chainId, {
+              address: addr,
+              abi: PAUSED_ABI,
+              functionName: 'paused',
+            })
             return readOk(n.chainId, Boolean(paused), null, Date.now())
           } catch (err) {
             return unreadable(n.chainId, err?.message)

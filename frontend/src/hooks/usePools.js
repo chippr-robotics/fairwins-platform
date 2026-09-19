@@ -11,10 +11,25 @@
  * the action set here maps 1:1 to those twins.
  */
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, decodeEventLog, zeroHash } from 'viem'
+import { formatUnits, parseUnits } from '../lib/evm/units'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { getAddress } from '../lib/evm/address'
 import { useWeb3 } from './useWeb3'
 import { getContractAddressForChain, getDeploymentBlockForChain } from '../config/contracts'
-import { ERC20_ABI, getFactory, getPool, POOL_STATE, poolStateDisplay } from '../lib/pools/poolContracts'
+import {
+  ERC20_ABI,
+  WAGER_POOL_ABI,
+  WAGER_POOL_FACTORY_ABI,
+  encodeFactoryCall,
+  encodePoolCall,
+  getFactoryAddress,
+  readPool,
+  readPoolFactory,
+  POOL_STATE,
+  poolStateDisplay,
+} from '../lib/pools/poolContracts'
 import { phraseToIndices, resolvePool, indicesToPhrase } from '../lib/pools/gateway'
 import { deriveNickname } from '../lib/pools/nickname'
 import { payoutMatrixHash } from '../lib/pools/payout'
@@ -39,12 +54,19 @@ async function waitReceipt(runner, txHash, tries = 8, delayMs = 1500) {
   return null
 }
 
+const FACTORY_ABI_PARSED = normalizeAbi(WAGER_POOL_FACTORY_ABI)
+
 /** Parse the PoolCreated event from a create receipt into the hook's return shape. */
-function parsePoolCreated(receipt, factory, account) {
+function parsePoolCreated(receipt, account) {
   const ev = (receipt?.logs || [])
     .map((l) => {
       try {
-        return factory.interface.parseLog(l)
+        const { eventName, args } = decodeEventLog({
+          abi: FACTORY_ABI_PARSED,
+          topics: l.topics,
+          data: l.data,
+        })
+        return { name: eventName, args }
       } catch {
         return null
       }
@@ -63,36 +85,77 @@ function parsePoolCreated(receipt, factory, account) {
   }
 }
 
+/**
+ * `resolvePool` is duck-typed on one method, so the gateway's signature is left alone and this
+ * satisfies it from the read seam (the same move `useFundingPools` makes).
+ */
+const factoryReaderFor = (chainId) => ({
+  poolByPhrase: (indices) => readPoolFactory(chainId, 'poolByPhrase', [indices]),
+})
+
+/**
+ * One `eth_getLogs` for one event on a pool clone — the exact shape `queryFilter(filter, from)` had.
+ *
+ * Deliberately NOT `getLogsRange`: `queryFilter` made a SINGLE request that either answered or
+ * threw, and these scans start at the factory's deploy block — 0 on a chain where none is recorded.
+ * Bisecting that range on a refusal would turn one honest failure into thousands of requests.
+ *
+ * `fromBlock` is the factory's deploy block rather than genesis. A clone cannot emit before the
+ * factory that created it existed, so this can drop no event; it is the bound `fetchProposedMatrix`
+ * already applied, now applied to the roster scan too.
+ */
+async function scanPoolEvent(chainId, poolAddress, eventName) {
+  const handle = eventScanHandle(chainId, { address: poolAddress, abi: WAGER_POOL_ABI })
+  if (!handle) throw new Error('No read connection for this network.')
+  const fromBlock = getDeploymentBlockForChain('wagerPoolFactory', chainId) || 0
+  const toBlock = Number(await handle.provider.getBlockNumber())
+  const topics = handle.filters[eventName]().getTopicFilter()
+  const logs = await handle.provider.getLogs({ address: poolAddress, topics, fromBlock, toBlock })
+  return logs
+    .map((log) => {
+      try {
+        const { name, args } = handle.interface.parseLog(log)
+        return { ...log, name, args }
+      } catch {
+        return null
+      }
+    })
+    .filter(Boolean)
+}
+
 function requiredApprovals(frozenDenominator, thresholdBips) {
   if (frozenDenominator <= 0) return 0
   return Math.max(1, Math.ceil((frozenDenominator * thresholdBips) / 10000))
 }
 
-async function summarizePool(poolContract, account) {
+/**
+ * Checksum every winner before the matrix is ENCODED (spec 110 divergence 16).
+ *
+ * `payoutMatrixHash` already normalises its rows with `getAddress` and hashes BYTES, so the hash
+ * accepts an all-uppercase winner. viem's encoder does not. Without this the id a creator commits
+ * to and the calldata that carries the matrix would disagree about what is acceptable — the hash
+ * would compute and the send would throw.
+ */
+const normEntries = (entries) =>
+  entries.map((e) => ({ winner: getAddress(String(e.winner)), amount: BigInt(e.amount) }))
+
+async function summarizePool(chainId, address, account) {
+  const ask = (functionName, args = []) => readPool(chainId, address, functionName, args)
   const [
     stateNum, buyIn, tokenAddr, memberCount, maxMembers, thresholdBips,
     acceptDeadline, creator, frozenDenominator, closedAt, resolveDeadline, currentProposalId,
   ] = await Promise.all([
-    poolContract.state(),
-    poolContract.buyIn(),
-    poolContract.token(),
-    poolContract.memberCount(),
-    poolContract.maxMembers(),
-    poolContract.thresholdBips(),
-    poolContract.acceptDeadline(),
-    poolContract.creator(),
-    poolContract.frozenDenominator(),
-    poolContract.closedAt(),
-    poolContract.resolveDeadline(),
-    poolContract.currentProposalId(),
+    ask('state'), ask('buyIn'), ask('token'), ask('memberCount'), ask('maxMembers'),
+    ask('thresholdBips'), ask('acceptDeadline'), ask('creator'), ask('frozenDenominator'),
+    ask('closedAt'), ask('resolveDeadline'), ask('currentProposalId'),
   ])
-  const runner = poolContract.runner
-  const token = new ethers.Contract(tokenAddr, ERC20_ABI, runner)
   let decimals = 6
   let symbol = 'USDC'
   try {
-    decimals = Number(await token.decimals())
-    symbol = await token.symbol()
+    const askToken = (functionName) =>
+      readContract(chainId, { address: tokenAddr, abi: ERC20_ABI, functionName })
+    decimals = Number(await askToken('decimals'))
+    symbol = await askToken('symbol')
   } catch {
     /* fall back to USDC defaults */
   }
@@ -103,30 +166,31 @@ async function summarizePool(poolContract, account) {
   const now = Math.floor(Date.now() / 1000)
   // Resolution is valid until the ABSOLUTE resolve deadline (no drift — matches WagerRegistry).
   const windowEnd = Number(resolveDeadline)
-  const hasProposal = currentProposalId && currentProposalId !== ethers.ZeroHash
+  const hasProposal = currentProposalId && currentProposalId !== zeroHash
 
   let hasJoined = false
   let alreadyRefunded = false
   let approvalCount = 0
   let alreadyApproved = false
   if (account) {
-    hasJoined = await poolContract.hasJoined(account)
-    alreadyRefunded = await poolContract.refunded(account)
-    if (hasProposal) alreadyApproved = await poolContract.approvedBy(currentProposalId, account)
+    const who = getAddress(account)
+    hasJoined = await ask('hasJoined', [who])
+    alreadyRefunded = await ask('refunded', [who])
+    if (hasProposal) alreadyApproved = await ask('approvedBy', [currentProposalId, who])
   }
-  if (hasProposal) approvalCount = Number(await poolContract.proposalApprovals(currentProposalId))
+  if (hasProposal) approvalCount = Number(await ask('proposalApprovals', [currentProposalId]))
 
   const withinResolutionWindow = state === 1 && now < windowEnd
   const refundEligible =
     (state === 3 || (state === 1 && now >= windowEnd)) && hasJoined && !alreadyRefunded
 
   return {
-    address: await poolContract.getAddress(),
+    address,
     state,
     stateLabel: POOL_STATE[state] ?? 'Unknown',
     stateDisplay: poolStateDisplay(state),
     buyIn,
-    buyInFormatted: ethers.formatUnits(buyIn, decimals),
+    buyInFormatted: formatUnits(buyIn, decimals),
     tokenAddress: tokenAddr,
     tokenSymbol: symbol,
     tokenDecimals: decimals,
@@ -197,18 +261,42 @@ export function usePools() {
       acceptDeadline: ctx.params.acceptDeadline,
       resolveDeadline: ctx.params.resolveDeadline,
     }),
-    selfSubmit: async (form, ctx) => ctx.factory.createPool(ctx.params).then((tx) => tx.wait()),
+    selfSubmit: async (form, ctx) => {
+      const { signer: s } = await requireContext()
+      if (!s) throw new Error('No signer available for self-submitted pool creation.')
+      return (
+        await s.sendTransaction({
+          to: ctx.factoryAddress,
+          data: encodeFactoryCall('createPool', [ctx.params]),
+        })
+      ).wait()
+    },
   })
   const joinTx = useGaslessWrite('poolJoin', {
     params: (poolAddress) => ({ pool: poolAddress }),
     payment: (poolAddress, summary) => ({ value: summary.buyIn }),
     selfSubmit: async (poolAddress, summary, account) => {
-      const { signer: s } = await requireContext()
+      const { signer: s, chainId: activeChainId } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted join.')
-      const token = new ethers.Contract(summary.tokenAddress, ERC20_ABI, s)
-      const allowance = await token.allowance(account, poolAddress)
-      if (allowance < summary.buyIn) await (await token.approve(poolAddress, summary.buyIn)).wait()
-      return (await getPool(poolAddress, s).join()).wait()
+      const allowance = await readContract(activeChainId, {
+        address: summary.tokenAddress,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [getAddress(String(account)), getAddress(String(poolAddress))],
+      })
+      if (BigInt(allowance) < summary.buyIn) {
+        await (
+          await s.sendTransaction({
+            to: summary.tokenAddress,
+            data: encodeFunctionData({
+              abi: normalizeAbi(ERC20_ABI),
+              functionName: 'approve',
+              args: [getAddress(String(poolAddress)), summary.buyIn],
+            }),
+          })
+        ).wait()
+      }
+      return (await s.sendTransaction({ to: poolAddress, data: encodePoolCall('join', []) })).wait()
     },
   })
   const closeJoiningTx = useGaslessWrite('poolCloseJoining', {
@@ -216,7 +304,7 @@ export function usePools() {
     selfSubmit: async (poolAddress) => {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted close.')
-      return (await getPool(poolAddress, s).closeJoining()).wait()
+      return (await s.sendTransaction({ to: poolAddress, data: encodePoolCall('closeJoining', []) })).wait()
     },
   })
   const cancelTx = useGaslessWrite('poolCancel', {
@@ -224,7 +312,7 @@ export function usePools() {
     selfSubmit: async (poolAddress) => {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted cancel.')
-      return (await getPool(poolAddress, s).cancel()).wait()
+      return (await s.sendTransaction({ to: poolAddress, data: encodePoolCall('cancel', []) })).wait()
     },
   })
   const proposeTx = useGaslessWrite('poolProposeOutcome', {
@@ -232,7 +320,12 @@ export function usePools() {
     selfSubmit: async (poolAddress, entries) => {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted proposal.')
-      return (await getPool(poolAddress, s).proposeOutcome(entries)).wait()
+      return (
+        await s.sendTransaction({
+          to: poolAddress,
+          data: encodePoolCall('proposeOutcome', [normEntries(entries)]),
+        })
+      ).wait()
     },
   })
   const approveTx = useGaslessWrite('poolApprove', {
@@ -241,7 +334,7 @@ export function usePools() {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted approval.')
       step?.('Confirm the approval in your wallet…')
-      const tx = await getPool(poolAddress, s).approve()
+      const tx = await s.sendTransaction({ to: poolAddress, data: encodePoolCall('approve', []) })
       step?.('Submitting your approval on-chain…')
       return tx.wait()
     },
@@ -251,7 +344,12 @@ export function usePools() {
     selfSubmit: async (poolAddress, entries, index, recipient) => {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted claim.')
-      return (await getPool(poolAddress, s).claim(entries, index, recipient)).wait()
+      return (
+        await s.sendTransaction({
+          to: poolAddress,
+          data: encodePoolCall('claim', [normEntries(entries), index, getAddress(String(recipient))]),
+        })
+      ).wait()
     },
   })
   const refundTx = useGaslessWrite('poolRefund', {
@@ -259,7 +357,7 @@ export function usePools() {
     selfSubmit: async (poolAddress) => {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted refund.')
-      return (await getPool(poolAddress, s).refund()).wait()
+      return (await s.sendTransaction({ to: poolAddress, data: encodePoolCall('refund', []) })).wait()
     },
   })
 
@@ -274,13 +372,21 @@ export function usePools() {
     setError(null)
     try {
       const { runner, signer: writeSigner, chainId: activeChainId, account: activeAccount } = await requireContext()
-      const factory = getFactory(runner, activeChainId)
+      const factoryAddress = getFactoryAddress(activeChainId)
+      if (!factoryAddress) {
+        throw new Error(`Wager pools are not available on this network (chain ${activeChainId}).`)
+      }
       const tokenAddr = form.token || getContractAddressForChain('paymentToken', activeChainId)
       if (!tokenAddr) throw new Error('No buy-in token configured for this network.')
-      const token = new ethers.Contract(tokenAddr, ERC20_ABI, runner)
       let decimals = 6
       try {
-        decimals = Number(await token.decimals())
+        decimals = Number(
+          await readContract(activeChainId, {
+            address: tokenAddr,
+            abi: ERC20_ABI,
+            functionName: 'decimals',
+          }),
+        )
       } catch {
         /* default USDC */
       }
@@ -292,8 +398,11 @@ export function usePools() {
           ? Number(form.resolveDeadline)
           : acceptDeadline + Number(form.resolutionDays) * 86400
       const params = {
-        token: tokenAddr,
-        buyIn: ethers.parseUnits(String(form.buyIn), decimals),
+        // Checksummed before it reaches the encoder (spec 110 divergence 16: viem refuses an
+        // all-uppercase address ethers accepted). EIP-712 encodes an address as 20 bytes, so the
+        // relayed intent signs identically either way — the calldata is the half that cares.
+        token: getAddress(String(tokenAddr)),
+        buyIn: parseUnits(String(form.buyIn), decimals),
         maxMembers: Number(form.maxMembers),
         thresholdBips: Math.round(Number(form.thresholdPct) * 100),
         acceptDeadline,
@@ -302,13 +411,12 @@ export function usePools() {
       let txHash
       if (writeSigner) {
         // Gasless when a relayer is live (createPoolWithSig, attributed to the signer), else self-submit.
-        const result = await poolCreateTx.run(form, { factory, params, account: activeAccount })
+        const result = await poolCreateTx.run(form, { factoryAddress, params, account: activeAccount })
         if (result?.error) throw result.error
         txHash = result.txHash
       } else {
         const send = requireSendCalls()
-        const factoryAddress = await factory.getAddress()
-        const data = factory.interface.encodeFunctionData('createPool', [params])
+        const data = encodeFactoryCall('createPool', [params])
         const submitted = await send([{ target: factoryAddress, data, value: 0n }])
         txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
         if (!txHash) throw new Error('Pool creation submitted but no transaction hash was returned.')
@@ -319,7 +427,7 @@ export function usePools() {
       // address + share phrase + the device-local record, while the escrow has already succeeded.
       const receipt = await waitReceipt(runner, txHash, 45, 2000)
       setStatus('idle')
-      const parsed = parsePoolCreated(receipt, factory, activeAccount)
+      const parsed = parsePoolCreated(receipt, activeAccount)
       // Never drop the txHash even if the receipt hasn't landed in time — the UI needs it to show a
       // pending pool the user can recover, not an all-null result that reads as a failure.
       return { ...parsed, txHash: parsed.txHash ?? txHash ?? null }
@@ -335,18 +443,17 @@ export function usePools() {
     setError(null)
     const indices = phraseToIndices(phrase, lang)
     if (!indices) return { notFound: true, reason: 'invalid' }
-    const { runner, chainId: activeChainId, account: activeAccount } = await requireContext()
-    const factory = getFactory(runner, activeChainId)
-    const addr = await resolvePool(factory, indices)
+    const { chainId: activeChainId, account: activeAccount } = await requireContext()
+    const addr = await resolvePool(factoryReaderFor(activeChainId), indices)
     if (!addr) return { notFound: true, reason: 'unknown' }
-    const summary = await summarizePool(getPool(addr, runner), activeAccount)
+    const summary = await summarizePool(activeChainId, addr, activeAccount)
     return { summary }
   }, [requireContext])
 
   /** Read a pool summary by address. */
   const getPoolSummary = useCallback(async (address) => {
-    const { runner, account: activeAccount } = await requireContext()
-    return summarizePool(getPool(address, runner), activeAccount)
+    const { chainId: activeChainId, account: activeAccount } = await requireContext()
+    return summarizePool(activeChainId, address, activeAccount)
   }, [requireContext])
 
   /**
@@ -358,8 +465,8 @@ export function usePools() {
     setStatus('joining')
     setError(null)
     try {
-      const { runner, signer: writeSigner, account: activeAccount } = await requireContext()
-      const summary = await summarizePool(getPool(poolAddress, runner), activeAccount)
+      const { signer: writeSigner, chainId: activeChainId, account: activeAccount } = await requireContext()
+      const summary = await summarizePool(activeChainId, poolAddress, activeAccount)
       let txHash
       if (writeSigner) {
         const result = await joinTx.run(poolAddress, summary, activeAccount)
@@ -367,18 +474,25 @@ export function usePools() {
         txHash = result.txHash
       } else {
         const send = requireSendCalls()
-        const token = new ethers.Contract(summary.tokenAddress, ERC20_ABI, runner)
-        const allowance = await token.allowance(activeAccount, poolAddress)
-        const pool = getPool(poolAddress, runner)
+        const allowance = await readContract(activeChainId, {
+          address: summary.tokenAddress,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [getAddress(String(activeAccount)), getAddress(String(poolAddress))],
+        })
         const calls = []
-        if (allowance < summary.buyIn) {
+        if (BigInt(allowance) < summary.buyIn) {
           calls.push({
             target: summary.tokenAddress,
-            data: token.interface.encodeFunctionData('approve', [poolAddress, summary.buyIn]),
+            data: encodeFunctionData({
+              abi: normalizeAbi(ERC20_ABI),
+              functionName: 'approve',
+              args: [getAddress(String(poolAddress)), summary.buyIn],
+            }),
             value: 0n,
           })
         }
-        calls.push({ target: poolAddress, data: pool.interface.encodeFunctionData('join', []), value: 0n })
+        calls.push({ target: poolAddress, data: encodePoolCall('join', []), value: 0n })
         const submitted = await send(calls)
         txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
         if (!txHash) throw new Error('Join submitted but no transaction hash was returned.')
@@ -400,9 +514,8 @@ export function usePools() {
    * the subgraph (the subgraph is for discovery/listing only).
    */
   const getMembers = useCallback(async (poolAddress) => {
-    const { runner } = await requireContext()
-    const pool = getPool(poolAddress, runner)
-    const events = await pool.queryFilter(pool.filters.Joined())
+    const { chainId: activeChainId } = await requireContext()
+    const events = await scanPoolEvent(activeChainId, poolAddress, 'Joined')
     return events.map((e) => {
       const address = e.args.member
       return { address, nickname: deriveNickname(address, poolAddress) }
@@ -424,14 +537,13 @@ export function usePools() {
    */
   const fetchProposedMatrix = useCallback(async (poolAddress) => {
     try {
-      const { runner, chainId: activeChainId } = await requireContext()
-      const pool = getPool(poolAddress, runner)
-      const onChainId = await pool.currentProposalId()
-      const targetId = onChainId && onChainId !== ethers.ZeroHash ? onChainId : null
-      // Bound the scan to the factory's deploy block when known (never scan from genesis); a provider that
-      // still rejects the range throws below and we return null so the off-chain fallback takes over.
-      const fromBlock = getDeploymentBlockForChain('wagerPoolFactory', activeChainId) || 0
-      const events = await pool.queryFilter(pool.filters.OutcomeProposed(), fromBlock)
+      const { chainId: activeChainId } = await requireContext()
+      const onChainId = await readPool(activeChainId, poolAddress, 'currentProposalId')
+      const targetId = onChainId && onChainId !== zeroHash ? onChainId : null
+      // The scan is bounded to the factory's deploy block (never genesis) inside `scanPoolEvent`; a
+      // provider that still rejects the range throws below and we return null so the off-chain
+      // fallback takes over.
+      const events = await scanPoolEvent(activeChainId, poolAddress, 'OutcomeProposed')
       if (!events.length) return null
       // Prefer the event matching the current on-chain proposalId (the latest one if the creator revised);
       // fall back to the most recent event otherwise (e.g. a resolved pool whose id is no longer exposed).
@@ -455,10 +567,9 @@ export function usePools() {
       if (result?.error) throw result.error
       return result.txHash
     }
-    const { runner } = await requireContext()
+    await requireContext()
     const send = requireSendCalls()
-    const pool = getPool(poolAddress, runner)
-    const submitted = await send([{ target: poolAddress, data: pool.interface.encodeFunctionData('closeJoining', []), value: 0n }])
+    const submitted = await send([{ target: poolAddress, data: encodePoolCall('closeJoining', []), value: 0n }])
     const txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
     if (!txHash) throw new Error('Close submitted but no transaction hash was returned.')
     return txHash
@@ -466,14 +577,16 @@ export function usePools() {
 
   /** Anyone: close joining once the accept deadline has passed (permissionless keeper — self-submit). */
   const pokeDeadline = useCallback(async (poolAddress) => {
-    const { runner, signer: writeSigner } = await requireContext()
+    const { signer: writeSigner } = await requireContext()
     if (writeSigner) {
-      const tx = await getPool(poolAddress, writeSigner).pokeDeadline()
+      const tx = await writeSigner.sendTransaction({
+        to: poolAddress,
+        data: encodePoolCall('pokeDeadline', []),
+      })
       return (await tx.wait()).hash
     }
     const send = requireSendCalls()
-    const pool = getPool(poolAddress, runner)
-    const submitted = await send([{ target: poolAddress, data: pool.interface.encodeFunctionData('pokeDeadline', []), value: 0n }])
+    const submitted = await send([{ target: poolAddress, data: encodePoolCall('pokeDeadline', []), value: 0n }])
     const txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
     if (!txHash) throw new Error('Deadline poke submitted but no transaction hash was returned.')
     return txHash
@@ -486,10 +599,9 @@ export function usePools() {
       if (result?.error) throw result.error
       return result.txHash
     }
-    const { runner } = await requireContext()
+    await requireContext()
     const send = requireSendCalls()
-    const pool = getPool(poolAddress, runner)
-    const submitted = await send([{ target: poolAddress, data: pool.interface.encodeFunctionData('cancel', []), value: 0n }])
+    const submitted = await send([{ target: poolAddress, data: encodePoolCall('cancel', []), value: 0n }])
     const txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
     if (!txHash) throw new Error('Cancellation submitted but no transaction hash was returned.')
     return txHash
@@ -507,11 +619,10 @@ export function usePools() {
       if (result?.error) throw result.error
       return result.txHash
     }
-    const { runner } = await requireContext()
+    await requireContext()
     const send = requireSendCalls()
-    const pool = getPool(poolAddress, runner)
     const submitted = await send([
-      { target: poolAddress, data: pool.interface.encodeFunctionData('proposeOutcome', [entries]), value: 0n },
+      { target: poolAddress, data: encodePoolCall('proposeOutcome', [normEntries(entries)]), value: 0n },
     ])
     const txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
     if (!txHash) throw new Error('Proposal submitted but no transaction hash was returned.')
@@ -527,12 +638,11 @@ export function usePools() {
     setStatus('voting')
     setError(null)
     try {
-      const { runner, signer: writeSigner } = await requireContext()
+      const { signer: writeSigner, chainId: activeChainId } = await requireContext()
       // Pin the CURRENT proposalId the member is approving — approveWithSig binds it so a relayer can
       // never retarget the approval to a matrix the member never saw (anti-rug).
-      const pool = getPool(poolAddress, runner)
-      const proposalId = await pool.currentProposalId()
-      if (!proposalId || proposalId === ethers.ZeroHash) {
+      const proposalId = await readPool(activeChainId, poolAddress, 'currentProposalId')
+      if (!proposalId || proposalId === zeroHash) {
         throw new Error('There is no proposed payout to approve yet.')
       }
       let txHash
@@ -543,7 +653,7 @@ export function usePools() {
       } else {
         const send = requireSendCalls()
         step('Confirm the approval in your wallet…')
-        const submitted = await send([{ target: poolAddress, data: pool.interface.encodeFunctionData('approve', []), value: 0n }])
+        const submitted = await send([{ target: poolAddress, data: encodePoolCall('approve', []), value: 0n }])
         txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
         if (!txHash) throw new Error('Approval submitted but no transaction hash was returned.')
       }
@@ -572,11 +682,14 @@ export function usePools() {
         if (result?.error) throw result.error
         txHash = result.txHash
       } else {
-        const { runner } = await requireContext()
+        await requireContext()
         const send = requireSendCalls()
-        const pool = getPool(poolAddress, runner)
         const submitted = await send([
-          { target: poolAddress, data: pool.interface.encodeFunctionData('claim', [entries, index, recipient]), value: 0n },
+          {
+            target: poolAddress,
+            data: encodePoolCall('claim', [normEntries(entries), index, getAddress(String(recipient))]),
+            value: 0n,
+          },
         ])
         txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
         if (!txHash) throw new Error('Claim submitted but no transaction hash was returned.')
@@ -601,10 +714,9 @@ export function usePools() {
         if (result?.error) throw result.error
         txHash = result.txHash
       } else {
-        const { runner } = await requireContext()
+        await requireContext()
         const send = requireSendCalls()
-        const pool = getPool(poolAddress, runner)
-        const submitted = await send([{ target: poolAddress, data: pool.interface.encodeFunctionData('refund', []), value: 0n }])
+        const submitted = await send([{ target: poolAddress, data: encodePoolCall('refund', []), value: 0n }])
         txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
         if (!txHash) throw new Error('Refund submitted but no transaction hash was returned.')
       }

@@ -20,12 +20,17 @@
  * `executeBatch` UserOps instead (sendBatch.js).
  */
 
-import { ethers } from 'ethers'
+import { encodeAbiParameters, hashMessage, parseAbiParameters } from 'viem'
+import { hashTypedDataLike } from '../evm/typedData'
 import { INTENT_ACTIONS } from '../relay/intentTypes'
 import { getAssertion } from './credentials'
 import { ACCOUNT_ABI, defaultPublicClient } from './smartAccount'
 
-const abi = ethers.AbiCoder.defaultAbiCoder()
+// ethers spells a struct `tuple(address x, …)`; abitype wants the bare parenthesized form. Same
+// rewrite `lib/chains/readContract.js#normalizeAbi` does, so the tuple strings below stay readable
+// as the Solidity they mirror. Encoding verified byte-identical to `AbiCoder.defaultAbiCoder()`
+// over empty, unicode, 300-byte and max-uint256 cases before the swap.
+const params = (signature) => parseAbiParameters(signature.replace(/\btuple\(/g, '('))
 
 // secp256r1 group order for low-s normalization (WebAuthnSol rejects high-s).
 const P256_N = BigInt('0xffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551')
@@ -72,10 +77,9 @@ export function encodeWebAuthnSignature({ assertion, ownerIndex = 0 }) {
     r,
     s,
   }
-  return abi.encode(
-    [SIGNATURE_WRAPPER_TUPLE],
-    [{ ownerIndex, signatureData: abi.encode([WEBAUTHN_AUTH_TUPLE], [auth]) }]
-  )
+  return encodeAbiParameters(params(SIGNATURE_WRAPPER_TUPLE), [
+    { ownerIndex: BigInt(ownerIndex), signatureData: encodeAbiParameters(params(WEBAUTHN_AUTH_TUPLE), [auth]) },
+  ])
 }
 
 const hexToBytes = (hex) => Uint8Array.from(hex.slice(2).match(/.{2}/g), (b) => parseInt(b, 16))
@@ -124,7 +128,10 @@ export function passkeyIntentSigner({ chainId, address, credentialId, ownerIndex
 
     /** ethers-Signer-compatible signTypedData — returns the ERC-1271 envelope bytes. */
     async signTypedData(domain, types, message) {
-      return signDigest(ethers.TypedDataEncoder.hash(domain, types, message))
+      // `hashTypedDataLike` infers the primary type the way ethers did. viem's `hashTypedData`
+      // demands one, and `Object.keys(types)[0]` would be a guess that can hash against a SUB-type
+      // — a valid signature over the wrong structure, which nothing downstream could detect.
+      return signDigest(hashTypedDataLike(domain, types, message))
     },
 
     /**
@@ -136,7 +143,10 @@ export function passkeyIntentSigner({ chainId, address, credentialId, ownerIndex
      * `lib/verify/verifyMessage.js`.
      */
     async signMessage(message) {
-      return signDigest(ethers.hashMessage(message))
+      // ethers' `hashMessage` took a string OR raw bytes; viem's refuses a bare Uint8Array and
+      // wants `{ raw }`. This adapter advertises ethers-signer compatibility, so both are accepted
+      // here rather than leaving a caller that passes bytes to fail at the library boundary.
+      return signDigest(hashMessage(typeof message === 'string' ? message : { raw: message }))
     },
   }
 }

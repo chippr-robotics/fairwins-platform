@@ -13,8 +13,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { ethers as ethersActual } from 'ethers'
 import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
 import { axe } from 'vitest-axe'
+import { LIQUIDITY_ROUTER_ABI } from '../../abis/LiquidityRouter'
 
-const m = vi.hoisted(() => ({ addr: {}, reads: {}, events: {}, feeQuote: null, feeThrows: null, counts: {} }))
+const m = vi.hoisted(() => ({ addr: {}, reads: {}, events: {}, scanCalls: [],
+  readCalls: [],
+  blockTimestamp: null, scanFails: null, sent: [], feeQuote: null, feeThrows: null, counts: {} }))
 
 vi.mock('../../config/contracts', () => ({
   getContractAddressForChain: (name, chainId) =>
@@ -33,30 +36,84 @@ vi.mock('../../lib/liquidity/acrossLpPositions', () => ({
   // unreadable case, which the tab must report as unknown rather than as an empty pool.
   readPooledToken: vi.fn(() => Promise.resolve(m.pooledToken)),
 }))
-vi.mock('ethers', async (orig) => {
+
+// The router AUTHORITY read (`hasRole`) moved onto the spec-110 chain seam; the tab's own router
+// reads still go through the contract mock above. Both serve `m.reads`, so a test's seed is unchanged.
+/**
+ * EVERY router read the tab makes, through the one chain seam.
+ *
+ * The `vi.mock('ethers')` this replaces had stopped intercepting anything once the tab left
+ * ethers — the retired-mock shape `src/test/lint/ethersMockRatchet.test.js` exists to catch. It
+ * mattered more than usual here: the per-read COUNTER lived in that fake, and the refetch-loop
+ * regression test at the bottom of this file asserts on it. Left behind, that test would have
+ * counted nothing while still looking like a guard.
+ *
+ * It records the CHAIN too, which the fake could not: it was handed a `runner` and the chain lived
+ * inside it, so a read against the wrong network's endpoint passed every assertion in this file —
+ * on a tab whose entire purpose is reading one network while the wallet sits on another.
+ */
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          if (prop === 'filters') {
-            return new Proxy({}, { get: (_f, name) => () => ({ __event: String(name) }) })
-          }
-          const key = String(prop)
-          // Counted, so a test can assert how MANY times the tab asked — see the refetch-loop
-          // regression at the bottom of this file.
-          return (...args) => {
-            m.counts[key] = (m.counts[key] || 0) + 1
-            return m.reads[key] ? m.reads[key](...args) : Promise.resolve(undefined)
-          }
+  return {
+    ...actual,
+    readContract: (chainId, { address, functionName, args = [] }) => {
+      m.counts[functionName] = (m.counts[functionName] || 0) + 1
+      m.readCalls.push({ chainId, address, functionName, args })
+      return m.reads[functionName] ? m.reads[functionName](...args) : Promise.resolve(undefined)
+    },
+  }
+})
+
+/**
+ * The event scans (history + operations) moved onto the spec-110 chain seam.
+ *
+ * `m.events` is keyed by EVENT NAME exactly as before, so every test's seed is unchanged — what is
+ * new is that the mock records the CHAIN each scan was made on. The ethers fake it replaces got
+ * its chain from a `runner` object, so a scan against the wrong network's endpoint passed every
+ * assertion in this file, on a tab whose whole purpose is reading one network while the wallet
+ * sits on another.
+ */
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    m.scanCalls.push({ chainId, address })
+    return {
+      target: address,
+      provider: {
+        getBlockNumber: async () => 1_000_000,
+        // The seam hands `getLogsRange` a reader; the name rides on the topic filter so one stub
+        // can answer per event, exactly as the old `queryFilter` stub did.
+        getLogs: async ({ topics }) => {
+          // A seeded rejection stands in for an RPC that refuses the range — the path that must
+          // report the scan as UNREADABLE rather than as zero.
+          if (m.scanFails) throw m.scanFails
+          return (m.events[topics?.__event] || []).map((e) => ({ ...e }))
         },
       },
-    )
+      filters: new Proxy(
+        {},
+        {
+          get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }),
+        },
+      ),
+      // Logs are seeded already decoded — the seam's own parseLog has its own suite.
+      interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: (chainId) => ({
+      // Block timestamps come from the SCOPED chain's client now, not from the wallet's provider,
+      // so "this happened two hours ago" is seeded here.
+      getBlock: async () => ({
+        timestamp: BigInt(m.blockTimestamp ?? Math.floor(Date.now() / 1000) - 60),
+      }),
+      __chainId: chainId,
+    }),
   }
-  const FakeCtor = vi.fn(FakeContract)
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
 })
 
 import SupplyTab from '../../components/admin/SupplyTab'
@@ -70,7 +127,7 @@ const POOL_ADDR = '0x88e6a0c2ddd26feeb64f039a2c41296fcb3f5640'
 const HUB_POOL = '0xc186fA914353c44b2E33eBE05f21846F1048bEda'
 
 const TRADING_POOL = {
-  poolId: '0xpool1',
+  poolId: `0x${'11'.repeat(32)}`,
   kind: BigInt(POOL_KIND.TRADING_LP),
   enabled: true,
   feeTier: 500n,
@@ -81,7 +138,7 @@ const TRADING_POOL = {
   maxDeposit1PerTx: 0n,
 }
 const RETIRED_POOL = {
-  poolId: '0xpool2',
+  poolId: `0x${'22'.repeat(32)}`,
   kind: BigInt(POOL_KIND.TRADING_LP),
   enabled: false,
   feeTier: 3000n,
@@ -92,7 +149,7 @@ const RETIRED_POOL = {
   maxDeposit1PerTx: 0n,
 }
 const BRIDGE_POOL = {
-  poolId: '0xpool3',
+  poolId: `0x${'33'.repeat(32)}`,
   kind: BigInt(POOL_KIND.BRIDGE_LP),
   enabled: true,
   feeTier: 0n,
@@ -112,6 +169,27 @@ const providerStub = {
 /** `runTx` resolves true on success — callers that send a sequence rely on the signal. */
 const TX_OK = true
 const ACCOUNT = '0x9999999999999999999999999999999999999999'
+
+const SIGNER = {
+  sendTransaction: vi.fn(async (tx) => {
+    m.sent.push(tx)
+    return { hash: '0xdeadbeef' }
+  }),
+}
+
+/**
+ * Decode what the tab actually put on the wire, with ETHERS, against the same ABI.
+ *
+ * A cross-library check rather than a read-back of a fake's argument list: the calldata is built
+ * by viem now, and an assertion that only inspects the arguments a stub received cannot tell you
+ * whether the bytes encode them. It also makes `to` assertable — `new Contract(addr, abi, runner)`
+ * in the fake this replaced ignored the address it was handed.
+ */
+function decodeSent(index = -1) {
+  const tx = m.sent.at(index)
+  const parsed = new ethersActual.Interface(LIQUIDITY_ROUTER_ABI).parseTransaction({ data: tx.data })
+  return { to: tx.to, method: parsed.name, args: parsed.args }
+}
 const ROLE_HASH = {
   admin: ethersActual.ZeroHash,
   guardian: ethersActual.id('GUARDIAN_ROLE'),
@@ -134,7 +212,10 @@ function props(overrides = {}) {
   return {
     runTx,
     node: {
-      signer: {},
+      // Writes are calldata now (spec 110): `encodeFunctionData` + `sendTransaction`. The recorded
+      // transactions are decoded in the assertions, so the bytes are checked, not a fake's argument
+      // list — and `to` is asserted, which `new Contract(addr, …)` in a fake silently ignored.
+      signer: SIGNER,
       account: ACCOUNT,
       chainId: 1,
       provider: providerStub,
@@ -147,6 +228,12 @@ function props(overrides = {}) {
 
 beforeEach(() => {
   m.addr = { 1: ROUTER }
+  m.scanFails = null
+  m.scanCalls = []
+  m.readCalls = []
+  m.blockTimestamp = null
+  m.sent = []
+  SIGNER.sendTransaction.mockClear()
   m.events = {}
   m.counts = {}
   m.feeQuote = { available: true, bps: 25, capBps: 250 }
@@ -269,7 +356,7 @@ describe('SupplyTab — a retired pool is retired, not gone (T129, FR-024)', () 
   // printed "0 positions" against a pool members still hold LP in — at the exact moment an operator
   // is deciding whether to retire it. That is the one claim FR-024 exists to prevent.
   it('says the position count is unknown when the deposit scan fails, never 0', async () => {
-    m.reads.queryFilter = () => Promise.reject(new Error('query returned more than 10000 results'))
+    m.scanFails = new Error('query returned more than 10000 results')
     render(<SupplyTab {...props({ isAdmin: true }).node} />)
     const table = await screen.findByRole('table', { name: 'Curated pools' })
     const retiredRow = within(table).getByText(/RETIRED/).closest('tr')
@@ -353,15 +440,14 @@ describe('SupplyTab — per-leg caps (T130, FR-045)', () => {
     fireEvent.click((await screen.findAllByRole('button', { name: 'Set caps' }))[0])
     await waitFor(() => expect(runTx).toHaveBeenCalled())
 
-    // Inspect what the transaction thunk actually asks the contract for.
-    const args = []
-    m.reads.setPoolLimit = (...a) => {
-      args.push(a)
-      return Promise.resolve({ wait: () => Promise.resolve() })
-    }
+    // Inspect what the transaction thunk actually put on the wire.
+    m.sent = []
     await runTx.mock.calls[runTx.mock.calls.length - 1][0]()
-    expect(args.length).toBe(1)
-    const [, max0, max1] = args[0]
+    expect(m.sent.length).toBe(1)
+    const sent = decodeSent()
+    expect(sent.method).toBe('setPoolLimit')
+    expect(sent.to).toBe(ROUTER) // the fake this replaced ignored the address entirely
+    const [, max0, max1] = sent.args
     expect(max0).toBe(TRADING_POOL.maxDeposit0PerTx) // 10,000 USDC preserved, not zeroed
     expect(max1).toBe(ethersActual.parseUnits('2', 18))
   })
@@ -593,4 +679,46 @@ describe('SupplyTab — reads the router once, not in a loop (issue #1031)', () 
     expect(screen.queryByText(/PAUSED/)).not.toBeInTheDocument()
     expect(screen.queryByText(/open to new deposits\)/)).not.toBeInTheDocument()
   })
+
+  /**
+   * THE ASSERTION THE OLD FAKE COULD NOT MAKE (spec 110).
+   *
+   * This tab exists to read ONE network while the wallet sits on another. The ethers fake carried
+   * its chain inside a `runner` object and ignored the address it was constructed with, so a read
+   * or a scan aimed at the WRONG network — or at the other network's router — passed every
+   * assertion in this file. The chain is an argument now and the mocks record it.
+   *
+   * The invariant asserted is CHAIN AND ADDRESS ALWAYS AGREE, over every call, rather than "after
+   * the switch, everything is on 137". The second phrasing is what this test said first and it was
+   * FLAKY: clearing the recorder does not cancel reads already in flight from the previous mount,
+   * so a late chain-1 read lands after the clear and fails an assertion that is only usually true.
+   * Same defect as the mnemonic fixtures earlier in this task — a test that is right most of the
+   * time is a test that fails on somebody else's commit.
+   */
+  it('never reads one network at another network\'s router', async () => {
+    const OTHER = '0x7777777777777777777777777777777777777777'
+    // The two addresses must DIFFER, or every assertion below is satisfied by a collision rather
+    // than by correct routing — which is exactly how this test first passed with the defect
+    // reintroduced: the OTHER address chosen happened to equal this file's ROUTER.
+    expect(OTHER).not.toBe(ROUTER)
+    const HOME_OF = { 1: ROUTER, 137: OTHER }
+    m.addr = HOME_OF
+    render(<SupplyTab {...props({ isAdmin: true }).node} />)
+    await screen.findByRole('table', { name: 'Curated pools' })
+
+    fireEvent.change(screen.getByLabelText(/^Network/), { target: { value: '137' } })
+    await waitFor(() =>
+      expect(m.readCalls.some((c) => Number(c.chainId) === 137)).toBe(true),
+    )
+
+    // Every call, whenever it landed: the address must be the router that lives on the chain the
+    // call names. A read for Polygon sent to Ethereum's router is the failure this tab must never
+    // have, and it is the one the fake could not see.
+    for (const call of [...m.readCalls, ...m.scanCalls]) {
+      expect(call.address, `chain ${call.chainId}`).toBe(HOME_OF[Number(call.chainId)])
+    }
+    // And both chains really were exercised, or the loop above proves nothing.
+    expect(m.readCalls.some((c) => Number(c.chainId) === 1)).toBe(true)
+  })
+
 })

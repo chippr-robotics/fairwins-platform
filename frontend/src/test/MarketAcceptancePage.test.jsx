@@ -29,24 +29,12 @@ vi.mock('../config/contracts', () => ({
   getContractAddressForChain: vi.fn((name) => mockResolveByName(name)),
 }))
 
-// Mock ethers
-vi.mock('ethers', async () => {
-  const actual = await vi.importActual('ethers')
-  return {
-    ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: vi.fn().mockImplementation(() => ({
-        getFriendMarketWithStatus: vi.fn(),
-        acceptedParticipantCount: vi.fn(),
-        getParticipantAcceptance: vi.fn()
-      })),
-      ZeroAddress: '0x0000000000000000000000000000000000000000',
-      formatUnits: vi.fn((value, decimals) => (Number(value) / 10 ** decimals).toString()),
-      formatEther: vi.fn((value) => (Number(value) / 1e18).toString())
-    }
-  }
-})
+// The `vi.mock('ethers')` that stood here is GONE (spec 110). MarketAcceptancePage reads through
+// the chain seam — the fake `Contract` it installed, with `getFriendMarketWithStatus` and friends,
+// had stopped intercepting anything. It was invisible because every case below renders with no
+// provider and reaches no chain read at all, so the dead mock cost nothing and proved nothing.
+// Caught by the ethers-mock ratchet once that gate stopped counting a module the file itself
+// replaces outright.
 
 // Mock MarketAcceptanceModal since we're testing the page, not the modal
 vi.mock('../components/fairwins/MarketAcceptanceModal', () => ({

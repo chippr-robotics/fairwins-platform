@@ -35,14 +35,14 @@
  * account change, and injectable deps.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Contract } from 'ethers'
+import { readContract } from '../lib/chains/readContract'
+import { getPublicClient } from '../lib/chains/publicClient'
 
 import { GMX_READER_ABI } from '../abis/perps/gmxReader'
 import { gmxAddressesFor, perpsAvailable } from '../config/perps'
 import { fetchPerpPositions } from '../lib/perps/perpsClient'
 import { tradeIndex as gainsTradeIndex } from '../lib/perps/venues/gains'
 import { GMX_CHAIN_ID, decodeAccountPositions, fromUsdUnits } from '../lib/perps/venues/gmx'
-import { getReadProvider } from '../utils/rpcProvider'
 
 const POLL_MS = 60_000
 
@@ -85,7 +85,7 @@ export function usePerpsPositions(account, { deps } = {}) {
   const io = {
     fetchPositions: fetchPerpPositions,
     available: perpsAvailable,
-    getProvider: getReadProvider,
+    getProvider: defaultGetProvider,
     makeContract: defaultMakeContract,
     addressesFor: gmxAddressesFor,
     gmxChainId: GMX_CHAIN_ID,
@@ -410,8 +410,20 @@ function gatewayFailureDetail(error) {
   return failureDetail(error)
 }
 
+// Spec 110 Phase 1: the DEFAULTS are seam-backed while the injectable test contracts keep
+// their shape — `getProvider(chainId)` yields a read handle, `makeContract(address, abi,
+// provider)` yields the one GMX reader view this hook calls.
+function defaultGetProvider(chainId) {
+  const client = getPublicClient(chainId)
+  if (!client) return null
+  return { readContract: (args) => readContract(chainId, args) }
+}
+
 function defaultMakeContract(address, abi, provider) {
-  return new Contract(address, abi, provider)
+  return {
+    getAccountPositions: (...args) =>
+      provider.readContract({ address, abi, functionName: 'getAccountPositions', args }),
+  }
 }
 
 /** Starts a read now, turning a synchronous throw into a rejection `allSettled` can carry. */

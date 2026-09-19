@@ -4,30 +4,43 @@ import { renderHook, waitFor, act } from '@testing-library/react'
 const getBalance = vi.fn()
 const rpcGetBalance = vi.fn()
 const tokenBalanceOf = vi.fn()
-const contractCtor = vi.fn(() => ({ balanceOf: tokenBalanceOf }))
 const makeReadProvider = vi.fn()
+const tokenReads = []
 
-// Partial mock: only the pieces useTransfer drives are stubbed (Contract is a spy so the ERC-20
-// balance read can be asserted). The rest of `ethers` stays real — config modules pulled in
-// transitively import named exports from it at load time (e.g. `getAddress` in config/staking.js),
-// and a hand-listed mock silently breaks the whole file the moment the import graph grows.
-vi.mock('ethers', async (importOriginal) => {
+/**
+ * Spec 110 — this file's `vi.mock('ethers')` is gone, and with it the one assertion in the suite
+ * that pinned WHICH provider the ERC-20 balance was read through: it checked that
+ * `new Contract(token, ABI, runner)` got the WALLET's provider on a classic session and the RPC
+ * provider on a passkey one.
+ *
+ * That routing is what changed, deliberately (the read-routing decision). The token balance is
+ * read by CHAIN now, through the one seam, so the member's own endpoint (spec 069) applies to it
+ * and an unreachable chain fails honestly instead of quietly answering with the home network's
+ * state. The consequence is worth asserting rather than deleting: the token read is now IDENTICAL
+ * across session kinds, where it used to depend on how you logged in.
+ *
+ * The NATIVE balance still goes through `readProvider`, so the wallet-vs-RPC preference is still
+ * pinned below — by `getBalance` / `rpcGetBalance`, which is where it actually lives.
+ */
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Interface: class MockInterface {},
-      Contract: function MockContract(...args) { return contractCtor(...args) },
-      formatUnits: (value, decimals) => (Number(value) / (10 ** decimals)).toString(),
-      isAddress: () => true,
-      parseUnits: () => 0n,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      tokenReads.push({ chainId, address, functionName, args })
+      if (functionName === 'balanceOf') return tokenBalanceOf(args[0])
+      throw new Error(`unexpected read: ${functionName}`)
     },
   }
 })
 
+// EIP-55 form, frozen. The fixture was '0xAaAa…0001' — a MIS-CHECKSUMMED address that ethers'
+// own `getAddress` rejects outright. It survived because nothing in this suite ever checksummed
+// it: the read went through a fake `Contract` constructor that took the address and ignored it.
+const ACCOUNT = '0xAAaA000000000000000000000000000000000001'
+
 const wallet = {
-  address: '0xAaAa000000000000000000000000000000000001',
+  address: ACCOUNT,
   chainId: 137,
   signer: {},
   provider: { getBalance },
@@ -86,7 +99,7 @@ describe('useTransfer balances', () => {
     rpcGetBalance.mockReset()
     tokenBalanceOf.mockReset()
     makeReadProvider.mockReset()
-    contractCtor.mockClear()
+    tokenReads.length = 0
     makeReadProvider.mockReturnValue({ getBalance: rpcGetBalance })
     getBalance.mockResolvedValue(2500000000000000000n)
     rpcGetBalance.mockResolvedValue(3500000000000000000n)
@@ -97,12 +110,15 @@ describe('useTransfer balances', () => {
     const { result } = renderHook(() => useTransfer())
 
     await waitFor(() => expect(getBalance).toHaveBeenCalledWith(wallet.address))
-    await waitFor(() => expect(tokenBalanceOf).toHaveBeenCalledWith(wallet.address))
-    expect(contractCtor).toHaveBeenCalledWith(
-      '0xToken000000000000000000000000000000000001',
-      ['function balanceOf(address) view returns (uint256)'],
-      wallet.provider
-    )
+    await waitFor(() => expect(tokenBalanceOf).toHaveBeenCalled())
+    expect(tokenReads).toEqual([
+      {
+        chainId: wallet.chainId,
+        address: '0xToken000000000000000000000000000000000001',
+        functionName: 'balanceOf',
+        args: [ACCOUNT],
+      },
+    ])
     expect(result.current.balanceOf(TRANSFER_KIND.NATIVE)).toBe('2.5')
     expect(result.current.balanceOf(TRANSFER_KIND.STABLE)).toBe('123.45')
 
@@ -121,12 +137,18 @@ describe('useTransfer balances', () => {
 
     await waitFor(() => expect(makeReadProvider).toHaveBeenCalledWith('https://rpc.test', wallet.chainId))
     await waitFor(() => expect(rpcGetBalance).toHaveBeenCalledWith(wallet.address))
-    await waitFor(() => expect(tokenBalanceOf).toHaveBeenCalledWith(wallet.address))
-    expect(contractCtor).toHaveBeenCalledWith(
-      '0xToken000000000000000000000000000000000001',
-      ['function balanceOf(address) view returns (uint256)'],
-      expect.objectContaining({ getBalance: rpcGetBalance })
-    )
+    await waitFor(() => expect(tokenBalanceOf).toHaveBeenCalled())
+    // BYTE-IDENTICAL to the classic session above: the token read does not depend on how the
+    // member signed in. Only the NATIVE balance follows the wallet-vs-RPC preference, asserted
+    // by `rpcGetBalance` on the line above.
+    expect(tokenReads).toEqual([
+      {
+        chainId: wallet.chainId,
+        address: '0xToken000000000000000000000000000000000001',
+        functionName: 'balanceOf',
+        args: [ACCOUNT],
+      },
+    ])
     expect(result.current.balanceOf(TRANSFER_KIND.NATIVE)).toBe('3.5')
   })
 })

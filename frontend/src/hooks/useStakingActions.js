@@ -11,9 +11,7 @@ import { useCallback } from 'react'
 import { useWallet } from './useWalletManagement'
 import { useEarnSend } from './useEarnSend'
 import { getBlockscoutUrl } from '../config/blockExplorer'
-import { NETWORKS } from '../config/networks'
 import { POL_TOKEN_L1 } from '../config/staking'
-import { makeReadProvider } from '../utils/rpcProvider'
 import { buildStakeForOption } from '../lib/staking/stakingActions'
 import { buildWithdrawalRequestCalls, buildLidoClaimCalls } from '../lib/staking/lidoStaking'
 import { buildUnstakeCalls as buildSpolUnstake, buildWithdrawCalls as buildSpolWithdraw } from '../lib/staking/spolStaking'
@@ -51,13 +49,12 @@ export function useStakingActions() {
   const stake = useCallback(
     async (option, amount, { onState, feeQuote } = {}) => {
       if (!address) throw new Error('This session cannot send transactions right now — please reconnect.')
-      const provider = makeReadProvider(NETWORKS[option.chainId].rpcUrl, option.chainId)
       // spec 066: thread the disclosed fee quote (with its bps as the maxFeeBps ceiling) so the
       // router path charges no more than the member was shown. Falls back to the option's overlay.
       const { calls } = await buildStakeForOption(option, {
         account: address,
         amount,
-        provider,
+        chainId: option.chainId,
         polToken: polTokenFor(option),
         feeQuote: feeQuote || option.feeQuote,
       })
@@ -75,10 +72,9 @@ export function useStakingActions() {
   const requestUnstake = useCallback(
     async (option, amount, { onState } = {}) => {
       if (!address) throw new Error('This session cannot send transactions right now — please reconnect.')
-      const provider = makeReadProvider(NETWORKS[option.chainId].rpcUrl, option.chainId)
       let calls
       if (option.providerKind === 'lido') {
-        ;({ calls } = await buildWithdrawalRequestCalls({ contracts: option.contracts, account: address, amount, provider }))
+        ;({ calls } = await buildWithdrawalRequestCalls({ contracts: option.contracts, account: address, amount, chainId: option.chainId }))
       } else if (option.providerKind === 'spol') {
         ;({ calls } = buildSpolUnstake({ contracts: option.contracts, amount }))
       } else {
@@ -93,10 +89,9 @@ export function useStakingActions() {
   const withdraw = useCallback(
     async (option, exit, { onState } = {}) => {
       if (!address) throw new Error('This session cannot send transactions right now — please reconnect.')
-      const provider = makeReadProvider(NETWORKS[option.chainId].rpcUrl, option.chainId)
       let calls
       if (option.providerKind === 'lido') {
-        ;({ calls } = await buildLidoClaimCalls({ contracts: option.contracts, provider, requestIds: [exit.handle.requestId] }))
+        ;({ calls } = await buildLidoClaimCalls({ contracts: option.contracts, chainId: option.chainId, requestIds: [exit.handle.requestId] }))
       } else if (option.providerKind === 'spol') {
         ;({ calls } = buildSpolWithdraw({ contracts: option.contracts }))
       } else {

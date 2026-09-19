@@ -13,7 +13,8 @@ import userEvent from '@testing-library/user-event'
 
 const mockWallet = {
   address: '0x' + 'e'.repeat(40),
-  signer: {},
+  // The write rail: `signer.sendTransaction` with real calldata, decoded in the assertions.
+  signer: { sendTransaction: (...a) => addOwnerPublicKey(...a) },
   provider: {},
   loginMethod: 'injected',
   isConnected: true,
@@ -27,35 +28,42 @@ vi.mock('../../../config/networks', () => ({
   getNetwork: vi.fn(() => ({ name: 'Polygon' })),
 }))
 
-// ethers.Contract double — per-test behavior via these fns.
-const { isOwnerAddress, addOwnerPublicKey, txWait } = vi.hoisted(() => ({
+// Per-test behaviour for the one read and the one write the panel makes.
+const { isOwnerAddress, addOwnerPublicKey, txWait, reads } = vi.hoisted(() => ({
   isOwnerAddress: vi.fn(),
   addOwnerPublicKey: vi.fn(),
   txWait: vi.fn(),
+  reads: [],
 }))
-// Only `Contract` is stubbed; everything else stays REAL. The panel's module graph reaches
-// modules that use ethers at import time (`lib/chains/estate.js` builds its role-hash table with
-// `ethers.id` at module scope), and a mock that replaces the whole package with two methods makes
-// those fail as `ethers.id is not a function` — a confusing error about a module this test is not
-// about. Spreading the real package keeps the stub to the one thing the test actually controls.
-vi.mock('ethers', async (importOriginal) => {
+
+/**
+ * Spec 110 — the panel reads through the chain seam and writes through `signer.sendTransaction`,
+ * so those are what is faked. The `vi.mock('ethers')` that stood here replaced `Contract` with a
+ * class whose constructor took `target` and stored it on `this` — and nothing ever read it back,
+ * so a controller check aimed at the WRONG ACCOUNT satisfied every assertion in the file. The
+ * read's chain, address and argument are recorded and asserted now.
+ */
+vi.mock('../../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: class {
-        constructor(target) {
-          this.target = target
-          this.isOwnerAddress = isOwnerAddress
-          this.addOwnerPublicKey = addOwnerPublicKey
-        }
-      },
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      reads.push({ chainId, address, functionName, args })
+      if (functionName === 'isOwnerAddress') return isOwnerAddress(args[0])
+      throw new Error(`unexpected read: ${functionName}`)
     },
   }
 })
 
+import { Interface, getAddress } from 'ethers'
 import RecoverAccountPanel from '../RecoverAccountPanel'
+
+// The panel's own two-entry ABI, restated here so the assertions decode with the REAL ethers
+// Interface rather than with the encoder under test (divergence 17).
+const RECOVERY_ABI = [
+  'function isOwnerAddress(address owner) view returns (bool)',
+  'function addOwnerPublicKey(bytes32 x, bytes32 y)',
+]
 import { knownCredentials } from '../../../lib/passkey/credentials'
 
 const ACCOUNT = '0x' + 'a'.repeat(40)
@@ -92,6 +100,7 @@ beforeEach(() => {
   localStorage.clear()
   mockWallet.loginMethod = 'injected'
   mockWallet.isConnected = true
+  reads.length = 0
   isOwnerAddress.mockResolvedValue(true)
   txWait.mockResolvedValue({ status: 1 })
   addOwnerPublicKey.mockResolvedValue({ wait: txWait })
@@ -126,6 +135,17 @@ describe('RecoverAccountPanel', () => {
     expect(screen.queryByLabelText('Passkey account address')).not.toBeInTheDocument()
     await enterAndVerify(user)
     await waitFor(() => expect(screen.getByTestId('recover-verified')).toBeInTheDocument())
+    // The controller gate asked THAT account, on THAT chain, about THIS wallet. The fake
+    // `Contract` this replaced took the address in its constructor and never gave it back, so a
+    // check aimed at the wrong account would have looked identical.
+    expect(reads).toEqual([
+      {
+        chainId: 137,
+        address: ACCOUNT,
+        functionName: 'isOwnerAddress',
+        args: [getAddress(mockWallet.address)],
+      },
+    ])
   })
 
   it('refuses recovery when the wallet is not a controller and never reaches the ceremony', async () => {
@@ -161,6 +181,7 @@ describe('RecoverAccountPanel', () => {
     await enterAndVerify(user)
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/No passkey account is deployed/i))
     expect(isOwnerAddress).not.toHaveBeenCalled()
+    expect(reads).toEqual([]) // …and nothing was read at all
     mockWallet.provider = {}
   })
 
@@ -174,7 +195,13 @@ describe('RecoverAccountPanel', () => {
     await waitFor(() => expect(screen.getByText(/New passkey authorized/i)).toBeInTheDocument())
 
     expect(createCredential).toHaveBeenCalled()
-    expect(addOwnerPublicKey).toHaveBeenCalledWith(PUBLIC_KEY.x, PUBLIC_KEY.y)
+    // DECODED from real calldata, aimed at the account being recovered — the old assertion read
+    // two arguments off a fake whose constructor discarded the address it was given.
+    const tx = addOwnerPublicKey.mock.calls[0][0]
+    expect(tx.to).toBe(ACCOUNT)
+    const [x, y] = new Interface(RECOVERY_ABI).decodeFunctionData('addOwnerPublicKey', tx.data)
+    expect(x).toBe(PUBLIC_KEY.x)
+    expect(y).toBe(PUBLIC_KEY.y)
     // Recorded only AFTER the receipt — the credential is now a controller.
     const [rec] = knownCredentials()
     expect(rec.credentialId).toBe('cred-new')

@@ -232,7 +232,12 @@ describe('Platform fees', () => {
 
             // Judged by the chain, never by the modal: the confirmation copy has been right in
             // this app while the transaction was never sent (#1226/#1227).
-            cy.get('.earn-vault-sheet', { timeout: 90000 }).contains(/deposit complete/i).should('be.visible')
+            // The 90s belongs on the command that WAITS. `.earn-vault-sheet` is already on screen —
+            // it is the sheet the submit was clicked in — so a timeout on the `cy.get` is spent on
+            // nothing and leaves the confirmation the default 10s, which is shorter than the deposit
+            // it is waiting for. Every other long wait in this file and in the suite attaches the
+            // timeout to `.contains` for exactly this reason (see line ~302, and 04-wager-creation-tx).
+            cy.get('.earn-vault-sheet').contains(/deposit complete/i, { timeout: 90000 }).should('be.visible')
 
             tokenBalance(fixtures.treasury).then((treasuryAfter) => {
               const charged = treasuryAfter - treasuryBefore

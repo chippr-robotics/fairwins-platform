@@ -42,16 +42,16 @@ import { groupVaults, pickVaultChain } from '../lib/custody/vaultGroups'
  * Spec 068 adds the ordered engine: a `managed-v2` vault carries its rule count instead of a v1
  * rule summary.
  */
-async function readPolicyBadge(vaultAddress, chainId, provider) {
+async function readPolicyBadge(vaultAddress, chainId) {
   try {
-    const policyStatus = await getPolicyStatusV2(vaultAddress, chainId, provider)
+    const policyStatus = await getPolicyStatusV2(vaultAddress, chainId)
     if (policyStatus === 'managed-v2') {
-      const policy = await readPolicyV2(vaultAddress, chainId, provider)
+      const policy = await readPolicyV2(vaultAddress, chainId)
       const count = policy?.rules?.length ?? 0
       return { policyStatus, policySummary: `${count} ordered rule${count === 1 ? '' : 's'}` }
     }
     if (policyStatus !== 'managed') return { policyStatus }
-    const policy = await readPolicy(vaultAddress, chainId, provider)
+    const policy = await readPolicy(vaultAddress, chainId)
     return { policyStatus, policySummary: summarizeRules(policy) }
   } catch {
     return {}
@@ -107,7 +107,7 @@ export function useCustodyVaults() {
             // usable when it is already on that chain; otherwise fall back to the chain's own RPC.
             const reader = onVaultChain ? provider : getProvider(refChainId)
             const state = await loadVault(ref.address, refChainId, reader)
-            const badge = state.isSafe ? await readPolicyBadge(ref.address, refChainId, reader) : {}
+            const badge = state.isSafe ? await readPolicyBadge(ref.address, refChainId) : {}
             return {
               ...ref,
               ...identity,

@@ -230,38 +230,38 @@ describe('createReportDataSource.getWagerEvents (bounded window, adaptive chunki
  * spec 069 forbids (never hand a provider a URL that can contradict the chain it is for).
  */
 describe('the report reads the chain it was asked for (spec 069)', () => {
-  afterEach(() => { vi.resetModules(); vi.doUnmock('../../utils/rpcProvider') })
+  afterEach(() => { vi.resetModules(); vi.doUnmock('../../lib/chains/publicClient') })
 
-  async function withProviderSpy(impl) {
+  async function withClientSpy(impl) {
     vi.resetModules()
-    const getReadProvider = vi.fn(impl)
-    vi.doMock('../../utils/rpcProvider', async (importOriginal) => ({
+    const getPublicClient = vi.fn(impl)
+    vi.doMock('../../lib/chains/publicClient', async (importOriginal) => ({
       ...(await importOriginal()),
-      getReadProvider,
+      getPublicClient,
     }))
     const mod = await import('../../data/reports/reportDataSource')
-    return { create: mod.createReportDataSource, getReadProvider }
+    return { create: mod.createReportDataSource, getPublicClient }
   }
 
-  it('resolves the provider from the report chain, not the build default', async () => {
-    const { create, getReadProvider } = await withProviderSpy(() => ({ getBlockNumber: async () => 1 }))
+  it('resolves the read route from the report chain, not the build default', async () => {
+    const { create, getPublicClient } = await withClientSpy(() => ({ getBlockNumber: async () => 1n }))
     create({ chainId: 63, repository: { listMyWagers: async () => ({ items: [], hasMore: false }) } })
     // Mordor, on a build whose default network is not Mordor.
-    expect(getReadProvider).toHaveBeenCalledWith(63)
+    expect(getPublicClient).toHaveBeenCalledWith(63)
   })
 
   it('refuses when the chain has no endpoint, rather than falling through to the default network', async () => {
-    // A null provider would reach ethers as "use the default network" — the same wrong-chain read
+    // A null client falling through to some default network would be the same wrong-chain read
     // by a quieter route. It has to be a refusal.
-    const { create } = await withProviderSpy(() => null)
+    const { create } = await withClientSpy(() => null)
     expect(() => create({ chainId: 63, repository: { listMyWagers: async () => ({ items: [] }) } }))
       .toThrow(/no rpc endpoint is configured for network 63/i)
   })
 
   it('still honours an explicitly injected provider (the testing seam)', async () => {
-    const { create, getReadProvider } = await withProviderSpy(() => ({ getBlockNumber: async () => 1 }))
+    const { create, getPublicClient } = await withClientSpy(() => ({ getBlockNumber: async () => 1n }))
     const injected = { getBlockNumber: async () => 42 }
     create({ chainId: 63, provider: injected, repository: { listMyWagers: async () => ({ items: [] }) } })
-    expect(getReadProvider).not.toHaveBeenCalled()
+    expect(getPublicClient).not.toHaveBeenCalled()
   })
 })

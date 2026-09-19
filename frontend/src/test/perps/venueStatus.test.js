@@ -341,13 +341,17 @@ describe('openBlockedNote — the venue is named as the source', () => {
 })
 
 describe('spec 069 — providers are never hand-built', () => {
-  it('resolves read providers through utils/rpcProvider only', () => {
+  it('resolves read connections through the chain seam only', () => {
     const source = readFileSync(SOURCE_PATH, 'utf8')
-    expect(source).toContain("from '../../utils/rpcProvider'")
+    // Spec 110 Phase 1: the spec-069 seam for reads is lib/chains — getPublicClient resolves
+    // the member's endpoint, headers and failover through resolveRpcEndpoints exactly as
+    // utils/rpcProvider did for ethers reads.
+    expect(source).toContain("from '../chains/publicClient'")
     // Comments stripped: the file header NAMES the forbidden pattern in order to warn about it.
     const code = source.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
     // A member's configured endpoint and failover are bypassed the moment either of these appears.
     expect(code).not.toMatch(/NETWORKS\[[^\]]*\]\s*\.\s*rpcUrl/)
     expect(code).not.toMatch(/new ethers\.JsonRpcProvider/)
+    expect(code).not.toMatch(/createPublicClient/)
   })
 })

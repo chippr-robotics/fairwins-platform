@@ -6,140 +6,56 @@
  * (Phases 1-2) removes its line, and a PR that adds a line is reintroducing the dependency
  * this migration exists to remove. src/test/lint/ethersRatchet.test.js fails on a stale
  * entry (a listed file that no longer imports ethers), so the list cannot rot upward.
+ *
+ * FIVE ENTRIES ARE NOT A CONVERSION, THEY ARE A DECISION — three reasons over five files — and
+ * are called out so nobody spends an afternoon rediscovering it:
+ *
+ *   - (RETIRED) `lib/pools/bip39Lists.js` was listed here TWICE on a wrong premise, and is now
+ *     converted. The first note said viem bundles no wordlists; the second said ethers bundles ten
+ *     and viem only English, so converting would silently drop nine languages. Both were checked
+ *     and both were false: `@scure/bip39` is ALREADY A DIRECT DEPENDENCY (2.4.0) and ships all ten,
+ *     each one identical to ethers' word for word — 2048 entries, same order, in cz/en/es/fr/it/
+ *     ja/ko/pt/zh_cn/zh_tw, verified before the swap because a pool's phrase is stored as INDICES
+ *     and a list differing anywhere would rename every pool ever created, in one language only.
+ *     `src/test/pools/bip39Lists.test.js` pins that comparison so the claim stays checkable.
+ *     THE LESSON THIS ENTRY EARNED TWICE: a stated blocker here is a claim, not a fact. Verify it
+ *     before trusting it, and especially before writing a NEW reason on top of a wrong one.
+ *   - `lib/miniapps/hostScope.js` hands ethers to third-party mini-app packages as a shared
+ *     module. That is the spec-073 host API contract (hostApi 2), not an internal dependency:
+ *     removing it breaks published packages, so it belongs to Phase 5 (#1596).
+ *   - `utils/rpcProvider.js` is the seam being replaced; it leaves last, when its final
+ *     caller does (T014).
+ *   - `lib/bridge/__tests__/bridgeRouter.test.js`, `lib/liquidity/__tests__/liquidityRouter.test.js`,
+ *     `components/account/__tests__/CallsignPanel.passkey.test.jsx` and
+ *     `components/account/__tests__/RecoverAccountPanel.test.jsx`
+ *     decode or encode viem-BUILT calldata with an ethers `Interface`, on purpose: that is a live
+ *     cross-library byte-compatibility assertion over the exact code this migration is changing,
+ *     and it fails loudly if the two encoders ever disagree. Each file says so at its import.
+ *     Converting them to viem would make the check tautological — it would be asserting that
+ *     viem agrees with itself — so it deletes the test while appearing to modernise it.
+ *
+ * Adding a NEW line is always wrong, including in a test. When a fixture needs something ethers
+ * had and viem does not (`Interface.encodeEventLog`), write the viem version once — see
+ * `src/test/helpers/encodeEventLog.js` — rather than reaching back for ethers.
  */
 export const ETHERS_ALLOWLIST = [
-  'src/components/account/CallsignPanel.jsx',
-  'src/components/account/RecoverAccountPanel.jsx',
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
-  'src/components/admin/BridgeTab.jsx',
-  'src/components/admin/CallsignRegistryAdmin.jsx',
-  'src/components/admin/ControlRoom.jsx',
-  'src/components/admin/DenyListAdmin.jsx',
-  'src/components/admin/FeesTab.jsx',
-  'src/components/admin/MaintenanceTab.jsx',
-  'src/components/admin/MiniAppReviewTab.jsx',
-  'src/components/admin/OracleAdaptersTab.jsx',
-  'src/components/admin/PaymasterOpsCard.jsx',
-  'src/components/admin/PerpsFeesPanel.jsx',
-  'src/components/admin/ProtocolConfigTab.jsx',
-  'src/components/admin/StakingTab.jsx',
-  'src/components/admin/SupplyTab.jsx',
-  'src/components/admin/apps/AccessControlApp.jsx',
-  'src/components/admin/apps/IncidentResponseApp.jsx',
-  'src/components/admin/apps/LiquidityApp.jsx',
-  'src/components/admin/apps/MembershipRevenueApp.jsx',
-  'src/components/admin/liquidityAdminCommon.js',
-  'src/components/admin/perpsFeeRails.js',
-  'src/components/admin/useAdminTx.js',
-  'src/components/custody/ProposalQueue.jsx',
-  'src/components/earn/SupplyView.jsx',
-  'src/components/fairwins/MarketAcceptanceModal.jsx',
-  'src/components/fairwins/MyMarketsModal.jsx',
-  'src/components/miniapps/SubmitAppPanel.jsx',
-  'src/components/perps/openPositionActions.js',
-  'src/components/perps/positionSheetActions.js',
-  'src/contexts/DexContext.jsx',
+  'src/components/account/__tests__/RecoverAccountPanel.test.jsx',
   'src/contexts/WalletContext.jsx',
   'src/contexts/Web3Context.jsx',
-  'src/data/notifications/sources/daoSource.js',
-  'src/data/notifications/sources/earnSource.js',
-  'src/data/notifications/sources/membershipSource.js',
-  'src/data/notifications/sources/tokenSource.js',
-  'src/data/reports/reportDataSource.js',
-  'src/data/wagers/EventsSource.js',
-  'src/data/wagers/RegistrySource.js',
-  'src/hooks/useAccountStats.js',
-  'src/hooks/useCallsignRegistryMetrics.js',
-  'src/hooks/useEarnRewards.js',
-  'src/hooks/useFeeEstate.js',
-  'src/hooks/useFriendMarketCreation.js',
-  'src/hooks/useFundingPools.js',
-  'src/hooks/useGroupPay.js',
-  'src/hooks/useMembershipTreasuryStats.js',
-  'src/hooks/useNullifierContracts.js',
-  'src/hooks/useOpenChallengeAccept.js',
-  'src/hooks/useOpenChallengeCreate.js',
   'src/hooks/useOracleConditions.js',
-  'src/hooks/usePerpsOrders.js',
-  'src/hooks/usePerpsPositions.js',
-  'src/hooks/usePools.js',
-  'src/hooks/useRoleDetails.js',
-  'src/hooks/useSiteStats.js',
-  'src/hooks/useStakingPositions.js',
-  'src/hooks/useSwapBalances.js',
-  'src/hooks/useTierPrices.js',
-  'src/hooks/useTransfer.js',
-  'src/hooks/useTreasuryVault.js',
-  'src/hooks/useVaultProposals.js',
-  'src/hooks/useVaultQueueAcrossChains.js',
-  'src/hooks/useVouchers.js',
-  'src/hooks/useWrapNative.js',
-  'src/lib/apiAccess/apiKeys.js',
-  'src/lib/backup/backupRegistry.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
-  'src/lib/bridge/bridgeRouter.js',
-  'src/lib/bridge/bridgeStatus.js',
-  'src/lib/callsigns/resolveCallsign.js',
-  'src/lib/chains/estate.js',
   'src/lib/clearpath/connectors/governorBravo.js',
   'src/lib/clearpath/connectors/ozGovernor.js',
-  'src/lib/custody/describeProposal.js',
-  'src/lib/custody/policy.js',
-  'src/lib/custody/policyEvents.js',
-  'src/lib/custody/policyV2.js',
-  'src/lib/custody/proposalHub.js',
   'src/lib/custody/safeVault.js',
-  'src/lib/custody/submitAsActiveAccount.js',
-  'src/lib/custody/transfers.js',
-  'src/lib/custody/vaultDeployment.js',
-  'src/lib/custody/vaultProposalReads.js',
-  'src/lib/custody/vaultTransaction.js',
   'src/lib/earn/vaultActions.js',
-  'src/lib/fees/feeQuote.js',
-  'src/lib/funding/fundingContracts.js',
   'src/lib/hardware/hardwareSigner.js',
-  'src/lib/liquidity/__tests__/acrossLpPositions.test.js',
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',
-  'src/lib/liquidity/__tests__/uniswapPositions.test.js',
-  'src/lib/liquidity/acrossLpPositions.js',
-  'src/lib/liquidity/liquidityRouter.js',
-  'src/lib/liquidity/uniswapPositions.js',
   'src/lib/miniapps/hostScope.js',
-  'src/lib/miniapps/registryAuthority.js',
-  'src/lib/miniapps/registryClient.js',
-  'src/lib/passkey/intentSigner.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
-  'src/lib/perps/feeUnits.js',
-  'src/lib/perps/venueStatus.js',
-  'src/lib/perps/venues/gains.js',
-  'src/lib/perps/venues/gmx.js',
-  'src/lib/pools/bip39Lists.js',
-  'src/lib/pools/gasless.js',
-  'src/lib/pools/payout.js',
-  'src/lib/pools/poolContracts.js',
-  'src/lib/portfolio/batchBalances.js',
-  'src/lib/portfolio/prices.js',
-  'src/lib/predict/passkeyApprovals.js',
-  'src/lib/recovery/bip39Suggest.js',
   'src/lib/recovery/legacyKeys.js',
   'src/lib/relay/__tests__/intentClient.test.js',
   'src/lib/relay/__tests__/poolIntents.test.js',
-  'src/lib/relay/intentClient.js',
-  'src/lib/screening/sources.js',
-  'src/lib/staking/lidoStaking.js',
-  'src/lib/staking/polygonDelegation.js',
-  'src/lib/staking/spolStaking.js',
-  'src/lib/staking/stakingRouter.js',
-  'src/lib/transfer/eip3009Transfer.js',
-  'src/lib/uniswap/__tests__/quote.test.js',
-  'src/lib/uniswap/quote.js',
-  'src/lib/verify/verifyMessage.js',
-  'src/pages/MarketAcceptancePage.jsx',
-  'src/utils/blockchainService.js',
-  'src/utils/claimCode/deriveFromCode.js',
-  'src/utils/claimCode/wordlist.js',
-  'src/utils/encryption.js',
   'src/utils/keyRegistryService.js',
   'src/utils/rpcProvider.js',
-  'src/utils/sanctionsScreen.js',
 ]

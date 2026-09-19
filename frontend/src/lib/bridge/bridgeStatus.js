@@ -40,14 +40,16 @@
  * Everything unknown is reported as unknown. There is no branch in this file that invents progress,
  * and every failure to observe resolves toward the *lower* claim (research R7, FR-054).
  */
-import { Interface, formatUnits, toBeHex } from 'ethers'
+import { decodeEventLog, numberToHex, toEventSelector } from 'viem'
+import { normalizeAbi } from '../chains/readContract'
+import { getPublicClient } from '../chains/publicClient'
+import { formatUnits } from '../evm/units'
 import { bridgeGatewayUrl } from './acrossQuotes'
 import { BRIDGE_STATE, captureBridgeState, listBridgeEntries } from '../../data/ledger/sources/bridgeLedgerSource'
 import { BRIDGE_SETTLEMENT } from './bridgeCopy'
 import { queueBridgeNotification } from './bridgeActivityBuffer'
 import { NETWORKS } from '../../config/networks'
 import { getTransactionUrl } from '../../config/blockExplorer'
-import { makeReadProvider } from '../../utils/rpcProvider'
 import { scanLogRange } from '../chain/logScan'
 
 const FETCH_TIMEOUT_MS = 10_000
@@ -240,8 +242,8 @@ export function evidenceFromGatewayStatus(dto) {
  * The Across SpokePool deposit and fill events, in BOTH the vocabularies a live SpokePool may be
  * on: the V3 pair (`V3FundsDeposited` / `FilledV3Relay`) and the post-rename pair
  * (`FundsDeposited` / `FilledRelay`, addresses widened to `bytes32`, `depositId` widened to
- * `uint256`). Topic hashes are derived by ethers from these fragments rather than hand-written, and
- * a matched log is decoded to confirm it really is the event we filtered for.
+ * `uint256`). Topic hashes are derived from these fragments rather than hand-written, and a matched
+ * log is decoded to confirm it really is the event we filtered for.
  *
  * The indexed layout is identical across the rename — `originChainId` then `depositId` then
  * `relayer` — which is what lets one filter serve both. That matters: `RequestedV3SlowFill` is also
@@ -260,12 +262,28 @@ const SPOKE_POOL_EVENTS = [
   'event FilledRelay(bytes32 inputToken, bytes32 outputToken, uint256 inputAmount, uint256 outputAmount, uint256 repaymentChainId, uint256 indexed originChainId, uint256 indexed depositId, uint32 fillDeadline, uint32 exclusivityDeadline, bytes32 exclusiveRelayer, bytes32 indexed relayer, bytes32 depositor, bytes32 recipient, bytes32 messageHash, tuple(bytes32 updatedRecipient, bytes32 updatedMessageHash, uint256 updatedOutputAmount, uint8 fillType) relayExecutionInfo)',
 ]
 
-export const SPOKE_POOL_IFACE = new Interface(SPOKE_POOL_EVENTS)
+/**
+ * The parsed ABI, exported in place of the ethers `Interface` this module used to hand out
+ * (spec 110). Consumers decode with viem's `decodeEventLog({ abi: SPOKE_POOL_ABI, … })` and take
+ * topic hashes with `toEventSelector`; tests BUILD fixture logs from the same value through
+ * `src/test/helpers/encodeEventLog.js`, so the fragments above are stated exactly once.
+ */
+export const SPOKE_POOL_ABI = normalizeAbi(SPOKE_POOL_EVENTS)
 
 const DEPOSIT_EVENT_NAMES = ['V3FundsDeposited', 'FundsDeposited']
 const FILL_EVENT_NAMES = ['FilledV3Relay', 'FilledRelay']
 
-const topicsFor = (names) => names.map((n) => SPOKE_POOL_IFACE.getEvent(n).topicHash)
+const eventItem = (name) => SPOKE_POOL_ABI.find((i) => i.type === 'event' && i.name === name)
+const topicsFor = (names) => names.map((n) => toEventSelector(eventItem(n)))
+
+/** viem's `decodeEventLog`, total: a log from another contract is `null`, never a throw. */
+function parseSpokeLog(log) {
+  try {
+    return decodeEventLog({ abi: SPOKE_POOL_ABI, topics: [...(log?.topics || [])], data: log?.data ?? '0x' })
+  } catch {
+    return null
+  }
+}
 
 /**
  * Approximate seconds per block, used ONLY to size the destination log-scan window. This is a scan
@@ -311,12 +329,46 @@ export function spokePoolAddress(chainId) {
   return NETWORKS[chainId]?.bridge?.spokePool ?? null
 }
 
-/** Default read provider for a chain, or null when the network is unknown or has no RPC. */
+/**
+ * Default read handle for a chain, or null when the network is unknown or has no endpoint.
+ *
+ * The duck shape (`getTransactionReceipt` / `getBlockNumber` / `getLogs`) is what this module's
+ * readers and `scanLogRange` were written against, and injected fakes still satisfy it unchanged.
+ * ONE normalization matters: viem reports a receipt's outcome as `'success' | 'reverted'` where
+ * ethers used `1 | 0`, and every caller here asks `Number(receipt.status) === 0`. `Number('success')`
+ * is NaN, which compares false — so a REVERTED deposit would have read as a successful one and the
+ * `src revert` leaf of the state machine would have become unreachable, silently. It is mapped here,
+ * once, rather than at each reader.
+ */
 function defaultProvider(chainId) {
   if (!isEvmChainId(chainId)) return null
-  const rpcUrl = NETWORKS[chainId]?.rpcUrl
-  if (!rpcUrl) return null
-  return makeReadProvider(rpcUrl, chainId)
+  const client = getPublicClient(chainId)
+  if (!client) return null
+  return {
+    async getTransactionReceipt(hash) {
+      const receipt = await client.getTransactionReceipt({ hash }).catch(() => null)
+      if (!receipt) return null
+      return { ...receipt, status: receipt.status === 'reverted' ? 0 : 1 }
+    },
+    async getBlockNumber() {
+      // Never cached: this head bounds a log scan, and a stale one silently narrows the window a
+      // fill could be found in. See the note in `lib/chains/eventScan.js`.
+      return Number(await client.getBlockNumber({ cacheTime: 0 }))
+    },
+    async getLogs({ address, topics, fromBlock, toBlock }) {
+      return client.request({
+        method: 'eth_getLogs',
+        params: [
+          {
+            address,
+            topics,
+            fromBlock: `0x${Number(fromBlock).toString(16)}`,
+            toBlock: `0x${Number(toBlock).toString(16)}`,
+          },
+        ],
+      })
+    },
+  }
 }
 
 /**
@@ -348,12 +400,9 @@ async function readOriginEvidence({ provider, srcTxHash, depositId }) {
   const wanted = depositId == null ? null : String(depositId)
   const depositIndexed = (receipt.logs || []).some((log) => {
     if (!depositTopics.has(log?.topics?.[0])) return false
-    try {
-      const parsed = SPOKE_POOL_IFACE.parseLog({ topics: [...log.topics], data: log.data })
-      return wanted == null || String(parsed.args.depositId) === wanted
-    } catch {
-      return false
-    }
+    const parsed = parseSpokeLog(log)
+    if (!parsed) return false
+    return wanted == null || String(parsed.args.depositId) === wanted
   })
 
   return { sourceMined: true, sourceReverted: false, depositIndexed }
@@ -407,7 +456,11 @@ async function readDestinationFill({ provider, destinationChainId, originChainId
       toBlock: head,
       // [any fill event, this origin chain, this deposit]. `uint32` and `uint256` pad to the same
       // 32-byte topic for any value a deposit id can take, so one topic serves both vocabularies.
-      topics: [topicsFor(FILL_EVENT_NAMES), toBeHex(BigInt(originChainId), 32), toBeHex(BigInt(depositId), 32)],
+      topics: [
+        topicsFor(FILL_EVENT_NAMES),
+        numberToHex(BigInt(originChainId), { size: 32 }),
+        numberToHex(BigInt(depositId), { size: 32 }),
+      ],
     })
   } catch {
     // A provider that refuses the range (or the chain) tells us nothing. Stay silent.
@@ -415,15 +468,12 @@ async function readDestinationFill({ provider, destinationChainId, originChainId
   }
 
   for (const log of logs || []) {
-    try {
-      const parsed = SPOKE_POOL_IFACE.parseLog({ topics: [...log.topics], data: log.data })
-      if (!FILL_EVENT_NAMES.includes(parsed.name)) continue
-      if (String(parsed.args.depositId) !== String(depositId)) continue
-      if (String(parsed.args.originChainId) !== String(originChainId)) continue
-      if (log.transactionHash) return log.transactionHash
-    } catch {
-      // Not one of our fill events after all — ignore it rather than count it.
-    }
+    // Not one of our fill events after all — ignore it rather than count it.
+    const parsed = parseSpokeLog(log)
+    if (!parsed || !FILL_EVENT_NAMES.includes(parsed.eventName)) continue
+    if (String(parsed.args.depositId) !== String(depositId)) continue
+    if (String(parsed.args.originChainId) !== String(originChainId)) continue
+    if (log.transactionHash) return log.transactionHash
   }
   return null
 }

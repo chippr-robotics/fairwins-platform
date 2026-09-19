@@ -24,8 +24,6 @@ vi.mock('../../lib/staking/polygonDelegation', () => ({
   readOpenUnbonds: async () => [],
   readStakeManagerTiming: async () => ({ epoch: 100n, withdrawalDelay: 80n }),
 }))
-vi.mock('../../utils/rpcProvider', () => ({ makeReadProvider: () => ({}) }))
-
 import { stakingSource } from '../../data/notifications/sources/stakingSource'
 
 const ACCOUNT = '0xabc'

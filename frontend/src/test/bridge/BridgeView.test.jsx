@@ -21,6 +21,7 @@
  * sees here is the itemization the app produces.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { encodeEventLog } from '../helpers/encodeEventLog'
 import { render, screen, within, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { axe } from 'vitest-axe'
@@ -98,7 +99,10 @@ vi.mock('../../data/ledger/sources/bridgeLedgerSource', async (importOriginal) =
 
 import BridgeView from '../../components/wallet/BridgeView'
 import { buildBridgeQuote, QUOTE_VALIDITY_MS } from '../../lib/bridge/acrossQuotes'
-import { SPOKE_POOL_IFACE } from '../../lib/bridge/bridgeStatus'
+import { SPOKE_POOL_ABI } from '../../lib/bridge/bridgeStatus'
+// Fixture logs are built from the SAME fragments the module parses, via the shared viem helper —
+// `Interface.encodeEventLog` has no single viem twin (spec 110). SPOKE_POOL_ABI is the parsed form.
+const encodeSpokeLog = (name, values) => encodeEventLog(SPOKE_POOL_ABI, name, values)
 import { BRIDGE_UNAVAILABLE, BRIDGE_SETTLEMENT } from '../../lib/bridge/bridgeCopy'
 
 // ---- fixtures ----------------------------------------------------------------------
@@ -428,7 +432,7 @@ describe('BridgeView — signing-time network switch (T151/T152, FR-061, SC-020)
     getTransactionReceipt.mockResolvedValue({
       logs: [
         {
-          ...SPOKE_POOL_IFACE.encodeEventLog('V3FundsDeposited', [
+          ...encodeSpokeLog('V3FundsDeposited', [
             USDC[42161], USDC[137], 100_000_000n, 98_500_000n, 137, 4242,
             Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000) + 3600, 0,
             walletState.address, walletState.address, ZeroAddress, '0x',
@@ -460,7 +464,7 @@ describe('BridgeView — signing-time network switch (T151/T152, FR-061, SC-020)
     getTransactionReceipt.mockResolvedValue({
       logs: [
         {
-          ...SPOKE_POOL_IFACE.encodeEventLog('V3FundsDeposited', [
+          ...encodeSpokeLog('V3FundsDeposited', [
             USDC[42161], USDC[137], 100_000_000n, 98_500_000n, 137, 4242,
             Math.floor(Date.now() / 1000), Math.floor(Date.now() / 1000) + 3600, 0,
             walletState.address, walletState.address, ZeroAddress, '0x',

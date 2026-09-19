@@ -1,5 +1,8 @@
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, decodeEventLog, parseAbiItem, zeroHash } from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { isAddress, getAddress } from '../lib/evm/address'
 import { useWallet } from './useWalletManagement'
 import { getContractAddressForChain, getDeploymentBlockForChain } from '../config/contracts'
 import { MEMBERSHIP_VOUCHER_ABI } from '../abis/MembershipVoucher'
@@ -18,7 +21,7 @@ import { useGaslessWrite } from '../lib/relay/useGaslessWrite'
  * Exported for tests (spec 026 FR-013/SC-005).
  */
 export function normalizeTermsHash(termsHash) {
-  if (typeof termsHash !== 'string' || !termsHash) return ethers.ZeroHash
+  if (typeof termsHash !== 'string' || !termsHash) return zeroHash
   return termsHash.startsWith('0x') ? termsHash : `0x${termsHash}`
 }
 
@@ -38,12 +41,41 @@ export function normalizeTermsHash(termsHash) {
  * Addresses/ABIs come only from synced config (Principle V). When the voucher isn't deployed on the active
  * network, {voucherAvailable} is false and the UI surfaces that honestly rather than implying it works.
  */
+const MANAGER_ABI_PARSED = normalizeAbi(MEMBERSHIP_MANAGER_ABI)
+const VOUCHER_ABI_PARSED = normalizeAbi(MEMBERSHIP_VOUCHER_ABI)
+const MINTER_ABI_PARSED = normalizeAbi(VOUCHER_BATCH_MINTER_ABI)
+const ERC20_ABI_PARSED = normalizeAbi(ERC20_ABI)
+
+const managerCall = (functionName, args) =>
+  encodeFunctionData({ abi: MANAGER_ABI_PARSED, functionName, args })
+const voucherCall = (functionName, args) =>
+  encodeFunctionData({ abi: VOUCHER_ABI_PARSED, functionName, args })
+const minterCall = (functionName, args) =>
+  encodeFunctionData({ abi: MINTER_ABI_PARSED, functionName, args })
+const erc20Call = (functionName, args) =>
+  encodeFunctionData({ abi: ERC20_ABI_PARSED, functionName, args })
+
+/**
+ * The 3-argument `safeTransferFrom`, as a ONE-ENTRY ABI (spec 110 divergence 21).
+ *
+ * ethers let you name an overload by its full signature — `encodeFunctionData(
+ * 'safeTransferFrom(address,address,uint256)', …)` — and that is exactly why the string is written
+ * out here: ERC-721 overloads it, and the 4-argument form takes a trailing `bytes`. viem REFUSES a
+ * signature as `functionName` (`AbiFunctionNotFoundError`); given the bare name it picks an
+ * overload by matching the ARGUMENTS it was handed. That happens to land on the same selector for
+ * this call, but it makes the choice a consequence of the argument list rather than something the
+ * author stated — so the ABI is narrowed to the one entry instead, and the intent survives.
+ */
+const SAFE_TRANSFER_FROM_3 = parseAbiItem(
+  'function safeTransferFrom(address from, address to, uint256 tokenId)',
+)
+
 export function useVouchers() {
-  const { account, signer, provider, chainId, sendCalls, loginMethod } = useWallet()
+  const { account, signer, chainId, sendCalls, loginMethod } = useWallet()
   // Passkey smart-account sessions have no ethers signer (spec 041): their writes go through
   // WalletContext.sendCalls (one sponsored ERC-4337 UserOp, approve+action batched), exactly like
-  // the transfer/earn/pool surfaces. Reads use the session read `provider` (a live RPC reader for
-  // passkey on supported chains). Classic wallets keep the signer path unchanged.
+  // the transfer/earn/pool surfaces. Reads go through the spec-110 chain seam, named by chainId,
+  // for every session kind. Classic wallets keep the signer path for writes.
   const isPasskey = loginMethod === 'passkey'
   const [status, setStatus] = useState('idle') // idle | minting | redeeming | transferring | listing | success | error
   const [error, setError] = useState(null)
@@ -63,14 +95,48 @@ export function useVouchers() {
     setLastTxHash(null)
   }, [])
 
+  /**
+   * The two reads every purchase path makes, on the chain the purchase will settle on.
+   *
+   * Spec 110: these went through `new Contract(addr, ABI, provider|signer)` — i.e. through the
+   * WALLET's provider for a classic session — which meant a member's own endpoint (spec 069) did
+   * not apply to them, and an unsupported wallet chain read the HOME network's state instead of
+   * failing. Both are read through the one seam now, named chain first.
+   */
+  const readTierConfig = useCallback(
+    (roleHash, tierId) =>
+      readContract(chainId, {
+        address: managerAddress,
+        abi: MEMBERSHIP_MANAGER_ABI,
+        functionName: 'getTierConfig',
+        args: [roleHash, tierId],
+      }),
+    [chainId, managerAddress],
+  )
+
+  const readAllowance = useCallback(
+    async (spender) =>
+      BigInt(
+        await readContract(chainId, {
+          address: paymentTokenAddress,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [getAddress(String(account)), getAddress(String(spender))],
+        }),
+      ),
+    [chainId, paymentTokenAddress, account],
+  )
+
   // Gasless seam (specs 035 + 036): relay the redeem when a relayer is live, else self-submit the
   // MembershipManager.redeemVoucher call (never-stranded). Signer-attributed (no payment) — the
   // redeemer is the connected wallet, auto-filled by signIntent, so it's omitted from params.
   const voucherTx = useGaslessWrite('redeemVoucher', {
     params: (tokenId, termsHash) => ({ voucherId: tokenId, acceptedTermsHash: normalizeTermsHash(termsHash) }),
     selfSubmit: async (tokenId, termsHash) => {
-      const manager = new ethers.Contract(managerAddress, MEMBERSHIP_MANAGER_ABI, signer)
-      const tx = await manager.redeemVoucher(tokenId, normalizeTermsHash(termsHash))
+      const tx = await signer.sendTransaction({
+        to: managerAddress,
+        data: managerCall('redeemVoucher', [BigInt(tokenId), normalizeTermsHash(termsHash)]),
+      })
       setLastTxHash(tx.hash)
       return tx.wait()
     },
@@ -88,7 +154,7 @@ export function useVouchers() {
 
       const qty = Math.max(1, Math.floor(Number(quantity) || 1))
       const to = recipient && recipient.trim() ? recipient.trim() : account
-      if (!ethers.isAddress(to)) throw new Error('Enter a valid recipient address.')
+      if (!isAddress(to)) throw new Error('Enter a valid recipient address.')
       const isGift = to.toLowerCase() !== account.toLowerCase()
       const needsHelper = qty > 1 || isGift
 
@@ -98,28 +164,24 @@ export function useVouchers() {
       try {
         if (isPasskey) {
           // Passkey rail: batch approve (only if the allowance is short) + the mint into ONE
-          // sponsored UserOp. Reads over the session read provider; encoding needs no signer.
+          // sponsored UserOp. Reads go through the chain seam; encoding needs no signer.
           if (needsHelper && !batchMintAvailable) {
             throw new Error('Buying multiple vouchers or gifting isn’t available on this network yet.')
           }
-          const manager = new ethers.Contract(managerAddress, MEMBERSHIP_MANAGER_ABI, provider)
-          const cfg = await manager.getTierConfig(roleHash, tierId)
+          const cfg = await readTierConfig(roleHash, tierId)
           if (!cfg.active) throw new Error('That tier is not available for purchase.')
-          const price = cfg.priceUSDC
+          const price = BigInt(cfg.priceUSDC)
           const spender = needsHelper ? batchMinterAddress : voucherAddress
           const amount = needsHelper ? price * BigInt(qty) : price
-          const token = new ethers.Contract(paymentTokenAddress, ERC20_ABI, provider)
-          const allowance = await token.allowance(account, spender)
+          const allowance = await readAllowance(spender)
           const calls = []
           if (allowance < amount) {
-            calls.push({ target: paymentTokenAddress, data: token.interface.encodeFunctionData('approve', [spender, amount]), value: 0n })
+            calls.push({ target: paymentTokenAddress, data: erc20Call('approve', [getAddress(String(spender)), amount]), value: 0n })
           }
           if (needsHelper) {
-            const minter = new ethers.Contract(batchMinterAddress, VOUCHER_BATCH_MINTER_ABI, provider)
-            calls.push({ target: batchMinterAddress, data: minter.interface.encodeFunctionData('mintBatch', [roleHash, tierId, qty, to]), value: 0n })
+            calls.push({ target: batchMinterAddress, data: minterCall('mintBatch', [roleHash, tierId, qty, getAddress(String(to))]), value: 0n })
           } else {
-            const voucher = new ethers.Contract(voucherAddress, MEMBERSHIP_VOUCHER_ABI, provider)
-            calls.push({ target: voucherAddress, data: voucher.interface.encodeFunctionData('mint', [roleHash, tierId]), value: 0n })
+            calls.push({ target: voucherAddress, data: voucherCall('mint', [roleHash, tierId]), value: 0n })
           }
           const res = await sendCalls(calls)
           const txHash = res?.txHash ?? res?.userOpHash ?? null
@@ -129,11 +191,9 @@ export function useVouchers() {
           return { count: qty, recipient: to, gift: isGift, tokenId: needsHelper ? undefined : null, txHash }
         }
 
-        const manager = new ethers.Contract(managerAddress, MEMBERSHIP_MANAGER_ABI, signer)
-        const cfg = await manager.getTierConfig(roleHash, tierId)
+        const cfg = await readTierConfig(roleHash, tierId)
         if (!cfg.active) throw new Error('That tier is not available for purchase.')
-        const price = cfg.priceUSDC
-        const token = new ethers.Contract(paymentTokenAddress, ERC20_ABI, signer)
+        const price = BigInt(cfg.priceUSDC)
 
         if (needsHelper) {
           if (!batchMintAvailable) {
@@ -141,13 +201,18 @@ export function useVouchers() {
           }
           const total = price * BigInt(qty)
           // Approve the batch helper (not the voucher) for the full amount, only if needed.
-          const allowance = await token.allowance(account, batchMinterAddress)
+          const allowance = await readAllowance(batchMinterAddress)
           if (allowance < total) {
-            const approveTx = await token.approve(batchMinterAddress, total)
+            const approveTx = await signer.sendTransaction({
+              to: paymentTokenAddress,
+              data: erc20Call('approve', [getAddress(String(batchMinterAddress)), total]),
+            })
             await approveTx.wait()
           }
-          const minter = new ethers.Contract(batchMinterAddress, VOUCHER_BATCH_MINTER_ABI, signer)
-          const tx = await minter.mintBatch(roleHash, tierId, qty, to)
+          const tx = await signer.sendTransaction({
+            to: batchMinterAddress,
+            data: minterCall('mintBatch', [roleHash, tierId, qty, getAddress(String(to))]),
+          })
           setLastTxHash(tx.hash)
           await tx.wait()
           setStatus('success')
@@ -155,20 +220,29 @@ export function useVouchers() {
         }
 
         // Single voucher for yourself: mint directly on the voucher (approve it for the price).
-        const allowance = await token.allowance(account, voucherAddress)
+        const allowance = await readAllowance(voucherAddress)
         if (allowance < price) {
-          const approveTx = await token.approve(voucherAddress, price)
+          const approveTx = await signer.sendTransaction({
+            to: paymentTokenAddress,
+            data: erc20Call('approve', [getAddress(String(voucherAddress)), price]),
+          })
           await approveTx.wait()
         }
-        const voucher = new ethers.Contract(voucherAddress, MEMBERSHIP_VOUCHER_ABI, signer)
-        const tx = await voucher.mint(roleHash, tierId)
+        const tx = await signer.sendTransaction({
+          to: voucherAddress,
+          data: voucherCall('mint', [roleHash, tierId]),
+        })
         setLastTxHash(tx.hash)
         const receipt = await tx.wait()
         let tokenId = null
-        for (const log of receipt.logs) {
+        for (const log of receipt.logs || []) {
           try {
-            const parsed = voucher.interface.parseLog(log)
-            if (parsed && parsed.name === 'VoucherMinted') {
+            const parsed = decodeEventLog({
+              abi: VOUCHER_ABI_PARSED,
+              topics: log.topics,
+              data: log.data,
+            })
+            if (parsed && parsed.eventName === 'VoucherMinted') {
               tokenId = parsed.args.id.toString()
               break
             }
@@ -184,7 +258,8 @@ export function useVouchers() {
         throw e
       }
     },
-    [isPasskey, provider, sendCalls, signer, account, voucherAvailable, batchMintAvailable, voucherAddress, managerAddress, batchMinterAddress, paymentTokenAddress]
+    [isPasskey, sendCalls, signer, account, voucherAvailable, batchMintAvailable,
+     voucherAddress, batchMinterAddress, paymentTokenAddress, readTierConfig, readAllowance]
   )
 
   /**
@@ -197,7 +272,7 @@ export function useVouchers() {
       if (!isPasskey && !signer) throw new Error('Connect a wallet to transfer a voucher.')
       if (!voucherAvailable) throw new Error('Membership vouchers are not available on this network yet.')
       const dest = (to || '').trim()
-      if (!ethers.isAddress(dest)) throw new Error('Enter a valid recipient address.')
+      if (!isAddress(dest)) throw new Error('Enter a valid recipient address.')
       if (account && dest.toLowerCase() === account.toLowerCase()) {
         throw new Error('That voucher is already in this wallet.')
       }
@@ -205,19 +280,21 @@ export function useVouchers() {
       setError(null)
       setLastTxHash(null)
       try {
-        // The voucher overloads safeTransferFrom; pick the 3-arg (no data) form explicitly.
-        const SIG = 'safeTransferFrom(address,address,uint256)'
+        // The voucher overloads safeTransferFrom; the 3-arg (no data) form is named by the
+        // one-entry ABI above, not by an argument count viem would infer.
+        const data = encodeFunctionData({
+          abi: [SAFE_TRANSFER_FROM_3],
+          functionName: 'safeTransferFrom',
+          args: [getAddress(String(account)), getAddress(String(dest)), BigInt(tokenId)],
+        })
         if (isPasskey) {
-          const iface = new ethers.Interface(MEMBERSHIP_VOUCHER_ABI)
-          const data = iface.encodeFunctionData(SIG, [account, dest, tokenId])
           const res = await sendCalls([{ target: voucherAddress, data, value: 0n }])
           const txHash = res?.txHash ?? res?.userOpHash ?? null
           setLastTxHash(txHash)
           setStatus('success')
           return { tokenId, to: dest, txHash }
         }
-        const voucher = new ethers.Contract(voucherAddress, MEMBERSHIP_VOUCHER_ABI, signer)
-        const tx = await voucher[SIG](account, dest, tokenId)
+        const tx = await signer.sendTransaction({ to: voucherAddress, data })
         setLastTxHash(tx.hash)
         await tx.wait()
         setStatus('success')
@@ -250,8 +327,7 @@ export function useVouchers() {
         if (isPasskey) {
           // Passkey rail: redeemVoucher as one sponsored UserOp (the 035 relay/intent path is
           // signer-only). The redeemer is the smart account — the connected passkey session.
-          const iface = new ethers.Interface(MEMBERSHIP_MANAGER_ABI)
-          const data = iface.encodeFunctionData('redeemVoucher', [tokenId, normalizeTermsHash(termsHash)])
+          const data = managerCall('redeemVoucher', [BigInt(tokenId), normalizeTermsHash(termsHash)])
           const res = await sendCalls([{ target: managerAddress, data, value: 0n }])
           const txHash = res?.txHash ?? res?.userOpHash ?? null
           setLastTxHash(txHash)
@@ -279,23 +355,48 @@ export function useVouchers() {
    * tier/duration. Read-only; never throws into the UI (returns [] on failure).
    */
   const listMyVouchers = useCallback(async () => {
-    const reader = provider || signer?.provider
-    if (!voucherAvailable || !account || !reader) return []
+    if (!voucherAvailable || !account) return []
     setStatus('listing')
     setError(null)
     try {
       const fromBlock = getDeploymentBlockForChain('membershipVoucher', chainId)
-      const voucher = new ethers.Contract(voucherAddress, MEMBERSHIP_VOUCHER_ABI, reader)
-      const incoming = await voucher.queryFilter(voucher.filters.Transfer(null, account), fromBlock)
-      const ids = [...new Set(incoming.map((e) => e.args.tokenId.toString()))]
+      const handle = eventScanHandle(chainId, { address: voucherAddress, abi: MEMBERSHIP_VOUCHER_ABI })
+      if (!handle) throw new Error('No read connection for this network.')
+      // ONE `eth_getLogs`, which is what `queryFilter(filter, fromBlock)` was — not `getLogsRange`,
+      // whose bisect would turn a single refusal over a from-deploy-block range into a storm.
+      const topics = handle.filters.Transfer(null, getAddress(String(account))).getTopicFilter()
+      const toBlock = Number(await handle.provider.getBlockNumber())
+      const incoming = await handle.provider.getLogs({
+        address: voucherAddress,
+        topics,
+        fromBlock: Number(fromBlock) || 0,
+        toBlock,
+      })
+      const ids = [
+        ...new Set(
+          incoming
+            .map((log) => {
+              try {
+                return handle.interface.parseLog(log).args.tokenId.toString()
+              } catch {
+                return null
+              }
+            })
+            .filter(Boolean),
+        ),
+      ]
+      const askVoucher = (functionName, args) =>
+        readContract(chainId, { address: voucherAddress, abi: MEMBERSHIP_VOUCHER_ABI, functionName, args })
       const held = []
       for (const id of ids) {
         try {
-          const owner = await voucher.ownerOf(id)
-          if (owner.toLowerCase() !== account.toLowerCase()) continue
-          const info = await voucher.voucherInfo(id)
+          const owner = await askVoucher('ownerOf', [BigInt(id)])
+          if (String(owner).toLowerCase() !== account.toLowerCase()) continue
+          const info = await askVoucher('voucherInfo', [BigInt(id)])
           held.push({
             tokenId: id,
+            // uint8/uint32 decode as NUMBERS under viem where ethers gave bigints (divergence b);
+            // `Number` covers both, and the shape this returns is unchanged either way.
             tier: Number(info.tier),
             durationDays: Number(info.durationDays),
             role: info.role,
@@ -312,7 +413,7 @@ export function useVouchers() {
       setError(e?.shortMessage || e?.message || 'Could not load your vouchers.')
       return []
     }
-  }, [voucherAvailable, account, provider, signer, voucherAddress, chainId])
+  }, [voucherAvailable, account, voucherAddress, chainId])
 
   return {
     status,

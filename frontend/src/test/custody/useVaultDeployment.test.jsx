@@ -10,7 +10,7 @@ let walletCtx
 vi.mock('../../hooks', () => ({ useWallet: () => walletCtx }))
 
 let railImpl
-vi.mock('../../lib/custody/writeRail', () => ({
+vi.mock('../../lib/chains/writeRail', () => ({
   RAILS: { SIGNER: 'signer', PASSKEY: 'passkey', NONE: 'none' },
   resolveWriteRail: (args) => railImpl(args),
 }))
@@ -105,7 +105,12 @@ describe('useVaultDeployment', () => {
     expect(result.current.byChain[137].status).toBe(DEPLOY_STATUS.LIVE) // wallet already there
     expect(result.current.byChain[8453].status).toBe(DEPLOY_STATUS.FAILED)
     expect(result.current.byChain[8453].stage).toBe('switch')
-    expect(result.current.byChain[8453].reason).toMatch(/instead of switching to base/i)
+    // Spec 110 T026 — one shared settle loop, so one refusal sentence. What is asserted is the
+    // PROPERTY the row needs (both chains named, and that nothing was signed), not the particular
+    // phrasing this hook's retired copy happened to use.
+    expect(result.current.byChain[8453].reason).toMatch(/Base/)
+    expect(result.current.byChain[8453].reason).toMatch(/Polygon/)
+    expect(result.current.byChain[8453].reason).toMatch(/nothing has been signed/i)
   })
 
   it('an occupied address is ALREADY LIVE — success, nothing sent there (FR-019)', async () => {

@@ -4,17 +4,18 @@
 // distinct "Policy change" entry with the decoded rule diff; a self-tx setting that guard renders as
 // "Activate policy engine". Anything that fails to decode renders exactly as before.
 
-import { Interface, formatUnits } from 'ethers'
+import { decodeFunctionData, parseAbi } from 'viem'
+import { formatUnits } from '../../lib/evm/units'
 import { STATUS } from '../../lib/custody/proposalStatus'
 import { approvalsRemaining } from '../../lib/custody/proposalStatus'
 import { getContractAddressForChain } from '../../config/contracts'
-import { guardIface, NATIVE_ASSET, shortAddress, formatDuration } from '../../lib/custody/policy'
+import { GUARD_ABI, NATIVE_ASSET, shortAddress, formatDuration } from '../../lib/custody/policy'
 // Spec 068 — ordered-engine proposals (setRules / adopt) decode through the V2 classifier and render
 // the resulting rule list in order, since one call replaces the whole policy.
 import { classifyPolicyProposalV2, describeRulesV2 } from '../../lib/custody/policyV2'
 import './Policy.css'
 
-const SAFE_GUARD_IFACE = new Interface(['function setGuard(address guard)'])
+const SAFE_GUARD_ABI = parseAbi(['function setGuard(address guard)'])
 
 function shortHash(h) {
   return h ? `${h.slice(0, 10)}…${h.slice(-6)}` : ''
@@ -41,8 +42,10 @@ function classifyPolicyProposal(p, chainId, vaultAddress) {
     const guardLc = guard.toLowerCase()
 
     if (to === guardLc) {
-      const parsed = guardIface.parseTransaction({ data: p.data })
-      if (!parsed || parsed.name !== 'configureRules') return null
+      // viem THROWS on calldata this ABI cannot decode where ethers' `parseTransaction` returned
+      // null; the surrounding try/catch already treats both as "not a policy proposal".
+      const parsed = decodeFunctionData({ abi: GUARD_ABI, data: p.data })
+      if (parsed?.functionName !== 'configureRules') return null
       const [limits, cooldown, allowlistEnabled, adds, removes] = parsed.args
       const changes = []
       for (const l of limits) {
@@ -62,8 +65,10 @@ function classifyPolicyProposal(p, chainId, vaultAddress) {
     }
 
     if (vaultAddress && to === String(vaultAddress).toLowerCase()) {
-      const parsed = SAFE_GUARD_IFACE.parseTransaction({ data: p.data })
-      if (!parsed || parsed.name !== 'setGuard') return null
+      // Throws on a selector this ABI does not carry; the enclosing catch renders the
+      // proposal exactly as an undecodable one, which is what it is.
+      const parsed = decodeFunctionData({ abi: SAFE_GUARD_ABI, data: p.data })
+      if (!parsed || parsed.functionName !== 'setGuard') return null
       const target = String(parsed.args[0]).toLowerCase()
       if (target === guardLc) return { kind: 'set-guard' }
       if (/^0x0{40}$/.test(target)) return { kind: 'remove-guard' }

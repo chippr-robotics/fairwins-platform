@@ -33,7 +33,8 @@
  * synchronous hard reset before paint on account change, per-venue isolation, injectable deps.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Contract, Interface } from 'ethers'
+import { decodeEventLog } from 'viem'
+import { normalizeAbi } from '../lib/chains/readContract'
 
 import { GAINS_DIAMOND_ABI, GAINS_PENDING_ORDER_TYPE } from '../abis/perps/gainsDiamond'
 import { GMX_EVENT_EMITTER_ABI, GMX_ORDER_TYPE } from '../abis/perps/gmxExchangeRouter'
@@ -61,7 +62,8 @@ import {
   decodeOrderEvent,
   eventTopicsForAccount,
 } from '../lib/perps/venues/gmx'
-import { getReadProvider } from '../utils/rpcProvider'
+import { getPublicClient } from '../lib/chains/publicClient'
+import { readContract } from '../lib/chains/readContract'
 
 /** The portfolio cadence, matching `usePerpsPositions`. */
 const POLL_MS = 60_000
@@ -116,7 +118,7 @@ const GAINS_REFUNDING_ORDER_TYPES = Object.freeze([
 const GAINS_ORDER_TYPE_NAMES = reverseLookup(GAINS_PENDING_ORDER_TYPE)
 const GMX_ORDER_TYPE_NAMES = reverseLookup(GMX_ORDER_TYPE)
 
-const EVENT_EMITTER = new Interface(GMX_EVENT_EMITTER_ABI)
+const EVENT_EMITTER_ABI = normalizeAbi(GMX_EVENT_EMITTER_ABI)
 
 /* ------------------------------------------------------------------------------------------- *
  * The hook
@@ -125,7 +127,7 @@ const EVENT_EMITTER = new Interface(GMX_EVENT_EMITTER_ABI)
 export function usePerpsOrders(account, { deps } = {}) {
   const io = {
     fetchPositions: fetchPerpPositions,
-    getProvider: getReadProvider,
+    getProvider: defaultGetProvider,
     makeContract: defaultMakeContract,
     diamondFor: gainsDiamondFor,
     addressesFor: gmxAddressesFor,
@@ -675,8 +677,12 @@ function decodeOrderEventLog(log) {
 /** `eventData.uintItems.orderType`, or null. Total — it runs over arbitrary logs. */
 function readOrderType(log) {
   try {
-    const parsed = EVENT_EMITTER.parseLog({ topics: [...(log?.topics ?? [])], data: log?.data ?? '0x' })
-    for (const item of parsed?.args?.eventData?.uintItems?.items ?? []) {
+    const { args } = decodeEventLog({
+      abi: EVENT_EMITTER_ABI,
+      topics: [...(log?.topics ?? [])],
+      data: log?.data ?? '0x',
+    })
+    for (const item of args?.eventData?.uintItems?.items ?? []) {
       if (item?.key === 'orderType') return toInteger(item.value)
     }
   } catch {
@@ -746,8 +752,54 @@ function gatewayFailureDetail(error) {
   return failureDetail(error)
 }
 
+/**
+ * The default read connection for a chain, and the default contract over it (spec 110).
+ *
+ * Both stay injectable `io` seams — this hook's tests supply their own — but the real ones now
+ * NAME the chain rather than inheriting it from a provider handed down. The reader keeps the two
+ * methods this hook actually uses, `getBlockNumber` and `getLogs`, in the ethers shapes the GMX
+ * fold was written against: a NUMBER block height, and logs whose `blockNumber`/`logIndex` sort
+ * as numbers (the fold is a state machine and sorts on them).
+ */
+function defaultGetProvider(chainId) {
+  const client = getPublicClient(chainId)
+  if (!client) return null
+  return {
+    chainId,
+    async getBlockNumber() {
+      // Never cached: this head bounds the order-event scan, and a stale one hides the member's
+      // most recent order. See the note in `lib/chains/eventScan.js`.
+      return Number(await client.getBlockNumber({ cacheTime: 0 }))
+    },
+    async getLogs({ address, topics, fromBlock, toBlock }) {
+      const logs = await client.request({
+        method: 'eth_getLogs',
+        params: [
+          {
+            address,
+            topics,
+            fromBlock: `0x${Number(fromBlock).toString(16)}`,
+            toBlock: `0x${Number(toBlock).toString(16)}`,
+          },
+        ],
+      })
+      return logs.map((log) => ({
+        ...log,
+        blockNumber: log.blockNumber == null ? null : Number(BigInt(log.blockNumber)),
+        logIndex: log.logIndex == null ? null : Number(BigInt(log.logIndex)),
+        transactionIndex:
+          log.transactionIndex == null ? null : Number(BigInt(log.transactionIndex)),
+      }))
+    },
+  }
+}
+
 function defaultMakeContract(address, abi, provider) {
-  return new Contract(address, abi, provider)
+  const chainId = provider?.chainId
+  return {
+    getMarketOrdersTimeoutBlocks: () =>
+      readContract(chainId, { address, abi, functionName: 'getMarketOrdersTimeoutBlocks' }),
+  }
 }
 
 /** Runs a dependency that may throw OR return null, and treats both the same. */

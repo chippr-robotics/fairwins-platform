@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { normalizeAbi } from '../lib/chains/readContract'
 import { WalletContext } from '../contexts/WalletContext'
 import { useTransfer } from './useTransfer'
 import { useActiveAccount } from './useActiveAccount'
@@ -51,7 +52,7 @@ import { isPasskeySupported } from '../config/passkeySupport'
  *   SKIPPED with its reason and the rest go through.
  */
 
-const ERC20_IFACE = new Interface(TRANSFER_ABI)
+const ERC20_ABI = normalizeAbi(TRANSFER_ABI)
 const OP_STATE = Object.freeze({ INCLUDED: 'included', FAILED: 'failed' })
 
 export const GROUP_OUTCOME = Object.freeze({
@@ -285,7 +286,7 @@ export function useGroupPay({ asset = null } = {}) {
 
     const legFor = (p) => (isNative
       ? { to: p.address, value: p.units, data: '0x' }
-      : { to: asset.address, value: 0n, data: ERC20_IFACE.encodeFunctionData('transfer', [p.address, p.units]) })
+      : { to: asset.address, value: 0n, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [p.address, p.units] }) })
 
     const base = (p) => ({ id: p.id, address: p.address, amount: p.amount, symbol: asset.symbol })
 
@@ -297,7 +298,7 @@ export function useGroupPay({ asset = null } = {}) {
         // ONE UserOp carrying every payment.
         const calls = payable.map((p) => (isNative
           ? { target: p.address, data: '0x', value: p.units }
-          : { target: asset.address, data: ERC20_IFACE.encodeFunctionData('transfer', [p.address, p.units]), value: 0n }))
+          : { target: asset.address, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [p.address, p.units] }), value: 0n }))
 
         // One Activity record per RECIPIENT: a member who paid five people must see five
         // payments, even though they share one transaction hash.

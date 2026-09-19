@@ -11,7 +11,9 @@
  * success is reported from the tx outcome, not the API (which may lag).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Interface, formatUnits } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { formatUnits } from '../lib/evm/units'
+import { normalizeAbi } from '../lib/chains/readContract'
 import { useWallet } from './useWalletManagement'
 import { useEarnSend } from './useEarnSend'
 import { getEarnNetworks, getEarnConfig, NETWORKS } from '../config/networks'
@@ -22,7 +24,7 @@ import { queueEarnAction } from '../lib/earn/earnActivityBuffer'
 import { captureEarnAction } from '../data/ledger'
 import { useActivityOptional } from './useActivity'
 
-const DISTRIBUTOR_IFACE = new Interface(MERKL_DISTRIBUTOR_ABI)
+const DISTRIBUTOR_ABI = normalizeAbi(MERKL_DISTRIBUTOR_ABI)
 
 export function useEarnRewards() {
   const { address, isConnected } = useWallet() || {}
@@ -96,12 +98,11 @@ export function useEarnRewards() {
         const sent = await sendOnChain(chainId, [
           {
             target: earnConfig.merklDistributor,
-            data: DISTRIBUTOR_IFACE.encodeFunctionData('claim', [
-              args.users,
-              args.tokens,
-              args.amounts,
-              args.proofs,
-            ]),
+            data: encodeFunctionData({
+              abi: DISTRIBUTOR_ABI,
+              functionName: 'claim',
+              args: [args.users, args.tokens, args.amounts, args.proofs],
+            }),
             value: 0n,
           },
         ])

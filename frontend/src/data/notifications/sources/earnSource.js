@@ -15,9 +15,9 @@
  * No Morpho/Merkl API calls here — the 30s activity cadence would hammer
  * them; on-chain share reads are the cheap, honest signal.
  */
-import { ethers, Contract } from 'ethers'
+import { isAddress } from 'viem'
 import { NETWORKS, isEarnAvailable } from '../../../config/networks'
-import { makeReadProvider } from '../../../utils/rpcProvider'
+import { readContract } from '../../../lib/chains/readContract'
 import { drainEarnActions } from '../../../lib/earn/earnActivityBuffer'
 import { earnPath } from '../../../config/earn'
 
@@ -68,22 +68,21 @@ export const earnSource = {
     ])
     if (trackedVaults.size === 0) return { ...EMPTY, entries, currentIds: entries.map((e) => e.refId) }
 
-    let provider
-    try {
-      provider = makeReadProvider(NETWORKS[chainId].rpcUrl, chainId)
-    } catch {
-      return { ok: false }
-    }
-
     let anyOk = false
     for (const vaultAddress of trackedVaults) {
-      if (!ethers.isAddress(vaultAddress)) continue
+      if (!isAddress(vaultAddress)) continue
       const sid = `earn:${vaultAddress}`
       currentIds.push(sid)
       let shares
       try {
-        const vault = new Contract(vaultAddress, BALANCE_OF_ABI, provider)
-        shares = (await vault.balanceOf(account)).toString()
+        shares = (
+          await readContract(chainId, {
+            address: vaultAddress,
+            abi: BALANCE_OF_ABI,
+            functionName: 'balanceOf',
+            args: [account],
+          })
+        ).toString()
         anyOk = true
       } catch {
         // Keep the prior snapshot so the baseline survives a flaky read.

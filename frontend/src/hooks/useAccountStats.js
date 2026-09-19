@@ -23,7 +23,8 @@
  * Updates are polling-based — no websockets. See research.md R5.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Contract, formatUnits } from 'ethers'
+import { formatUnits } from '../lib/evm/units'
+import { readContract } from '../lib/chains/readContract'
 import { useWallet } from './useWalletManagement'
 import usePriceConversion from './usePriceConversion'
 import { useChainTokens } from './useChainTokens'
@@ -60,11 +61,17 @@ function emptyFreshness() {
  * tile would otherwise omit the user's USDC — the very token wagers are staked
  * in. Best-effort: a read failure returns null and leaves the tile unchanged.
  */
-async function fetchStableBalance({ provider, address, stableAddress, stableDecimals }) {
-  if (!provider || !address || !stableAddress) return null
+async function fetchStableBalance({ chainId, provider, address, stableAddress, stableDecimals }) {
+  // `provider` stays the gate it always was — "is a wallet connected?" — because this tile
+  // describes the CONNECTED wallet. `chainId` names the chain the balance is read on.
+  if (!provider || !address || !stableAddress || chainId == null) return null
   try {
-    const token = new Contract(stableAddress, ERC20_BALANCE_ABI, provider)
-    const raw = await token.balanceOf(address)
+    const raw = await readContract(chainId, {
+      address: stableAddress,
+      abi: ERC20_BALANCE_ABI,
+      functionName: 'balanceOf',
+      args: [address],
+    })
     return Number(formatUnits(raw, stableDecimals ?? 6))
   } catch {
     return null
@@ -190,6 +197,7 @@ export function useAccountStats({ range: initialRange = DEFAULT_RANGE, accountAd
           wagerRepositoryFor: getDefaultWagerRepository,
         }),
         fetchStableBalance({
+          chainId,
           provider,
           address,
           stableAddress: tokens.stableAddress,

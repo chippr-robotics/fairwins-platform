@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// Mock the address resolver + ethers Contract so we can drive resolve/callsignOf return values.
+// Mock the address resolver + the chain read seam (spec 110 Phase 1) so we can drive
+// resolve/callsignOf return values.
 const mockResolve = vi.fn()
 const mockCallsignOf = vi.fn()
 
@@ -8,13 +9,17 @@ vi.mock('../../../config/contracts', () => ({
   getContractAddressForChain: (name) => (name === 'callsignRegistry' ? '0x00000000000000000000000000000000000000AA' : undefined),
 }))
 
-vi.mock('ethers', () => ({
-  // Regular function (not an arrow) so it is usable with `new`.
-  Contract: vi.fn(function () {
-    this.resolve = mockResolve
-    this.callsignOf = mockCallsignOf
-  }),
-}))
+vi.mock('../../chains/readContract', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      if (functionName === 'resolve') return mockResolve(...args)
+      if (functionName === 'callsignOf') return mockCallsignOf(...args)
+      throw new Error('unmocked read: ' + functionName)
+    },
+  }
+})
 
 import { resolveCallsign, lookupCallsignOf, isResolvableForValue, CallsignStatus } from '../resolveCallsign'
 

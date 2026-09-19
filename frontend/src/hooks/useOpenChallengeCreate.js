@@ -1,5 +1,10 @@
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import {
+  decodeEventLog, encodeFunctionData, keccak256, stringToHex, maxUint256, zeroAddress, zeroHash,
+} from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { parseUnits } from '../lib/evm/units'
+import { getAddress } from '../lib/evm/address'
 import { useWeb3 } from './useWeb3'
 import { WAGER_REGISTRY_ABI } from '../abis/WagerRegistry'
 import { getContractAddressForChain, getContractAddress } from '../config/contracts'
@@ -21,6 +26,13 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
 ]
+
+const REGISTRY_ABI_PARSED = normalizeAbi(WAGER_REGISTRY_ABI)
+const ERC20_ABI_PARSED = normalizeAbi(ERC20_ABI)
+const registryCall = (functionName, args) =>
+  encodeFunctionData({ abi: REGISTRY_ABI_PARSED, functionName, args })
+const erc20Call = (functionName, args) =>
+  encodeFunctionData({ abi: ERC20_ABI_PARSED, functionName, args })
 
 // Resolution types permitted for an open challenge (FR-016a): NOT Creator(1)/Opponent(2).
 export const OPEN_RESOLUTION_TYPES = { Either: 0, ThirdParty: 3, Polymarket: 4, ChainlinkDataFeed: 5, ChainlinkFunctions: 6, UMA: 7 }
@@ -53,16 +65,18 @@ export function useOpenChallengeCreate() {
 
       const registryAddr = resolve('wagerRegistry')
       if (!registryAddr) throw new Error('WagerRegistry is not deployed on this network.')
-      const tokenAddr = (form.token && form.token !== ethers.ZeroAddress) ? form.token : resolve('paymentToken')
+      const tokenAddr = (form.token && form.token !== zeroAddress) ? form.token : resolve('paymentToken')
       if (!tokenAddr) throw new Error('A stake token (USDC) is required.')
 
-      const registry = new ethers.Contract(registryAddr, WAGER_REGISTRY_ABI, readProvider)
-      const token = new ethers.Contract(tokenAddr, ERC20_ABI, readProvider)
-      const decimals = Number(await token.decimals())
-      const stakeWei = ethers.parseUnits(String(form.stake || '10'), decimals)
+      const askToken = (functionName, args) =>
+        readContract(execChainId, { address: tokenAddr, abi: ERC20_ABI, functionName, args })
+      const decimals = Number(await askToken('decimals'))
+      // The seam refuses a stake this token cannot represent exactly (spec 110 divergence 20:
+      // viem rounds half-up where ethers threw) — the escrowed amount must be what was entered.
+      const stakeWei = parseUnits(String(form.stake || '10'), decimals)
 
-      const balance = await token.balanceOf(actor)
-      if (balance < stakeWei) throw new Error('Insufficient token balance for this stake.')
+      const balance = await askToken('balanceOf', [getAddress(String(actor))])
+      if (BigInt(balance) < stakeWei) throw new Error('Insufficient token balance for this stake.')
 
       // 1. Generate the claim code + derive the on-chain commitment and the terms key.
       onProgress({ step: 'code', message: 'Generating your claim code…' })
@@ -90,10 +104,12 @@ export function useOpenChallengeCreate() {
       )
       const { cid } = await uploadEncryptedEnvelope(envelope, { marketType: 'openChallenge' })
       const metadataReference = buildEncryptedIpfsReference(cid)
-      const metadataHash = ethers.keccak256(ethers.toUtf8Bytes(metadataReference))
+      const metadataHash = keccak256(stringToHex(metadataReference))
 
       // 3. Approve the stake token (max) if needed.
-      const allowance = await token.allowance(actor, registryAddr)
+      const allowance = BigInt(
+        await askToken('allowance', [getAddress(String(actor)), getAddress(String(registryAddr))]),
+      )
 
       // 4. Deadlines.
       const now = Math.floor(Date.now() / 1000)
@@ -103,12 +119,13 @@ export function useOpenChallengeCreate() {
       const resolutionType = Number(form.resolutionType ?? OPEN_RESOLUTION_TYPES.Either)
       const arbitrator = resolutionType === OPEN_RESOLUTION_TYPES.ThirdParty
         ? form.arbitrator
-        : ethers.ZeroAddress
-      const oracleConditionId = form.oracleConditionId || ethers.ZeroHash
+        : zeroAddress
+      const oracleConditionId = form.oracleConditionId || zeroHash
       const creatorIsYes = Boolean(form.creatorIsYes)
 
       const args = [
-        claimAddress, arbitrator, tokenAddr, stakeWei,
+        // Checksummed before the encoder (divergence 16); the arbitrator may be the zero address.
+        getAddress(String(claimAddress)), getAddress(String(arbitrator)), getAddress(String(tokenAddr)), stakeWei,
         acceptDeadline, resolveDeadline, resolutionType,
         oracleConditionId, creatorIsYes, metadataHash, metadataReference,
       ]
@@ -124,7 +141,13 @@ export function useOpenChallengeCreate() {
       // (Silver-tier gate, bad deadlines, resolved condition, …) is still surfaced for all users.
       onProgress({ step: 'create', message: 'Validating…' })
       try {
-        await registry.createOpenWager.staticCall(...args, { from: actor })
+        await readContract(execChainId, {
+          address: registryAddr,
+          abi: WAGER_REGISTRY_ABI,
+          functionName: 'createOpenWager',
+          args,
+          account: getAddress(String(actor)),
+        })
       } catch (sim) {
         const raw = revertReasonFrom(sim)
         const isAllowanceRevert = /(exceeds|insufficient) allowance/i.test(raw)
@@ -135,14 +158,20 @@ export function useOpenChallengeCreate() {
 
       let receipt
       if (signer && !isPasskey) {
-        const writeRegistry = new ethers.Contract(registryAddr, WAGER_REGISTRY_ABI, signer)
-        const writeToken = new ethers.Contract(tokenAddr, ERC20_ABI, signer)
         if (allowance < stakeWei) {
           onProgress({ step: 'approve', message: 'Approving token spend…' })
-          await (await writeToken.approve(registryAddr, ethers.MaxUint256)).wait()
+          await (
+            await signer.sendTransaction({
+              to: tokenAddr,
+              data: erc20Call('approve', [getAddress(String(registryAddr)), maxUint256]),
+            })
+          ).wait()
         }
         onProgress({ step: 'create', message: 'Confirm in your wallet…' })
-        const tx = await writeRegistry.createOpenWager(...args)
+        const tx = await signer.sendTransaction({
+          to: registryAddr,
+          data: registryCall('createOpenWager', args),
+        })
         receipt = await tx.wait()
       } else {
         if (typeof sendCalls !== 'function') {
@@ -153,14 +182,14 @@ export function useOpenChallengeCreate() {
           onProgress({ step: 'approve', message: 'Approving token spend…' })
           calls.push({
             target: tokenAddr,
-            data: token.interface.encodeFunctionData('approve', [registryAddr, ethers.MaxUint256]),
+            data: erc20Call('approve', [getAddress(String(registryAddr)), maxUint256]),
             value: 0n,
           })
         }
         onProgress({ step: 'create', message: 'Confirm in your wallet…' })
         calls.push({
           target: registryAddr,
-          data: registry.interface.encodeFunctionData('createOpenWager', args),
+          data: registryCall('createOpenWager', args),
           value: 0n,
         })
         const sent = await sendCalls(calls, {
@@ -192,8 +221,19 @@ export function useOpenChallengeCreate() {
       }
       if (!receipt || receipt.status === 0) throw new Error('Creation reverted on-chain.')
 
-      const ev = receipt.logs
-        .map((l) => { try { return registry.interface.parseLog(l) } catch { return null } })
+      const ev = (receipt.logs || [])
+        .map((l) => {
+          try {
+            const { eventName, args: a } = decodeEventLog({
+              abi: REGISTRY_ABI_PARSED,
+              topics: l.topics,
+              data: l.data,
+            })
+            return { name: eventName, args: a }
+          } catch {
+            return null
+          }
+        })
         .find((p) => p && p.name === 'OpenWagerCreated')
       const wagerId = ev ? ev.args.wagerId : null
 

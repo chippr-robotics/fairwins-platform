@@ -1,5 +1,10 @@
 import { useCallback } from 'react'
-import { ethers } from 'ethers'
+import {
+  decodeEventLog, encodeFunctionData, keccak256, stringToHex, maxUint256, zeroAddress, zeroHash,
+} from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { formatUnits, parseUnits } from '../lib/evm/units'
+import { isAddress, getAddress } from '../lib/evm/address'
 import { useWeb3 } from './useWeb3'
 import { useActiveAccount } from './useActiveAccount'
 import { useGaslessWrite } from '../lib/relay/useGaslessWrite'
@@ -25,36 +30,53 @@ const ERC20_ABI = [
 
 export { ResolutionType, ORACLE_RESOLUTION_TYPES }
 
-const WAGER_PARTICIPANT_ROLE = ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE'))
+const WAGER_PARTICIPANT_ROLE = keccak256(stringToHex('WAGER_PARTICIPANT_ROLE'))
 
-async function expireStaleWagers(registry, userAddress, onProgress) {
+const REGISTRY_ABI_PARSED = normalizeAbi(WAGER_REGISTRY_ABI)
+const ERC20_ABI_PARSED = normalizeAbi(ERC20_ABI)
+const registryCall = (functionName, args) =>
+  encodeFunctionData({ abi: REGISTRY_ABI_PARSED, functionName, args })
+const erc20Call = (functionName, args) =>
+  encodeFunctionData({ abi: ERC20_ABI_PARSED, functionName, args })
+const registryHasFunction = (name) =>
+  REGISTRY_ABI_PARSED.some((f) => f?.type === 'function' && f.name === name)
+
+/**
+ * Clear Open wagers whose accept deadline has passed, so they stop counting toward the tier's
+ * concurrent limit.
+ *
+ * Spec 110: takes the CHAIN and the signer rather than an ethers `Contract` it digs a provider out
+ * of (`registry.runner?.provider || registry.provider`) — that dig was the fusion of "where" with
+ * "who" this task exists to remove, and it is what decided which network the membership manager
+ * was resolved on. The chain is now the caller's, stated.
+ */
+async function expireStaleWagers(chainId, signer, registryAddress, userAddress, onProgress) {
   try {
-    const provider = registry.runner?.provider || registry.provider
-    // Resolve MembershipManager for the chain this registry/signer is on.
-    let membershipManagerAddr
-    try {
-      const cid = Number((await provider.getNetwork()).chainId)
-      membershipManagerAddr = getContractAddressForChain('membershipManager', cid)
-    } catch {
-      membershipManagerAddr = getContractAddress('membershipManager')
-    }
+    const membershipManagerAddr =
+      (chainId != null ? getContractAddressForChain('membershipManager', chainId) : null) ||
+      getContractAddress('membershipManager')
     if (!membershipManagerAddr) return
 
-    const mgr = new ethers.Contract(membershipManagerAddr, MEMBERSHIP_MANAGER_ABI, provider)
-    const membership = await mgr.getMembership(userAddress, WAGER_PARTICIPANT_ROLE)
+    const askManager = (functionName, args) =>
+      readContract(chainId, { address: membershipManagerAddr, abi: MEMBERSHIP_MANAGER_ABI, functionName, args })
+    const askRegistry = (functionName, args) =>
+      readContract(chainId, { address: registryAddress, abi: WAGER_REGISTRY_ABI, functionName, args })
+
+    const who = getAddress(String(userAddress))
+    const membership = await askManager('getMembership', [who, WAGER_PARTICIPANT_ROLE])
     const tierNum = Number(membership.tier)
     if (tierNum === 0) return
 
-    const cfg = await mgr.getTierConfig(WAGER_PARTICIPANT_ROLE, tierNum)
+    const cfg = await askManager('getTierConfig', [WAGER_PARTICIPANT_ROLE, tierNum])
     const concurrentLimit = Number(cfg.limits.maxConcurrentMarkets)
     const activeCount = Number(membership.activeCount)
     if (concurrentLimit === 0 || activeCount < concurrentLimit) return
 
-    const count = await registry.getUserWagerCount(userAddress)
+    const count = await askRegistry('getUserWagerCount', [who])
     if (count === 0n) return
 
-    const wagers = await registry.getUserWagers(userAddress, 0, count)
-    const ids = await registry.getUserWagerIds(userAddress, 0, count)
+    const wagers = await askRegistry('getUserWagers', [who, 0n, count])
+    const ids = await askRegistry('getUserWagerIds', [who, 0n, count])
     const now = Math.floor(Date.now() / 1000)
     const expiredIds = []
 
@@ -66,7 +88,10 @@ async function expireStaleWagers(registry, userAddress, onProgress) {
     if (expiredIds.length === 0) return
 
     onProgress({ step: 'cleanup', message: `Cleaning up ${expiredIds.length} expired wager(s)...` })
-    const tx = await registry.batchExpireOpen(expiredIds)
+    const tx = await signer.sendTransaction({
+      to: registryAddress,
+      data: registryCall('batchExpireOpen', [expiredIds]),
+    })
     await tx.wait()
   } catch (e) {
     console.debug('[expireStaleWagers] cleanup skipped:', e.message)
@@ -158,9 +183,9 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
   const createFriendMarket = useCallback(async (data, modalSigner) => {
     const activeSigner = modalSigner || signer
     if (!isPasskey && !activeSigner) throw new Error('Please connect your wallet to create a wager')
-    // Passkey sessions have no signer: reads and calldata encoding run over the session read provider,
-    // the write goes out as one sponsored UserOp (approve+create) via sendCalls further below.
-    const readRunner = activeSigner || provider
+    // Passkey sessions have no signer: reads go through the spec-110 chain seam (named by the
+    // execution chain, below) and the write goes out as one sponsored UserOp (approve+create) via
+    // sendCalls further down. `provider` is still the receipt reader on the relayed path.
 
     const onProgress = data.data?.onProgress || (() => {})
     savePendingTransaction({
@@ -198,10 +223,10 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
 
       // Resolve stake token. v2 is ERC20-only; default to paymentToken (USDC).
       const requestedToken = data.data?.collateralToken
-      const stakeTokenAddress = (requestedToken && requestedToken !== ethers.ZeroAddress)
+      const stakeTokenAddress = (requestedToken && requestedToken !== zeroAddress)
         ? requestedToken
         : resolve('paymentToken')
-      if (!stakeTokenAddress || stakeTokenAddress === ethers.ZeroAddress) {
+      if (!stakeTokenAddress || stakeTokenAddress === zeroAddress) {
         throw new Error('A stake token (USDC or WPOL) is required. Native POL is not supported.')
       }
 
@@ -214,14 +239,26 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
         : activeSigner
           ? await activeSigner.getAddress()
           : address
-      const registry = new ethers.Contract(wagerRegistryAddress, WAGER_REGISTRY_ABI, readRunner)
-      const stakeToken = new ethers.Contract(stakeTokenAddress, ERC20_ABI, readRunner)
-      const tokenDecimals = Number(await stakeToken.decimals())
-      const tokenSymbol = await stakeToken.symbol().catch(() => 'tokens')
+      // Named chain, not the signer's runner (spec 110 read-routing decision). `executionChainId`
+      // is already the chain the transaction will execute on, so display and execution still agree.
+      const askRegistry = (functionName, args, account) =>
+        readContract(executionChainId, {
+          address: wagerRegistryAddress,
+          abi: WAGER_REGISTRY_ABI,
+          functionName,
+          args,
+          ...(account ? { account } : {}),
+        })
+      const askToken = (functionName, args) =>
+        readContract(executionChainId, { address: stakeTokenAddress, abi: ERC20_ABI, functionName, args })
+      const tokenDecimals = Number(await askToken('decimals'))
+      const tokenSymbol = await askToken('symbol').catch(() => 'tokens')
 
       // Stakes
       const stakeAmountRaw = data.data.stakeAmount || '10'
-      const stakeWei = ethers.parseUnits(String(stakeAmountRaw), tokenDecimals)
+      // The seam refuses a stake this token cannot represent exactly (spec 110 divergence 20:
+      // viem rounds half-up where ethers threw) — the escrow must be what the member entered.
+      const stakeWei = parseUnits(String(stakeAmountRaw), tokenDecimals)
       const isOffer = data.marketType === 'offer'
       // Same NaN-only-fallback fix as resolutionType below, and for a similar reason: `|| 100`
       // silently turns a missing/unparseable value into 100% odds, which computes a zero
@@ -264,12 +301,12 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
       }
 
       // Balance check
-      const balance = await stakeToken.balanceOf(userAddress)
+      const balance = BigInt(await askToken('balanceOf', [getAddress(String(userAddress))]))
       if (balance < creatorStakeWei) {
         throw new Error(
           `Insufficient ${tokenSymbol} balance. ` +
-          `Have ${ethers.formatUnits(balance, tokenDecimals)}, ` +
-          `need ${ethers.formatUnits(creatorStakeWei, tokenDecimals)}.`
+          `Have ${formatUnits(balance, tokenDecimals)}, ` +
+          `need ${formatUnits(creatorStakeWei, tokenDecimals)}.`
         )
       }
 
@@ -320,7 +357,7 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
 
       // Participants
       const opponent = data.data.opponent || data.data.participants?.[0]
-      if (!opponent || !ethers.isAddress(opponent)) {
+      if (!opponent || !isAddress(opponent)) {
         throw new Error('Valid opponent address required for 1v1 wager')
       }
       if (opponent.toLowerCase() === userAddress.toLowerCase()) {
@@ -338,17 +375,17 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
       // rebind here so the contract call is unambiguous.
       // Fall back to the legacy key for any external callers that still set it.
       const oracleConditionId = data.data.oracleConditionId ?? data.data.polymarketConditionId ?? ''
-      const polymarketConditionId = oracleConditionId || ethers.ZeroHash
+      const polymarketConditionId = oracleConditionId || zeroHash
       const creatorIsYes = Boolean(data.data.creatorIsYes ?? true)
       // ThirdParty resolution names a neutral arbitrator (Spec Kit 005); every
       // other resolution type submits the zero address, which is exactly what
       // WagerRegistry requires (a non-zero arbitrator on a non-ThirdParty wager
       // reverts ArbitratorDisallowed; a zero arbitrator on ThirdParty reverts
       // ArbitratorRequired).
-      let arbitrator = ethers.ZeroAddress
+      let arbitrator = zeroAddress
       if (resolutionType === ResolutionType.ThirdParty) {
         const arb = (data.data.arbitrator || '').trim()
-        if (!ethers.isAddress(arb) || arb === ethers.ZeroAddress) {
+        if (!isAddress(arb) || arb === zeroAddress) {
           throw new Error('ThirdParty resolution requires a valid arbitrator address.')
         }
         arbitrator = arb
@@ -359,13 +396,13 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
       // caller invokes the hook directly), surface a clear error rather than
       // let the contract revert with a cryptic custom error.
       const oracleResolved = ORACLE_RESOLUTION_TYPES.has(resolutionType)
-      if (oracleResolved && polymarketConditionId === ethers.ZeroHash) {
+      if (oracleResolved && polymarketConditionId === zeroHash) {
         throw new Error(
           'Oracle-resolved wagers require a conditionId. ' +
           'Pick a Polymarket market (or other oracle condition) before submitting.'
         )
       }
-      if (!oracleResolved && polymarketConditionId !== ethers.ZeroHash) {
+      if (!oracleResolved && polymarketConditionId !== zeroHash) {
         throw new Error(
           'A conditionId was supplied for a non-oracle resolution type. ' +
           'Either change the resolution type or clear the conditionId.'
@@ -400,17 +437,18 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
       } else {
         metadataReference = data.data.description || 'Friend Wager'
       }
-      const metadataHash = ethers.keccak256(ethers.toUtf8Bytes(metadataReference))
+      const metadataHash = keccak256(stringToHex(metadataReference))
 
       // Spec 007 (FR-056/FR-058): bind the in-force T&C version hash on-chain when the
       // registry supports it. legalDocs hashes are bare 64-hex → normalize to bytes32.
       // Falls back to plain createWager on older registries lacking the overload.
       const termsHashHex = getCurrentDocument('terms')?.hash
       const termsBytes32 = termsHashHex && /^[0-9a-fA-F]{64}$/.test(termsHashHex) ? '0x' + termsHashHex : null
-      const useTerms = Boolean(termsBytes32) && typeof registry.createWagerWithTerms === 'function'
+      const useTerms = Boolean(termsBytes32) && registryHasFunction('createWagerWithTerms')
       const createMethod = useTerms ? 'createWagerWithTerms' : 'createWager'
       const createArgs = [
-        opponent, arbitrator, stakeTokenAddress,
+        // Checksummed before the encoder (divergence 16); arbitrator may be the zero address.
+        getAddress(String(opponent)), getAddress(String(arbitrator)), getAddress(String(stakeTokenAddress)),
         creatorStakeWei, opponentStakeWei,
         acceptDeadline, resolveDeadline,
         resolutionType, polymarketConditionId, creatorIsYes,
@@ -424,8 +462,8 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
       // surfaces only in the vault queue until co-owners approve + execute (FR-022b) — no self-submit/gasless.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to create a wager as the vault.")
-        const approveData = stakeToken.interface.encodeFunctionData('approve', [wagerRegistryAddress, creatorStakeWei])
-        const createData = registry.interface.encodeFunctionData(createMethod, createArgs)
+        const approveData = erc20Call('approve', [getAddress(String(wagerRegistryAddress)), creatorStakeWei])
+        const createData = registryCall(createMethod, createArgs)
         onProgress({ step: 'create', message: 'Creating a vault proposal for co-owner approval…' })
         const res = await submitAsActive({
           batch: [
@@ -450,10 +488,13 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
         // gas estimation can land on a node that still sees allowance 0, and the
         // transferFrom reverts ("transfer amount exceeds allowance", surfaced as
         // an opaque "missing revert data" by some wallet RPCs).
-        let currentAllowance = await stakeToken.allowance(userAddress, wagerRegistryAddress)
+        let currentAllowance = BigInt(await askToken('allowance', [getAddress(String(userAddress)), getAddress(String(wagerRegistryAddress))]))
         if (currentAllowance < creatorStakeWei) {
           onProgress({ step: 'approve', message: 'Approving token spend...' })
-          const approveTx = await stakeToken.approve(wagerRegistryAddress, ethers.MaxUint256)
+          const approveTx = await activeSigner.sendTransaction({
+            to: stakeTokenAddress,
+            data: erc20Call('approve', [getAddress(String(wagerRegistryAddress)), maxUint256]),
+          })
           onProgress({ step: 'approve', message: 'Waiting for approval confirmation...', txHash: approveTx.hash })
           await approveTx.wait()
 
@@ -461,7 +502,7 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
           // are often load-balanced, so the node answering the next read/estimate
           // may briefly lag the node that mined the approval.
           for (let attempt = 0; attempt < 6; attempt++) {
-            currentAllowance = await stakeToken.allowance(userAddress, wagerRegistryAddress)
+            currentAllowance = BigInt(await askToken('allowance', [getAddress(String(userAddress)), getAddress(String(wagerRegistryAddress))]))
             if (currentAllowance >= creatorStakeWei) break
             await new Promise((resolve) => setTimeout(resolve, 1500 * (attempt + 1)))
           }
@@ -477,12 +518,13 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
         // concurrent limit. Without this, acceptDeadline-expired wagers
         // inflate activeCount and block new creation even when the user
         // has fewer truly-active wagers than their tier allows.
-        await expireStaleWagers(registry, userAddress, onProgress)
+        await expireStaleWagers(executionChainId, activeSigner, wagerRegistryAddress, userAddress, onProgress)
 
         // Simulate to catch reverts pre-wallet-prompt
         try {
           onProgress({ step: 'create', message: 'Validating transaction...' })
-          await registry[createMethod].staticCall(...createArgs)
+          // The caller is named explicitly; ethers took it from the signer bound to the contract.
+          await askRegistry(createMethod, createArgs, getAddress(String(userAddress)))
         } catch (simError) {
           throw new Error(translateRevert(revertReasonFrom(simError)), { cause: simError })
         }
@@ -498,7 +540,10 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
         let gasLimit
         for (let attempt = 0; attempt < 3; attempt++) {
           try {
-            const estimate = await registry[createMethod].estimateGas(...createArgs)
+            const estimate = await activeSigner.estimateGas({
+              to: wagerRegistryAddress,
+              data: registryCall(createMethod, createArgs),
+            })
             gasLimit = (estimate * 120n) / 100n // +20% headroom
             break
           } catch {
@@ -510,10 +555,12 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
           }
         }
 
-        const tx = await registry[createMethod](
-          ...createArgs,
-          { ...feeOverrides, gasLimit }
-        )
+        const tx = await activeSigner.sendTransaction({
+          to: wagerRegistryAddress,
+          data: registryCall(createMethod, createArgs),
+          ...feeOverrides,
+          gasLimit,
+        })
         onProgress({ step: 'create', message: 'Waiting for confirmation...', txHash: tx.hash })
         savePendingTransaction({ step: 'create', txHash: tx.hash, data: data.data })
 
@@ -534,26 +581,26 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
         // the connected wallet's rail, and there is no acting-account twin of it — self-submit is
         // the never-stranded fallback the gasless rails already promise.
         const calls = []
-        const currentAllowance = await stakeToken.allowance(userAddress, wagerRegistryAddress)
+        const currentAllowance = BigInt(await askToken('allowance', [getAddress(String(userAddress)), getAddress(String(wagerRegistryAddress))]))
         if (currentAllowance < creatorStakeWei) {
           calls.push({
             to: stakeTokenAddress,
             value: 0n,
-            data: stakeToken.interface.encodeFunctionData('approve', [wagerRegistryAddress, creatorStakeWei]),
+            data: erc20Call('approve', [getAddress(String(wagerRegistryAddress)), creatorStakeWei]),
           })
         }
         // Simulate AS the acting account, so a membership/screening refusal is reported before
         // the member is asked to unlock a key or confirm on a device.
         try {
           onProgress({ step: 'create', message: 'Validating transaction...' })
-          await registry[createMethod].staticCall(...createArgs, { from: userAddress })
+          await askRegistry(createMethod, createArgs, getAddress(String(userAddress)))
         } catch (simError) {
           throw new Error(translateRevert(revertReasonFrom(simError)), { cause: simError })
         }
         calls.push({
           to: wagerRegistryAddress,
           value: 0n,
-          data: registry.interface.encodeFunctionData(createMethod, createArgs),
+          data: registryCall(createMethod, createArgs),
         })
         onProgress({
           step: 'create',
@@ -568,23 +615,23 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
           throw new Error('This wallet cannot create a wager on the current transaction rail.')
         }
         const calls = []
-        const currentAllowance = await stakeToken.allowance(userAddress, wagerRegistryAddress)
+        const currentAllowance = BigInt(await askToken('allowance', [getAddress(String(userAddress)), getAddress(String(wagerRegistryAddress))]))
         if (currentAllowance < creatorStakeWei) {
           calls.push({
             target: stakeTokenAddress,
-            data: stakeToken.interface.encodeFunctionData('approve', [wagerRegistryAddress, creatorStakeWei]),
+            data: erc20Call('approve', [getAddress(String(wagerRegistryAddress)), creatorStakeWei]),
             value: 0n,
           })
         }
         try {
           onProgress({ step: 'create', message: 'Validating transaction...' })
-          await registry[createMethod].staticCall(...createArgs, { from: userAddress })
+          await askRegistry(createMethod, createArgs, getAddress(String(userAddress)))
         } catch (simError) {
           throw new Error(translateRevert(revertReasonFrom(simError)), { cause: simError })
         }
         calls.push({
           target: wagerRegistryAddress,
-          data: registry.interface.encodeFunctionData(createMethod, createArgs),
+          data: registryCall(createMethod, createArgs),
           value: 0n,
         })
         onProgress({ step: 'create', message: 'Confirm with your passkey…' })
@@ -598,7 +645,7 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
           opponent, arbitrator, stakeTokenAddress, creatorStakeWei, opponentStakeWei,
           acceptDeadline, resolveDeadline, resolutionType, polymarketConditionId,
           creatorIsYes, metadataHash, metadataReference,
-          termsVersionHash: termsBytes32 || ethers.ZeroHash,
+          termsVersionHash: termsBytes32 || zeroHash,
           performSelfSubmit,
         })
       }
@@ -625,10 +672,14 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
       // Parse WagerCreated event
       let wagerId = null
       if (receipt) {
-        for (const log of receipt.logs) {
+        for (const log of receipt.logs || []) {
           try {
-            const parsed = registry.interface.parseLog(log)
-            if (parsed?.name === 'WagerCreated') {
+            const parsed = decodeEventLog({
+              abi: REGISTRY_ABI_PARSED,
+              topics: log.topics,
+              data: log.data,
+            })
+            if (parsed?.eventName === 'WagerCreated') {
               wagerId = parsed.args.wagerId.toString()
               break
             }
@@ -648,8 +699,8 @@ export function useFriendMarketCreation({ onMarketCreated } = {}) {
         ipfsCid,
         metadataReference,
         metadataHash,
-        creatorStake: ethers.formatUnits(creatorStakeWei, tokenDecimals),
-        opponentStake: ethers.formatUnits(opponentStakeWei, tokenDecimals),
+        creatorStake: formatUnits(creatorStakeWei, tokenDecimals),
+        opponentStake: formatUnits(opponentStakeWei, tokenDecimals),
         stakeAmount: stakeAmountRaw,
         stakeTokenAddress,
         stakeTokenSymbol: tokenSymbol,

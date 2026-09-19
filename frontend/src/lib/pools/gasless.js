@@ -10,7 +10,8 @@
  * never steal). When no relayer is configured, the member joins normally (paying gas) — gasless is purely
  * additive.
  */
-import { ethers } from 'ethers'
+import { toHex } from 'viem'
+import { splitSignature } from '../evm/signature'
 
 // Single source: @fairwins/intent-types (spec 075, FR-025). This table was previously duplicated
 // here AND in services/relay-gateway/src/intent/intentTypes.js, kept in step by hand. It is the
@@ -38,10 +39,15 @@ export async function signReceiveAuthorization({
 }) {
   const from = await signer.getAddress()
   const now = nowSeconds != null ? nowSeconds : Math.floor(Date.now() / 1000)
-  const nonce = ethers.hexlify(ethers.randomBytes(32))
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)))
   const domain = { name: tokenName, version: tokenVersion, chainId, verifyingContract: token }
   const message = { from, to, value: value.toString(), validAfter: 0, validBefore: now + validitySeconds, nonce }
-  const sig = ethers.Signature.from(await signer.signTypedData(domain, RECEIVE_WITH_AUTHORIZATION_TYPES, message))
+  // `lib/evm/signature.js`, not viem's `parseSignature` — which refuses the 64-byte compact form a
+  // wallet may return AND hands back `v` as a BIGINT where ethers gave a number. This object is
+  // handed to a third-party relayer and serialized, and `JSON.stringify` throws on a bigint, so the
+  // swap would have turned a working gasless join into a failed one on the money path.
+  const sig = splitSignature(await signer.signTypedData(domain, RECEIVE_WITH_AUTHORIZATION_TYPES, message))
+  if (!sig) throw new Error('The wallet returned something that is not a signature, so nothing has been authorized.')
   return { from, to, value, validAfter: 0, validBefore: message.validBefore, nonce, v: sig.v, r: sig.r, s: sig.s }
 }
 

@@ -51,28 +51,42 @@ vi.mock('../../lib/relay/useGaslessWrite', () => ({
   useGaslessWrite: () => ({ run: (...a) => gaslessRun(...a), status: 'idle' }),
 }))
 
-// ---- ethers: real everywhere except the Contract factory — only the resolve path's
-// `getWager` read and the `interface.encodeFunctionData` calls touch it. -----------------
-const getWagerRead = vi.fn(async () => ({ creator: CONNECTED, opponent: OPPONENT }))
-function makeContract(address, _abi, runner) {
-  const iface = {
-    encodeFunctionData: (fn, args) =>
-      `0xENC:${fn}:${JSON.stringify(args, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))}`,
-  }
-  return {
-    interface: iface,
-    runner,
-    address,
-    getWager: (...a) => getWagerRead(...a),
-    declareWinner: vi.fn(async () => ({ hash: '0xSIGNER-WRITE', wait: async () => ({ status: 1, logs: [] }) })),
-    declareDraw: vi.fn(async () => ({ hash: '0xSIGNER-DRAW', wait: async () => ({ status: 1, logs: [] }) })),
-    claimRefund: vi.fn(async () => ({ hash: '0xSIGNER-REFUND', wait: async () => ({ hash: '0xSIGNER-REFUND' }) })),
-  }
+/**
+ * Spec 110 — the modal reads through the chain seam and builds its calldata with viem, so the seam
+ * is what is faked. The `vi.mock('ethers')` that stood here returned an `interface` whose
+ * `encodeFunctionData` produced the marker string `0xENC:<fn>:<args>` — and the assertions below
+ * checked `payload.data` with `toMatch(/^0x/)`, which that marker satisfies. So the acting rail's
+ * calldata was never checked at all: any string starting with "0x" passed.
+ *
+ * The selectors below are FROZEN, taken from ethers' `Interface` offline. That keeps the
+ * cross-library check without importing ethers here (divergence 17: never compare calldata using
+ * the encoder under test), and the encoders themselves are fuzz-compared against ethers separately.
+ */
+const SELECTOR = {
+  declareWinner: '0xe374b097',
+  declareDraw: '0x5b597e8e',
+  claimRefund: '0x5b7baf64',
 }
-vi.mock('ethers', async (importOriginal) => {
+/*
+ * ENCODABLE wager ids. These were the strings 'w-refund' / 'w-resolve', which NEITHER library can
+ * encode into `claimRefund(uint256)` / `declareWinner(uint256,address)` — they only ever reached a
+ * fake `encodeFunctionData` that returned a marker string for any input whatsoever.
+ */
+const REFUND_ID = '41'
+const RESOLVE_ID = '42'
+
+const getWagerRead = vi.fn(async () => ({ creator: CONNECTED, opponent: OPPONENT }))
+const seamReads = []
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
-  const Contract = function (address, abi, runner) { return makeContract(address, abi, runner) }
-  return { ...actual, Contract, ethers: { ...actual.ethers, Contract } }
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      seamReads.push({ chainId, address, functionName, args })
+      if (functionName === 'getWager') return getWagerRead(...args)
+      throw new Error(`unexpected read: ${functionName}`)
+    },
+  }
 })
 
 vi.mock('../../hooks', () => ({
@@ -148,6 +162,7 @@ beforeEach(() => {
   sendCalls.mockClear()
   gaslessRun.mockClear()
   getWagerRead.mockClear()
+  seamReads.length = 0
   refreshFriendMarkets.mockClear()
 })
 
@@ -155,7 +170,7 @@ beforeEach(() => {
 describe('claimRefund (list row) while acting as a recovered / hardware account (spec 088 FR-002)', () => {
   // Participant, past its resolve window — the "Refund" affordance's refundable case.
   const market = {
-    id: 'w-refund',
+    id: REFUND_ID,
     wagerId: '11',
     chainId: 137,
     creator: OPPONENT,
@@ -171,7 +186,7 @@ describe('claimRefund (list row) while acting as a recovered / hardware account 
   const refund = async () => {
     const user = userEvent.setup()
     render(<MyMarketsModal isOpen onClose={vi.fn()} friendMarkets={[market]} />)
-    await user.click(await screen.findByRole('button', { name: 'refund-w-refund' }))
+    await user.click(await screen.findByRole('button', { name: `refund-${REFUND_ID}` }))
   }
 
   it.each(['legacy', 'hardware'])('reclaims through the acting seam, addressed to the registry (%s)', async (mode) => {
@@ -182,7 +197,9 @@ describe('claimRefund (list row) while acting as a recovered / hardware account 
     const [payload] = submitAsActive.mock.calls[0]
     expect(payload.to).toBe(REGISTRY)
     expect(payload.batch).toBeUndefined() // a refund is one call, not a batch
-    expect(payload.data).toMatch(/^0x/)
+    // …and it is a claimRefund, by frozen selector — `toMatch(/^0x/)` passed for the fake's own
+    // `0xENC:` marker, so it asserted nothing about the bytes.
+    expect(String(payload.data).slice(0, 10)).toBe(SELECTOR.claimRefund)
   })
 
   it.each(['legacy', 'hardware'])('never reclaims on the connected wallet’s rails (%s)', async (mode) => {
@@ -206,7 +223,7 @@ describe('claimRefund (list row) while acting as a recovered / hardware account 
 // =====================================================================================
 describe('resolve (declareWinner) while acting as a recovered / hardware account (spec 088 FR-002)', () => {
   const market = {
-    id: 'w-resolve',
+    id: RESOLVE_ID,
     wagerId: '12',
     chainId: 137,
     creator: CONNECTED,
@@ -224,7 +241,7 @@ describe('resolve (declareWinner) while acting as a recovered / hardware account
     const user = userEvent.setup()
     render(<MyMarketsModal isOpen onClose={vi.fn()} friendMarkets={[market]} />)
     await user.click(await screen.findByRole('tab', { name: /Created/i }))
-    await user.click(await screen.findByRole('button', { name: 'resolve-w-resolve' }))
+    await user.click(await screen.findByRole('button', { name: `resolve-${RESOLVE_ID}` }))
     await user.click(await screen.findByRole('button', { name: /Creator wins/i }))
     await user.click(screen.getByRole('button', { name: 'Continue' }))
     await user.click(screen.getByRole('button', { name: /Confirm Resolution/i }))
@@ -238,7 +255,11 @@ describe('resolve (declareWinner) while acting as a recovered / hardware account
     const [payload] = submitAsActive.mock.calls[0]
     expect(payload.to).toBe(REGISTRY)
     expect(payload.batch).toBeUndefined() // a resolution is one call, not a batch
-    expect(payload.data).toMatch(/^0x/)
+    expect(String(payload.data).slice(0, 10)).toBe(SELECTOR.declareWinner)
+    // The winner came from the registry's OWN record, read on the modal's chain.
+    expect(seamReads).toContainEqual(
+      expect.objectContaining({ chainId: 137, address: REGISTRY, functionName: 'getWager' }),
+    )
   })
 
   it.each(['legacy', 'hardware'])('never resolves on the connected wallet’s rails (%s)', async (mode) => {

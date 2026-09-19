@@ -45,19 +45,24 @@
  * TWO READS THAT LOOK LIKE VIEWS AND ARE NOT.
  *
  * `exchangeRateCurrent` and `liquidityUtilizationCurrent` are **state-changing** on Across
- * (they settle accrued LP fees before answering), so `provider.call` on them requires an
- * explicit STATIC CALL — `contract.fn.staticCall(...)`. Calling them as plain reads would
- * either throw or, worse, be built as a transaction the member is asked to sign. Every read
- * below goes through `safeCall` and returns `null` when it fails: a member shown "0" when
- * the truth is "we could not read it" has been told something false about their own money
- * (FR-054). Nothing here ever substitutes a zero, a cached figure, or an invented one.
+ * (they settle accrued LP fees before answering). Under ethers that meant an explicit
+ * `contract.fn.staticCall(...)`, because reading them any other way would have BUILT A
+ * TRANSACTION the member is asked to sign. The spec-110 seam removes the hazard rather than
+ * managing it: `readContract` is an `eth_call` whatever a function's declared mutability, and
+ * it has no path that sends one — so the two reads below are ordinary reads here, and cannot
+ * become transactions by omission. The ABI still declares them without `view`, which is their
+ * real mutability on-chain. Every read goes through `safeCall` and returns `null` when it
+ * fails: a member shown "0" when the truth is "we could not read it" has been told something
+ * false about their own money (FR-054). Nothing here ever substitutes a zero, a cached figure,
+ * or an invented one.
  * ---------------------------------------------------------------------------
  *
  * ADDRESSES. `hubPool` is always an explicit argument, resolved by the caller from
  * `getHubPoolAddress(chainId)` (the network's own config record) or from the curated
  * `PoolListing.poolAddress` read off the router. Nothing here hardcodes one.
  */
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../chains/readContract'
 import { NETWORKS, cohortChainIds } from '../../config/networks'
 import { isBitcoinNetworkId } from '../../config/bitcoinNetworks'
 import { assertEvmChainId } from '../bridge/bridgeRouter'
@@ -68,9 +73,10 @@ import { assertEvmChainId } from '../bridge/bridgeRouter'
  * to Uniswap's position manager.
  *
  * `exchangeRateCurrent` / `liquidityUtilizationCurrent` are declared WITHOUT `view` on
- * purpose: that is their real mutability on-chain, and declaring them `view` here would let
- * a caller read them as a plain call in some paths and silently build a transaction in
- * others. They are read via `.staticCall(...)` below.
+ * purpose: that is their real mutability on-chain. Declaring them `view` to make a read
+ * convenient would be recording something untrue about Across's contract — and a writing
+ * caller reading that declaration would then build a call where a transaction is required.
+ * They are read as `eth_call`s through the chain seam; see the header note.
  */
 export const HUB_POOL_ABI = [
   'function addLiquidity(address l1Token, uint256 l1TokenAmount) payable',
@@ -90,8 +96,9 @@ export const LP_TOKEN_ABI = [
   'function symbol() view returns (string)',
 ]
 
-const HUB_POOL_IFACE = new Interface(HUB_POOL_ABI)
-const ERC20_APPROVE_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+const HUB_POOL = normalizeAbi(HUB_POOL_ABI)
+const LP_TOKEN = normalizeAbi(LP_TOKEN_ABI)
+const ERC20_APPROVE_ABI = normalizeAbi(['function approve(address spender, uint256 amount) returns (bool)'])
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -232,10 +239,11 @@ export function bridgeLiquiditySupport(chainId) {
  *
  * @returns {Promise<null | {lpToken: string, isEnabled: boolean, liquidReserves: bigint, utilizedReserves: bigint, undistributedLpFees: bigint, lastLpFeeUpdate: number}>}
  */
-export async function readPooledToken({ provider, hubPool, l1Token }) {
-  if (!provider || !hubPool || !l1Token) return null
-  const contract = new Contract(hubPool, HUB_POOL_ABI, provider)
-  const raw = await safeCall(() => contract.pooledTokens(l1Token))
+export async function readPooledToken({ chainId, provider, hubPool, l1Token }) {
+  if (!provider || !hubPool || !l1Token || chainId == null) return null
+  const raw = await safeCall(() =>
+    readContract(chainId, { address: hubPool, abi: HUB_POOL, functionName: 'pooledTokens', args: [l1Token] }),
+  )
   if (raw === undefined || raw === null) return null
   const lpToken = raw.lpToken ?? raw[0]
   // An unlisted token returns a zero-filled struct rather than reverting. A zero LP token is
@@ -261,10 +269,11 @@ export async function readPooledToken({ provider, hubPool, l1Token }) {
  *
  * @returns {Promise<bigint|null>} null when unreadable — never a 1e18 stand-in
  */
-export async function readExchangeRate({ provider, hubPool, l1Token }) {
-  if (!provider || !hubPool || !l1Token) return null
-  const contract = new Contract(hubPool, HUB_POOL_ABI, provider)
-  const raw = await safeCall(() => contract.exchangeRateCurrent.staticCall(l1Token))
+export async function readExchangeRate({ chainId, provider, hubPool, l1Token }) {
+  if (!provider || !hubPool || !l1Token || chainId == null) return null
+  const raw = await safeCall(() =>
+    readContract(chainId, { address: hubPool, abi: HUB_POOL, functionName: 'exchangeRateCurrent', args: [l1Token] }),
+  )
   return raw === undefined ? null : asBigInt(raw)
 }
 
@@ -275,26 +284,34 @@ export async function readExchangeRate({ provider, hubPool, l1Token }) {
  *
  * @returns {Promise<bigint|null>}
  */
-export async function readUtilization({ provider, hubPool, l1Token }) {
-  if (!provider || !hubPool || !l1Token) return null
-  const contract = new Contract(hubPool, HUB_POOL_ABI, provider)
-  const raw = await safeCall(() => contract.liquidityUtilizationCurrent.staticCall(l1Token))
+export async function readUtilization({ chainId, provider, hubPool, l1Token }) {
+  if (!provider || !hubPool || !l1Token || chainId == null) return null
+  const raw = await safeCall(() =>
+    readContract(chainId, {
+      address: hubPool,
+      abi: HUB_POOL,
+      functionName: 'liquidityUtilizationCurrent',
+      args: [l1Token],
+    }),
+  )
   return raw === undefined ? null : asBigInt(raw)
 }
 
 /** The member's LP token balance, or null when it cannot be read. */
-export async function readLpBalance({ provider, lpToken, owner }) {
-  if (!provider || !lpToken || !owner) return null
-  const contract = new Contract(lpToken, LP_TOKEN_ABI, provider)
-  const raw = await safeCall(() => contract.balanceOf(owner))
+export async function readLpBalance({ chainId, provider, lpToken, owner }) {
+  if (!provider || !lpToken || !owner || chainId == null) return null
+  const raw = await safeCall(() =>
+    readContract(chainId, { address: lpToken, abi: LP_TOKEN, functionName: 'balanceOf', args: [owner] }),
+  )
   return raw === undefined ? null : asBigInt(raw)
 }
 
 /** Whether the HubPool itself is paused, or null when that cannot be read (never `false`). */
-export async function readHubPoolPaused({ provider, hubPool }) {
-  if (!provider || !hubPool) return null
-  const contract = new Contract(hubPool, HUB_POOL_ABI, provider)
-  const raw = await safeCall(() => contract.paused())
+export async function readHubPoolPaused({ chainId, provider, hubPool }) {
+  if (!provider || !hubPool || chainId == null) return null
+  const raw = await safeCall(() =>
+    readContract(chainId, { address: hubPool, abi: HUB_POOL, functionName: 'paused' }),
+  )
   return raw === undefined ? null : Boolean(raw)
 }
 
@@ -358,14 +375,14 @@ export function maxWithdrawable({ lpBalance, exchangeRate, liquidReserves }) {
  *
  * @returns {Promise<null | object>}
  */
-export async function readLpPosition({ provider, hubPool, l1Token, owner }) {
-  const pooled = await readPooledToken({ provider, hubPool, l1Token })
+export async function readLpPosition({ chainId, provider, hubPool, l1Token, owner }) {
+  const pooled = await readPooledToken({ chainId, provider, hubPool, l1Token })
   if (!pooled) return null
 
   const [lpBalance, exchangeRate, utilization] = await Promise.all([
-    readLpBalance({ provider, lpToken: pooled.lpToken, owner }),
-    readExchangeRate({ provider, hubPool, l1Token }),
-    readUtilization({ provider, hubPool, l1Token }),
+    readLpBalance({ chainId, provider, lpToken: pooled.lpToken, owner }),
+    readExchangeRate({ chainId, provider, hubPool, l1Token }),
+    readUtilization({ chainId, provider, hubPool, l1Token }),
   ])
 
   return {
@@ -429,13 +446,13 @@ export function buildAddLiquidityCalls({ hubPool, l1Token, amount, useNative = f
   if (!useNative) {
     calls.push({
       target: l1Token,
-      data: ERC20_APPROVE_IFACE.encodeFunctionData('approve', [hubPool, value]),
+      data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [hubPool, value] }),
       value: 0n,
     })
   }
   calls.push({
     target: hubPool,
-    data: HUB_POOL_IFACE.encodeFunctionData('addLiquidity', [l1Token, value]),
+    data: encodeFunctionData({ abi: HUB_POOL, functionName: 'addLiquidity', args: [l1Token, value] }),
     // The HubPool requires msg.value == l1TokenAmount on the native path, and 0 otherwise.
     value: useNative ? value : 0n,
   })
@@ -482,7 +499,11 @@ export function buildRemoveLiquidityCalls({
     calls: [
       {
         target: hubPool,
-        data: HUB_POOL_IFACE.encodeFunctionData('removeLiquidity', [l1Token, value, Boolean(receiveNative)]),
+        data: encodeFunctionData({
+          abi: HUB_POOL,
+          functionName: 'removeLiquidity',
+          args: [l1Token, value, Boolean(receiveNative)],
+        }),
         value: 0n,
       },
     ],

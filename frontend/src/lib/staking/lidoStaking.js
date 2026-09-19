@@ -13,14 +13,18 @@
  *
  * Exit is the Lido Withdrawal Queue: request (mints an ERC-721 ticket) → wait
  * until finalized → claim. A request is ready iff `isFinalized && !isClaimed`.
+ *
+ * Spec 110 Phase 1: reads go through the chain seam — the chain is an argument
+ * (`chainId`), never an ambient provider.
  */
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import { LIDO_WSTETH_ABI } from '../../abis/LidoWstETH'
 import { LIDO_WITHDRAWAL_QUEUE_ABI } from '../../abis/LidoWithdrawalQueue'
 import { LIDO_APR_API } from '../../config/staking'
+import { readContract, normalizeAbi } from '../chains/readContract'
 
-const WSTETH_IFACE = new Interface(LIDO_WSTETH_ABI)
-const QUEUE_IFACE = new Interface(LIDO_WITHDRAWAL_QUEUE_ABI)
+const WSTETH_ABI = normalizeAbi(LIDO_WSTETH_ABI)
+const QUEUE_ABI = normalizeAbi(LIDO_WITHDRAWAL_QUEUE_ABI)
 
 /** Fetch Lido's 7-day SMA APR as a fraction (0.032), or null on failure. */
 export async function fetchLidoApr(apiUrl = LIDO_APR_API) {
@@ -38,15 +42,16 @@ export async function fetchLidoApr(apiUrl = LIDO_APR_API) {
 }
 
 /**
- * Read the member's Lido position over a read provider.
+ * Read the member's Lido position on a named chain.
  * Returns { lstBalanceRaw (wstETH), stakedRaw (underlying ETH) }.
  */
-export async function readLidoPosition({ account, provider, contracts }) {
-  const wsteth = new Contract(contracts.wsteth, LIDO_WSTETH_ABI, provider)
-  const lstBalanceRaw = await wsteth.balanceOf(account)
+export async function readLidoPosition({ account, chainId, contracts }) {
+  const wsteth = (functionName, args) =>
+    readContract(chainId, { address: contracts.wsteth, abi: WSTETH_ABI, functionName, args })
+  const lstBalanceRaw = await wsteth('balanceOf', [account])
   let stakedRaw = 0n
   if (lstBalanceRaw > 0n) {
-    stakedRaw = await wsteth.getStETHByWstETH(lstBalanceRaw)
+    stakedRaw = await wsteth('getStETHByWstETH', [lstBalanceRaw])
   }
   return { lstBalanceRaw, stakedRaw }
 }
@@ -66,21 +71,33 @@ export function buildStakeCalls({ contracts, amount }) {
  * Request a withdrawal of wstETH from the Lido queue. Needs a wstETH approval
  * to the queue when the allowance is short. Returns { calls, requiresApproval }.
  */
-export async function buildWithdrawalRequestCalls({ contracts, account, amount, provider }) {
-  const wsteth = new Contract(contracts.wsteth, LIDO_WSTETH_ABI, provider)
-  const allowance = await wsteth.allowance(account, contracts.withdrawalQueue)
+export async function buildWithdrawalRequestCalls({ contracts, account, amount, chainId }) {
+  const allowance = await readContract(chainId, {
+    address: contracts.wsteth,
+    abi: WSTETH_ABI,
+    functionName: 'allowance',
+    args: [account, contracts.withdrawalQueue],
+  })
   const requiresApproval = allowance < amount
   const calls = []
   if (requiresApproval) {
     calls.push({
       target: contracts.wsteth,
-      data: WSTETH_IFACE.encodeFunctionData('approve', [contracts.withdrawalQueue, amount]),
+      data: encodeFunctionData({
+        abi: WSTETH_ABI,
+        functionName: 'approve',
+        args: [contracts.withdrawalQueue, amount],
+      }),
       value: 0n,
     })
   }
   calls.push({
     target: contracts.withdrawalQueue,
-    data: QUEUE_IFACE.encodeFunctionData('requestWithdrawalsWstETH', [[amount], account]),
+    data: encodeFunctionData({
+      abi: QUEUE_ABI,
+      functionName: 'requestWithdrawalsWstETH',
+      args: [[amount], account],
+    }),
     value: 0n,
   })
   return { calls, requiresApproval }
@@ -90,11 +107,14 @@ export async function buildWithdrawalRequestCalls({ contracts, account, amount, 
  * Read the status of the member's open Lido withdrawal requests.
  * Returns [{ requestId, amountRaw, ready }] where ready = finalized && !claimed.
  */
-export async function readLidoWithdrawalStatuses({ contracts, account, provider, requestIds }) {
-  const queue = new Contract(contracts.withdrawalQueue, LIDO_WITHDRAWAL_QUEUE_ABI, provider)
-  const ids = requestIds?.length ? requestIds.map((r) => BigInt(r)) : await queue.getWithdrawalRequests(account)
+export async function readLidoWithdrawalStatuses({ contracts, account, chainId, requestIds }) {
+  const queue = (functionName, args) =>
+    readContract(chainId, { address: contracts.withdrawalQueue, abi: QUEUE_ABI, functionName, args })
+  const ids = requestIds?.length
+    ? requestIds.map((r) => BigInt(r))
+    : await queue('getWithdrawalRequests', [account])
   if (!ids.length) return []
-  const statuses = await queue.getWithdrawalStatus(ids)
+  const statuses = await queue('getWithdrawalStatus', [ids])
   return ids.map((id, i) => ({
     requestId: id.toString(),
     amountRaw: statuses[i].amountOfStETH,
@@ -107,16 +127,17 @@ export async function readLidoWithdrawalStatuses({ contracts, account, provider,
  * Claim finalized Lido withdrawals. Resolves the checkpoint hints first.
  * Returns { calls }.
  */
-export async function buildLidoClaimCalls({ contracts, provider, requestIds }) {
-  const queue = new Contract(contracts.withdrawalQueue, LIDO_WITHDRAWAL_QUEUE_ABI, provider)
+export async function buildLidoClaimCalls({ contracts, chainId, requestIds }) {
+  const queue = (functionName, args) =>
+    readContract(chainId, { address: contracts.withdrawalQueue, abi: QUEUE_ABI, functionName, args })
   const ids = requestIds.map((r) => BigInt(r))
-  const lastIndex = await queue.getLastCheckpointIndex()
-  const hints = await queue.findCheckpointHints(ids, 1, lastIndex)
+  const lastIndex = await queue('getLastCheckpointIndex')
+  const hints = await queue('findCheckpointHints', [ids, 1n, lastIndex])
   return {
     calls: [
       {
         target: contracts.withdrawalQueue,
-        data: QUEUE_IFACE.encodeFunctionData('claimWithdrawals', [ids, hints]),
+        data: encodeFunctionData({ abi: QUEUE_ABI, functionName: 'claimWithdrawals', args: [ids, hints] }),
         value: 0n,
       },
     ],

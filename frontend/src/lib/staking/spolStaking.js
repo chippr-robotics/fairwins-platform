@@ -6,47 +6,68 @@
  * value-accruing). Stake: approve POL → buySPOL. Exit: sellSPOL → unbonding
  * nonce → withdrawPOL after the wait, OR an instant DEX swap of the liquid
  * token. rewardFee is Polygon's fee (on rewards), read for honest disclosure.
+ *
+ * Spec 110 Phase 1: reads go through the chain seam — the chain is an argument
+ * (`chainId`), never an ambient provider.
  */
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import { SPOL_CONTROLLER_ABI, SPOL_TOKEN_ABI } from '../../abis/SPOLController'
 import { POL_TOKEN_ABI } from '../../abis/PolygonValidatorShare'
+import { readContract, normalizeAbi } from '../chains/readContract'
 
-const CONTROLLER_IFACE = new Interface(SPOL_CONTROLLER_ABI)
-const POL_IFACE = new Interface(POL_TOKEN_ABI)
+const CONTROLLER_ABI = normalizeAbi(SPOL_CONTROLLER_ABI)
+const TOKEN_ABI = normalizeAbi(SPOL_TOKEN_ABI)
+const POL_ABI = normalizeAbi(POL_TOKEN_ABI)
 
 const WAD = 1_000_000_000_000_000_000n // 1e18
 
 /**
- * Read the member's sPOL position over a read provider.
+ * Read the member's sPOL position on a named chain.
  * Returns { lstBalanceRaw (sPOL), stakedRaw (underlying POL) }.
  */
-export async function readSpolPosition({ account, provider, contracts }) {
-  const token = new Contract(contracts.token, SPOL_TOKEN_ABI, provider)
-  const controller = new Contract(contracts.controller, SPOL_CONTROLLER_ABI, provider)
-  const lstBalanceRaw = await token.balanceOf(account)
+export async function readSpolPosition({ account, chainId, contracts }) {
+  const lstBalanceRaw = await readContract(chainId, {
+    address: contracts.token,
+    abi: TOKEN_ABI,
+    functionName: 'balanceOf',
+    args: [account],
+  })
   let stakedRaw = 0n
   if (lstBalanceRaw > 0n) {
-    stakedRaw = await controller.convertSPOLtoPOL(lstBalanceRaw)
+    stakedRaw = await readContract(chainId, {
+      address: contracts.controller,
+      abi: CONTROLLER_ABI,
+      functionName: 'convertSPOLtoPOL',
+      args: [lstBalanceRaw],
+    })
   }
   return { lstBalanceRaw, stakedRaw }
 }
 
 /** Total POL staked in the pool (TVL numerator), or null on failure. */
-export async function readSpolTvl({ provider, contracts }) {
+export async function readSpolTvl({ chainId, contracts }) {
   try {
-    const controller = new Contract(contracts.controller, SPOL_CONTROLLER_ABI, provider)
-    return await controller.totalsPOLBalance()
+    return await readContract(chainId, {
+      address: contracts.controller,
+      abi: CONTROLLER_ABI,
+      functionName: 'totalsPOLBalance',
+    })
   } catch {
     return null
   }
 }
 
 /** Read Polygon's live sPOL reward fee (bps) for disclosure, or null. */
-export async function readSpolRewardFee({ provider, contracts }) {
+export async function readSpolRewardFee({ chainId, contracts }) {
   try {
-    const controller = new Contract(contracts.controller, SPOL_CONTROLLER_ABI, provider)
     // rewardFee is per-mille (100 = 10%). Convert to bps for a common unit.
-    const perMille = Number(await controller.rewardFee())
+    const perMille = Number(
+      await readContract(chainId, {
+        address: contracts.controller,
+        abi: CONTROLLER_ABI,
+        functionName: 'rewardFee',
+      }),
+    )
     return perMille * 10
   } catch {
     return null
@@ -57,21 +78,29 @@ export async function readSpolRewardFee({ provider, contracts }) {
  * Stake POL → sPOL. Needs a POL approval to the controller when short.
  * Returns { calls, requiresApproval }.
  */
-export async function buildStakeCalls({ contracts, polToken, account, amount, provider }) {
-  const pol = new Contract(polToken, POL_TOKEN_ABI, provider)
-  const allowance = await pol.allowance(account, contracts.controller)
+export async function buildStakeCalls({ contracts, polToken, account, amount, chainId }) {
+  const allowance = await readContract(chainId, {
+    address: polToken,
+    abi: POL_ABI,
+    functionName: 'allowance',
+    args: [account, contracts.controller],
+  })
   const requiresApproval = allowance < amount
   const calls = []
   if (requiresApproval) {
     calls.push({
       target: polToken,
-      data: POL_IFACE.encodeFunctionData('approve', [contracts.controller, amount]),
+      data: encodeFunctionData({
+        abi: POL_ABI,
+        functionName: 'approve',
+        args: [contracts.controller, amount],
+      }),
       value: 0n,
     })
   }
   calls.push({
     target: contracts.controller,
-    data: CONTROLLER_IFACE.encodeFunctionData('buySPOL', [amount]),
+    data: encodeFunctionData({ abi: CONTROLLER_ABI, functionName: 'buySPOL', args: [amount] }),
     value: 0n,
   })
   return { calls, requiresApproval }
@@ -83,7 +112,7 @@ export function buildUnstakeCalls({ contracts, amount }) {
     calls: [
       {
         target: contracts.controller,
-        data: CONTROLLER_IFACE.encodeFunctionData('sellSPOL', [amount]),
+        data: encodeFunctionData({ abi: CONTROLLER_ABI, functionName: 'sellSPOL', args: [amount] }),
         value: 0n,
       },
     ],
@@ -95,8 +124,10 @@ export function buildWithdrawCalls({ contracts }) {
   return {
     calls: [
       {
+        // The zero-arg overload of the overloaded withdrawPOL()/withdrawPOL(address)
+        // pair — viem selects it by the empty args list.
         target: contracts.controller,
-        data: CONTROLLER_IFACE.encodeFunctionData('withdrawPOL()', []),
+        data: encodeFunctionData({ abi: CONTROLLER_ABI, functionName: 'withdrawPOL', args: [] }),
         value: 0n,
       },
     ],
@@ -111,9 +142,13 @@ export function buildWithdrawCalls({ contracts }) {
  * supplied by the caller (from the StakeManager).
  * Returns [{ unbondNonce, shares, withdrawEpoch, amountRaw, ready }].
  */
-export async function readSpolOpenNonces({ contracts, account, provider, currentEpoch, withdrawalDelay }) {
-  const controller = new Contract(contracts.controller, SPOL_CONTROLLER_ABI, provider)
-  const rows = await controller.getUserOpenNonces(account)
+export async function readSpolOpenNonces({ contracts, account, chainId, currentEpoch, withdrawalDelay }) {
+  const rows = await readContract(chainId, {
+    address: contracts.controller,
+    abi: CONTROLLER_ABI,
+    functionName: 'getUserOpenNonces',
+    args: [account],
+  })
   return rows.map((r) => {
     const withdrawEpoch = BigInt(r.withdrawEpoch)
     const ready =

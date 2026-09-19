@@ -261,7 +261,8 @@ const GMX_GAS_CONFIG = {
   [GMX_DECREASE_ORDER_GAS_LIMIT_KEY]: 3_000_000n,
 }
 const gmxQuoteDeps = (over = {}) => ({
-  getProvider: () => ({ getFeeData: async () => ({ gasPrice: 20_000_000n }) }),
+  // A viem PublicClient's gas-price surface — `eth_gasPrice`, with the 1559 ceiling behind it.
+  getClient: () => ({ getGasPrice: async () => 20_000_000n, estimateFeesPerGas: async () => ({}) }),
   makeContract: () => ({ getUint: async (key) => GMX_GAS_CONFIG[key] ?? 0n }),
   ...over,
 })

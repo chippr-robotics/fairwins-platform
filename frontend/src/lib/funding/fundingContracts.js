@@ -3,7 +3,8 @@
  * (`getContractAddressForChain`), never hardcoded (Principle V); ABIs are derived from the compiled
  * artifacts (`src/abis/FundingPool*.js`).
  */
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../chains/readContract'
 import { FUNDING_POOL_FACTORY_ABI } from '../../abis/FundingPoolFactory'
 import { FUNDING_POOL_ABI } from '../../abis/FundingPool'
 import { getContractAddressForChain } from '../../config/contracts'
@@ -25,17 +26,33 @@ export function isFundingAvailable(chainId) {
   return typeof a === 'string' && a.length === 42
 }
 
-/** Build the factory contract bound to `runner` (signer or provider). Throws if not deployed. */
-export function getFundingFactory(runner, chainId) {
+/**
+ * Read one function on the factory for `chainId`. Throws if funding pools are not deployed there —
+ * the same refusal `getFundingFactory` made, kept as a throw rather than a null so a caller cannot
+ * mistake "not available here" for "read returned nothing".
+ */
+export function readFundingFactory(chainId, functionName, args = []) {
   const address = getFundingFactoryAddress(chainId)
   if (!address) throw new Error(`Funding pools are not available on this network (chain ${chainId}).`)
-  return new ethers.Contract(address, FUNDING_POOL_FACTORY_ABI, runner)
+  return readContract(chainId, { address, abi: FUNDING_POOL_FACTORY_ABI, functionName, args })
 }
 
-/** Build a pool contract bound to `runner`. */
-export function getFundingPool(address, runner) {
-  return new ethers.Contract(address, FUNDING_POOL_ABI, runner)
+/** Read one function on a pool clone. */
+export function readFundingPool(chainId, address, functionName, args = []) {
+  return readContract(chainId, { address, abi: FUNDING_POOL_ABI, functionName, args })
 }
+
+/** Calldata for a factory call (the `Interface.encodeFunctionData` this replaces). */
+export function encodeFactoryCall(functionName, args) {
+  return encodeFunctionData({ abi: normalizeAbi(FUNDING_POOL_FACTORY_ABI), functionName, args })
+}
+
+/** Calldata for a pool-clone call. */
+export function encodePoolCall(functionName, args) {
+  return encodeFunctionData({ abi: normalizeAbi(FUNDING_POOL_ABI), functionName, args })
+}
+
+export { FUNDING_POOL_ABI, FUNDING_POOL_FACTORY_ABI }
 
 export const FUNDING_STATE = ['Open', 'Closed', 'Refunding']
 export const FUNDING_STATE_DISPLAY = ['Open', 'Closed', 'Refunding']

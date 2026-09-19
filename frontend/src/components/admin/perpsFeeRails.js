@@ -17,8 +17,16 @@
  * Every read returns a three-state `chainReadResult` (read / not-deployed / unreadable). On a fee
  * schedule a silent 0 is read as "we charge nothing", so an unreachable chain must never produce
  * one — which is why there is no code path in this module that turns a failure into a number.
+ *
+ * The reads go through `readContract(chainId, …)` (spec 110 Phase 1), and each rail's chain is a
+ * CONSTANT here — GMX is on Arbitrum, the Hyperliquid service on the build's mainnet chain — so
+ * neither can drift to the wallet's. The `provider` argument stays, and is now purely the
+ * AVAILABILITY GATE it always really was: `readProviderFor` is cohort-bounded (spec 071), so a
+ * null from it means this build may not read that chain at all, which is a different answer from
+ * a read that was attempted and failed. Losing that distinction would report a testnet build's
+ * refusal as an unreachable mainnet.
  */
-import { ethers } from 'ethers'
+import { keccak256, stringToBytes, zeroAddress } from 'viem'
 import { FEE_ROUTER_ABI } from '../../abis/FeeRouter'
 import { GMX_DATA_STORE_ABI } from '../../abis/perps/gmxDataStore'
 import { MAINNET_CHAIN_ID } from '../../config/networks'
@@ -30,6 +38,8 @@ import {
 } from '../../lib/perps/feeUnits'
 import { notDeployed, readOk, unreadable } from '../../lib/chains/chainReadResult'
 import { networkName } from '../../lib/chains/estate'
+import { readContract } from '../../lib/chains/readContract'
+import { getAddress, isAddress } from '../../lib/evm/address'
 
 /**
  * GMX v2 is deployed on Arbitrum and nowhere else this product touches, so the venue registry is
@@ -47,11 +57,11 @@ export const GMX_CHAIN_ID = PERP_VENUES.gmx.chains[0]
 export const HL_FEE_CHAIN_ID = MAINNET_CHAIN_ID
 
 /** `keccak256("perps.hyperliquid.builder")` — the registered FeeRouter service id. */
-export const HL_BUILDER_SERVICE_ID = ethers.id('perps.hyperliquid.builder')
+export const HL_BUILDER_SERVICE_ID = keccak256(stringToBytes('perps.hyperliquid.builder'))
 
 /** A short address for display. The zero address renders as nothing, never as `0x0000…0000`. */
 export function shortAddr(a) {
-  return a && a !== ethers.ZeroAddress ? `${a.substring(0, 6)}…${a.substring(a.length - 4)}` : ''
+  return a && a !== zeroAddress ? `${a.substring(0, 6)}…${a.substring(a.length - 4)}` : ''
 }
 
 /** bps as a percentage, for the second reading of every rate. Fractional bps survive. */
@@ -59,12 +69,21 @@ export function bpsPct(bps) {
   return `${(Number(bps) / 100).toFixed(4).replace(/0+$/, '').replace(/\.$/, '')}%`
 }
 
+/**
+ * Is this the same account? Checksum-VALIDATING, which is the half viem does not do for itself.
+ *
+ * ethers' `getAddress` THREW on a mixed-case address whose EIP-55 checksum did not verify, so the
+ * old `try/catch` here failed closed on one — the guard below refused, with a reason. viem's
+ * `getAddress` does not validate the casing it is handed; it silently re-checksums it. Dropping
+ * the check on the way past would have turned a loud refusal on a suspicious literal into a quiet
+ * comparison, in the one function on this screen that decides whether an operator is allowed to
+ * send `setUiFeeFactor`. `isAddress` from the address seam reproduces ethers' rule exactly
+ * (all-lower and ALL-UPPER carry no checksum and are accepted; mixed case must verify), so this
+ * keeps the original behaviour rather than the original code.
+ */
 function sameAddress(a, b) {
-  try {
-    return ethers.getAddress(a) === ethers.getAddress(b)
-  } catch {
-    return false
-  }
+  if (!isAddress(a) || !isAddress(b)) return false
+  return getAddress(a) === getAddress(b)
 }
 
 /**
@@ -135,11 +154,14 @@ export async function readGmxUiFeeRail({ provider, dataStore, receiver }) {
     return unreadable(GMX_CHAIN_ID, `no read connection to ${networkName(GMX_CHAIN_ID)}`)
   }
   try {
-    const store = new ethers.Contract(dataStore, GMX_DATA_STORE_ABI, provider)
-    const [factor, maxFactor] = await Promise.all([
-      store.getUint(key),
-      store.getUint(GMX_MAX_UI_FEE_FACTOR_KEY),
-    ])
+    const getUint = (slot) =>
+      readContract(GMX_CHAIN_ID, {
+        address: dataStore,
+        abi: GMX_DATA_STORE_ABI,
+        functionName: 'getUint',
+        args: [slot],
+      })
+    const [factor, maxFactor] = await Promise.all([getUint(key), getUint(GMX_MAX_UI_FEE_FACTOR_KEY)])
     return readOk(GMX_CHAIN_ID, {
       factor,
       maxFactor,
@@ -163,8 +185,12 @@ export async function readHyperliquidRail({ provider, routerAddr }) {
     return unreadable(HL_FEE_CHAIN_ID, `no read connection to ${networkName(HL_FEE_CHAIN_ID)}`)
   }
   try {
-    const router = new ethers.Contract(routerAddr, FEE_ROUTER_ABI, provider)
-    const svc = await router.getService(HL_BUILDER_SERVICE_ID)
+    const svc = await readContract(HL_FEE_CHAIN_ID, {
+      address: routerAddr,
+      abi: FEE_ROUTER_ABI,
+      functionName: 'getService',
+      args: [HL_BUILDER_SERVICE_ID],
+    })
     return readOk(HL_FEE_CHAIN_ID, {
       feeBps: Number(svc.feeBps),
       capBps: Number(svc.capBps),

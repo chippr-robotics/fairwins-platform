@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 
-const m = vi.hoisted(() => ({ addr: {}, byAddr: {}, constructed: [] }))
+const m = vi.hoisted(() => ({ addr: {}, byAddr: {}, constructed: [], readCalls: [] }))
 
 vi.mock('../../config/contracts', () => ({
   getContractAddressForChain: (name, chainId) =>
@@ -54,25 +54,52 @@ vi.mock('../../utils/rpcProvider', () => ({
   makeReadProvider: () => fakeProvider(),
   getReadProvider: () => fakeProvider(),
 }))
-vi.mock('ethers', async (orig) => {
+/**
+ * Every read is keyed by the CONTRACT ADDRESS the tab asked, so a value from one network's router
+ * can only appear on screen if the tab actually asked THAT router for it.
+ *
+ * That was the design before spec 110 too — but it was enforced through a fake `ethers.Contract`
+ * that received the address as a constructor argument and, like every such fake, was free to
+ * ignore it. Now the address arrives on each call and so does the CHAIN, so both are recorded.
+ */
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract(address) {
-    m.constructed.push(address)
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          if (prop === 'filters') return new Proxy({}, { get: (_f, name) => () => ({ __event: String(name) }) })
-          const key = String(prop)
-          const reads = m.byAddr[address] || {}
-          return (...args) => (reads[key] ? reads[key](...args) : Promise.resolve(undefined))
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: (chainId, { address, functionName, args = [] }) => {
+      m.constructed.push(address)
+      m.readCalls.push({ chainId, address, functionName })
+      const reads = m.byAddr[address] || {}
+      return reads[functionName] ? reads[functionName](...args) : Promise.resolve(undefined)
+    },
   }
-  const FakeCtor = vi.fn(FakeContract)
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
+})
+
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    m.constructed.push(address)
+    m.readCalls.push({ chainId, address, functionName: '<scan>' })
+    return {
+      target: address,
+      provider: {
+        getBlockNumber: async () => 1_000_000,
+        getLogs: async () => [],
+      },
+      filters: new Proxy(
+        {},
+        { get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }) },
+      ),
+      interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: () => ({ getBlock: async () => ({ timestamp: 0n }) }),
+  }
 })
 
 import BridgeTab from '../../components/admin/BridgeTab'
@@ -107,13 +134,13 @@ const tabProps = (overrides = {}) => ({
 const routerReads = (extra) => ({
   paused: () => Promise.resolve(false),
   MAX_FEE_BPS: () => Promise.resolve(250n),
-  queryFilter: () => Promise.resolve([]),
   ...extra,
 })
 
 beforeEach(() => {
   m.addr = { 1: ETH_ROUTER, 137: POLY_ROUTER }
   m.constructed = []
+  m.readCalls = []
 })
 
 describe('Bridge control state is per network', () => {

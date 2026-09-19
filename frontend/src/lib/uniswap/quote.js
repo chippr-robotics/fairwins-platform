@@ -12,7 +12,7 @@
  * instances for the figures, never to pick addresses — those arrive from the
  * caller, already resolved per-chain.
  */
-import { ethers } from 'ethers'
+import { formatUnits, parseUnits } from '../evm/units'
 import { toSdkToken, buildTradeMetrics, ROUTED_FEE_TIERS } from './trade'
 
 /**
@@ -20,7 +20,7 @@ import { toSdkToken, buildTradeMetrics, ROUTED_FEE_TIERS } from './trade'
  * figures a trading UI shows (execution price, minimum received, price impact).
  *
  * @param {object} p
- * @param {ethers.Contract} p.quoter QuoterV2 bound to `chainId`'s read provider
+ * @param {object} p.quoter QuoterV2 bound to `chainId`'s read provider (injected by the caller)
  * @param {number} p.chainId         chain the pool lives on (SDK Token identity)
  * @param {string} p.tokenIn         leg being sold
  * @param {string} p.tokenOut        leg being bought
@@ -45,7 +45,7 @@ export async function quoteBestRoute({
   symbolOut,
   slippageBps,
 }) {
-  const amountInWei = ethers.parseUnits(amountIn, decimalsIn)
+  const amountInWei = parseUnits(amountIn, decimalsIn)
   if (amountInWei <= 0n) {
     throw new Error('Enter an amount greater than zero')
   }
@@ -110,13 +110,13 @@ export async function quoteBestRoute({
 
   return {
     chainId: Number(chainId),
-    amountOut: ethers.formatUnits(best.amountOutWei, decimalsOut),
+    amountOut: formatUnits(best.amountOutWei, decimalsOut),
     amountOutWei: best.amountOutWei,
     feeTier: best.fee,
     gasEstimate: best.gasEstimate,
     executionPrice: metrics.executionPrice.toSignificant(6),
     executionPriceInverted: metrics.executionPrice.invert().toSignificant(6),
-    minimumReceived: ethers.formatUnits(metrics.minimumReceivedRaw, decimalsOut),
+    minimumReceived: formatUnits(metrics.minimumReceivedRaw, decimalsOut),
     minimumReceivedWei: metrics.minimumReceivedRaw,
     priceImpactPercent: metrics.priceImpact
       ? parseFloat(metrics.priceImpact.toSignificant(4))

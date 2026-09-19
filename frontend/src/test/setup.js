@@ -190,6 +190,51 @@ vi.mock('ethers', async () => {
   }
 })
 
+// The viem read seam (spec 110 Phase 1, #1592) — the twin of the ethers Contract mock above.
+// Files converted onto lib/chains/readContract leave MockContract's coverage, so the seam's
+// client factory answers with the SAME canned world here: balanceOf/allowance are 1000 tokens,
+// totalSupply a million, roles empty, native balance 1, logs empty. An unmocked functionName
+// THROWS (exactly as a missing method on MockContract did), so a suite that needs a specific
+// read still fails loudly and mocks the seam itself. src/test/chains/* unmocks this to test
+// the real factory.
+vi.mock('../lib/chains/publicClient', async () => {
+  const actual = await vi.importActual('../lib/chains/publicClient')
+  const CANNED = {
+    balanceOf: () => 1000n * 10n ** 18n,
+    allowance: () => 1000n * 10n ** 18n,
+    totalSupply: () => 1000000n * 10n ** 18n,
+    hasRole: () => false,
+    getRoleMember: () => '0x0000000000000000000000000000000000000000',
+    getRoleMemberCount: () => 0n,
+    getEthBalance: () => 10n ** 18n,
+  }
+  const fakeClient = {
+    async readContract({ functionName }) {
+      if (functionName in CANNED) return CANNED[functionName]()
+      throw new Error(`mock publicClient: unmocked read '${functionName}' — mock the seam in this suite`)
+    },
+    async getBalance() {
+      return 10n ** 18n
+    },
+    async getBlockNumber() {
+      return 1000000n
+    },
+    async getLogs() {
+      return []
+    },
+    // eventScanHandle's raw log read (eth_getLogs). Empty history, same as getLogs above.
+    async request({ method }) {
+      if (method === 'eth_getLogs') return []
+      throw new Error(`mock publicClient: unmocked request '${method}' — mock the seam in this suite`)
+    },
+    async call() {
+      // 1000 tokens, the MockJsonRpcProvider.call parity value.
+      return { data: `0x${(1000n * 10n ** 18n).toString(16).padStart(64, '0')}` }
+    },
+  }
+  return { ...actual, getPublicClient: () => fakeClient }
+})
+
 // Mock wagmi hooks for WalletProvider
 vi.mock('wagmi', () => ({
   // Real-wagmi passthrough: createConnector is an identity wrapper (spec 041

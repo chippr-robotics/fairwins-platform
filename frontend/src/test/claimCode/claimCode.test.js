@@ -138,3 +138,56 @@ describe('crypto/envelopeEncryption — code-keyed mode', () => {
     expect(() => decryptEnvelopeCode(tampered, symKey)).toThrow()
   })
 })
+
+/**
+ * Spec 110 T028 — THE DERIVATION IS FROZEN.
+ *
+ * The suite around this one proves the derivation is deterministic and that the acceptance
+ * signature verifies. Neither can fail if the derivation MOVES: a changed keccak input, a changed
+ * domain tag, a different key-to-address step — all of it stays self-consistent, every assertion
+ * stays green, and every open challenge ever created is orphaned, because `claimAddress` IS the
+ * on-chain `claimAuthority` and the discovery key. Nobody could accept an existing wager again.
+ *
+ * These values were computed with the ORIGINAL ethers implementation, before the viem swap, so
+ * they are anchored to what shipped rather than to the code they guard. They must never be
+ * regenerated to make a test pass — a mismatch here means the change is wrong, not the fixture.
+ */
+describe('claim-code derivation is frozen (v1)', () => {
+  const FIXTURES = [
+    {
+      code: 'river amber tiger kite',
+      claimPrivateKey: '0xe37571a6d9c5aef69c3fe1bf2fb0759e4d20c7f6c0c55ad0051a0062db60d699',
+      claimAddress: '0xbd09BAAcbeb34874E7fea83795CCAC1C80FdF4AC',
+      symKeyHex: '3945534a8143db2c21616164005557a7beb32dd0a989b61dd95ffdd0e85cb4d6',
+    },
+    {
+      code: 'abandon ability able about',
+      claimPrivateKey: '0x73b805fe68faa9a9fa41f02daf8c3c7a358689fcba331e3b32d86c19cf684ba6',
+      claimAddress: '0x4DC99E0297A04B6Ef77b6591F4d7e3787bb8eADD',
+      symKeyHex: 'a8beebafecb0d5ca60c1cd9a66ba1d77fe1cf679e3dc73427d98a6824eb96a80',
+    },
+  ]
+
+  for (const f of FIXTURES) {
+    it(`derives the shipped keypair for "${f.code}"`, () => {
+      const { claimPrivateKey, claimAddress, symKey } = deriveFromCode(f.code)
+      expect(claimPrivateKey).toBe(f.claimPrivateKey)
+      expect(claimAddress).toBe(f.claimAddress) // checksummed, exactly as ethers returned it
+      expect(Buffer.from(symKey).toString('hex')).toBe(f.symKeyHex)
+    })
+  }
+
+  it('normalises to the same keys however the member types the code', () => {
+    const canonical = deriveFromCode('river amber tiger kite')
+    for (const variant of ['  River   Amber\tTiger   Kite ', 'RIVER AMBER TIGER KITE']) {
+      expect(deriveFromCode(variant).claimAddress).toBe(canonical.claimAddress)
+    }
+  })
+
+  it('refuses a private key outside the curve order instead of deriving an address from it', () => {
+    // The keccak output is a valid scalar with overwhelming probability, and the refusal is what
+    // covers the rest. ethers' SigningKey threw here; viem's privateKeyToAccount was checked to
+    // throw on exactly the same inputs (zero, n, n+1, all-ones, short hex, non-hex).
+    expect(() => deriveFromCode('')).toThrow(/empty code/i)
+  })
+})

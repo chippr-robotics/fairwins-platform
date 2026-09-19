@@ -53,7 +53,7 @@ vi.mock('../../hooks/useRoles', () => ({
   }),
 }))
 vi.mock('../../hooks/useWeb3', () => ({
-  useWeb3: () => ({ account: '0xabc', signer: {}, provider: null, chainId: m.chainId }),
+  useWeb3: () => ({ account: '0xabc', signer: m.signer, provider: null, chainId: m.chainId }),
 }))
 vi.mock('../../hooks/useUI', () => ({ useNotification: () => ({ showNotification: m.notify }) }))
 vi.mock('../../hooks/useMediaQuery', () => ({
@@ -100,25 +100,37 @@ vi.mock('../../components/admin/useAdminTx', () => ({
 }))
 
 // Every ethers.Contract the views construct records its address and calls.
-vi.mock('ethers', async (importOriginal) => {
-  const actual = await importOriginal()
-  class RecordingContract {
-    constructor(address) {
-      this.__address = address
-      const record = (method) => (...args) => {
-        m.contractCalls.push({ address, method, args })
-        return Promise.resolve({ wait: async () => ({}) })
-      }
-      for (const method of ['grantRole', 'revokeRole', 'setTier', 'grantMembership', 'revokeMembership', 'withdrawFees']) {
-        this[method] = record(method)
-      }
-      // View reads reject so state stays in its honest "could not read" shape.
-      this.accruedFees = () => Promise.reject(new Error('not under test'))
-      this.treasury = () => Promise.reject(new Error('not under test'))
-    }
-  }
-  return { ...actual, ethers: { ...actual.ethers, Contract: RecordingContract } }
-})
+
+/**
+ * BOTH apps in this file write calldata now (spec 110): `encodeFunctionData` +
+ * `sendTransaction`. The signer DECODES what it is asked to send back into the same
+ * `{address, method, args}` shape the `RecordingContract` fake used to record, so every assertion
+ * in this file reads UNCHANGED — and is now backed by the actual bytes rather than by the argument
+ * list a fake was handed. That fake is deleted: with both apps off ethers it guarded nothing, the
+ * retired-mock shape `src/test/lint/ethersMockRatchet.test.js` fails on.
+ *
+ * It was one of the better fakes — it kept the address it was constructed with, so its assertions
+ * really did check targeting. Decoding here preserves that rather than trading it away.
+ */
+m.signer = {
+  sendTransaction: async ({ to, data }) => {
+    const parsed = new realEthers.Interface([
+      'function grantRole(bytes32 role, address account)',
+      'function revokeRole(bytes32 role, address account)',
+      'function setTier(bytes32 role, uint8 tier, uint128 priceUSDC, uint32 durationDays, (uint32 monthlyMarketCreation,uint32 maxConcurrentMarkets) limits, bool active)',
+      'function grantMembership(address user, bytes32 role, uint8 tier, uint32 durationDays)',
+      'function revokeMembership(address user, bytes32 role)',
+      'function withdrawFees(uint128 amount, address to)',
+    ]).parseTransaction({ data })
+    m.contractCalls.push({
+      address: to,
+      method: parsed.name,
+      // `parseTransaction` returns a Result; the assertions compare against plain arrays.
+      args: Array.from(parsed.args),
+    })
+    return { hash: '0xdeadbeef', wait: async () => ({}) }
+  },
+}
 
 import AccessControlApp from '../../components/admin/apps/AccessControlApp'
 import MembershipRevenueApp from '../../components/admin/apps/MembershipRevenueApp'
@@ -331,11 +343,16 @@ describe('MembershipRevenueApp: membership role selector', () => {
     fireEvent.change(screen.getByLabelText(/Recipient/), { target: { value: TARGET } })
     fireEvent.click(screen.getByRole('button', { name: 'Grant Membership' }))
     await waitFor(() => expect(m.runTx).toHaveBeenCalled())
+    // `1n` / `30n`, not `1` / `30`: these are now DECODED FROM THE CALLDATA, and ethers decodes
+    // `uint8`/`uint32` as bigints. The fake this replaced recorded the JS numbers the component
+    // handed it, having never encoded anything — so the old expectation described the call site
+    // rather than the transaction. The component still passes numbers and viem encodes them
+    // identically; what changed is that the assertion now reads the bytes.
     expect(m.contractCalls).toEqual([
       {
         address: ADDRS.membershipManager,
         method: 'grantMembership',
-        args: [TARGET, WAGER_HASH, 1, 30],
+        args: [TARGET, WAGER_HASH, 1n, 30n],
       },
     ])
   })

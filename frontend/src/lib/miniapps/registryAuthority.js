@@ -43,10 +43,10 @@
  * still be materially different from the documented design — so the panel reads
  * the admin role and says which of the two it is looking at.
  */
-import { Contract } from 'ethers'
 import { APP_CURATOR_ROLE, MINI_APP_REGISTRY_ABI } from '../../abis/miniAppRegistry'
 import { miniAppChainId } from '../../config/networks'
-import { getReadProvider } from '../../utils/rpcProvider'
+import { getPublicClient } from '../chains/publicClient'
+import { readContract } from '../chains/readContract'
 import { miniAppRegistryAddress } from './registryClient'
 
 /** Every outcome this module can return. Never a bare boolean — see the header. */
@@ -74,9 +74,9 @@ export const UNVERIFIED_REASON = Object.freeze({
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 /**
- * Resolve chain + address + a read contract, or the outcome explaining why not.
+ * Resolve chain + address + a reader, or the outcome explaining why not.
  *
- * `!provider` is UNVERIFIED rather than not-deployed for the same reason it is in
+ * No route is UNVERIFIED rather than not-deployed for the same reason it is in
  * `registryClient.resolveRegistry`: a registry that exists on a chain this build
  * currently has no route to is an unread registry, and reporting it as absent
  * would say the platform has no curation surface when it has one we cannot reach.
@@ -88,8 +88,7 @@ function resolveRegistry() {
     return { outcome: { status: CURATOR_AUTHORITY.NOT_DEPLOYED, chainId, registryAddress: null } }
   }
 
-  const provider = getReadProvider(chainId)
-  if (!provider) {
+  if (!getPublicClient(chainId)) {
     return {
       outcome: {
         status: CURATOR_AUTHORITY.UNVERIFIED,
@@ -101,7 +100,9 @@ function resolveRegistry() {
     }
   }
 
-  return { chainId, registryAddress, contract: new Contract(registryAddress, MINI_APP_REGISTRY_ABI, provider) }
+  const read = (functionName, args) =>
+    readContract(chainId, { address: registryAddress, abi: MINI_APP_REGISTRY_ABI, functionName, args })
+  return { chainId, registryAddress, read }
 }
 
 /**
@@ -125,10 +126,10 @@ export async function readCuratorRoleAdmin() {
     const { chainId, registryAddress, reason = null, error = null } = resolved.outcome
     return { ok: false, chainId, registryAddress, roleAdmin: null, selfAdministering: null, reason, error }
   }
-  const { chainId, registryAddress, contract } = resolved
+  const { chainId, registryAddress, read } = resolved
 
   try {
-    const roleAdmin = String(await contract.getRoleAdmin(APP_CURATOR_ROLE))
+    const roleAdmin = String(await read('getRoleAdmin', [APP_CURATOR_ROLE]))
     return {
       ok: true,
       chainId,
@@ -206,11 +207,11 @@ export async function readCuratorAuthority({ account } = {}) {
     const { status, registryAddress, reason = null, error = null } = resolved.outcome
     return outcome(status, { registryAddress, reason, error })
   }
-  const { registryAddress, contract } = resolved
+  const { registryAddress, read } = resolved
 
   let held
   try {
-    held = await contract.hasRole(APP_CURATOR_ROLE, account)
+    held = await read('hasRole', [APP_CURATOR_ROLE, account])
   } catch (error) {
     return outcome(CURATOR_AUTHORITY.UNVERIFIED, {
       registryAddress,
@@ -223,7 +224,7 @@ export async function readCuratorAuthority({ account } = {}) {
   let roleAdmin = null
   let selfAdministering = null
   try {
-    roleAdmin = String(await contract.getRoleAdmin(APP_CURATOR_ROLE))
+    roleAdmin = String(await read('getRoleAdmin', [APP_CURATOR_ROLE]))
     selfAdministering = roleAdmin.toLowerCase() === APP_CURATOR_ROLE.toLowerCase()
   } catch {
     // Left null: unknown, which is what the panel will say.

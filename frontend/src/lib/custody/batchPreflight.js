@@ -63,7 +63,7 @@ export async function previewBatchSupport(vaultAddress, chainId, provider) {
 
   let guard
   try {
-    guard = await readVaultGuard(vaultAddress, chainId, provider)
+    guard = await readVaultGuard(vaultAddress, chainId)
   } catch {
     return unknown(null, 'The vault’s guard slot could not be read.')
   }
@@ -84,7 +84,7 @@ export async function previewBatchSupport(vaultAddress, chainId, provider) {
   const v1 = getPolicyEngineAddresses(chainId)
   if (v1 && sameAddress(guard, v1.guard)) {
     try {
-      const res = await previewPolicy(vaultAddress, chainId, payload, provider)
+      const res = await previewPolicy(vaultAddress, chainId, payload)
       return res.ok ? ok('v1') : denied('v1', res.violation?.message)
     } catch {
       return unknown('v1', 'The vault’s policy could not be read.')
