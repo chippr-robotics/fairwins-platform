@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { formatUnits, parseUnits } from '../lib/evm/units'
+import { isAddress, getAddress } from '../lib/evm/address'
 import { useWallet } from './useWalletManagement'
 import { useActiveAccount } from './useActiveAccount'
 import { useChainTokens } from './useChainTokens'
@@ -63,7 +66,15 @@ export const TRANSFER_KIND = Object.freeze({ NATIVE: 'native', STABLE: 'stable' 
 // lib/passkey/submission.js — kept as literals here to avoid pulling the relay graph into this hook).
 const OP_STATE = Object.freeze({ SUBMITTED: 'submitted', INCLUDED: 'included', FAILED: 'failed' })
 
-const ERC20_IFACE = new ethers.Interface(TRANSFER_ABI)
+const TRANSFER_ABI_PARSED = normalizeAbi(TRANSFER_ABI)
+/** ERC-20 `transfer` calldata. The recipient is checksummed first (spec 110 divergence 16: viem's
+ *  encoder refuses an all-uppercase address our own `isAddress` — like ethers' — accepts). */
+const transferCall = (to, value) =>
+  encodeFunctionData({
+    abi: TRANSFER_ABI_PARSED,
+    functionName: 'transfer',
+    args: [getAddress(String(to)), value],
+  })
 
 export function useTransfer() {
   const { address, chainId, signer, provider, loginMethod, sendCalls } = useWallet()
@@ -158,22 +169,29 @@ export function useTransfer() {
     }
     try {
       const nat = await readProvider.getBalance(address)
-      setNativeBalance(ethers.formatUnits(nat, tokens.nativeDecimals))
+      setNativeBalance(formatUnits(nat, tokens.nativeDecimals))
     } catch {
       setNativeBalance(null)
     }
     if (tokens.stableAddress) {
       try {
-        const erc20 = new ethers.Contract(tokens.stableAddress, TRANSFER_ABI, readProvider)
-        const bal = await erc20.balanceOf(address)
-        setStableBalance(ethers.formatUnits(bal, tokens.stableDecimals))
+        // Named chain, not the wallet's provider (spec 110 read-routing decision): the member's
+        // own endpoint (spec 069) applies to this read, and an unreachable chain fails honestly
+        // instead of quietly answering with the home network's state.
+        const bal = await readContract(chainId, {
+          address: tokens.stableAddress,
+          abi: TRANSFER_ABI,
+          functionName: 'balanceOf',
+          args: [getAddress(String(address))],
+        })
+        setStableBalance(formatUnits(bal, tokens.stableDecimals))
       } catch {
         setStableBalance(null)
       }
     } else {
       setStableBalance(null)
     }
-  }, [readProvider, address, tokens.stableAddress, tokens.stableDecimals, tokens.nativeDecimals])
+  }, [readProvider, chainId, address, tokens.stableAddress, tokens.stableDecimals, tokens.nativeDecimals])
 
   useEffect(() => {
     refreshBalances()
@@ -197,7 +215,7 @@ export function useTransfer() {
   const send = useCallback(
     async ({ kind, asset, to, amount }) => {
       if (!signer && !isPasskey) throw new Error('Wallet not connected.')
-      if (!ethers.isAddress(to)) throw new Error('Enter a valid recipient address.')
+      if (!isAddress(to)) throw new Error('Enter a valid recipient address.')
 
       // Normalize either a legacy `kind` (native/stable) or an explicit portfolio `asset` descriptor into a
       // single token shape the routing table below understands. Arbitrary ERC-20s from the portfolio picker
@@ -239,7 +257,9 @@ export function useTransfer() {
 
       let value
       try {
-        value = ethers.parseUnits(String(amount), a.decimals)
+        // The seam refuses a value this token cannot represent exactly (spec 110 divergence 20 —
+        // viem rounds half-up where ethers threw). What is SENT must be what was typed.
+        value = parseUnits(String(amount), a.decimals)
       } catch {
         throw new Error('Enter a valid amount.')
       }
@@ -254,7 +274,7 @@ export function useTransfer() {
         if (!canActAsVault) throw new Error("Switch to the vault's network to send from it.")
         const payload = a.isNative
           ? { to, value, data: '0x' }
-          : { to: a.address, value: 0n, data: ERC20_IFACE.encodeFunctionData('transfer', [to, value]) }
+          : { to: a.address, value: 0n, data: transferCall(to, value) }
         setError(null)
         setStatus('submitting')
         try {
@@ -279,7 +299,7 @@ export function useTransfer() {
       if (operatingAsLegacy || operatingAsHardware) {
         const payload = a.isNative
           ? { to, value, data: '0x' }
-          : { to: a.address, value: 0n, data: ERC20_IFACE.encodeFunctionData('transfer', [to, value]) }
+          : { to: a.address, value: 0n, data: transferCall(to, value) }
         setError(null)
         setStatus('submitting')
         try {
@@ -319,7 +339,7 @@ export function useTransfer() {
           // One ceremony via the smart-account batch. Native = value move; token = ERC-20 transfer call.
           const calls = a.isNative
             ? [{ target: to, data: '0x', value }]
-            : [{ target: a.address, data: ERC20_IFACE.encodeFunctionData('transfer', [to, value]), value: 0n }]
+            : [{ target: a.address, data: transferCall(to, value), value: 0n }]
           setStatus('submitting')
           // Reflect the honest lifecycle while the batch is tracked to inclusion (spec 041 FR-017):
           // a passkey UserOp is "submitted" for up to ~90s before it is "included", so flip the button
@@ -376,8 +396,7 @@ export function useTransfer() {
           } catch (relayErr) {
             // Never stranded: fall back to a self-submitted transfer (sender pays gas).
             console.warn('[useTransfer] relayer failed, self-submitting:', relayErr?.message)
-            const erc20 = new ethers.Contract(a.address, TRANSFER_ABI, signer)
-            const tx = await erc20.transfer(to, value)
+            const tx = await signer.sendTransaction({ to: a.address, data: transferCall(to, value) })
             const receipt = await tx.wait()
             txHash = receipt?.hash ?? tx.hash
             route = 'self'
@@ -386,8 +405,7 @@ export function useTransfer() {
           // Classic EOA ERC-20 (network stablecoin without a rail, or any other portfolio token):
           // a plain token transfer where the sender pays gas.
           setStatus('submitting')
-          const erc20 = new ethers.Contract(a.address, TRANSFER_ABI, signer)
-          const tx = await erc20.transfer(to, value)
+          const tx = await signer.sendTransaction({ to: a.address, data: transferCall(to, value) })
           const receipt = await tx.wait()
           txHash = receipt?.hash ?? tx.hash
           route = 'self'

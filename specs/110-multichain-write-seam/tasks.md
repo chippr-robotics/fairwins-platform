@@ -1134,6 +1134,30 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         **Vouchers have no no-chain e2e spec** (`33-transfers-swap-vouchers`,
         `43-voucher-send-from-portfolio` and `40-acting-account-purchase` are all on-chain tier), so
         as with the wager pools that leg is CI's, not a local run. Said rather than skipped.
+      - **`useTransfer.js` — the read-routing decision's first money path, and a MIS-CHECKSUMMED
+        fixture that had never been looked at.** Allowlist 29 → 28. Eight sites, all ordinary:
+        `Interface` → `transferCall`, two `new Contract(token, ABI, signer).transfer(...)` →
+        `signer.sendTransaction`, `formatUnits`/`parseUnits`/`isAddress` onto their seams. The
+        `transfer` encoder was fuzzed 4,000 rounds × 3 address casings plus 0 / 1 / 2²⁵⁶−1, all
+        byte-identical to ethers.
+        Two of those are not cosmetic on this surface. `parseUnits` is now the seam that REFUSES
+        over-precision (divergence 20) — on the send path that is the difference between sending
+        what the member typed and sending a rounded neighbour of it. And the stablecoin balance
+        moves onto `readContract(chainId, …)` per the read-routing decision, so the member's own
+        endpoint applies and an unreachable chain fails honestly; the NATIVE balance still goes
+        through `readProvider`, which is where the wallet-vs-RPC preference actually lives.
+        **`useTransfer.balances.test.jsx` held the ONE assertion in the repo that pinned that
+        routing** — it checked `new Contract(token, ABI, runner)` got the WALLET's provider on a
+        classic session and the RPC provider on a passkey one. It is not deleted: it is restated as
+        the new fact, and the new fact is worth having — the token read is now BYTE-IDENTICAL
+        across session kinds, where it used to depend on how the member signed in. The native
+        preference stays asserted by `getBalance` / `rpcGetBalance`.
+        And the file's wallet fixture was `'0xAaAa…0001'`, which ethers' own `getAddress` REJECTS
+        as a bad checksum. It had survived because the suite's fake `Contract` constructor took the
+        address and ignored it, so nothing had ever checksummed it — the third fixture in three
+        batches whose invalidity only became visible once the address became load-bearing. Frozen
+        to its EIP-55 form.
+        `41-group-pay` (11) and `40-account-add-wrap-move` (8) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
