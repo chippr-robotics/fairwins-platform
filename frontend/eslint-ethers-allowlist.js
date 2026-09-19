@@ -40,7 +40,6 @@
 export const ETHERS_ALLOWLIST = [
   'src/components/account/RecoverAccountPanel.jsx',
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
-  'src/components/admin/CallsignRegistryAdmin.jsx',
   'src/components/admin/DenyListAdmin.jsx',
   'src/components/admin/OracleAdaptersTab.jsx',
   'src/components/admin/PaymasterOpsCard.jsx',

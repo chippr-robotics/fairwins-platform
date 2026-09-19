@@ -833,6 +833,24 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         **The rule: verify that a fixture DISTINGUISHES what the assertion claims it
         distinguishes.** "Verified non-vacuous" means reintroducing the fault and watching the
         test fail — not reasoning that it would.
+      - **`CallsignRegistryAdmin.jsx` — and the read path had NO COVERAGE at all before this.**
+        Allowlist 43 → 42. `ethers.id(canonical)` → `keccak256(stringToBytes(canonical))`, checked
+        over 21 callsign shapes (both length boundaries, every rejected form, unicode) before the
+        swap. That hash IS the registry's on-chain key: a wrong byte does not throw, it looks up
+        nothing, and the panel reports a REGISTERED callsign as unregistered.
+        Divergence 16 on the role grant/revoke target. `ethers.isAddress` → the address seam.
+        **The existing suite rendered with a NULL provider on purpose** — `reader` is null,
+        `loadConfig` never runs, the whole tab is synchronous and nothing is ever read. Good for
+        what it tested (the not-configured and no-role renders); it also meant the conversion had
+        no coverage for the hash, the reads or the chain. A test was added that drives a real
+        lookup, and the expected hash is a FROZEN LITERAL computed with the original `ethers.id` —
+        asserting against a freshly computed `keccak256(stringToBytes(...))` would use the very
+        function under test and prove only that it equals itself (the claimCode lesson, third
+        instance). Verified non-vacuous by perturbing the hashed string.
+        One practical note for the next admin-tab test: these tabs disable every control when the
+        scope is off the wallet's chain (`onScopeNetwork`), and a testnet build's cohort does not
+        contain 137 — so a test that interacts with a form must render on `cohortChainIds()[0]`,
+        not on a hardcoded mainnet id. That is why the original suite never clicked anything.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
