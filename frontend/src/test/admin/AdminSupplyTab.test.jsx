@@ -687,28 +687,38 @@ describe('SupplyTab — reads the router once, not in a loop (issue #1031)', () 
    * its chain inside a `runner` object and ignored the address it was constructed with, so a read
    * or a scan aimed at the WRONG network — or at the other network's router — passed every
    * assertion in this file. The chain is an argument now and the mocks record it.
+   *
+   * The invariant asserted is CHAIN AND ADDRESS ALWAYS AGREE, over every call, rather than "after
+   * the switch, everything is on 137". The second phrasing is what this test said first and it was
+   * FLAKY: clearing the recorder does not cancel reads already in flight from the previous mount,
+   * so a late chain-1 read lands after the clear and fails an assertion that is only usually true.
+   * Same defect as the mnemonic fixtures earlier in this task — a test that is right most of the
+   * time is a test that fails on somebody else's commit.
    */
-  it('makes every read and every scan on the SCOPED chain, at that chain\'s router', async () => {
-    const OTHER = '0x2222222222222222222222222222222222222222'
-    m.addr = { 1: ROUTER, 137: OTHER }
+  it('never reads one network at another network\'s router', async () => {
+    const OTHER = '0x7777777777777777777777777777777777777777'
+    // The two addresses must DIFFER, or every assertion below is satisfied by a collision rather
+    // than by correct routing — which is exactly how this test first passed with the defect
+    // reintroduced: the OTHER address chosen happened to equal this file's ROUTER.
+    expect(OTHER).not.toBe(ROUTER)
+    const HOME_OF = { 1: ROUTER, 137: OTHER }
+    m.addr = HOME_OF
     render(<SupplyTab {...props({ isAdmin: true }).node} />)
     await screen.findByRole('table', { name: 'Curated pools' })
 
-    m.readCalls = []
-    m.scanCalls = []
     fireEvent.change(screen.getByLabelText(/^Network/), { target: { value: '137' } })
-    await waitFor(() => expect(m.readCalls.length).toBeGreaterThan(0))
+    await waitFor(() =>
+      expect(m.readCalls.some((c) => Number(c.chainId) === 137)).toBe(true),
+    )
 
-    for (const call of m.readCalls) {
-      expect(Number(call.chainId)).toBe(137)
-      expect(call.address).toBe(OTHER)
+    // Every call, whenever it landed: the address must be the router that lives on the chain the
+    // call names. A read for Polygon sent to Ethereum's router is the failure this tab must never
+    // have, and it is the one the fake could not see.
+    for (const call of [...m.readCalls, ...m.scanCalls]) {
+      expect(call.address, `chain ${call.chainId}`).toBe(HOME_OF[Number(call.chainId)])
     }
-    for (const scan of m.scanCalls) {
-      expect(Number(scan.chainId)).toBe(137)
-      expect(scan.address).toBe(OTHER)
-    }
-    // And the wallet's chain really is the other one, or this proves nothing.
-    expect(m.readCalls.some((c) => Number(c.chainId) === 1)).toBe(false)
+    // And both chains really were exercised, or the loop above proves nothing.
+    expect(m.readCalls.some((c) => Number(c.chainId) === 1)).toBe(true)
   })
 
 })

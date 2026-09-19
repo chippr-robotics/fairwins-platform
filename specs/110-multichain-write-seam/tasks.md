@@ -794,6 +794,45 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         unchanged and is now backed by the actual bytes; `MembershipRevenueApp` still constructs an
         ethers `Contract` in the same file, so one bag has two producers and the mock ratchet stays
         satisfied. Verified non-vacuous by substituting a wrong role hash.
+      - **`MembershipRevenueApp.jsx` — membership prices and the fee withdrawal.** Allowlist
+        44 → 43, and the retired `RecordingContract` fake in `adminRoleManagement.test.jsx` is
+        DELETED, because with both apps in that file off ethers it guarded nothing. Two role hashes
+        byte-compared; `formatUnits`/`parseUnits` move to `lib/evm/units.js`, which is already
+        ethers-compatible at the input boundary (it coerces the BIGINT decimals a `decimals()` read
+        returns, and keeps ethers' trailing `.0`). Divergence 16 on all three member-typed targets
+        — `grantMembership`, `revokeMembership` and `withdrawFees`, the last of which names where
+        the money goes. 15 and 18 are NOT reachable: every tier integer goes through
+        `Number(e.target.value)` and `active` through `e.target.checked`.
+        **A TDZ that eslint caught and a test would have too: the `roleId` helper was inserted
+        BELOW the two `const` role hashes that call it.** `const` is not hoisted for use, so the
+        module would have thrown at load. Worth noting because the same edit in
+        `AccessControlApp.jsx` happened to land above its table — the difference was luck, not
+        care.
+        **THE FAKE RECORDED WHAT IT WAS HANDED, NOT WHAT WOULD BE SENT — and the difference is
+        visible now.** `grantMembership`'s `tier`/`durationDays` assertions had to change from
+        `1, 30` to `1n, 30n`: they are DECODED FROM CALLDATA now, and ethers decodes `uint8`/
+        `uint32` as bigints. The component still passes numbers and viem encodes them identically.
+        The old expectation described the call site; the new one describes the transaction.
+      - **TWO TEST-QUALITY DEFECTS IN MY OWN NEW GUARDS, both found by insisting on a re-run.**
+        Recording them because each has a general form, and this task has now produced three of
+        the same family (the mnemonic fixtures being the first).
+        (1) **A RACE PHRASED AS AN INVARIANT.** The first version of the scoped-chain test cleared
+        the recorder, switched network, and asserted every subsequent call was on the new chain.
+        Clearing does not cancel reads already in flight from the previous mount, so a late one
+        lands after the clear and fails an assertion that is only usually true — it passed, then
+        failed, then passed. Restated as the property actually wanted: **chain and address always
+        agree**, over every call, whenever it landed. Race-free, and strictly stronger — it also
+        catches a read for chain X sent at chain Y's router.
+        (2) **A FIXTURE COLLISION MADE IT VACUOUS, and the only reason that surfaced is that the
+        non-vacuity check was run.** The restated test passed with the defect deliberately
+        reintroduced. The cause was not the logic: the second router address chosen for the test
+        was `0x2222…`, which is exactly what `ROUTER` already is in `AdminSupplyTab.test.jsx` —
+        so `{1: ROUTER, 137: OTHER}` mapped both chains to one address and nothing could
+        distinguish them. The test now asserts `expect(OTHER).not.toBe(ROUTER)` first, so a future
+        collision fails loudly instead of silently retiring the guard.
+        **The rule: verify that a fixture DISTINGUISHES what the assertion claims it
+        distinguishes.** "Verified non-vacuous" means reintroducing the fault and watching the
+        test fail — not reasoning that it would.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

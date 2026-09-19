@@ -46,7 +46,6 @@ export const ETHERS_ALLOWLIST = [
   'src/components/admin/PaymasterOpsCard.jsx',
   'src/components/admin/ProtocolConfigTab.jsx',
   'src/components/admin/StakingTab.jsx',
-  'src/components/admin/apps/MembershipRevenueApp.jsx',
   'src/components/fairwins/MarketAcceptanceModal.jsx',
   'src/components/fairwins/MyMarketsModal.jsx',
   'src/contexts/DexContext.jsx',
