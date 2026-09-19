@@ -25,8 +25,9 @@
  *     removing it breaks published packages, so it belongs to Phase 5 (#1596).
  *   - `utils/rpcProvider.js` is the seam being replaced; it leaves last, when its final
  *     caller does (T014).
- *   - `lib/bridge/__tests__/bridgeRouter.test.js`, `lib/liquidity/__tests__/liquidityRouter.test.js`
- *     and `components/account/__tests__/CallsignPanel.passkey.test.jsx`
+ *   - `lib/bridge/__tests__/bridgeRouter.test.js`, `lib/liquidity/__tests__/liquidityRouter.test.js`,
+ *     `components/account/__tests__/CallsignPanel.passkey.test.jsx` and
+ *     `components/account/__tests__/RecoverAccountPanel.test.jsx`
  *     decode or encode viem-BUILT calldata with an ethers `Interface`, on purpose: that is a live
  *     cross-library byte-compatibility assertion over the exact code this migration is changing,
  *     and it fails loudly if the two encoders ever disagree. Each file says so at its import.
@@ -38,8 +39,8 @@
  * `src/test/helpers/encodeEventLog.js` — rather than reaching back for ethers.
  */
 export const ETHERS_ALLOWLIST = [
-  'src/components/account/RecoverAccountPanel.jsx',
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
+  'src/components/account/__tests__/RecoverAccountPanel.test.jsx',
   'src/components/fairwins/MyMarketsModal.jsx',
   'src/contexts/WalletContext.jsx',
   'src/contexts/Web3Context.jsx',
@@ -48,7 +49,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/clearpath/connectors/governorBravo.js',
   'src/lib/clearpath/connectors/ozGovernor.js',
   'src/lib/custody/safeVault.js',
-  'src/lib/custody/submitAsActiveAccount.js',
   'src/lib/earn/vaultActions.js',
   'src/lib/hardware/hardwareSigner.js',
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',

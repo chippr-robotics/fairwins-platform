@@ -18,7 +18,8 @@
 // call sites still pass no chain and T028 is what closes them. What it must never do is claim more
 // than it checked: an unverifiable network read is not a pass, it simply is not a check.
 
-import { Contract } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../chains/readContract'
 import { SAFE_ABI } from '../../abis/Safe'
 import { buildSafeTx, computeSafeTxHash, encodeMultiSend } from './vaultTransaction'
 import { emitProposal } from './proposalHub'
@@ -90,14 +91,23 @@ export async function submitAsActiveAccount(payload, ctx) {
     // Guard against a wrong-network footgun: the hash is chain-scoped and approveHash lands on whatever chain
     // the signer is connected to, so refuse unless the signer/provider is actually on the vault's chain.
     await assertSignerOnChain(chainId, { signer, provider }, 'This proposal')
-    const safe = new Contract(vaultAddress, SAFE_ABI, signer)
     // An explicit nonce queues an ordered follow-up (issue #1368's split shape); otherwise the
-    // vault's current nonce is read, exactly as before.
-    const nonce = payload.nonce ?? (await safe.nonce())
+    // vault's current nonce is read, exactly as before — on the vault's OWN chain, which
+    // `assertSignerOnChain` has just proved the signer is on.
+    const nonce =
+      payload.nonce ??
+      (await readContract(chainId, { address: vaultAddress, abi: SAFE_ABI, functionName: 'nonce' }))
     const safeTx = buildActiveAccountSafeTx(payload, { nonce, multiSendCallOnly: safeContracts.multiSendCallOnly })
     const safeTxHash = computeSafeTxHash(vaultAddress, chainId, safeTx)
     await emitProposal({ hubAddress, safe: vaultAddress, safeTx, safeTxHash, signer })
-    const approveTx = await safe.approveHash(safeTxHash)
+    const approveTx = await signer.sendTransaction({
+      to: vaultAddress,
+      data: encodeFunctionData({
+        abi: normalizeAbi(SAFE_ABI),
+        functionName: 'approveHash',
+        args: [safeTxHash],
+      }),
+    })
     await approveTx.wait()
     return { kind: 'proposed', safeTxHash, nonce: Number(nonce) }
   }

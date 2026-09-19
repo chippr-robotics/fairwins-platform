@@ -1376,6 +1376,34 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         byte-identical. `quoteExactInputSingle` has FOUR outputs, so `res[0]`/`res[3]` in
         `quote.js` keep working against viem's bare array.
         `26-trade-account.cy.js` (3) run locally, green.
+      - **`submitAsActiveAccount.js` + `RecoverAccountPanel.jsx` — and the vault proposal path
+        finally gets a test.** Allowlist 22 → 21 net (the panel leaves; its TEST joins the
+        cross-library byte-check category, stated in the allowlist header rather than smuggled in).
+        `submitAsActiveAccount`'s vault branch is two lines: the nonce read (`safe.nonce()` →
+        `readContract(chainId, …)`, on the vault's own chain, which `assertSignerOnChain` has just
+        proved the signer is on) and the approve (`safe.approveHash(h)` →
+        `signer.sendTransaction`). **Its test file said, in its own header, that "the full vault
+        emit+approve path is exercised via the app".** That was true and — after StakingTab — not
+        good enough: an object→calldata conversion with no invoking test is exactly the shape that
+        left a pause button dead for nineteen commits. Two tests now assert WHERE the nonce is read
+        (the vault, on the vault's chain) and WHAT the approve carries (the computed `safeTxHash`,
+        DECODED from calldata), both verified non-vacuous.
+        `RecoverAccountPanel` is one read and one write, but the read is the CONTROLLER GATE — the
+        check that decides whether this wallet may add a passkey to that account. Its `ethers`
+        double was `class { constructor(target) { this.target = target } }`: it took the address
+        and nothing ever read it back, so a gate aimed at the wrong account satisfied every
+        assertion. The read's chain, address and argument are asserted now; pointing the gate at
+        `target` instead of `walletAddress` fails it.
+        **`BAD_DATA` is two spellings now.** The panel turns "that address answered, but not like a
+        passkey account" into a sentence a member can act on, and it detected that by ethers'
+        `BAD_DATA` / "could not decode result data". viem raises `ContractFunctionZeroDataError`
+        and says the function "returned no data" — the same diagnostic this PR already had to stop
+        rendering verbatim on the screening list. Both spellings are matched.
+        `hardwareSigner.js` is deliberately NOT converted in this batch: it IS an ethers
+        `AbstractSigner` implementation, and the whole app's write rail calls
+        `signer.sendTransaction(...).wait()` against that shape. It converts with the contexts, not
+        before. (T021's `primaryTypeOf` note stands and is separate.)
+        `33-account-surfaces.cy.js` (6) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
