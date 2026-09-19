@@ -1344,6 +1344,38 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         `cancelled` for shard 3 and the check-in prompt correctly says cancelled is not a failure —
         but it is also not evidence, and a fast push cadence can starve an expensive tier of ever
         running. Worth watching for on any branch that pushes faster than its slowest tier.
+      - **`DexContext.jsx` — four contract instances become four addresses, and a spec-069 bypass
+        on the cross-chain quote.** Allowlist 23 → 22. The four `new Contract(addr, abi,
+        readProvider)` memos held nothing a provider was needed for: the reads name the chain now
+        (`readContract(chainId, …)`) and the encoders are module-level, so `contracts` is just the
+        four ADDRESSES plus the gate. `readProvider` stays in the gate rather than the read — it is
+        what answers "is there anything to read with", and `fetchBalances` still uses it for the
+        NATIVE balance, which is a provider call and not a contract call.
+        **The spec-069 bypass.** `getBestQuoteOn` built its off-chain quoter with
+        `makeReadProvider(NETWORKS[target].rpcUrl, target)` — hand-building a provider from
+        `NETWORKS[chainId].rpcUrl`, which spec 069 forbids in as many words. A member who had
+        repointed Base in Network settings was quoted through the build default anyway. The quote
+        reads through the endpoint seam now, so the override applies.
+        `lib/uniswap/quote.js` is NOT touched: it already imports no ethers and duck-types the
+        quoter on `quoter.quoteExactInputSingle.staticCall(params)`, deliberately, so that a
+        cross-chain quote and a local one are the same computation. A `quoterOn(chainId, address)`
+        adapter satisfies that duck type from the seam — the same move `resolvePool`,
+        `factoryReaderFor` and `getLogsRange` make with their readers. The adapter also CHECKSUMS
+        the struct's `tokenIn`/`tokenOut`: that is the boundary where a caller's struct meets an
+        encoder, and `quoteBestRoute` builds the struct from whatever it was handed and has no
+        encoder of its own to answer for (divergence 16).
+        **The cross-chain test asserted the bypass.** It checked
+        `makeReadProvider` had been called with `NETWORKS[8453].rpcUrl` — i.e. it pinned the
+        forbidden construction. The claim underneath ("Base's own quoter, because Base does not
+        share Uniswap's canonical addresses") is right and is kept, restated against the quoter
+        itself: `quoter.address` and `quoter.chainId`, which the adapter now carries precisely so
+        WHERE a quote is read is checkable rather than inferred from a constructor's arguments.
+        Verified non-vacuous by quoting the connected chain's id instead of the target's.
+        Four encoders fuzzed 1,200 rounds × 3 address casings against ethers (ERC-20 `approve`,
+        WNative `withdraw`/`deposit`, `exactInputSingle`, `quoteExactInputSingle`), all
+        byte-identical. `quoteExactInputSingle` has FOUR outputs, so `res[0]`/`res[3]` in
+        `quote.js` keep working against viem's bare array.
+        `26-trade-account.cy.js` (3) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
