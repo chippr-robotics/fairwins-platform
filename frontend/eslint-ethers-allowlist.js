@@ -42,7 +42,6 @@ export const ETHERS_ALLOWLIST = [
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
   'src/components/account/__tests__/RecoverAccountPanel.test.jsx',
   'src/contexts/WalletContext.jsx',
-  'src/contexts/Web3Context.jsx',
   'src/hooks/useOracleConditions.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
   'src/lib/clearpath/connectors/governorBravo.js',

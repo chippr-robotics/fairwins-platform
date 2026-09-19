@@ -7,6 +7,7 @@ import { classifyEstateProbes } from '../lib/chains/estateSweep'
 import { ChainSwitchRefused } from '../lib/chains/submitOn'
 import { useWalletChainId } from '../hooks/useWalletChainId'
 import { makeReadProvider } from '../utils/rpcProvider'
+import { formatEther } from '../lib/evm/units'
 import {
   getUserRoles,
   addUserRole,
@@ -580,7 +581,7 @@ export function WalletProvider({ children }) {
 
       setBalances(prev => ({
         ...prev,
-        native: ethers.formatEther(nativeBalance)
+        native: formatEther(nativeBalance)
       }))
     } catch (error) {
       console.error('Error fetching balances:', error)
@@ -612,36 +613,17 @@ export function WalletProvider({ children }) {
     }
   }, [address, fetchBalances])
 
-  // Get balance for specific token
-  const getTokenBalance = useCallback(async (tokenAddress) => {
-    if (!provider || !address) {
-      throw new Error('Wallet not connected')
-    }
-
-    try {
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        ['function balanceOf(address) view returns (uint256)'],
-        provider
-      )
-      const balance = await tokenContract.balanceOf(address)
-      const formatted = ethers.formatEther(balance)
-      
-      // Cache the balance
-      setBalances(prev => ({
-        ...prev,
-        tokens: {
-          ...prev.tokens,
-          [tokenAddress]: formatted
-        }
-      }))
-      
-      return formatted
-    } catch (error) {
-      console.error('Error getting token balance:', error)
-      throw error
-    }
-  }, [provider, address])
+  /*
+   * `getTokenBalance` was here, and spec 110 DELETED it rather than converting it.
+   *
+   * It had no caller: it reached the outside world only through `useWalletBalances`, which no
+   * component uses, and nothing anywhere reads the `balances.tokens` cache it wrote. Its one
+   * behaviour was also wrong — it formatted every token with `formatEther`, i.e. 18 decimals
+   * regardless of the token, so a USDC balance would have rendered a million million times too
+   * small. Converting it would have carried that bug across the migration and made dead code
+   * look maintained. Reads of a named token now go through `readContract(chainId, …)` at the
+   * surface that wants them, where the decimals are known.
+   */
 
   // Connect wallet (spec 045 FR-001/FR-004).
   // - No connectorId: open the unified connect modal so the USER chooses —
@@ -951,7 +933,6 @@ export function WalletProvider({ children }) {
     
     // Balance methods
     refreshBalances,
-    getTokenBalance,
     
     // RVAC role methods
     hasRole,

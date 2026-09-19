@@ -324,7 +324,42 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
       ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 19.**
 
-      **THE ENDGAME IS FOUR FILES AND THEY MOVE TOGETHER**, and what is left on the allowlist
+      **THE ENDGAME WAS FOUR FILES; READING THEM MADE IT THREE, AND THEN TWO PROBLEMS.**
+
+        `contexts/Web3Context.jsx` is **DELETED, not converted** — the sixth deletion in this
+        task and the same shape as the other five. `Web3Provider` is rendered NOWHERE (`main.jsx`
+        mounts `WalletProvider` as "the unified blockchain context — single source of truth"),
+        `Web3Context.jsx` is imported by nothing, and its context object was imported only by
+        itself. `useWeb3()` has always read `WalletContext`. Two reference docs drew it in the
+        provider tree marked "legacy — backwards compatibility", beside a `RoleProvider` that is
+        also never mounted; both were corrected, because a doc that draws a provider the app does
+        not render is worse than one that omits it — a reader trusts it and debugs the wrong
+        thing.
+
+        **The remaining three share the duck type but NOT the hard part**, which is what the
+        "they move together" framing missed:
+
+          - `contexts/WalletContext.jsx` wraps a wagmi `walletClient` — already viem — in
+            `BrowserProvider` + `JsonRpcSigner`. Here the INJECTED WALLET populates the
+            transaction (nonce, fees, gas); ethers is a shape, not an engine.
+          - `lib/hardware/hardwareSigner.js` extends `AbstractSigner` and
+            `lib/recovery/legacyKeys.js` builds `Wallet`/`HDNodeWallet` behind a `NonceManager`.
+            Both hold the signing material locally, so nobody else fills those fields: they
+            inherit ethers' transaction POPULATION, and converting them means writing a populator
+            (nonce, EIP-1559 vs legacy fees, gas limit, chainId) plus `.wait()`. On the hardware
+            path that lands where the runbooks deliberately have no automated coverage — device
+            confirmations are a staged MANUAL protocol, never faked in CI.
+
+        So the decision, recorded rather than improvised: **an ethers-SHAPED adapter over viem for
+        the wallet rail first**, because it is the only split where one commit's blast radius is
+        small enough for the on-chain tier to be a real gate. Handing every call site a viem
+        `WalletClient` instead would move ~90 sites — `sendTransaction` ×81 alone — in a single
+        commit whose first verification is the whole app's write path. The typed-data half of the
+        adapter already exists and is already proven: `lib/evm/typedData.js#primaryTypeOf` was
+        checked against `TypedDataEncoder.from(types).primaryType` over all 32 real intent tables.
+        The two local-key files keep their own task; their populator is not a swap.
+
+      **(superseded framing, kept for the trail)** THE ENDGAME IS FOUR FILES AND THEY MOVE TOGETHER, and what is left on the allowlist
       besides them is a recorded decision, not pending work (7 cross-library byte-check test
       files, `rpcProvider` last with its final caller, `hostScope` in Phase 5, and the five
       deferrals with their reasons).
@@ -1507,10 +1542,18 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         on top of its legs (it already zeroes the legs — asserting on a leg's `retryCount` passes
         with the fix removed, which is how the first version of this test was vacuous).
         That is not latency trivia here. Every three-state reader renders a failed read as
-        `unreadable`, and the sweeps that produce those readings are SEQUENTIAL: `RoleContext`
-        loops over roles and `hasRoleOnChain` loops over candidate contracts inside each one. So a
-        total outage went from seconds to minutes before the console could say **"Could Not Verify
-        Access"** — the FR-012 screen, at exactly the moment an incident commander is trying to get
+        `unreadable`, and the estate probe behind the console is a wide FAN-OUT — 8 admin roles ×
+        every cohort chain, concurrently — in which `hasRoleOnChain` then walks its candidate
+        contracts SEQUENTIALLY (ADMIN and GUARDIAN have three or four each). Multiplying every one
+        of those requests by four, or by eight on a chain with a curated failover, and adding ~1s
+        of backoff to each leg of a serial inner loop, is what turned a total outage from seconds
+        into minutes before the console could say **"Could Not Verify Access"**.
+        *(Corrected after the fact: the commit message for this fix said the sweep was
+        `RoleContext` looping over roles. It is not — `RoleProvider` is never rendered anywhere
+        (spec 110 deleted its sibling `Web3Provider` for the same reason), and the real sweep is
+        `WalletContext`'s `Promise.all`, which is explicitly concurrent. The measured 4×/8× request
+        multiplication and the e2e evidence are unaffected; the named mechanism was wrong and a
+        reason nobody re-checks is how a wrong one survives.)* — the FR-012 screen, at exactly the moment an incident commander is trying to get
         in. `32-admin-console.cy.js` AD-03 (every chain dead) failed at both viewport profiles and
         was reproduced locally before anything was changed.
         Fixed at the seam: `retryCount: 0` on every transport AND on the fallback itself, with

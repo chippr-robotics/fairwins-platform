@@ -115,7 +115,7 @@ For components that display or check balances:
 import { useWalletBalances } from '../hooks'
 
 function BalanceDisplay() {
-  const { balances, refreshBalances, getTokenBalance } = useWalletBalances()
+  const { balances, refreshBalances } = useWalletBalances()
   
   return (
     <div>
@@ -298,15 +298,23 @@ await refreshBalances() // Manually refresh
 ```
 
 ### Token Balances
-Get and cache ERC20 token balances:
+
+`getTokenBalance` was removed in spec 110. It had no caller, nothing read the
+`balances.tokens` cache it wrote, and it formatted every token with 18 decimals — so a USDC
+balance came back a million million times too small. Read a named token where its decimals are
+known:
 
 ```jsx
-const { getTokenBalance } = useWallet()
+import { readContract } from '../lib/chains/readContract'
+import { formatUnits } from '../lib/evm/units'
 
-// Get wrapped-native balance
-const wrappedNativeBalance = await getTokenBalance(WRAPPED_NATIVE_ADDRESS)
-
-// Balance is now cached in balances.tokens[WRAPPED_NATIVE_ADDRESS]
+const raw = await readContract(chainId, {
+  address: tokenAddress,
+  abi: ['function balanceOf(address) view returns (uint256)'],
+  functionName: 'balanceOf',
+  args: [account],
+})
+const shown = formatUnits(raw, decimals)  // the TOKEN's decimals, not 18
 ```
 
 ## Network Management
@@ -371,23 +379,33 @@ The wallet system is integrated into the app's provider hierarchy:
 <WagmiProvider>
   <QueryClientProvider>
     <ThemeProvider>
-      <WalletProvider>        {/* Primary wallet management */}
-        <Web3Provider>         {/* Legacy - backwards compatibility */}
+      <WalletProvider>          {/* the unified blockchain context - single source of truth */}
+        <CustodyProvider>
           <UserPreferencesProvider>
-            <RoleProvider>     {/* Legacy - backwards compatibility */}
-              <DexProvider>  {/* Uses WalletProvider internally */}
-                <UIProvider>
-                  <App />
-                </UIProvider>
-              </DexProvider>
-            </RoleProvider>
+            <PrivacyProvider>
+              <FriendMarketsProvider>
+                <DexProvider>
+                  <UIProvider>
+                    <PriceProvider>
+                      <App />
+                    </PriceProvider>
+                  </UIProvider>
+                </DexProvider>
+              </FriendMarketsProvider>
+            </PrivacyProvider>
           </UserPreferencesProvider>
-        </Web3Provider>
+        </CustodyProvider>
       </WalletProvider>
     </ThemeProvider>
   </QueryClientProvider>
 </WagmiProvider>
 ```
+
+This tree used to be drawn with `Web3Provider` and `RoleProvider` in it, marked "legacy -
+backwards compatibility". **Neither was ever mounted.** `useWeb3()` and `useRoles()` both read
+`WalletContext`; `RoleContext` exports only constants, and `Web3Context`'s provider was deleted
+in spec 110 as dead code. A doc that draws a provider the app does not render is worse than one
+that omits it, because a reader trusts it and debugs the wrong thing.
 
 ## Best Practices
 
@@ -520,7 +538,6 @@ function CompleteExample() {
   
   // Balance Methods
   refreshBalances: () => Promise<void>
-  getTokenBalance: (tokenAddress: string) => Promise<string>
   
   // RVAC Role Methods
   hasRole: (role: string) => boolean
