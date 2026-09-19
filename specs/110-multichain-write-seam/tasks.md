@@ -322,7 +322,36 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       so nothing signs on the wrong chain either way — but "no prompt on the intent rail" is proven
       for the app-held rails and ASSUMED for injected ones.
 - [ ] T028 Convert the signer-touching files (~65, *(re-measure)*) onto `submitOn`; empty the
-      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 53.**
+      ethers allowlist for shipped `frontend/src` paths. **In progress — allowlist 67 -> 19.**
+
+      **THE ENDGAME IS FOUR FILES AND THEY MOVE TOGETHER**, and what is left on the allowlist
+      besides them is a recorded decision, not pending work (7 cross-library byte-check test
+      files, `rpcProvider` last with its final caller, `hostScope` in Phase 5, and the five
+      deferrals with their reasons).
+
+        `contexts/WalletContext.jsx` + `contexts/Web3Context.jsx` CONSTRUCT the ethers
+        `BrowserProvider` / `JsonRpcSigner` that every converted write now goes through;
+        `lib/recovery/legacyKeys.js` builds `Wallet` / `HDNodeWallet` behind a `NonceManager`, and
+        `lib/hardware/hardwareSigner.js` IMPLEMENTS `AbstractSigner`. All four hand out the same
+        duck type, so converting any one alone leaves the others producing an object the callers
+        no longer understand.
+
+      **The surface that duck type actually owes** — measured across `frontend/src`, not guessed:
+      `sendTransaction` ×81, `signMessage` ×19, `getAddress` ×17, `.provider` ×12,
+      `signTypedData` ×11, `signTransaction` ×3, `estimateGas` ×1, `connect` ×1, and one
+      surviving v5 `_signTypedData`. On the provider side: `getNetwork` ×16, `getCode` ×8,
+      `getBalance` ×6, `getFeeData` ×4, `waitForTransaction` ×5, `getTransactionReceipt` ×12.
+      That is the contract any replacement has to satisfy, and it is the reason this is a design
+      decision rather than a conversion: **either** the contexts start returning a viem
+      `WalletClient` and ~15 call sites change with them in one commit, **or** they keep handing
+      out an ethers-SHAPED facade backed by viem, which converts the import without converting
+      the interface and leaves `tx.wait()` semantics to be reproduced by hand. Neither is a
+      mechanical swap, and the second is the one that can look finished while being subtly wrong.
+
+      **Wants on-chain verification. Do not start it blind.** The fast tier cannot see a signer:
+      it has no chain, so every write path there is already a refusal. The evidence has to come
+      from the on-chain tier (or a local `setup:e2e` chain), and the work should be sequenced so
+      that a single commit never leaves the four files disagreeing about the duck type.
       - `src/utils/encryption.js` — **DELETED, not converted.** No importers anywhere in the repo,
         and the cryptographic BOM already carried it as risk R7 ("attack surface with no owner").
         It also could not have RUN: it imported `recoverPublicKey` from `ethers`, which **ethers v6
