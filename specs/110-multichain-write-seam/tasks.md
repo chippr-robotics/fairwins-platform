@@ -359,6 +359,39 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         checked against `TypedDataEncoder.from(types).primaryType` over all 32 real intent tables.
         The two local-key files keep their own task; their populator is not a swap.
 
+      **`lib/chains/walletSigner.js` — the adapter, built and proven, NOT yet wired.** One commit
+        for the thing and its differential test; the wiring is its own commit so the on-chain
+        tier gates it. Both are driven over the SAME fake EIP-1193 transport, and the assertions
+        are about what each puts ON THE WIRE — the RPC sequence and the `eth_sendTransaction`
+        fields — because a test that compared returned hashes would pass with the gas estimate
+        deleted. Three non-vacuity probes: no estimate (2 tests fail), viem's raw receipt status
+        (3 fail), `Object.keys(types)[0]` as the primary type (1 fail).
+
+        **DIVERGENCE 25 — ethers' `JsonRpcSigner.sendTransaction` ESTIMATES GAS and viem does
+        not.** Reading `sendUncheckedTransaction` is what made this rail tractable at all: before
+        `eth_sendTransaction` ethers does exactly three things — set `from`, resolve `to`, and
+        estimate gas when `gasLimit` is absent, with its own comment giving the reason (*"The
+        JSON-RPC for eth_sendTransaction uses 90000 gas … otherwise we look it up for them"*). It
+        does NOT fill nonce or fees; the wallet does. So the transaction POPULATION that makes
+        `hardwareSigner`/`legacyKeys` a different and larger job is, on this rail, one estimate.
+        Dropping it changes two things, and the second is the one that matters: a wallet or node
+        applying the 90 000 default under-gases every write that needs more, **and a transaction
+        that would revert stops failing BEFORE the prompt** — the member is asked to sign,
+        approves, pays, and then watches it revert. Every confirm surface here is written against
+        the first behaviour. Reproduced in the same place, on the same condition, and pinned by
+        the RPC sequence.
+
+        **DIVERGENCE 26 — the two libraries put DIFFERENT JSON on the wire for the same
+        signature.** `eth_signTypedData_v4`: ethers serialises `domain.chainId` as the hex STRING
+        `"0x89"` where viem sends the JSON NUMBER `137`, and ethers lower-cases an address inside
+        the message where viem keeps its checksum case. Neither is forced to match the other, and
+        the reason is an assertion rather than an argument: the WALLET computes the digest, both
+        spellings denote the same uint256 and the same 20 address bytes, and the test hashes each
+        payload AS SENT with ethers' own encoder and shows the EIP-712 hashes are identical. What
+        cannot be proven offline is that a wallet parses a JSON number the way it parses a hex
+        string — every wallet does, since viem's whole user base signs this way, and imitating
+        ethers' spelling would mean hand-rolling the request and losing viem's validation of it.
+
       **(superseded framing, kept for the trail)** THE ENDGAME IS FOUR FILES AND THEY MOVE TOGETHER, and what is left on the allowlist
       besides them is a recorded decision, not pending work (7 cross-library byte-check test
       files, `rpcProvider` last with its final caller, `hostScope` in Phase 5, and the five
