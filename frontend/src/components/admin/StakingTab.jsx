@@ -219,7 +219,7 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
       return
     }
     const args = b !== undefined ? [a, b] : [a]
-    runTx(() => write()[fn](...args), `${label} updated`).then(refresh)
+    runTx(() => write(fn, args), `${label} updated`).then(refresh)
   }
 
   const addValidator = () => {
@@ -235,7 +235,7 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
   }
   const togglePause = () => {
     const fn = state?.paused ? 'unpause' : 'pause'
-    runTx(() => write()[fn](), state?.paused ? 'Staking resumed' : 'Staking paused').then(refresh)
+    runTx(() => write(fn, []), state?.paused ? 'Staking resumed' : 'Staking paused').then(refresh)
   }
 
   if (!routerAddr) {

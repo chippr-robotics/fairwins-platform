@@ -1316,6 +1316,34 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         write did not happen but not that it went anywhere right. Verified non-vacuous by swapping
         `acceptWager` for `declineWager` in the acting batch (3 tests fail).
         `04-wager-creation-validation.cy.js` (14) run locally, green.
+      - **A REAL REGRESSION, shipped nineteen commits ago and green the whole time:
+        `StakingTab`'s pause/resume and provider-address forms were DEAD.** Found by the on-chain
+        tier (`31-earn-lend-stake` ES-03: "Expected to find content: 'Resume staking' … but never
+        did"), on the first head this session where Cypress Full E2E shard 3 was not CANCELLED by
+        the next push — it had been cancelled on all ten preceding heads, and last succeeded on
+        `5583c978`.
+        The conversion turned `write` from a signer-bound contract into a FUNCTION
+        `write(functionName, args)`. Two call sites kept the retired shape `write()[fn](...)`:
+        `write()` now returns a **Promise**, so `promise['pause']` is `undefined` and the call
+        throws `TypeError: write(...)[fn] is not a function`. `togglePause` (US2, GUARDIAN) and
+        `setPair` (US3, the Lido/sPOL/POL address forms) were both dead on the operator's console.
+        **This is the SAME defect shape this tab already produced once** — the earlier batch
+        recorded that turning `routerRead` from an object into a function left
+        `routerRead.queryFilter` undefined and the history scan failing silently. Same file, same
+        cause, the other half of the pair. A conversion that changes a helper from an OBJECT to a
+        FUNCTION has to be grepped for `helper()` with no arguments, every time.
+        **Why the unit suite was green: `runTx` was `vi.fn(() => Promise.resolve())`** — it
+        ignored the thunk it was handed. Every assertion in the file ("dispatches pause",
+        "dispatches add and remove") checked only that the tab CALLED `runTx` with the right toast
+        message, and the toast is right even when the write throws. `runTx` now INVOKES the thunk,
+        the signer is a spy, and each test decodes the sent calldata by selector — verified
+        non-vacuous by restoring the original line, which fails with the exact runtime TypeError.
+        That is rule (c) at the level of a TEST HARNESS rather than a fixture: the harness could
+        not distinguish "dispatched" from "dispatched something that works".
+        **Method note: a cancelled shard is not a green one.** Ten consecutive heads reported
+        `cancelled` for shard 3 and the check-in prompt correctly says cancelled is not a failure —
+        but it is also not evidence, and a fast push cadence can starve an expensive tier of ever
+        running. Worth watching for on any branch that pushes faster than its slowest tier.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
