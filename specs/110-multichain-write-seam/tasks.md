@@ -1004,6 +1004,46 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         mattered: "a pool link the chain cannot answer renders as unreadable with a retry — never as
         zeros". That honest-degradation path is exactly what this conversion could have broken,
         because the read now raises `NoRpcEndpointError` where a contract call used to reject.
+      - **Wager pools (spec 034): `lib/pools/poolContracts.js` + `usePools.js` — the same trigger,
+        one batch later.** Allowlist 33 → 31. `poolContracts.js` had the identical
+        "contract factories; convert when their callers do" shape as its funding-pool sibling and
+        the identical single caller, so the pair moved together: `getFactory`/`getPool` become
+        `readPoolFactory` / `readPool` / `encodeFactoryCall` / `encodePoolCall` /
+        `getFactoryAddress`, and "not available on this network" stays a THROW.
+        Probed first, at the repo root, against ethers' own `Interface`: every selector and every
+        full calldata byte-matches — the six no-arg pool calls, `proposeOutcome` and `claim` (both
+        carrying the `PayoutEntry[]` STRUCT ARRAY), `createPool`'s six-field struct, and
+        `poolByPhrase`'s `uint16[4]`. Then 4,000 fuzz rounds over random addresses in all three
+        casings (checksummed / all-lower / ALL-UPPER), through the ERC-20 `approve` encoder and
+        through the struct array, all byte-identical once normalised — and the same probe confirmed
+        viem still refuses the raw all-uppercase form, so the `normEntries` / `getAddress` guards
+        are load-bearing rather than decorative (**divergence 16**, reaching inside array elements
+        and inside `createPool`'s `token` field).
+        **Two shapes changed and each was a decision.**
+        (1) `queryFilter(filter)` becomes a LOCAL `scanPoolEvent` that makes ONE `eth_getLogs`,
+        deliberately NOT `getLogsRange`. The funding-pool batch reached for `getLogsRange` because
+        its feed genuinely wanted the bisect; here the two scans start at a *deploy block that is 0
+        where none is recorded*, and bisecting an unbounded range turns one honest refusal into
+        thousands of requests. `queryFilter` made a single request that answered or threw, and that
+        is what is preserved. The roster scan additionally gained the deploy-block bound
+        `fetchProposedMatrix` already had — a clone cannot emit before the factory that created it
+        existed, so it can drop no event.
+        (2) `resolvePool` is again left alone, satisfied by a duck-typed `factoryReaderFor(chainId)`
+        — this is the OTHER half of the pair the funding-pool batch deliberately did not reach into.
+        The shared gateway is now consumed the same way from both sides and still imports no ethers.
+        **The old test proved nothing and now does.** `src/test/usePools.test.jsx` mocked
+        `lib/pools/poolContracts` wholesale with a fake whose `interface.encodeFunctionData`
+        returned the literal string `'0xclose'`, and then asserted the passkey call carried
+        `data: '0xclose'` — i.e. that the hook passed a mock's return value through, never that the
+        bytes a wallet would be asked to sign are the right ones. The module is no longer mocked;
+        the assertion is the FROZEN selector `0x6be61602`, byte-compared against ethers before the
+        swap. The roster test now asserts the scan's chain, address, topic and *block range* rather
+        than "queryFilter was called". Both were verified non-vacuous by reintroducing the fault:
+        encoding `cancel` where `closeJoining` belongs fails the first, scanning from genesis fails
+        the second.
+        **The wager-pool member surface has no no-chain e2e spec** — `24-wager-pools.cy.js` is
+        on-chain tier — so the local run that the funding-pool batch could do was not available
+        here, and CI's on-chain shard is what covers it. Said plainly rather than quietly skipped.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
