@@ -268,6 +268,47 @@ describe('walletSigner — the same wire behaviour as the ethers signer it repla
     )
   })
 
+  /*
+   * THE CHECK THAT PROVES THE SHAPE, rather than enumerating it.
+   *
+   * The provider this object exposes is handed to OTHER LIBRARIES: `legacyKeys.js` does
+   * `wallet.connect(provider)` so a recovered account signs with its own key, and that ethers
+   * signer then POPULATES (nonce, fees, gas, chainId) and BROADCASTS through it. No audit of
+   * `provider.x(` call sites can find those calls, because the caller is inside ethers — which
+   * is how `getTransactionCount` was missing until the on-chain tier said
+   * `checkProvider(...).getTransactionCount is not a function` (40-acting-account-purchase
+   * AAP-03). Driving a real ethers Wallet through a full send is the check that would have.
+   */
+  it('a real ethers Wallet can populate AND broadcast through this provider', async () => {
+    const signed = []
+    const t = fakeTransport({
+      eth_getTransactionCount: '0x7',
+      eth_gasPrice: '0x3b9aca00',
+      eth_maxPriorityFeePerGas: '0x3b9aca00',
+      eth_getBlockByNumber: {
+        number: '0x4000000', hash: '0x' + 'ef'.repeat(32), parentHash: '0x' + '00'.repeat(32),
+        timestamp: '0x66000000', gasLimit: '0x1c9c380', gasUsed: '0x0', baseFeePerGas: '0x7',
+        miner: ACCOUNT, extraData: '0x', transactions: [], nonce: '0x0000000000000000',
+        difficulty: '0x0', totalDifficulty: '0x0', size: '0x0', stateRoot: '0x' + '00'.repeat(32),
+        transactionsRoot: '0x' + '00'.repeat(32), receiptsRoot: '0x' + '00'.repeat(32),
+        logsBloom: '0x' + '00'.repeat(256), sha3Uncles: '0x' + '00'.repeat(32), uncles: [],
+        mixHash: '0x' + '00'.repeat(32),
+      },
+      eth_sendRawTransaction: TX_HASH,
+    })
+    const provider = makeAdapter(t).provider
+    const wallet = new ethers.Wallet('0x' + '11'.repeat(32))
+    const connected = wallet.connect(provider)
+
+    const sent = await connected.sendTransaction({ to: TO, value: 1n, gasLimit: 21000n })
+    expect(sent.hash).toBe(TX_HASH)
+
+    // It asked for the nonce and put it on the wire, which is the AAP-03 failure in one line.
+    expect(methodsOf(t)).toContain('eth_getTransactionCount')
+    signed.push(paramsFor(t, 'eth_sendRawTransaction'))
+    expect(signed[0]).toMatch(/^0x02/) // an EIP-1559 envelope, signed locally
+  })
+
   it('the provider surface answers what the app asks of it', async () => {
     const signer = makeAdapter(ours)
     await expect(signer.getAddress()).resolves.toBe(ACCOUNT)

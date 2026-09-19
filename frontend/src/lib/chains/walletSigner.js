@@ -116,6 +116,42 @@ export function walletSigner({ walletClient, publicClient, address }) {
     async waitForTransaction(hash, confirmations = 1) {
       return toEthersReceipt(await publicClient.waitForTransactionReceipt({ hash, confirmations }))
     },
+    /*
+     * THE PROVIDER IS HANDED TO OTHER LIBRARIES, so its surface is not "what the app calls on it".
+     *
+     * Found by the on-chain tier (`40-acting-account-purchase` AAP-03:
+     * `checkProvider(...).getTransactionCount is not a function`). A recovered legacy account
+     * signs with its OWN ethers signer — `legacyKeys.js` does `wallet.connect(provider)` — and
+     * that signer POPULATES and BROADCASTS through whatever provider it was given, which on the
+     * acting-account path is this one. An audit of `provider.x(` call sites could never have
+     * found that: the caller is inside ethers.
+     *
+     * So these three are here to satisfy ethers' `AbstractSigner`, not the app:
+     * `getTransactionCount` (nonce), `getFeeData` (already below), `estimateGas` + `getNetwork`
+     * (above), and `broadcastTransaction` — the one `sendTransaction` ends in. `getBlock` rides
+     * along because fee logic reaches for it. `src/test/chains/walletSigner.test.js` drives a real
+     * `ethers.Wallet` connected to this object through a full send, which is the only check that
+     * proves the shape rather than enumerating it.
+     */
+    getTransactionCount: (addr, blockTag = 'latest') =>
+      publicClient.getTransactionCount({ address: addr, blockTag }),
+    broadcastTransaction: async (signedTx) => {
+      const hash = await publicClient.sendRawTransaction({ serializedTransaction: signedTx })
+      return {
+        hash,
+        async wait(confirmations = 1) {
+          return toEthersReceipt(await publicClient.waitForTransactionReceipt({ hash, confirmations }))
+        },
+      }
+    },
+    async getBlock(blockTagOrNumber = 'latest') {
+      const block =
+        typeof blockTagOrNumber === 'number'
+          ? await publicClient.getBlock({ blockNumber: BigInt(blockTagOrNumber) })
+          : await publicClient.getBlock({ blockTag: blockTagOrNumber })
+      return { ...block, number: Number(block.number), timestamp: Number(block.timestamp) }
+    },
+
     async getFeeData() {
       const fees = await publicClient.estimateFeesPerGas()
       return {
