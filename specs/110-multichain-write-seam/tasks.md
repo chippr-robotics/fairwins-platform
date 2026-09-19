@@ -1272,6 +1272,23 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         keeps in `check-spec-registry.js`, and verified non-vacuous with a bogus entry.
         The lint baseline moves 180 → **178**: both warnings belonged to the deleted file, checked
         by restoring it and counting rather than assumed from the delta.
+      - **A CI red that was NOT this branch's, and the register's own lesson (b) finding it.**
+        `MiniAppWorkspace.test.jsx` went red once on `b8c70146` — a commit that deletes a hook with
+        no importers and adds a staleness check, i.e. touches nothing that file can reach. 1 failed
+        of 9,504, on a focus assertion, and it passes locally 5/5 alone and in every sweep.
+        It is not a flake to re-run away: it is **a race phrased as an invariant**, the same defect
+        this task already recorded in its own guards. The test did
+        `await screen.findByText(...)` and then asserted `document.activeElement` SYNCHRONOUSLY —
+        but `findByText` resolves on the commit that rendered the package, while the focus move is
+        a separate `useEffect` gated on `launch.phase`. Two different moments. The ordering holds
+        on an idle machine running 33 tests and stops holding inside a full 828-file run, which is
+        why only CI ever saw it — and why a file deletion, which reshuffles the full run's file
+        ordering, is a plausible trigger for something that was already latent.
+        Its own SIBLING test, making the identical claim about the refusal heading, already used
+        `waitFor`. This one was the outlier. Fixed to match, which changes what is asserted not at
+        all — focus ARRIVING on the heading is the claim; the instant it arrives never was.
+        Verified non-vacuous by deleting the focus call from the component: the `waitFor` version
+        still fails.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
