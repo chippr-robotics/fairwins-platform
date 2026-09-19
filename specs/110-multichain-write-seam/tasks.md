@@ -1222,6 +1222,35 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         as it should, and the miss is what showed the passkey batch had no calldata assertion at
         all. "Reintroduce the fault" is not enough; it has to be on the path under test.
         `35-navigation-and-lookup.cy.js` (6) run locally, green.
+      - **`useFriendMarketCreation.js` — the largest single hook in the task (736 lines, five write
+        rails), and no new divergence.** Allowlist 26 → 25. That is worth saying: after twenty-three
+        findings, a conversion that produces none is evidence the register is converging rather than
+        evidence nobody looked. Everything here was byte-checked — `createWager` and
+        `createWagerWithTerms` (twelve and thirteen arguments) plus `batchExpireOpen`'s id array over
+        1,000 fuzzed rounds, `keccak256(toUtf8Bytes(ref))` over the metadata reference, and the
+        `getUserWagers` offset which changed from the literal `0` to `0n` (identical calldata either
+        way, checked rather than assumed).
+        **One shape changed and it is the task's own thesis in miniature.** `expireStaleWagers` took
+        an ethers `Contract` and dug a provider out of it — `registry.runner?.provider ||
+        registry.provider` — then asked THAT provider for its network to decide which chain's
+        MembershipManager to resolve. Where the read happens was being derived from who the contract
+        was bound to. It takes `(chainId, signer, registryAddress, …)` now; the chain is stated.
+        `typeof registry.createWagerWithTerms === 'function'` — an ethers feature probe for the
+        spec-007 overload — becomes an explicit ABI lookup, which is what the probe was reading
+        anyway. The five rails (vault proposal, acting-account batch, passkey UserOp, gasless intent,
+        self-submit) keep their exact branching; only the encoding and the reads moved, and
+        `estimateGas` + the fee overrides ride on `signer.estimateGas`/`sendTransaction` unchanged.
+        **`actingWagerWrites.test.jsx` keeps its `vi.mock('ethers')` ON PURPOSE** — it drives TWO
+        surfaces and `MarketAcceptanceModal` is still an ethers consumer, so the mock still has a
+        job. Its `batchFns()` helper used to split the fake's `0xENC:<fn>:<args>` marker; it decodes
+        a real selector now for the converted half and falls back to the marker for the modal's,
+        with the reason named in place so the branch disappears when the modal converts. The
+        connected signer gained a `sendTransaction` SPY rather than being left without the method:
+        an absent method would make the acting tests pass by throwing, which proves the write did
+        not happen but not that it went anywhere right. Both FR-001 claims verified non-vacuous —
+        reading the connected wallet's balance fails 6 tests, simulating as the connected wallet
+        fails the one that exists for it.
+        `04-wager-creation-validation.cy.js` (14) run locally, green.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

@@ -18,6 +18,10 @@
  * FR-001 bug: the stake balance and the allowance must be read for the ACTING address.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+// `vi.mock('ethers')` below replaces only `Contract`, so `Interface` here is the real one — which
+// is the point: the batch's calldata is decoded by the library the encoder is being checked against.
+import { Interface } from 'ethers'
+import { WAGER_REGISTRY_ABI } from '../../abis/WagerRegistry'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { renderHook } from '@testing-library/react'
@@ -25,6 +29,8 @@ import { renderHook } from '@testing-library/react'
 const CONNECTED = '0x1111111111111111111111111111111111111111'
 const ACTING = '0x2222222222222222222222222222222222222222'
 const OPPONENT = '0x3333333333333333333333333333333333333333'
+const REGISTRY_IFACE = new Interface(WAGER_REGISTRY_ABI)
+const ERC20_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
 const REGISTRY = '0x4444444444444444444444444444444444444444'
 const TOKEN = '0x5555555555555555555555555555555555555555'
 
@@ -54,16 +60,60 @@ vi.mock('../../hooks/useActiveAccount', () => ({
 
 // ---- the connected wallet's own rails. Every one of these is a way to sign as the WRONG
 // account while acting, so each is a spy the tests assert was never touched. ------------
+const connectedSignerWrite = vi.fn(async () => ({
+  hash: '0xCONNECTED-WRITE',
+  wait: async () => ({ hash: '0xCONNECTED-WRITE', logs: [] }),
+}))
 const connectedSigner = {
   id: 'connected-signer',
   getAddress: async () => CONNECTED,
   provider: { getNetwork: async () => ({ chainId: 137n }) },
+  // Spec 110: the signer rail is `sendTransaction` now, not a signer-bound ethers Contract. It is
+  // a SPY rather than absent on purpose — a missing method would make the acting tests pass by
+  // throwing, which proves the write did not happen but not that it went anywhere right.
+  sendTransaction: (...a) => connectedSignerWrite(...a),
+  estimateGas: async () => 100_000n,
 }
 const sendCalls = vi.fn(async () => ({ txHash: '0xUSEROP' }))
 const gaslessRun = vi.fn(async () => ({ txHash: '0xRELAYED' }))
 vi.mock('../../lib/relay/useGaslessWrite', () => ({
   useGaslessWrite: () => ({ run: (...a) => gaslessRun(...a), status: 'idle' }),
 }))
+
+/**
+ * Spec 110 — `useFriendMarketCreation` reads through the chain seam now, so the seam is faked here
+ * from the SAME `balances`/`allowances` state the ethers `Contract` fake below serves. The ethers
+ * mock stays because `MarketAcceptanceModal`, the other surface in this file, is still an ethers
+ * consumer — this file genuinely needs both.
+ *
+ * `staticCallFrom` keeps its job and its meaning: it records who the create was simulated AS,
+ * which is the whole of FR-001. ethers took that from `{ from }`; the seam takes it as `account`.
+ */
+const seamReads = []
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [], account }) => {
+      seamReads.push({ chainId, address, functionName, args, account })
+      if (String(address).toLowerCase() === TOKEN.toLowerCase()) {
+        if (functionName === 'decimals') return 6
+        if (functionName === 'symbol') return 'USDC'
+        if (functionName === 'balanceOf') return balances[String(args[0]).toLowerCase()] ?? 0n
+        if (functionName === 'allowance') return allowances[String(args[0]).toLowerCase()] ?? 0n
+      }
+      if (functionName === 'getMembership') return { tier: 0n, activeCount: 0n }
+      if (functionName === 'getUserWagerCount') return 0n
+      if (functionName === 'getUserWagers' || functionName === 'getUserWagerIds') return []
+      if (/^createWager/.test(functionName)) {
+        // The pre-flight. `account` is who it is simulated AS.
+        staticCallFrom({ from: account })
+        return undefined
+      }
+      throw new Error(`unexpected seam read ${functionName} on ${address}`)
+    },
+  }
+})
 
 // ---- ethers: real everywhere except the Contract factory, which is the chain seam -----
 const balances = { [ACTING.toLowerCase()]: 10_000_000n, [CONNECTED.toLowerCase()]: 10_000_000n }
@@ -155,9 +205,31 @@ import MarketAcceptanceModal from '../../components/fairwins/MarketAcceptanceMod
 
 /** The decoded `to` addresses of whatever batch was handed to the acting seam. */
 const batchTargets = () => (submitAsActive.mock.calls[0]?.[0]?.batch || []).map((c) => c.to)
-/** The encoded function names in that batch, in order. */
+/**
+ * The function names in that batch, in order — DECODED from real calldata by selector. The old
+ * helper split the fake's `0xENC:<fn>:<args>` string, which could only ever report back what the
+ * fake had been told to write.
+ */
+const nameForSelector = (data) => {
+  const text = String(data)
+  // `MarketAcceptanceModal` is still an ethers consumer (see the allowlist), so its half of this
+  // file still goes through the `Contract` fake above and its calldata is that fake's
+  // `0xENC:<fn>:<args>` marker, not real bytes. Named explicitly rather than silently tolerated:
+  // when the modal converts, this branch goes and the assertions get stronger for free.
+  if (text.startsWith('0xENC:')) return text.split(':')[1]
+  const selector = text.slice(0, 10)
+  for (const iface of [REGISTRY_IFACE, ERC20_IFACE]) {
+    try {
+      const fn = iface.getFunction(selector)
+      if (fn) return fn.name
+    } catch {
+      /* not this ABI's selector */
+    }
+  }
+  return selector
+}
 const batchFns = () =>
-  (submitAsActive.mock.calls[0]?.[0]?.batch || []).map((c) => String(c.data).split(':')[1])
+  (submitAsActive.mock.calls[0]?.[0]?.batch || []).map((c) => nameForSelector(c.data))
 
 beforeEach(() => {
   activeAccount = personal()
@@ -166,7 +238,9 @@ beforeEach(() => {
   gaslessRun.mockClear()
   registryWrite.mockClear()
   tokenApproveWrite.mockClear()
+  connectedSignerWrite.mockClear()
   staticCallFrom.mockClear()
+  seamReads.length = 0
   for (const k of Object.keys(allowances)) delete allowances[k]
 })
 
@@ -208,6 +282,7 @@ describe('createWager while acting as a recovered / hardware account (spec 088 F
     expect(sendCalls).not.toHaveBeenCalled()    // no passkey UserOp from the connected account
     expect(registryWrite).not.toHaveBeenCalled() // no signer-bound contract write
     expect(tokenApproveWrite).not.toHaveBeenCalled()
+    expect(connectedSignerWrite).not.toHaveBeenCalled() // nor the signer's own sendTransaction
   })
 
   it('simulates the create AS the acting account, so a refusal is reported before any ceremony', async () => {
