@@ -40,9 +40,6 @@
 export const ETHERS_ALLOWLIST = [
   'src/components/account/RecoverAccountPanel.jsx',
   'src/components/account/__tests__/CallsignPanel.passkey.test.jsx',
-  'src/components/admin/DenyListAdmin.jsx',
-  'src/components/admin/PaymasterOpsCard.jsx',
-  'src/components/admin/StakingTab.jsx',
   'src/components/fairwins/MarketAcceptanceModal.jsx',
   'src/components/fairwins/MyMarketsModal.jsx',
   'src/contexts/DexContext.jsx',

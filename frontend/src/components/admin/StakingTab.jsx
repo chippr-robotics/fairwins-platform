@@ -14,7 +14,12 @@
  * "not deployed" state and the member app keeps the spec-065 fee-free direct staking.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { getLogsRange } from '../../lib/chains/logRange'
+import { getPublicClient } from '../../lib/chains/publicClient'
+import { getAddress, isAddress } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { estateNetworks, networkName, readProviderFor, readAuthority, authorityGate } from '../../lib/chains/estate'
 import { NetworkScopeCard } from './scopeControls'
@@ -37,10 +42,15 @@ const SETTER_EVENTS = [
 ]
 
 function shortAddr(a) {
-  return a && a !== ethers.ZeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
+  return a && a !== zeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
 }
 
-const isValidAddr = (a) => ethers.isAddress(a) && a !== ethers.ZeroAddress
+/**
+ * `isAddress` from the address SEAM, not viem's own (spec 110 divergence d): viem's defaults to
+ * `strict: true` and refuses an ALL-UPPERCASE address, which carries no checksum and is valid.
+ * Its other half is `getAddress` at the encoders below — divergence 16.
+ */
+const isValidAddr = (a) => isAddress(a) && a !== zeroAddress
 
 export default function StakingTab({ signer, account, chainId, provider, runTx, pendingTx, isAdmin, isStakingAdmin, isGuardian }) {
   // Spec 071 US4: provider addresses and the validator allowlist are per network — a router on
@@ -88,11 +98,19 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
   const [formError, setFormError] = useState(null)
 
   const routerRead = useMemo(
-    () => (routerAddr && readProvider ? new ethers.Contract(routerAddr, STAKING_ROUTER_ABI, readProvider) : null),
-    [routerAddr, readProvider]
+    () =>
+      routerAddr && readProvider
+        ? (functionName, args = []) =>
+            readContract(scopeChainId, { address: routerAddr, abi: STAKING_ROUTER_ABI, functionName, args })
+        : null,
+    [routerAddr, readProvider, scopeChainId]
   )
   const write = useCallback(
-    () => new ethers.Contract(routerAddr, STAKING_ROUTER_ABI, signer),
+    (functionName, args = []) =>
+      signer.sendTransaction({
+        to: routerAddr,
+        data: encodeFunctionData({ abi: normalizeAbi(STAKING_ROUTER_ABI), functionName, args }),
+      }),
     [routerAddr, signer]
   )
 
@@ -103,20 +121,20 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
       const safe = (p) => p.then((v) => v).catch(() => undefined)
       const [feeRouter, lidoSteth, lidoWsteth, spolController, spolToken, polToken, polygonStakeManager, paused, count] =
         await Promise.all([
-          safe(routerRead.feeRouter()),
-          safe(routerRead.lidoSteth()),
-          safe(routerRead.lidoWsteth()),
-          safe(routerRead.spolController()),
-          safe(routerRead.spolToken()),
-          safe(routerRead.polToken()),
-          safe(routerRead.polygonStakeManager()),
-          safe(routerRead.paused()),
-          safe(routerRead.validatorCount()),
+          safe(routerRead('feeRouter')),
+          safe(routerRead('lidoSteth')),
+          safe(routerRead('lidoWsteth')),
+          safe(routerRead('spolController')),
+          safe(routerRead('spolToken')),
+          safe(routerRead('polToken')),
+          safe(routerRead('polygonStakeManager')),
+          safe(routerRead('paused')),
+          safe(routerRead('validatorCount')),
         ])
       const validators = []
       if (count !== undefined) {
         const entries = await Promise.all(
-          Array.from({ length: Number(count) }, (_, i) => safe(routerRead.validatorAt(i)))
+          Array.from({ length: Number(count) }, (_, i) => safe(routerRead('validatorAt', [BigInt(i)])))
         )
         for (const v of entries) if (v) validators.push(v)
       }
@@ -137,25 +155,40 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
   }, [readProvider, routerAddr, scopeChainId])
 
   const fetchHistory = useCallback(async () => {
-    if (!routerRead || !readProvider) return
+    if (!routerAddr || !readProvider) return
     try {
-      const latest = await readProvider.getBlockNumber()
-      const fromBlock = Math.max(0, Number(latest) - HISTORY_LOOKBACK_BLOCKS)
+      const handle = eventScanHandle(scopeChainId, { address: routerAddr, abi: STAKING_ROUTER_ABI })
+      const client = getPublicClient(scopeChainId)
+      if (!handle || !client) return
+      const latest = Number(await handle.provider.getBlockNumber())
+      const fromBlock = Math.max(0, latest - HISTORY_LOOKBACK_BLOCKS)
       const all = []
       for (const name of SETTER_EVENTS) {
-        const evs = await routerRead.queryFilter(routerRead.filters[name](), fromBlock, 'latest').catch(() => [])
-        for (const ev of evs) all.push({ name, ev })
+        // Bisects on refusal rather than asking for the whole window in one `eth_getLogs`: a
+        // range-capping RPC used to land in the catch below, which renders "this RPC bounds event
+        // lookups" — honest, but it meant no history ever showed on such a chain.
+        const logs = await getLogsRange(
+          handle.provider,
+          routerAddr,
+          fromBlock,
+          latest,
+          2000,
+          handle.filters[name]().getTopicFilter(),
+        ).catch(() => [])
+        for (const log of logs) all.push({ name, ev: { ...log, args: handle.interface.parseLog(log).args } })
       }
       all.sort((a, b) => b.ev.blockNumber - a.ev.blockNumber || b.ev.index - a.ev.index)
       const recent = all.slice(0, HISTORY_LIMIT)
       const entries = await Promise.all(
         recent.map(async ({ name, ev }) => {
-          const block = await readProvider.getBlock(ev.blockNumber).catch(() => null)
+          const block = await client
+            .getBlock({ blockNumber: BigInt(ev.blockNumber) })
+            .catch(() => null)
           const actor = ev.args?.actor || ev.args?.account
           return {
             name,
             actor,
-            at: block ? new Date(block.timestamp * 1000) : null,
+            at: block ? new Date(Number(block.timestamp) * 1000) : null,
             txHash: ev.transactionHash,
             key: `${ev.transactionHash}-${ev.index}`,
           }
@@ -165,7 +198,7 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
     } catch (e) {
       setHistory({ entries: [], error: e?.message || String(e) })
     }
-  }, [routerRead, readProvider])
+  }, [routerAddr, readProvider, scopeChainId])
 
   useEffect(() => {
     fetchState()
@@ -195,10 +228,10 @@ export default function StakingTab({ signer, account, chainId, provider, runTx, 
       setFormError('Enter a valid, non-zero validator share address.')
       return
     }
-    runTx(() => write().addValidator(forms.addVal), `Validator ${shortAddr(forms.addVal)} added`).then(refresh)
+    runTx(() => write('addValidator', [getAddress(forms.addVal.trim())]), `Validator ${shortAddr(forms.addVal)} added`).then(refresh)
   }
   const removeValidator = (addr) => {
-    runTx(() => write().removeValidator(addr), `Validator ${shortAddr(addr)} removed`).then(refresh)
+    runTx(() => write('removeValidator', [getAddress(addr)]), `Validator ${shortAddr(addr)} removed`).then(refresh)
   }
   const togglePause = () => {
     const fn = state?.paused ? 'unpause' : 'pause'

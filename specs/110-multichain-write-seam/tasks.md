@@ -877,6 +877,29 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         `expect(umaStub.registerCondition).toHaveBeenCalled…` reads unchanged and is now backed by
         bytes. **The mock ratchet caught this file** the moment `OracleAdaptersTab` left the
         allowlist — its second real catch.
+      - **`StakingTab.jsx` + `DenyListAdmin.jsx` + `PaymasterOpsCard.jsx` — the last of the admin
+        tabs.** Allowlist 40 → 37. `parseEther`/`formatEther` move to `lib/evm/units.js`;
+        divergence 16 on `addValidator`, `removeValidator`, `withdrawTo`, `setVerifyingSigner` and
+        `setDenied` — denying the wrong account, or rotating the paymaster's verifying signer to a
+        mistyped address, is not a recoverable mistake.
+        **A PAYABLE call changes shape, and the shape it changes TO is what it always was on the
+        wire.** `deposit({ value })` passed the native amount in an ethers overrides object as a
+        trailing argument; it is now `sendTransaction({ to, data, value })` — a field on the
+        transaction. Nothing about the transaction differs; only the JS spelling.
+        **`StakingTab` had its OWN inline history scan** (not `loadRouterHistory`), and converting
+        `routerRead` from an object to a function silently broke it: `routerRead.queryFilter` became
+        `undefined`, the `.catch(() => [])` threw on undefined, the outer try swallowed it, and the
+        history rendered EMPTY with no error. Caught because a test asserted a row renders. It
+        bisects now like the others.
+        Three more retired `vi.mock('ethers')` deleted (`adminViewScope`, both `staking-admin`
+        files) — the ratchet's third, fourth and fifth catches. `adminViewScope`'s was another
+        address-ROUTING fake, so the per-address table was kept and re-pointed at the seam.
+        **AND THE MOCK I WROTE TO REPLACE THEM HAD THE FIXTURE-COLLISION DEFECT AGAIN** — a second
+        instance in the same task. My `eventScanHandle` stub ignored its `address` and returned a
+        handle unconditionally, so the staking history test still passed when the scan was pointed
+        at `null`. It returns null for a falsy address now and records `{chainId, address}`. The
+        rule stands: **a mock that ignores an argument cannot distinguish what the assertion claims
+        it does**, and the only way to find that out is to reintroduce the fault and watch.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cohortChainIds } from '../../config/networks'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
-const m = vi.hoisted(() => ({ routerAddr: null, reads: {}, qfEvents: [] }))
+const m = vi.hoisted(() => ({ routerAddr: null, reads: {}, qfEvents: [], scanCalls: [] }))
 
 vi.mock('../../config/contracts', () => ({ getContractAddressForChain: vi.fn(() => m.routerAddr) }))
 vi.mock('../../config/blockExplorer', () => ({ getBlockscoutUrl: () => 'https://explorer.example/address/0x' }))
@@ -15,23 +15,11 @@ vi.mock('../../lib/fees/feeQuote', async (orig) => ({
   ...(await orig()),
   fetchFeeQuote: vi.fn(() => Promise.resolve({ available: false, bps: 0, capBps: 0 })),
 }))
-vi.mock('ethers', async (orig) => {
-  const actual = await orig()
-  function FakeContract() {
-    return new Proxy({}, {
-      get(_t, prop) {
-        if (prop === 'then') return undefined
-        if (prop === 'filters') return new Proxy({}, { get: () => () => ({}) })
-        const key = String(prop)
-        return (...args) => (m.reads[key] ? m.reads[key](...args) : Promise.resolve(undefined))
-      },
-    })
-  }
-  const FakeCtor = vi.fn(FakeContract)
-  // StakingTab uses `ethers.Contract` (the namespace object), so override BOTH the named
-  // export and the namespace's Contract; keep everything else real (isAddress, ZeroAddress…).
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
-})
+/**
+ * The ethers fake that stood here is GONE: StakingTab reads through the chain seam now (spec
+ * 110), so it intercepted nothing — the retired-mock shape `src/test/lint/ethersMockRatchet.test.js`
+ * fails on. The `readContract` mock below already serves `m.reads`, so every seed is unchanged.
+ */
 
 
 // Spec 071: the tab scopes to a network the operator picks (seeded from the wallet's chain when
@@ -46,6 +34,36 @@ import { ethers } from 'ethers'
 // The estate AUTHORITY read (`hasRole` on the router that will enforce it) moved onto the
 // spec-110 chain seam; the tab's own router reads still go through the contract mock above.
 // Both serve `m.reads`, so what a test seeds is unchanged.
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    // Honours the address, so a scan pointed at nothing cannot quietly return seeded events —
+    // a mock that ignores its address cannot distinguish what the assertion claims it does.
+    if (!address) return null
+    m.scanCalls.push({ chainId, address })
+    return {
+    target: address,
+    provider: {
+      getBlockNumber: async () => 1_000_000,
+      // Seeded events, already decoded — the seam's own parseLog has its own suite.
+      getLogs: async () => (m.qfEvents || []).map((e, i) => ({ ...e, index: e.index ?? i })),
+    },
+    filters: new Proxy(
+      {},
+      { get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }) },
+    ),
+    interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: () => ({ getBlock: async () => ({ timestamp: 1_752_800_000n }) }),
+  }
+})
+
 vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
   return {
