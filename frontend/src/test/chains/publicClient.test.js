@@ -216,3 +216,113 @@ describe('readContract — multi-output results keep their names (the ethers Res
     expect(raw).toBe(4n)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+// DIVERGENCE 24 — one attempt at a dead endpoint, ethers' throttle backoff at a 429.
+//
+// viem's http() retries 403/408/413/429/500/502/503/504 and any status-less error three times;
+// ethers retried ONE status, 429. That difference is not latency trivia here: the sweeps that
+// produce `unreadable` readings are sequential, so four attempts per failed read turned a total
+// outage into minutes of "checking…" on the screen whose whole job is to say it could not ask
+// (admin-console AD-03, which is what caught it).
+// ─────────────────────────────────────────────────────────────────────────────────────────────
+describe('throttledFetch — ethers’ retry rule, not viem’s', () => {
+  const originalFetch = globalThis.fetch
+  beforeEach(() => {
+    localStorage.clear()
+    __resetEndpointStoreForTests()
+    __resetPublicClientCache()
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    vi.useRealTimers()
+  })
+
+  const reply = (status, headers = {}) => ({
+    status,
+    headers: { get: (k) => headers[k.toLowerCase()] ?? null },
+  })
+
+  it('attempts a 503 EXACTLY once — the case that was costing four', async () => {
+    const calls = []
+    globalThis.fetch = vi.fn(async (url) => {
+      calls.push(url)
+      return reply(503)
+    })
+    const res = await publicClientModule.throttledFetch('https://rpc.example/x', { method: 'POST' })
+    expect(res.status).toBe(503)
+    expect(calls).toHaveLength(1)
+  })
+
+  it('a network failure is not swallowed into a retry loop either', async () => {
+    let attempts = 0
+    globalThis.fetch = vi.fn(async () => {
+      attempts += 1
+      throw new Error('connection refused')
+    })
+    await expect(
+      publicClientModule.throttledFetch('https://rpc.example/x', {}),
+    ).rejects.toThrow(/connection refused/)
+    expect(attempts).toBe(1)
+  })
+
+  it('a 429 DOES back off and retry — the one case ethers retried', async () => {
+    let attempts = 0
+    globalThis.fetch = vi.fn(async () => {
+      attempts += 1
+      return attempts < 3 ? reply(429) : reply(200)
+    })
+    const res = await publicClientModule.throttledFetch('https://rpc.example/x', {})
+    expect(res.status).toBe(200)
+    expect(attempts).toBe(3)
+  })
+
+  it('honours `retry-after` as SECONDS — ethers read it as milliseconds, which is its bug', async () => {
+    vi.useFakeTimers()
+    let attempts = 0
+    globalThis.fetch = vi.fn(async () => {
+      attempts += 1
+      return attempts === 1 ? reply(429, { 'retry-after': '2' }) : reply(200)
+    })
+    const pending = publicClientModule.throttledFetch('https://rpc.example/x', {})
+    await vi.advanceTimersByTimeAsync(1999)
+    expect(attempts).toBe(1) // still waiting: 2 SECONDS, not 2 milliseconds
+    await vi.advanceTimersByTimeAsync(2)
+    await expect(pending).resolves.toMatchObject({ status: 200 })
+    expect(attempts).toBe(2)
+  })
+
+  it('a dead endpoint costs ONE request through the REAL transport, not four', async () => {
+    // The end-to-end wiring, not a config assertion: viem exposes no `fetchFn` on the transport
+    // object, and its `fallback` already zeroes its LEGS' retryCount — so anything short of
+    // counting actual requests would be checking viem's behaviour rather than ours.
+    // Mordor, because it curates no build-time failover: one transport, one leg.
+    globalThis.fetch = vi.fn(async () => new Response('upstream unavailable', { status: 503 }))
+    await expect(
+      readContract(63, {
+        address: '0x0000000000000000000000000000000000000001',
+        abi: parseAbi(['function hasRole(bytes32,address) view returns (bool)']),
+        functionName: 'hasRole',
+        args: ['0x' + '00'.repeat(32), '0x0000000000000000000000000000000000000002'],
+      }),
+    ).rejects.toThrow()
+    expect(globalThis.fetch).toHaveBeenCalledTimes(1)
+  })
+
+  it('and a failover chain tries each leg once — the whole sequence is not retried either', async () => {
+    // Polygon curates a build-time failover, so this is the `fallback` shape every member on
+    // default settings gets. Two requests: primary, then failover. Not eight.
+    globalThis.fetch = vi.fn(async () => new Response('upstream unavailable', { status: 503 }))
+    const client = getPublicClient(137)
+    expect(client.transport.key).toBe('fallback')
+    await expect(
+      readContract(137, {
+        address: '0x0000000000000000000000000000000000000001',
+        abi: parseAbi(['function hasRole(bytes32,address) view returns (bool)']),
+        functionName: 'hasRole',
+        args: ['0x' + '00'.repeat(32), '0x0000000000000000000000000000000000000002'],
+      }),
+    ).rejects.toThrow()
+    expect(globalThis.fetch).toHaveBeenCalledTimes(2)
+  })
+})

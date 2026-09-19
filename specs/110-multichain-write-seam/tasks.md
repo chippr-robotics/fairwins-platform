@@ -1496,6 +1496,31 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         all, and it is what two surfaces and the wager notification source call. Paging (100 at a
         time, two reads zipped by index), the chain, the three-state-free empty case and the
         uppercase-address path, each probed non-vacuous.
+      **DIVERGENCE 24 — the transport RETRIED where ethers made one request** (found by CI, on the
+        one screen whose whole job is to say it could not ask). viem's `http()` retries
+        403/408/413/429/500/502/503/504 **and any error carrying no status at all**, three times
+        at 150ms exponential; ethers retried exactly ONE status, 429, with its own throttle
+        backoff, and made a single attempt at everything else (`FetchRequest.#send`, ~L470 —
+        redirects followed, 429 retried, 5xx returned as-is). Measured through the real transport:
+        a dead endpoint cost **4 requests instead of 1**, and on a chain with a curated failover
+        **8 instead of 2**, because `fallback` carries its own retry of the WHOLE ordered sequence
+        on top of its legs (it already zeroes the legs — asserting on a leg's `retryCount` passes
+        with the fix removed, which is how the first version of this test was vacuous).
+        That is not latency trivia here. Every three-state reader renders a failed read as
+        `unreadable`, and the sweeps that produce those readings are SEQUENTIAL: `RoleContext`
+        loops over roles and `hasRoleOnChain` loops over candidate contracts inside each one. So a
+        total outage went from seconds to minutes before the console could say **"Could Not Verify
+        Access"** — the FR-012 screen, at exactly the moment an incident commander is trying to get
+        in. `32-admin-console.cy.js` AD-03 (every chain dead) failed at both viewport profiles and
+        was reproduced locally before anything was changed.
+        Fixed at the seam: `retryCount: 0` on every transport AND on the fallback itself, with
+        ethers' 429 throttle reproduced rather than dropped (`throttledFetch` — same trigger, same
+        jittered slot backoff, same 12-attempt ceiling, `retry-after` honoured). One deliberate
+        difference: ethers read `retry-after` as MILLISECONDS (`parseInt` straight into its wait)
+        where the header is specified in SECONDS — an ethers bug, not a behaviour worth
+        reproducing, and the suite says so. Both knobs are pinned by counting real requests
+        through the real transport, each verified non-vacuous (4-instead-of-1 and 8-instead-of-2
+        are what the probes print).
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
