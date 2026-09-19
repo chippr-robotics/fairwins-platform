@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   formatUnits as ethersFormatUnits,
   parseUnits as ethersParseUnits,
+  parseEther as ethersParseEther,
 } from 'ethers'
 import { formatUnits, parseUnits, formatEther, parseEther } from '../../lib/evm/units'
 
@@ -83,5 +84,60 @@ describe('lib/evm/units — differential parity with ethers v6', () => {
     ]) {
       expect(parseUnits(text, decimals)).toBe(ethersParseUnits(text, decimals))
     }
+  })
+})
+
+/*
+ * DIVERGENCE 20. The parity block above feeds only values ethers ACCEPTS, so it checks the
+ * agreement set and is blind to the refusal set — which is where viem and ethers actually part
+ * company: ethers refused a value the unit cannot represent exactly, viem ROUNDS IT HALF-UP and
+ * says nothing. On a send/wrap/stake path that is a different amount than the member typed, and
+ * it can round UP past the balance so the revert lands after the signature instead of before it.
+ *
+ * Checked against ethers rather than against remembered numbers, for the same reason the block
+ * above gives: the claim is about ethers.
+ */
+describe('lib/evm/units — parseUnits refuses what it cannot represent exactly', () => {
+  const OVER_PRECISION = [
+    ['1.0000005', 6],   // rounds UP under viem — 1.000001
+    ['1.0000004', 6],   // rounds DOWN — still not what was typed
+    ['0.0000001', 6],   // rounds to ZERO: a send of nothing
+    ['1.9999999999999999999', 18], // rounds UP to 2 — MORE than typed
+    ['1.0000000000000000005', 18],
+    ['1.5', 0],         // a 0-decimal unit has no halves
+    ['0.9', 0],
+    ['1.5000001', 6],
+  ]
+  const EXACT = [
+    ['1.5000000', 6],   // trailing zeros carry no precision — accepted by both
+    ['1.500000', 6],
+    ['1.0000000000', 6],
+    ['1.', 6],
+    ['.5', 6],
+    ['0.000000', 6],
+    ['-1.0000000', 6],
+    ['1.00', 0],
+    ['1.234567', 6],
+  ]
+
+  it('throws on every over-precise value ethers threw on', () => {
+    for (const [text, decimals] of OVER_PRECISION) {
+      expect(() => ethersParseUnits(text, decimals)).toThrow()
+      expect(() => parseUnits(text, decimals)).toThrow()
+    }
+  })
+
+  it('still accepts everything ethers accepted, with the same result', () => {
+    for (const [text, decimals] of EXACT) {
+      expect(`${text}@${decimals}=${parseUnits(text, decimals)}`).toBe(
+        `${text}@${decimals}=${ethersParseUnits(text, decimals)}`,
+      )
+    }
+  })
+
+  it('parseEther refuses the same way (it is parseUnits at 18)', () => {
+    expect(() => ethersParseEther('1.9999999999999999999')).toThrow()
+    expect(() => parseEther('1.9999999999999999999')).toThrow()
+    expect(parseEther('1.5')).toBe(ethersParseEther('1.5'))
   })
 })

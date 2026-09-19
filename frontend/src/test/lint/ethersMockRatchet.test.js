@@ -69,6 +69,42 @@ function walk(dir) {
   return out
 }
 
+/** The full text of the `vi.mock(...)` call starting at `open` (the index of its `(`). */
+function callText(source, open) {
+  let depth = 0
+  for (let i = open; i < source.length; i += 1) {
+    if (source[i] === '(') depth += 1
+    else if (source[i] === ')') {
+      depth -= 1
+      if (depth === 0) return source.slice(open, i + 1)
+    }
+  }
+  return source.slice(open)
+}
+
+/**
+ * Specifiers this file REPLACES outright — `vi.mock('…')` whose factory never reaches for the
+ * real module (`importOriginal` / `vi.importActual`).
+ *
+ * A replaced module cannot be what an ethers mock is guarding: its own imports never run, so the
+ * fact that IT imports ethers says nothing about the subject under test. Counting it was the hole
+ * that let `src/test/wallet/useWrapNative.test.jsx` keep a dead `vi.mock('ethers')` — the hook had
+ * moved to the chain seam, and the only allowlisted module the file named was
+ * `utils/rpcProvider`, which the same file had entirely replaced.
+ *
+ * A PARTIAL mock (one that spreads `await importOriginal()`) still loads the real module and still
+ * counts, which is why this is a property of the factory rather than of the `vi.mock` call.
+ */
+function replacedSpecifiers(source) {
+  const replaced = new Set()
+  const re = /vi\.mock\(\s*'(\.[^']+)'/g
+  for (const m of source.matchAll(re)) {
+    const open = source.indexOf('(', m.index)
+    if (!/\bimportOriginal\b|\bimportActual\b/.test(callText(source, open))) replaced.add(m[1])
+  }
+  return replaced
+}
+
 /** Every local module a file pulls in — `from '…'`, `vi.mock('…')` and `await import('…')`. */
 function localSpecifiers(source) {
   const specs = new Set()
@@ -81,6 +117,15 @@ function localSpecifiers(source) {
     /\bimport\(\s*'(\.[^']+)'\s*\)/g,
   ]) {
     for (const m of source.matchAll(re)) specs.add(m[1])
+  }
+  // A module the file replaces outright is not one it reaches — unless it ALSO imports it for
+  // real, which is how a test asserts against the unmocked original.
+  const imported = new Set()
+  for (const re of [/from\s+'(\.[^']+)'/g, /\bimport\(\s*'(\.[^']+)'\s*\)/g]) {
+    for (const m of source.matchAll(re)) imported.add(m[1])
+  }
+  for (const spec of replacedSpecifiers(source)) {
+    if (!imported.has(spec)) specs.delete(spec)
   }
   return specs
 }

@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { parseUnits } from '../lib/evm/units'
+import { getAddress } from '../lib/evm/address'
 import { useWallet } from './useWalletManagement'
 import { useActiveAccount } from './useActiveAccount'
 import { getNetwork, NETWORKS } from '../config/networks'
@@ -65,7 +68,10 @@ export const WRAP_DIRECTION = Object.freeze({ WRAP: 'wrap', UNWRAP: 'unwrap' })
 // kept as literals so this hook doesn't pull the relay graph in, same as useTransfer).
 const OP_STATE = Object.freeze({ SUBMITTED: 'submitted', INCLUDED: 'included', FAILED: 'failed' })
 
-const WNATIVE_IFACE = new ethers.Interface(WNATIVE_ABI)
+const WNATIVE_ABI_PARSED = normalizeAbi(WNATIVE_ABI)
+const SYMBOL_ABI = ['function symbol() view returns (string)']
+const wnativeCall = (functionName, args = []) =>
+  encodeFunctionData({ abi: WNATIVE_ABI_PARSED, functionName, args })
 
 // WETH9's deposit/withdraw are small, fixed-shape calls; 100k covers both with room for
 // the L2 variants that charge more for the same work. Used only to SIZE the gas reserve
@@ -146,12 +152,18 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
       setNativeBalance(null) // unread, NOT zero — the view renders "—" for this
     }
     try {
-      const erc20 = new ethers.Contract(token.address, WNATIVE_ABI, readProvider)
-      setWrappedBalance(await erc20.balanceOf(actingAddress))
+      setWrappedBalance(
+        await readContract(target, {
+          address: token.address,
+          abi: WNATIVE_ABI,
+          functionName: 'balanceOf',
+          args: [getAddress(String(actingAddress))],
+        }),
+      )
     } catch {
       setWrappedBalance(null)
     }
-  }, [readProvider, actingAddress, token])
+  }, [readProvider, actingAddress, token, target])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -162,12 +174,11 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
     let cancelled = false
     setOnChainSymbol(null)
     if (!readProvider || !token) return undefined
-    const erc20 = new ethers.Contract(token.address, ['function symbol() view returns (string)'], readProvider)
-    erc20.symbol()
+    readContract(target, { address: token.address, abi: SYMBOL_ABI, functionName: 'symbol' })
       .then((s) => { if (!cancelled && typeof s === 'string' && s) setOnChainSymbol(s) })
       .catch(() => { /* label falls back to the derived one — never blocks wrapping */ })
     return () => { cancelled = true }
-  }, [readProvider, token])
+  }, [readProvider, token, target])
 
   // Gas reserve, quoted from the chain rather than assumed. An unreadable fee leaves the
   // reserve null and MAX falls back to a balance-minus-nothing offer only when there is
@@ -256,7 +267,10 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
 
       let value
       try {
-        value = ethers.parseUnits(String(amount), decimals)
+        // The seam refuses a value the unit cannot represent EXACTLY (spec 110 divergence 20:
+        // viem rounds half-up where ethers threw). On this path that refusal is the whole point —
+        // what gets wrapped must be what the member typed, never a rounded neighbour of it.
+        value = parseUnits(String(amount), decimals)
       } catch {
         throw new Error('Enter a valid amount.')
       }
@@ -270,8 +284,8 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
 
       // One call, two shapes: deposit carries the coin as msg.value, withdraw names the amount.
       const call = wrapping
-        ? { to: token.address, value, data: WNATIVE_IFACE.encodeFunctionData('deposit', []) }
-        : { to: token.address, value: 0n, data: WNATIVE_IFACE.encodeFunctionData('withdraw', [value]) }
+        ? { to: token.address, value, data: wnativeCall('deposit') }
+        : { to: token.address, value: 0n, data: wnativeCall('withdraw', [value]) }
 
       setError(null)
 

@@ -1044,6 +1044,50 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         **The wager-pool member surface has no no-chain e2e spec** — `24-wager-pools.cy.js` is
         on-chain tier — so the local run that the funding-pool batch could do was not available
         here, and CI's on-chain shard is what covers it. Said plainly rather than quietly skipped.
+      - **`useWrapNative.js` — and DIVERGENCE 20, in the seam that claimed it had no more.**
+        Allowlist 31 → 30. The hook itself is small (an `Interface`, two `Contract` reads, a
+        `parseUnits`), and `deposit()` / `withdraw(wad)` byte-match ethers across 3,003 fuzzed
+        amounts including 0 and 2²⁵⁶−1. The conversion is not what this batch is about.
+        **DIVERGENCE 20 — `parseUnits` ROUNDS a value the unit cannot represent; ethers REFUSED
+        it.** `lib/evm/units.js` has said since Phase 0 that "throw semantics are preserved". That
+        is true of the DECIMALS argument and false of the VALUE:
+        `parseUnits('1.0000005', 6)` threw under ethers and is `1000001n` under viem — rounded
+        HALF-UP, silently. `'1.9999999999999999999'` at 18 becomes **2.0**, MORE than was typed;
+        `'0.0000001'` at 6 becomes **0**, a send of nothing; `'1.5'` at 0 decimals becomes **2**.
+        Every call site in this app was written against the refusal and already renders it
+        ("Enter a valid amount."), so under viem the same keystrokes produce a DIFFERENT AMOUNT
+        than the member consented to — and rounding UP can push a MAX past the balance, moving the
+        revert from before the signature to after it. ethers' actual rule is EXACT
+        REPRESENTABILITY: trailing zeros are fine (`'1.5000000'` at 6 is `1500000n` in both), a
+        non-zero digit beyond the unit's precision is not. Fixed in the seam, for `parseEther`
+        too, rather than at ~50 call sites.
+        **The existing differential test could not have found it.** It fed only values ethers
+        ACCEPTS — it checked the agreement set and never the refusal set, which is where the two
+        libraries part company. That is the fixture lesson again, one level up: at the level of
+        which CASES a differential test is given, not which values a fixture holds. The new block
+        asserts `expect(() => ethersParseUnits(…)).toThrow()` beside `expect(() => parseUnits(…))
+        .toThrow()`, so it stays a claim about ethers rather than about a remembered number.
+      - **The ethers-mock ratchet was counting modules the test itself had replaced — and a
+        SIXTH file fell out of it.** The gate asks whether a `vi.mock('ethers')` still reaches a
+        module that imports ethers, and it counted `vi.mock('…')` specifiers as "reaches". But a
+        module the file REPLACES outright never loads, so its imports never run: the fact that it
+        imports ethers says nothing about the subject. `useWrapNative.test.jsx` is exactly that —
+        the hook had just moved to the chain seam, and the only allowlisted path the file named
+        was `utils/rpcProvider`, which the same file fully replaces. The gate stayed quiet. Now a
+        specifier that is mocked-and-never-really-imported does not count, unless its factory
+        reaches for `importOriginal`/`importActual` (a PARTIAL mock does load the real module, so
+        it still counts). Both directions were proved with throwaway probe files — one that the
+        gate must flag, one that it must not.
+        The catch: `src/test/MarketAcceptancePage.test.jsx`, whose fake `Contract` had
+        `getFriendMarketWithStatus` on it long after the page moved to `readContract`. It was
+        invisible because every case there renders with no provider and reaches no chain read at
+        all — the mock cost nothing and proved nothing. Deleted rather than rewritten.
+        `useWrapNative.test.jsx`'s own fake was the documented shape: `new Contract(address, …)`
+        ignoring its first argument, so a balance read aimed at the wrong contract OR the wrong
+        chain passed every assertion. Both are recorded and asserted now — and the moment the
+        address became load-bearing, the file's `HW` fixture turned out to be
+        `'0xHaRd0000…'`, which is not hex. It had never been an address; nothing had ever looked.
+        **The no-chain e2e spec was run locally** (`40-account-add-wrap-move.cy.js`, 8/8).
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

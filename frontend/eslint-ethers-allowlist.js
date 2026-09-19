@@ -52,7 +52,6 @@ export const ETHERS_ALLOWLIST = [
   'src/hooks/useTransfer.js',
   'src/hooks/useTreasuryVault.js',
   'src/hooks/useVouchers.js',
-  'src/hooks/useWrapNative.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',
   'src/lib/clearpath/connectors/governorBravo.js',
   'src/lib/clearpath/connectors/ozGovernor.js',
