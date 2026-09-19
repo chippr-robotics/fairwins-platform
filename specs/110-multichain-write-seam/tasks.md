@@ -465,6 +465,27 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         So the shipped gate was not testable in this suite at all, cross-library parity had to be
         measured in a plain-Node probe, and the swap makes the validator testable where it was not.
         Never assert against ethers' BIP-39 functions in vitest; they answer wrongly there.
+        **AND THE TEST THAT CAME WITH IT WAS FLAKY — 1 RUN IN 15 — WHICH IS WORSE THAN A WEAK
+        TEST, BECAUSE IT FAILS ON SOMEBODY ELSE'S COMMIT.** It GENERATED a phrase per run and
+        derived the invalid cases from it by mutation, including "bad checksum" by swapping the
+        last word. The last word of a BIP-39 phrase carries the 4 CHECKSUM bits, so a substitute
+        checksums correctly about 1 time in 16 — MEASURED at 6.6% over 2,000 trials. It duly went
+        red on `32e03a87`, a DOCS-ONLY commit, reporting that `isValidMnemonic` had returned true
+        for a phrase labelled invalid. It was not wrong about that; the fixture was.
+        A randomly-generated fixture is not a stronger test than a fixed one — it is the same test
+        plus a coin flip, and here the coin decided whether the suite was honest. Every phrase is a
+        frozen literal now, each verified before it was pasted, and the file carries three
+        assertions ABOUT THE FIXTURES (every valid one validates at its stated length, every
+        invalid one fails, and — deliberately keeping the randomness where it belongs — a
+        400-trial measurement that a last-word swap is NOT reliably invalid, so the reason the
+        literals exist cannot quietly stop being true). The 12-word phrase's ADDRESS is frozen too:
+        this is a money path, and "derives the same thing twice" stays green through a derivation
+        change that orphans every account ever recovered (standing lesson b, the claimCode lesson,
+        re-earned).
+        The general form is worth keeping: **a test that generates its own negative cases is
+        asserting a probability, not a property.** Generate the POSITIVE direction if you like —
+        `generateMnemonic` always produces a valid phrase — but a negative case has to be
+        constructed and checked, or frozen.
       - **`src/test/lint/ethersMockRatchet.test.js` (new) — the retired-mock class is a GATE now,
         not a discovery.** Three files in a row was enough: a test that mocks `ethers` must import,
         statically or dynamically, at least one module still on the ethers allowlist, or the mock
