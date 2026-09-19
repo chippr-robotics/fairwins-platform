@@ -900,6 +900,46 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         at `null`. It returns null for a falsy address now and records `{chainId, address}`. The
         rule stands: **a mock that ignores an argument cannot distinguish what the assertion claims
         it does**, and the only way to find that out is to reintroduce the fault and watch.
+      - **`useVaultProposals.js` + a one-line fix in `lib/custody/vaultTransaction.js` — custody,
+        and DIVERGENCE 17 inside a dynamic `bytes`.** Allowlist 37 → 36. Safe reads move to
+        `readContract`; the log-scan handle is `eventScanHandle`, which IS the duck type `scanLogs`
+        consumes, so `readExecutionOutcomes` needed no change at all. The `Interface` becomes a
+        three-line `safeCall(fn, args)`.
+        Probed first, and `execTransaction` did NOT match: viem's calldata carried the signature
+        blob's address in CHECKSUM CASE where ethers emitted lowercase. The blob is built by
+        `buildPrevalidatedSignatures` with viem's `pad`, which preserves the casing of the address
+        it is handed — divergence 17, reaching inside a dynamic `bytes` argument. **This was
+        already live on the branch**, not introduced here: `vaultTransaction.js` had been converted
+        earlier and its test lowercases before comparing, with all-digit fixtures, so it could not
+        see it.
+        **It is COSMETIC, and saying so precisely matters**: the Safe parses hex case-insensitively,
+        `keccak256` hashes bytes rather than the string, and `getTransactionHash` does not cover the
+        signatures at all — so `safeTxHash` is untouched and no transaction behaves differently. It
+        is normalised anyway (`.toLowerCase()` on the padded owner, restoring byte-identity with
+        ethers) because a calldata string that silently differs from what shipped is a trap for the
+        next byte comparison, not because anything was broken.
+        **EVERY EXISTING TEST THAT TOUCHES THIS HOOK MOCKS IT** — `VaultQueueView`,
+        `VaultActionSheet` and `VaultDetailsView` all `vi.mock('../../hooks/useVaultProposals')` —
+        so the calldata that moves funds out of a multisig had NO coverage. 515 tests passed either
+        way. `src/test/custody/useVaultProposals.writes.test.jsx` is new: it drives `approve` and
+        `execute` on the classic rail, asserts the transaction's `to` is the VAULT (what an ethers
+        `Contract` fake structurally cannot show), pins both selectors as FROZEN literals, and
+        byte-compares the whole `execTransaction` calldata against ethers. That last assertion is
+        what catches divergence 17 here — verified non-vacuous by removing the `.toLowerCase()`.
+      - **An OBSERVATION, not a diagnosis, recorded so the next session does not rediscover it
+        cold:** `src/test/perps/perpsActivity.test.js > is written to by the ONE write path` failed
+        ONCE in a local sweep-1 run during this batch, and did not reproduce — it passes alone and
+        passed a full repeat sweep (5,792/5,792). It is not attributable to this task: neither
+        `usePerpsTrade.js` nor that test has been touched, and the names it greps for
+        (`recordPerpsOrder`, `queuePerpsAction`) appear in nothing written here.
+        What can be said: the test `import.meta.glob`s 200+ files with `?raw`, sweep 1 is the run
+        CLAUDE.md warns OOMs this environment, and a starved `?raw` load returning empty would
+        produce exactly the observed failure shape (an empty `writers`, so `toEqual` fails) while
+        still satisfying the file-count guard above it. That is a plausible mechanism, NOT a
+        confirmed cause — the sweep output was tail-truncated before the assertion detail, so the
+        actual `writers` value was never seen. **CI's own Frontend Unit Tests job is the authority
+        for the full suite and has been green on every commit in this PR.** If it recurs there,
+        it is real and the assertion text will be available; do not write it off as this note.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

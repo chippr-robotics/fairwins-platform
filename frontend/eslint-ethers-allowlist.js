@@ -54,7 +54,6 @@ export const ETHERS_ALLOWLIST = [
   'src/hooks/usePools.js',
   'src/hooks/useTransfer.js',
   'src/hooks/useTreasuryVault.js',
-  'src/hooks/useVaultProposals.js',
   'src/hooks/useVouchers.js',
   'src/hooks/useWrapNative.js',
   'src/lib/bridge/__tests__/bridgeRouter.test.js',

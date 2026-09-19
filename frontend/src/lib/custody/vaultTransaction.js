@@ -101,7 +101,13 @@ export function buildPrevalidatedSignatures(approverAddresses) {
   }
   let out = '0x'
   for (const owner of sorted) {
-    const r = pad(owner, { size: 32 }).slice(2) // 32-byte left-padded address
+    // LOWERCASED (spec 110 divergence 17). viem's `pad` preserves the EIP-55 checksum casing of
+    // the address it is handed, and viem's encoder then carries that casing into the calldata,
+    // where ethers emitted lowercase. The BYTES are identical either way — the Safe parses hex
+    // case-insensitively, and `safeTxHash` does not cover the signatures at all — so this is
+    // cosmetic rather than a defect. It is normalised because a calldata string that differs from
+    // what shipped is a trap for the next byte-comparison, not because anything is wrong on chain.
+    const r = pad(owner, { size: 32 }).slice(2).toLowerCase() // 32-byte left-padded address
     const s = '00'.repeat(32)
     const v = '01'
     out += r + s + v
