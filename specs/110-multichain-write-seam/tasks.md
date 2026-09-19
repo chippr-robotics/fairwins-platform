@@ -1158,6 +1158,31 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         batches whose invalidity only became visible once the address became load-bearing. Frozen
         to its EIP-55 form.
         `41-group-pay` (11) and `40-account-add-wrap-move` (8) run locally, green.
+      - **DIVERGENCE 22 — a viem error HIDES the revert bytes behind `cause`, and
+        `rawRevertCandidates` reached none of them.** Found while converting the first
+        `staticCall`: the pre-flight on the open-challenge accept path exists to turn a revert into
+        a sentence a member can act on, and `lib/wagers/sanctionsRevert.js` recovers
+        `ISanctionsGuard.SanctionedAddress` BY SELECTOR because the registry ABI cannot decode it.
+        All of that runs off `rawRevertData`, whose candidate list was FIVE FIXED EXPRESSIONS —
+        right, because the shapes ethers and the wallets produce are five fixed expressions.
+        viem is not like that. It wraps each layer in a typed error and chains them through `cause`:
+        `ContractFunctionExecutionError.cause` → `ContractFunctionRevertedError.raw` at depth 1 when
+        the node error is pre-decoded, or `.cause.cause.cause.cause.data` at depth 4 when it is not.
+        Two different keys, two different depths, both MEASURED rather than remembered. None of the
+        five paths reaches either, so converting any `staticCall` without fixing this first would
+        have silently replaced a screened member's explanation with "execution reverted (unknown
+        custom error)" — a regression invisible to every existing test, because every existing
+        fixture is an ethers-shaped error.
+        The walk is now breadth-first over `cause`/`error`/`data`/`info.error`, depth-bounded and
+        cycle-guarded, harvesting `data` and `raw`. Widening what is READ never widens what is
+        CLAIMED: `extractRevert` still keeps walking when a candidate does not decode, so an extra
+        candidate costs a failed parse and nothing else — asserted by a case whose bytes belong to
+        no ABI here and still resolve to `null`.
+        **The fixtures are REAL viem errors**, produced by driving a real `readContract` against a
+        transport that throws, not objects shaped the way the test remembers viem. That is the
+        distinction that matters: a hand-built fixture would have agreed with whatever the walk was
+        written to expect, which is precisely how the original list came to miss every viem shape.
+        Verified non-vacuous by restoring the five-path list — all three viem cases fail.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

@@ -126,3 +126,81 @@ describe('describeRevert', () => {
     expect(describeRevert({ args: [1] })).toBeNull()
   })
 })
+
+/*
+ * DIVERGENCE 22 (spec 110). The five shapes above are five FIXED EXPRESSIONS because that is what
+ * ethers and the wallets produce. viem is not like that: it wraps every layer in a typed error and
+ * chains them through `cause`, so the revert bytes sit at a depth that varies with the transport,
+ * under `raw` in one shape and `data` in another. The hand-listed paths reached NONE of them.
+ *
+ * The errors here are REAL viem errors, produced by driving a real `readContract` against a
+ * transport that throws — not objects shaped the way this file remembers viem. That distinction is
+ * the whole point: a hand-built fixture would have agreed with whatever the walk was written to
+ * expect, which is exactly how the original list came to miss every viem shape.
+ */
+describe('rawRevertData reaches a viem error', () => {
+  const STALE = IFACE.encodeErrorResult('StaleProposal', [
+    '0x' + '11'.repeat(32),
+    '0x' + '22'.repeat(32),
+  ])
+
+  /** Drive a real viem readContract against a transport that throws `thrown`. */
+  async function viemRevert(thrown) {
+    const { createPublicClient, custom, parseAbi } = await import('viem')
+    const client = createPublicClient({
+      chain: {
+        id: 137,
+        name: 'probe',
+        nativeCurrency: { name: 'n', symbol: 'n', decimals: 18 },
+        rpcUrls: { default: { http: [] } },
+      },
+      transport: custom({
+        async request({ method }) {
+          if (method === 'eth_chainId') return '0x89'
+          throw thrown()
+        },
+      }),
+    })
+    try {
+      await client.readContract({
+        address: '0x' + '11'.repeat(20),
+        abi: parseAbi(['function doThing() returns (uint256)']),
+        functionName: 'doThing',
+      })
+      throw new Error('expected the read to revert')
+    } catch (e) {
+      return e
+    }
+  }
+
+  it('finds the bytes when the node error carries them bare (deep `cause` chain)', async () => {
+    const err = await viemRevert(() => Object.assign(new Error('execution reverted'), { data: STALE }))
+    expect(err.name).toBe('ContractFunctionExecutionError')
+    expect(rawRevertData(err)).toBe(STALE)
+    expect(extractRevert(err, IFACE)).toMatchObject({ name: 'StaleProposal' })
+  })
+
+  it('finds the bytes when viem pre-decodes them onto `cause.raw`', async () => {
+    const err = await viemRevert(() =>
+      Object.assign(new Error('execution reverted'), { code: 3, data: { data: STALE } }),
+    )
+    expect(rawRevertData(err)).toBe(STALE)
+    expect(extractRevert(err, IFACE)).toMatchObject({ name: 'StaleProposal' })
+  })
+
+  it('still resolves to null for bytes this ABI does not describe', async () => {
+    const foreign = '0x' + 'ab'.repeat(4) + '00'.repeat(32)
+    const err = await viemRevert(() => Object.assign(new Error('execution reverted'), { data: foreign }))
+    expect(rawRevertData(err)).toBe(foreign) // the walk found it…
+    expect(extractRevert(err, IFACE)).toBeNull() // …and refused to name it
+  })
+
+  it('terminates on a cyclic error chain', () => {
+    const a = new Error('a')
+    const b = new Error('b')
+    a.cause = b
+    b.cause = a
+    a.data = STALE
+    expect(rawRevertData(a)).toBe(STALE)
+  })
+})

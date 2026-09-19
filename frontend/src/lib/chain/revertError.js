@@ -16,20 +16,56 @@
  */
 
 /**
- * Every place a wallet or provider has been observed to leave the raw revert bytes.
+ * Every place a wallet, provider or library has been observed to leave the raw revert bytes.
  *
- * Ordered outermost-first: the shallowest copy is the one the immediate caller produced, and the
- * deeper ones are what a wallet forwarded from the node. A passkey UserOp failure nests one level
- * deeper than a signer transaction does; MetaMask nests the node payload under `data.data`.
+ * Ordered outermost-first (breadth-first): the shallowest copy is the one the immediate caller
+ * produced, and the deeper ones are what a wallet forwarded from the node. A passkey UserOp
+ * failure nests one level deeper than a signer transaction does; MetaMask nests the node payload
+ * under `data.data`.
+ *
+ * DIVERGENCE 22 (spec 110) — A VIEM ERROR HIDES THE BYTES BEHIND `cause`, and the hand-listed
+ * paths above reached NONE of them. The list was five fixed expressions because the five shapes
+ * ethers and the wallets produce are five fixed expressions. viem is not like that: it wraps each
+ * layer in a typed error and chains them through `cause`, so the same revert arrives as
+ *
+ *   ContractFunctionExecutionError
+ *     .cause ContractFunctionRevertedError  → `.raw`    ← depth 1
+ *   …or, when the node error is not pre-decoded:
+ *     .cause CallExecutionError .cause ExecutionRevertedError .cause UnknownRpcError
+ *       .cause Error → `.data`                                ← depth 4
+ *
+ * — both measured, not remembered. Depth varies with the transport and the key is `raw` in one and
+ * `data` in the other. So this walks the chain instead of naming positions in it: the same revert
+ * has to be findable however the layer above chose to wrap it, or a screened member gets
+ * "execution reverted (unknown custom error)" in place of the sentence that tells them why.
+ *
+ * Breadth-first, depth-bounded, cycle-guarded. Callers filter for what actually looks like revert
+ * data and (in `extractRevert`) keep walking when a candidate does not decode, so an extra
+ * candidate costs a failed parse, never a wrong answer.
  */
+const REVERT_CHAIN_KEYS = ['cause', 'error', 'data']
+const MAX_REVERT_DEPTH = 8
+
 function rawRevertCandidates(error) {
-  return [
-    error?.data,
-    error?.data?.data,
-    error?.info?.error?.data,
-    error?.error?.data,
-    error?.error?.error?.data,
-  ]
+  const out = []
+  const seen = new Set()
+  let frontier = [error]
+  for (let depth = 0; depth <= MAX_REVERT_DEPTH && frontier.length > 0; depth += 1) {
+    const next = []
+    for (const node of frontier) {
+      if (!node || typeof node !== 'object' || seen.has(node)) continue
+      seen.add(node)
+      // Harvest before descending, so a shallower copy is always offered first.
+      if (typeof node.data === 'string') out.push(node.data)
+      if (typeof node.raw === 'string') out.push(node.raw)
+      for (const key of REVERT_CHAIN_KEYS) {
+        if (node[key] && typeof node[key] === 'object') next.push(node[key])
+      }
+      if (node.info?.error && typeof node.info.error === 'object') next.push(node.info.error)
+    }
+    frontier = next
+  }
+  return out
 }
 
 /**
