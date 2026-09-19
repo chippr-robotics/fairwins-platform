@@ -61,8 +61,6 @@ const ALLOW = {
   'utils/sanctionsScreen.js': { addr: 1, prov: 0 },
   // expireStaleWagers catch + createFriendMarket resolve() fallback
   'hooks/useFriendMarketCreation.js': { addr: 2, prov: 0 },
-  // legacy: treasuryVault not deployed on v2 (module-scope address)
-  'hooks/useTreasuryVault.js': { addr: 1, prov: 0 },
   // legacy: nullifierRegistry not deployed on v2 (module-scope address)
   'hooks/useNullifierContracts.js': { addr: 1, prov: 0 },
   // legacy: v1 friendGroupMarketFactory event source (not deployed on v2). The five build-time
@@ -122,5 +120,27 @@ describe('chain resolution guard (spec 008, FR-011)', () => {
         'or getProvider(chainId); if the change is intentional (a justified fallback or a migration), ' +
         'update the ALLOW baseline in this file:\n  ' + offenders.join('\n  ')
     ).toEqual([])
+  })
+
+  /*
+   * An ALLOW entry is a PERMITTED CEILING, and this guard had no way to notice one outliving the
+   * file it excuses. That is not only untidy: the baseline is keyed by PATH, so a stale entry
+   * silently hands its exemption to whatever is written at that path next. Found when
+   * `hooks/useTreasuryVault.js` was deleted (spec 110 — dead code for a contract that lives in
+   * `contracts-archive/` and is deployed on no network) and its entry would have sat here
+   * indefinitely, matching nothing.
+   *
+   * The same discipline `LEGACY_COLLISIONS` keeps in `scripts/specs/check-spec-registry.js`: the
+   * list has to shrink when what it excuses goes away.
+   */
+  it('has no stale ALLOW entry — a baseline must not outlive its file', () => {
+    const stale = Object.keys(ALLOW).filter((rel) => {
+      try {
+        return !statSync(join(SRC, rel)).isFile()
+      } catch {
+        return true
+      }
+    })
+    expect(stale, 'These ALLOW entries name files that no longer exist — delete them.').toEqual([])
   })
 })

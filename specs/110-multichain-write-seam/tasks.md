@@ -1251,6 +1251,27 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         reading the connected wallet's balance fails 6 tests, simulating as the connected wallet
         fails the one that exists for it.
         `04-wager-creation-validation.cy.js` (14) run locally, green.
+      - **`useTreasuryVault.js` — DELETED, not converted.** Allowlist 25 → 24. It was the next
+        candidate by size (19 ethers uses, 522 lines), and the first thing the survey turned up is
+        that it has **no importers anywhere** — not in `components/`, `pages/`, `hooks/`, the
+        cypress suites, or anything outside the repo's own bookkeeping. Its contract is
+        `contracts-archive/treasury/TreasuryVault.sol`, and CLAUDE.md says that directory is
+        "reference-only; never import or deploy it". No network configures `treasuryVault`, so
+        `TREASURY_VAULT_ADDRESS` was permanently `null`, which made `readContract`/`writeContract`
+        permanently null and every one of the hook's twelve functions an early return or a throw.
+        Converting dead code for an archived contract buys nothing and pays for it twice — once in
+        the change, and again every time someone reads it and believes it is live. Deleted, on the
+        precedent `utils/encryption.js` set earlier in this PR (no importers + a latent defect →
+        deleted rather than converted). The repo's own guard test already annotated it "legacy:
+        treasuryVault not deployed on v2".
+        **The deletion found a gap in a DIFFERENT gate.** `chainResolutionGuard`'s `ALLOW` baseline
+        had no staleness check, so this hook's entry would have sat there indefinitely matching
+        nothing. That is not merely untidy: the baseline is keyed by PATH, so a stale entry
+        silently hands its permitted ceiling to whatever is written at that path next. It now fails
+        on an entry naming a file that does not exist — the same discipline `LEGACY_COLLISIONS`
+        keeps in `check-spec-registry.js`, and verified non-vacuous with a bogus entry.
+        The lint baseline moves 180 → **178**: both warnings belonged to the deleted file, checked
+        by restoring it and counting rather than assumed from the delta.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
