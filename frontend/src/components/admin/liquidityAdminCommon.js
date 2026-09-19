@@ -29,9 +29,13 @@
  *      the specific router on the specific network whether THIS account holds the role — see its
  *      own doc-comment for why the app-wide role flags cannot answer that question.
  */
-import { isAddress, keccak256, stringToHex, zeroAddress, zeroHash } from 'viem'
+import { keccak256, stringToHex, zeroAddress, zeroHash } from 'viem'
+import { isAddress } from '../../lib/evm/address'
 import { formatUnits, parseUnits } from '../../lib/evm/units'
 import { readContract } from '../../lib/chains/readContract'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { getLogsRange } from '../../lib/chains/logRange'
+import { getPublicClient } from '../../lib/chains/publicClient'
 
 /** keccak256 over a role name's UTF-8 bytes — byte-identical to ethers v6 `id()`. */
 const roleId = (name) => keccak256(stringToHex(name))
@@ -58,7 +62,20 @@ export function shortAddr(a) {
   return a && a !== zeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
 }
 
-/** A settable address must be a real, non-zero address — the routers reject `ZeroAddress`. */
+/**
+ * A settable address must be a real, non-zero address — the routers reject `ZeroAddress`.
+ *
+ * `isAddress` comes from the address SEAM, not from viem directly (spec 110 divergence d). viem's
+ * own `isAddress` defaults to `strict: true`, which REFUSES an ALL-UPPERCASE address — and an
+ * all-uppercase address carries no EIP-55 checksum information, so there is nothing to verify and
+ * it is perfectly valid. An operator pasting one from a tool that upper-cases hex was told their
+ * token address was not an address. The seam reproduces ethers' rule: no checksum in the casing ⇒
+ * accept; mixed case ⇒ it must verify.
+ *
+ * The other half of that pair lives at the ENCODERS — see divergence 16. viem's
+ * `encodeFunctionData` refuses the same uppercase address this now accepts, so every caller
+ * normalises through `getAddress` before encoding.
+ */
 export const isValidAddr = (a) => isAddress(a) && a !== zeroAddress
 
 /** Display name for a chain, or an honest placeholder — never a guessed one. */
@@ -313,35 +330,62 @@ const safe = (p) => p.then((v) => v).catch(() => undefined)
  * card says "this RPC bounds event lookups" instead of "no changes" — those are very different
  * statements to an operator auditing a control surface (FR-046).
  *
- * @param {{contract: object, provider: object, eventNames: string[], describe: Function}} args
+ * The chain is an ARGUMENT (spec 110): it used to arrive inside an ethers `Contract`'s runner,
+ * which is why a caller could not be asked which chain it had scanned. `provider` stays as the
+ * AVAILABILITY GATE — `readProviderFor` here passes `requireCohort: false` on purpose, so its null
+ * means the chain has no endpoint at all.
+ *
+ * The scan BISECTS on refusal rather than asking for 200,000 blocks in one `eth_getLogs`: public
+ * RPCs cap that at ~10,000, and a refusal used to land in the catch below and render as "this RPC
+ * bounds event lookups" on every one of them.
+ *
+ * @param {{chainId: number, address: string, abi: Array, provider: object,
+ *          eventNames: string[], describe: Function}} args
  * @returns {Promise<{entries: Array|null, error: string|null}>}
  */
-export async function loadRouterHistory({ contract, provider, eventNames, describe }) {
-  if (!contract || !provider) return { entries: [], error: 'no read connection' }
+export async function loadRouterHistory({ chainId, address, abi, provider, eventNames, describe }) {
+  if (!address || !provider || chainId == null) return { entries: [], error: 'no read connection' }
   try {
-    const latest = await provider.getBlockNumber()
-    const fromBlock = Math.max(0, Number(latest) - HISTORY_LOOKBACK_BLOCKS)
+    const handle = eventScanHandle(chainId, { address, abi })
+    const client = getPublicClient(chainId)
+    if (!handle || !client) return { entries: [], error: 'no read connection' }
+    const latest = Number(await handle.provider.getBlockNumber())
+    const fromBlock = Math.max(0, latest - HISTORY_LOOKBACK_BLOCKS)
     const all = []
     for (const name of eventNames) {
-      const evs = await safe(contract.queryFilter(contract.filters[name](), fromBlock, 'latest'))
-      for (const ev of evs || []) all.push({ name, ev })
+      const logs = await safe(
+        getLogsRange(
+          handle.provider,
+          address,
+          fromBlock,
+          latest,
+          2000,
+          handle.filters[name]().getTopicFilter(),
+        ),
+      )
+      for (const log of logs || []) {
+        // A log this ABI cannot decode is SKIPPED, not rendered blank: it would otherwise become a
+        // history row with no action and no actor, which reads as a change nobody can account for.
+        const parsed = await safe(Promise.resolve().then(() => handle.interface.parseLog(log)))
+        if (parsed) all.push({ name, log, args: parsed.args || {} })
+      }
     }
-    all.sort((a, b) => b.ev.blockNumber - a.ev.blockNumber || b.ev.index - a.ev.index)
+    all.sort((a, b) => b.log.blockNumber - a.log.blockNumber || b.log.index - a.log.index)
     const entries = await Promise.all(
-      all.slice(0, HISTORY_LIMIT).map(async ({ name, ev }) => {
-        const block = await safe(provider.getBlock(ev.blockNumber))
-        const described = describe(name, ev.args || {}) || {}
+      all.slice(0, HISTORY_LIMIT).map(async ({ name, log, args }) => {
+        const block = await safe(client.getBlock({ blockNumber: BigInt(log.blockNumber) }))
+        const described = describe(name, args) || {}
         return {
-          key: `${ev.transactionHash}-${ev.index}`,
+          key: `${log.transactionHash}-${log.index}`,
           name,
           action: described.action || name,
           target: described.target || '—',
           before: described.before ?? '—',
           after: described.after ?? '—',
           // `actor` on every config event; OZ's Paused/Unpaused name it `account`.
-          actor: ev.args?.actor || ev.args?.account || null,
+          actor: args?.actor || args?.account || null,
           at: block ? new Date(Number(block.timestamp) * 1000) : null,
-          txHash: ev.transactionHash,
+          txHash: log.transactionHash,
         }
       }),
     )

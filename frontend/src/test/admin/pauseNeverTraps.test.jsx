@@ -45,23 +45,42 @@ vi.mock('../../lib/bridge/bridgeStatus', async (orig) => ({
   ...(await orig()),
   fetchBridgeStatus: vi.fn(() => Promise.reject(new Error('no gateway'))),
 }))
-vi.mock('ethers', async (orig) => {
+/**
+ * Reads and event scans through the one chain seam (spec 110). The `vi.mock('ethers')` this
+ * replaces stopped intercepting anything the moment these tabs left ethers — a mock that guards
+ * nothing while still looking like a guard, which `src/test/lint/ethersMockRatchet.test.js` now
+ * fails on.
+ */
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          if (prop === 'filters') return new Proxy({}, { get: (_f, name) => () => ({ __event: String(name) }) })
-          const key = String(prop)
-          return (...args) => (m.reads[key] ? m.reads[key](...args) : Promise.resolve(undefined))
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: (_chainId, { functionName, args = [] }) =>
+      (m.reads[functionName] ? m.reads[functionName](...args) : Promise.resolve(undefined)),
   }
-  const FakeCtor = vi.fn(FakeContract)
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
+})
+
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (_chainId, { address }) => ({
+    target: address,
+    provider: {
+      getBlockNumber: async () => 1_000_000,
+      getLogs: async ({ topics }) => (m.events[topics?.__event] || []).map((e) => ({ ...e })),
+    },
+    filters: new Proxy(
+      {},
+      { get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }) },
+    ),
+    interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+  }),
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: () => ({ getBlock: async () => ({ timestamp: 0n }) }),
+  }
 })
 
 import BridgeTab from '../../components/admin/BridgeTab'
@@ -125,7 +144,6 @@ beforeEach(() => {
     poolCount: () => Promise.resolve(1n),
     poolAt: () => Promise.resolve('0xpool1'),
     getPool: () => Promise.resolve(RETIRED_POOL),
-    queryFilter: (filter) => Promise.resolve(m.events[filter?.__event] || []),
   }
 })
 

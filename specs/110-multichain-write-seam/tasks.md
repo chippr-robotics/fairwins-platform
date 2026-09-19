@@ -728,6 +728,55 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         files above were violating by accident. Converting them alongside files whose fix is
         "honour the cohort gate" would put two opposite-looking changes in one review. They also
         carry a real ops scan (`queryFilter` + receipts + gateway status). Their own batch.
+      - **`BridgeTab.jsx` + `SupplyTab.jsx` + `liquidityAdminCommon.js` — the spec-067 router pair,
+        converted together, and TWO more divergences (18 in the opposite direction from 15).**
+        Allowlist 47 → 45. These convert as one change because they share the module: it holds
+        `readProviderFor` (the `requireCohort: false` opt-out), `isValidAddr`, and
+        `loadRouterHistory`, which both tabs call.
+        **DIVERGENCE 18 — viem is STRICTER than ethers on `bool`, which is the OPPOSITE of what
+        divergence 15 teaches about integers.** Measured on `setRoute`'s struct: viem's
+        `encodeFunctionData` REFUSES `1`, `0`, `'true'`, `''`, `[]`, `null` and `undefined` for a
+        `bool` parameter, where ethers coerced every one of them (`1`→true, `''`→false,
+        `undefined`→false…). So "viem coerces" is the wrong generalisation to carry out of 15: it
+        coerces INTEGERS loosely and refuses BOOLS outright. The practical shape is a form field
+        that is `undefined` before first interaction — ethers sent `false`, viem throws from under
+        the button.
+        **Divergences 15, 16 and 18 all reach STRUCT FIELDS**, not just top-level arguments —
+        verified on the seven-field `setRoute` tuple.
+        And the good news, measured rather than assumed: **TUPLE ENCODING HAS FULL PARITY.** A
+        named object encodes identically in ethers and viem, key ORDER does not matter, a
+        positional array works in both, and a missing key throws in both. So `setRoute({...})` /
+        `listPool({...})` convert with the object literal untouched.
+        **`isValidAddr` was already stricter than ethers, and that is a live honesty bug this batch
+        fixes.** It was `isAddress(a) && a !== zeroAddress` on **viem's own** `isAddress`, which
+        defaults to `strict: true` and REFUSES an all-uppercase address — an address that carries
+        no checksum information and is perfectly valid. An operator pasting one from a tool that
+        upper-cases hex was told their token address was not an address. It reads from the address
+        SEAM now (ethers' rule), and every caller normalises through `getAddress` before encoding,
+        because divergence 16 means the encoder refuses exactly what the validator now accepts.
+        **The two halves have to move together** — validator alone accepts what the encoder throws
+        on; encoder alone is unreachable behind a validator that already refused.
+        `loadRouterHistory` takes `{chainId, address, abi, …}` instead of an ethers `Contract`, and
+        both scans bisect (`getLogsRange`) instead of asking for 200,000 blocks in one
+        `eth_getLogs`. On a range-capping RPC the old single `queryFilter` threw, and the catch
+        rendered "this RPC bounds event lookups" — honest, but it meant neither panel could ever
+        show history on such a chain. A log the ABI cannot decode is now SKIPPED rather than
+        rendered as a blank row, which would read as a change nobody can account for.
+        **FOUR test files had the retired-`vi.mock('ethers')` shape, and one of them was about to
+        make a regression test silently vacuous.** `AdminSupplyTab` kept its per-read COUNTER inside
+        the ethers fake, and the refetch-loop regression test (#1031 — reads were 51 in 250ms and
+        rising) asserts on that counter. Left behind, it would have counted nothing while still
+        looking like a guard; it only failed loudly because the assertion reads the number. The
+        counter now lives in the seam mock. All four record `{chainId, address, functionName}`, and
+        both tabs gained the assertion their fakes made impossible — every read and every scan on
+        the SCOPED chain at THAT chain's router, driven through the Network control, verified
+        non-vacuous by pointing the reads at the wallet's chain.
+        Two FIXTURES were never realistic and the real encoder said so: pool and route ids were
+        `'0xpool1'` / `'0xroute1'`, which are not `bytes32` and not even hex. The fake never encoded
+        them, so nothing checked. They are real 32-byte values now.
+        One more shape moved with the chain: block timestamps come from the SCOPED chain's client,
+        so a test seeding "this happened two hours ago" seeds it there rather than on the wallet's
+        provider — which is a different chain whenever these tabs are doing the job they exist for.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
