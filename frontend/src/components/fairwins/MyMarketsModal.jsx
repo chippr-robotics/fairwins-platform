@@ -76,6 +76,23 @@ function MyMarketsModal({
   const { isConnected, account, chainId } = useWallet()
   const { signer, sendCalls, loginMethod } = useWeb3()
   const isPasskey = loginMethod === 'passkey'
+
+  /*
+   * THE LIST'S WRITES READ THE SIGNER THROUGH A REF TOO (spec 110 T040).
+   *
+   * These hooks name no target chain, so `useGaslessWrite` never switches inside them — which is
+   * why they looked exempt. They are not: the HANDLER around them runs immediately after the
+   * re-entry effect fires, and that effect fires on the render where `chainId` reached the
+   * wager's chain, which is one render BEFORE the chain-scoped signer is rebuilt. So the
+   * `selfSubmit` closure captured at that render holds the pre-switch signer and broadcasts on
+   * the old chain, while `settleOnWagerChain` — which polls a per-render ref — correctly saw the
+   * later, settled one and reported success. The settle was right and the closure was stale.
+   *
+   * CLM-01 is the only claim in the suite that changes chain, so it is the only one that could
+   * ever show this.
+   */
+  const signerRef = useRef(signer)
+  useEffect(() => { signerRef.current = signer })
   /*
    * Spec 110 Phase 4 (T040) — the action goes to the WAGER's chain, not the wallet's.
    *
@@ -837,7 +854,7 @@ function MyMarketsModal({
   const claimPayoutTx = useGaslessWrite('claimPayout', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const tx = await signer.sendTransaction({
+      const tx = await signerRef.current.sendTransaction({
         to: getContractAddressForChain('wagerRegistry', chainId),
         data: registryCall('claimPayout', [wagerId]),
       })
@@ -863,12 +880,6 @@ function MyMarketsModal({
    */
   const afterSettleRef = useRef(null)
   const handlersRef = useRef({})
-  useEffect(() => {
-    const pending = afterSettleRef.current
-    if (!pending || Number(chainId) !== pending.chainId) return
-    afterSettleRef.current = null
-    pending.run()
-  }, [chainId])
 
   const handleClaimPayout = useCallback(async (market) => {
     if (!isPasskey && !signer) return
@@ -977,7 +988,7 @@ function MyMarketsModal({
   const claimRefundRowTx = useGaslessWrite('claimRefund', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const tx = await signer.sendTransaction({
+      const tx = await signerRef.current.sendTransaction({
         to: getContractAddressForChain('wagerRegistry', chainId),
         data: registryCall('claimRefund', [wagerId]),
       })
@@ -1156,7 +1167,7 @@ function MyMarketsModal({
     }
   }, [account, signer, isPasskey, sendCalls, chainId, chainOf, settleOnWagerChain, dismissMarket, markWagerRead, refreshFriendMarkets, fireToast, claimRefundRowTx])
 
-  // The re-entry effect calls these by name once the wallet has settled on the wager's chain.
+  // The re-entry effect below calls these by name once the wallet has settled on the wager's chain.
   useEffect(() => {
     handlersRef.current = {
       claim: handleClaimPayout,
@@ -1164,6 +1175,28 @@ function MyMarketsModal({
       clearExpired: handleClearExpired,
     }
   })
+
+  /*
+   * RE-ENTRY, AND IT MUST BE DECLARED *AFTER* THE REF IT READS.
+   *
+   * React runs effects in DECLARATION order. This effect used to sit beside the refs above —
+   * before the handlers exist, and so before the effect that refreshes `handlersRef` — so on the
+   * render where the chain finally settled it fired FIRST and called the PREVIOUS render's
+   * handler, still closed over the pre-switch `chainId`. That handler computed `mustSwitch` from
+   * the stale chain, armed the hand-off again, settled a wallet that was already settled, and
+   * returned. Nothing re-triggered the effect, because the chain had already finished changing.
+   *
+   * The visible result was a claim that produced no transaction and no error: CLM-01 clicks
+   * "Claim Winnings" and the screenshot is a button and an empty space. It is the only claim in
+   * the suite that has to change chain — every later one starts already settled and never
+   * re-enters — which is why the unit suite and the no-chain tier could not see it.
+   */
+  useEffect(() => {
+    const pending = afterSettleRef.current
+    if (!pending || Number(chainId) !== pending.chainId) return
+    afterSettleRef.current = null
+    pending.run()
+  }, [chainId])
 
   if (!isOpen) return null
 
