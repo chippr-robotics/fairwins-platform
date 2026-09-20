@@ -20,6 +20,7 @@ import { useVaultQueueAcrossChains } from '../../hooks/useVaultQueueAcrossChains
 import { summarizeQueue } from '../../lib/custody/vaultGroups'
 import { STATUS, approvalsRemaining } from '../../lib/custody/proposalStatus'
 import { chainDisplayName } from '../../lib/custody/chainName'
+import { chainSwitchRefusal } from '../../lib/chains/submitOn'
 import { describeProposal } from '../../lib/custody/describeProposal'
 import { NETWORKS } from '../../config/networks'
 import { getContractAddressForChain } from '../../config/contracts'
@@ -143,9 +144,25 @@ export default function VaultQueueView({ group }) {
         if (!switchNetwork) throw new Error('This wallet cannot switch networks from here.')
         await switchNetwork(row.chainId)
       } catch {
+        /*
+         * Spec 110 T029 — the SHARED refusal, not a fifth private copy of it.
+         *
+         * This surface runs its own settle (switch, then defer the action until the proposals
+         * hook has re-bound to the row's chain), so T026's unification of the LOOP never reached
+         * it and it kept a sentence of its own: "Approval not sent — this proposal is on Base,
+         * and the wallet stayed on Polygon." That named both chains, so every test asserting on
+         * the chain NAMES passed and the divergence stayed invisible. The noun is still this
+         * surface's — "This approval" belongs in a queue row — and it is the only part that
+         * differs from every other write in the app.
+         */
         setRowError(
           row.safeTxHash,
-          `${ACTION_LABEL[kind]} not sent — this proposal is on ${chainDisplayName(row.chainId)}, and the wallet stayed on ${chainDisplayName(walletChainId)}.`,
+          chainSwitchRefusal({
+            to: Number(row.chainId),
+            from: Number(walletChainId),
+            chainName: chainDisplayName,
+            subject: `This ${ACTION_LABEL[kind].toLowerCase()}`,
+          }).message,
         )
         return
       }

@@ -60,6 +60,38 @@ const num = (v) => (v == null ? null : Number(v))
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /**
+ * THE ONE PLACE THE REFUSAL SENTENCE IS COMPOSED.
+ *
+ * T026 unified the switch-then-settle LOOP, which unified the sentence for every surface that
+ * runs the loop. It did not reach a surface that legitimately runs its own — `VaultQueueView`
+ * switches and then defers the action until the proposals hook has re-bound to the row's chain
+ * (spec 102), which is a two-phase flow `settleWalletOn` does not model — and that surface still
+ * carried a private sentence: *"Approval not sent — this proposal is on Base, and the wallet
+ * stayed on Polygon."* It named both chains, so every test looking for both chain names passed,
+ * and the divergence was invisible until something compared the sentences themselves
+ * (`fast/50-multichain-write-seam` MCW-03, which found it on its first run).
+ *
+ * So the composer is exported separately from the loop: a surface with its own settle can still
+ * speak the one sentence. The NOUN stays the caller's — "This approval" reads better in a queue
+ * row than "This" — and it is the only part that varies.
+ *
+ * @param {object} args
+ * @param {number|null} args.to    the chain the write was going to
+ * @param {number|null} args.from  the chain the wallet stayed on
+ * @param {(chainId: number|null) => string} args.chainName  strict lookup — never a
+ *   default-network fallback, which would name the wrong chain in the one sentence that has to
+ *   be right.
+ * @param {string} [args.subject]  the noun the sentence opens with.
+ * @returns {ChainSwitchRefused}
+ */
+export function chainSwitchRefusal({ to, from, chainName, subject = 'This' }) {
+  return new ChainSwitchRefused(
+    `${subject} goes to ${chainName(to)}, but the wallet stayed on ${chainName(from)}, so nothing has been signed.`,
+    { from, to },
+  )
+}
+
+/**
  * Is this signer ACTUALLY on `target`, or does it merely exist?
  *
  * A truthy signer is not a settled one. The wallet context's `chainId` updates from the
@@ -127,11 +159,7 @@ export async function settleWalletOn(
   const here = num(readWallet()?.chainId)
   if (here === target) return readWallet()
 
-  const refusal = () =>
-    new ChainSwitchRefused(
-      `${subject} goes to ${chainName(target)}, but the wallet stayed on ${chainName(here)}, so nothing has been signed.`,
-      { from: here, to: target },
-    )
+  const refusal = () => chainSwitchRefusal({ to: target, from: here, chainName, subject })
   if (typeof switchNetwork !== 'function') throw refusal()
 
   try {
