@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { encodeFunctionData } from 'viem'
+import { useWalletChainId } from '../hooks/useWalletChainId'
 import { readContract, normalizeAbi } from '../lib/chains/readContract'
 import { formatEther, formatUnits, parseEther, parseUnits } from '../lib/evm/units'
 import { getAddress } from '../lib/evm/address'
-import { useChainId } from 'wagmi'
 import { useWallet } from '../hooks/useWalletManagement'
 import { useEffectiveAccount } from '../hooks/useEffectiveAccount'
 import { useActiveAccount } from '../hooks/useActiveAccount'
@@ -88,7 +88,7 @@ export function DexProvider({ children }) {
   } = useActiveAccount()
   // Spec 088: the shared acting-address seam covers every kind (legacy, hardware, derived).
   const { address: effectiveTradingAddress, isActingAccount: actingForTrade } = useEffectiveAccount()
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
   const network = getNetwork(chainId)
 

@@ -19,9 +19,9 @@
  *                 trusted, protected-value handling has already failed safe.
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { WalletContext } from '../contexts/WalletContext.js'
-import { getCurrentChainId, getNetwork } from '../config/networks'
+import { getNetwork } from '../config/networks'
 import { getActiveBitcoinNetworkId } from '../config/bitcoinNetworks'
 import { createBitcoinGatewayClient, bitcoinGatewayUrl } from '../lib/bitcoin/gatewayClient'
 import { ledgerStore } from '../lib/bitcoin/wallet'
@@ -31,7 +31,7 @@ export function useBitcoinStamps({ gateway, store } = {}) {
   // soft-fail wherever no wallet context exists, never take the page down.
   const wallet = useContext(WalletContext) || {}
   const { address: account, isConnected } = wallet
-  const chainId = useChainId() || getCurrentChainId()
+  const chainId = useWalletChainId()
   const testnetMode = Boolean(getNetwork(chainId)?.isTestnet)
   const networkId = getActiveBitcoinNetworkId(testnetMode)
 

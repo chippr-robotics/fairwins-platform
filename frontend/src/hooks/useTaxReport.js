@@ -8,7 +8,8 @@
  */
 
 import { useCallback, useState, useMemo } from 'react'
-import { useAccount, useChainId } from 'wagmi'
+import { useAccount } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { getNetwork } from '../config/networks'
 import { getContractAddressForChain } from '../config/contracts'
 import { resolvePeriod, resolveCustomPeriod, validateRange } from '../utils/reportPeriods'
@@ -28,7 +29,7 @@ export const REPORT_STATUS = Object.freeze({
 
 export function useTaxReport(options = {}) {
   const wagmiAccount = useAccount()
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   // An explicit `account`/`chainId` option is authoritative (including a null
   // account for the disconnected state); otherwise fall back to wagmi.
   const account = 'account' in options ? options.account : (wagmiAccount?.address ?? null)

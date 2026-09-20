@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from './helpers/walletChain'
 import { DexProvider } from '../contexts/DexContext.jsx'
 import { useDex } from '../hooks/useDex'
 import { NETWORKS } from '../config/networks'
@@ -43,7 +43,7 @@ function Probe() {
 }
 
 function renderAt(chainId) {
-  useChainId.mockReturnValue(chainId)
+  setWalletChain(chainId)
   return render(
     <DexProvider>
       <Probe />

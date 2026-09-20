@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { getDefaultWagerRepository } from '../data/wagers/WagerRepository'
 import { WagerSortKey } from '../constants/wagerDefaults'
 
@@ -38,7 +38,7 @@ export function useMyWagers({
   initialSort,
   initialFilter,
 } = {}) {
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const activeChainId = chainId ?? wagmiChainId
   const repo = useMemo(
     () => repository || getDefaultWagerRepository(activeChainId),

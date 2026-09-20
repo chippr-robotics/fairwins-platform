@@ -27,10 +27,12 @@ export function WalletProvider({ children }) {
   const { connect, connectAsync, connectors } = useConnect()
   const { disconnect, disconnectAsync } = useDisconnect()
   // The WALLET's chain, never the one wagmi's config settled on (issue #1030). Identical to the
-  // old `useChainId()` for every configured chain and for every passkey session; it differs only
-  // when the wallet sits on a chain the app does not configure — the case this context has to be
-  // able to SEE in order to correct it (auto-switch below) instead of silently reading and
-  // displaying a different network.
+  // banned `useChainId()` for every configured chain and for every passkey session; it differs
+  // only when the wallet sits on a chain the app does not configure — the case this context has
+  // to be able to SEE in order to correct it (auto-switch below) instead of silently reading and
+  // displaying a different network — and, since spec 110 Phase 3, when NOTHING is connected: the
+  // fallback is the build's own `getCurrentChainId()` rather than wagmi's `chains[0]`, which is
+  // Polygon even in a testnet build.
   const chainId = useWalletChainId()
   const { switchChain, switchChainAsync } = useSwitchChain()
   const { data: walletClient } = useWalletClient()
