@@ -51,7 +51,6 @@ export const ETHERS_ALLOWLIST = [
   'src/lib/liquidity/__tests__/liquidityRouter.test.js',
   'src/lib/miniapps/hostScope.js',
   'src/lib/payments/__tests__/paymentRequest.test.js',
-  'src/lib/recovery/legacyKeys.js',
   'src/lib/relay/__tests__/intentClient.test.js',
   'src/lib/relay/__tests__/poolIntents.test.js',
   'src/utils/keyRegistryService.js',

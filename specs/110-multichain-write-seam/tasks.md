@@ -1597,6 +1597,84 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         reproducing, and the suite says so. Both knobs are pinned by counting real requests
         through the real transport, each verified non-vacuous (4-instead-of-1 and 8-instead-of-2
         are what the probes print).
+      **`lib/recovery/legacyKeys.js` — the LOCAL-KEY rail, and three divergences the on-chain
+        tier could not have found any earlier than the unit suite did.** A recovered legacy
+        account signs with a key this app holds, so nothing else populates its transactions: the
+        nonce, the fee, the gas limit and the chain id all have to be filled in before anything is
+        signed. That is what made it a different job from the wallet rail rather than the same
+        swap twice — and most of it turned out to be already done. viem's `sendTransaction` runs
+        `prepareTransactionRequest` for a local account, which fills exactly what ethers' `Wallet`
+        filled, so the populator did not have to be written. `class ManagedLegacySigner extends
+        ethers.NonceManager` is deleted rather than re-rolled. The chain became an ARGUMENT
+        throughout (`chainId`, with `client` as the injection point) — `walletFromSecret(secret,
+        provider)` split into `addressFromSecret` and `signerForSecret`, a rename rather than a
+        signature change so a stale caller is a build error instead of an address-only object
+        where a signer was wanted. Allowlist 17 → 16.
+
+        **DIVERGENCE 28 — the fee read is not a drop-in, in two ways, and ETC is on the wrong
+        side of both.** (a) viem's `estimateFeesPerGas` defaults to `type: 'eip1559'` and THROWS
+        `Eip1559FeesNotSupportedError` when the latest block carries no `baseFeePerGas`, where
+        ethers answered `gasPrice` with the 1559 fields null. **ETC 61 and Mordor 63 are exactly
+        that kind of chain and they are in the cohort**, so a member recovering an account there
+        would not have got a worse quote — the whole read would have raised. (b) the EIP-1559 max
+        fee is `base × 1.2 + tip` (`chain.fees.baseFeeMultiplier`) where ethers' was `base × 2 +
+        tip`. That margin is load-bearing HERE and almost nowhere else: the coin leg sends
+        `balance − gasLimit × price` and PINS `maxFeePerGas` to that same price, so the headroom
+        is the only thing covering a base fee that climbs between signing and inclusion. Halving
+        it produces no error — it produces a transaction that never mines, which is the stranding
+        the reserve exists to prevent. Reproduced in `lib/chains/feeData.js` (one seam, used by
+        `providerLike.getFeeData` too) and checked against real ethers over the same fake node,
+        1559 and legacy, including its 1-gwei tip fallback.
+
+        **DIVERGENCE 29 — `tx.wait()` RESOLVES on a reverted transaction where ethers THREW, and
+        this was already shipped.** ethers' `TransactionResponse.wait()` asserts on
+        `receipt.status === 0` and raises CALL_EXCEPTION carrying the receipt; viem's
+        `waitForTransactionReceipt` returns `status: 'reverted'` and no error. The adapter merged
+        in #1618 passed that straight through. Roughly forty converted call sites are written
+        against the throw — `MarketAcceptanceModal` and `useOpenChallengeAccept` both do
+        `await approveTx.wait()` and then PAY, and the legacy sweep records the asset as sent — so
+        a silently-resolving revert is a payment against an allowance that was never granted and
+        an outcome that says a member's money moved. Fixed once, in `ethersCompat.waitForReceipt`,
+        used by both signer rails; `provider.getTransactionReceipt`/`waitForTransaction`
+        deliberately do NOT throw, because ethers' own provider methods returned a status-0
+        receipt. Pinned by driving a real ethers signer and the adapter over the same reverted
+        receipt and requiring both to reject.
+
+        **DIVERGENCE 30 — viem's nonce manager has no stale-read guard AT ZERO, which is the
+        account this module is about.** Its guard reads `if (previousNonce > 0 && nonce <=
+        previousNonce) return previousNonce + 1`, so an account whose last consumed nonce was 0
+        falls through it: a node still answering 0 hands the second transaction the first's nonce
+        and it is refused "nonce too low". That is precisely the spec-098 approve-then-pay failure
+        `ManagedLegacySigner` was written for, and a recovered account that has never sent
+        anything is exactly the account it happens to. The header of the first draft of
+        `localKeySigner.js` claimed viem "reproduces all three behaviours"; writing the test that
+        was supposed to pin them is what showed the claim was true only above zero. Closed with a
+        per-(account, chain) floor inside the manager's own SOURCE — so viem's re-read per send is
+        kept and only the zero case changes — and `reset` drops the floor as well, because a send
+        that threw consumed nothing. All four behaviours are pinned over a real signed envelope,
+        and removing the floor fails exactly one of them.
+
+        **Also found by the new tests, not by CI: the wallet client's transport carried viem's
+        DEFAULT retries** — divergence 24 again, in a transport that DELEGATES to
+        `publicClient.request`, so the default did not add retries, it multiplied them. It applies
+        to probes that are meant to fail: viem asks a node for `eth_fillTransaction` before it
+        populates, and a node answering anything other than "method not found" is asked four times
+        per send. Measured at 5.3s per transfer; `retryCount: 0` brings the suite from 127s to
+        3.3s.
+
+        **The fakes were replaced, not ported.** `legacyKeysMultiAsset.test.js` mocked `ethers`
+        itself: a `StubContract` whose constructor ignored the ABI and whose `transfer` recorded
+        its own arguments. It could not fail on anything this module actually gets wrong — a
+        transfer encoded against the wrong function, arguments in the wrong order, a chain id that
+        never reached the signature — because nothing was ever encoded. Both suites now drive a
+        REAL viem client over a fake EIP-1193 node that PARSES what it is handed, so every nonce,
+        fee field and calldata assertion is about bytes a chain would have accepted. One
+        assertion changed meaning as a result and the change is kept visible: a zero
+        `maxPriorityFeePerGas` is RLP-encoded as an empty field, so a parsed transaction reports
+        it absent — absent and zero are the same bytes, and the node cannot tell them apart
+        either. Derivation parity (`derivationParity.test.js`) keeps real ethers as the oracle
+        over generated phrases and keys: a wrong path here shows a member an address that is not
+        theirs, tells them the import worked, and errors nowhere.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

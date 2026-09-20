@@ -44,21 +44,7 @@
  */
 import { toHex } from 'viem'
 import { primaryTypeOf } from '../evm/typedData'
-
-/** viem's receipt, in the shape ethers' callers read. */
-function toEthersReceipt(receipt) {
-  return {
-    ...receipt,
-    // ethers v6 names it `hash`; viem keeps the RPC's `transactionHash`. Both are kept so a
-    // caller reading either is right.
-    hash: receipt.transactionHash,
-    // ethers: 1 | 0. viem: 'success' | 'reverted'. A caller testing `status === 1` would read
-    // EVERY successful receipt as a failure if this were passed through.
-    status: receipt.status === 'success' ? 1 : 0,
-    blockNumber: receipt.blockNumber == null ? receipt.blockNumber : Number(receipt.blockNumber),
-    // gasUsed stays a bigint, as ethers returned it — callers `.toString()` it.
-  }
-}
+import { providerLike, waitForReceipt } from './ethersCompat'
 
 /**
  * @param {object} io
@@ -71,106 +57,17 @@ export function walletSigner({ walletClient, publicClient, address }) {
   if (!walletClient || !publicClient || !address) return null
   const account = walletClient.account ?? address
 
-  const providerLike = {
-    /*
-     * DIVERGENCE 27 — `getNetwork()` answers with the chain this signer was BUILT FOR, not the
-     * chain the wallet is on right now, and ethers' static network is what made that true.
-     *
-     * WalletContext built `new BrowserProvider(walletClient.transport, { chainId, name })` with
-     * a FIXED network, so a pre-switch signer kept answering with its OLD chain. That is
-     * load-bearing, not incidental: `settleWalletOn` tells a settled signer from a stale one by
-     * asking exactly this question (`signerIsOn`), and waits until the signer's OWN provider
-     * reports the target — because "the wallet is on the target chain" and "this signer belongs
-     * to the target chain" are different facts, and pairing the new chainId with the pre-switch
-     * signer is the race that check exists to lose safely.
-     *
-     * Asking the wallet live (`publicClient.getChainId()`) broke it: the moment the wallet
-     * switched, a STALE signer answered with the target, `signerIsOn` said yes, the settle loop
-     * handed back the pre-switch signer, and viem's chain assertion then refused the send. The
-     * cross-chain wrap never reached its success notice — `45-wrap-cross-chain` WXC-01 on the
-     * on-chain tier, with WXC-03's disabled Unwrap button following from the missing balance.
-     *
-     * The assertion in `sendTransaction` is KEPT for the same reason: ethers refused a stale send
-     * too, as `network changed: 63 => 80002` from its fixed-network provider. Both libraries
-     * refuse; only the way they answer `getNetwork` differed.
-     */
-    async getNetwork() {
-      const configured = walletClient.chain?.id
-      if (configured != null) {
-        return { chainId: BigInt(configured), name: walletClient.chain?.name ?? `chain-${configured}` }
-      }
-      // No chain was configured (the window.ethereum fallback path): ask, as ethers' detecting
-      // BrowserProvider did when it was given no network.
-      const chainId = await publicClient.getChainId()
-      return { chainId: BigInt(chainId), name: `chain-${chainId}` }
-    },
-    getCode: (addr) => publicClient.getBytecode({ address: addr }).then((code) => code ?? '0x'),
-    getBalance: (addr) => publicClient.getBalance({ address: addr }),
-    getBlockNumber: () => publicClient.getBlockNumber().then(Number),
-    call: (tx) => publicClient.call({ to: tx.to, data: tx.data, account: tx.from ?? account }).then((r) => r.data ?? '0x'),
-    estimateGas: (tx) => publicClient.estimateGas({ ...tx, account: tx.from ?? account }),
-    async getTransactionReceipt(hash) {
-      const receipt = await publicClient.getTransactionReceipt({ hash }).catch(() => null)
-      return receipt ? toEthersReceipt(receipt) : null
-    },
-    async waitForTransaction(hash, confirmations = 1) {
-      return toEthersReceipt(await publicClient.waitForTransactionReceipt({ hash, confirmations }))
-    },
-    /*
-     * THE PROVIDER IS HANDED TO OTHER LIBRARIES, so its surface is not "what the app calls on it".
-     *
-     * Found by the on-chain tier (`40-acting-account-purchase` AAP-03:
-     * `checkProvider(...).getTransactionCount is not a function`). A recovered legacy account
-     * signs with its OWN ethers signer — `legacyKeys.js` does `wallet.connect(provider)` — and
-     * that signer POPULATES and BROADCASTS through whatever provider it was given, which on the
-     * acting-account path is this one. An audit of `provider.x(` call sites could never have
-     * found that: the caller is inside ethers.
-     *
-     * So these three are here to satisfy ethers' `AbstractSigner`, not the app:
-     * `getTransactionCount` (nonce), `getFeeData` (already below), `estimateGas` + `getNetwork`
-     * (above), and `broadcastTransaction` — the one `sendTransaction` ends in. `getBlock` rides
-     * along because fee logic reaches for it. `src/test/chains/walletSigner.test.js` drives a real
-     * `ethers.Wallet` connected to this object through a full send, which is the only check that
-     * proves the shape rather than enumerating it.
-     */
-    getTransactionCount: (addr, blockTag = 'latest') =>
-      publicClient.getTransactionCount({ address: addr, blockTag }),
-    broadcastTransaction: async (signedTx) => {
-      const hash = await publicClient.sendRawTransaction({ serializedTransaction: signedTx })
-      return {
-        hash,
-        async wait(confirmations = 1) {
-          return toEthersReceipt(await publicClient.waitForTransactionReceipt({ hash, confirmations }))
-        },
-      }
-    },
-    async getBlock(blockTagOrNumber = 'latest') {
-      const block =
-        typeof blockTagOrNumber === 'number'
-          ? await publicClient.getBlock({ blockNumber: BigInt(blockTagOrNumber) })
-          : await publicClient.getBlock({ blockTag: blockTagOrNumber })
-      return { ...block, number: Number(block.number), timestamp: Number(block.timestamp) }
-    },
-
-    async getFeeData() {
-      const fees = await publicClient.estimateFeesPerGas()
-      return {
-        maxFeePerGas: fees.maxFeePerGas ?? null,
-        maxPriorityFeePerGas: fees.maxPriorityFeePerGas ?? null,
-        gasPrice: fees.gasPrice ?? null,
-      }
-    },
-  }
+  const provider = providerLike(publicClient, { chain: walletClient.chain ?? null, account })
 
   return {
-    provider: providerLike,
+    provider,
 
     async getAddress() {
       return address
     },
 
     async estimateGas(tx) {
-      return providerLike.estimateGas(tx)
+      return provider.estimateGas(tx)
     },
 
     async signMessage(message) {
@@ -219,7 +116,7 @@ export function walletSigner({ walletClient, publicClient, address }) {
       return {
         hash,
         async wait(confirmations = 1) {
-          return toEthersReceipt(await publicClient.waitForTransactionReceipt({ hash, confirmations }))
+          return waitForReceipt(publicClient, hash, confirmations)
         },
       }
     },

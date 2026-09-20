@@ -193,17 +193,49 @@ describe('walletSigner — the same wire behaviour as the ethers signer it repla
     expect(typeof receipt.status).toBe('number')
   })
 
-  it('a reverted receipt reports 0, the way every caller tests it', async () => {
-    const t = fakeTransport({
-      eth_getTransactionReceipt: {
-        transactionHash: TX_HASH, transactionIndex: '0x0', blockHash: '0x' + 'cd'.repeat(32),
-        blockNumber: '0x4000001', from: ACCOUNT, to: TO, cumulativeGasUsed: '0x5208',
-        gasUsed: '0x5208', contractAddress: null, logs: [], logsBloom: '0x' + '00'.repeat(256),
-        status: '0x0', type: '0x0', effectiveGasPrice: '0x1',
-      },
-    })
-    const tx = await makeAdapter(t).sendTransaction({ to: TO, data: DATA })
-    await expect(tx.wait()).resolves.toMatchObject({ status: 0 })
+  /*
+   * DIVERGENCE 29 — a reverted transaction must REJECT out of `wait()`.
+   *
+   * viem's `waitForTransactionReceipt` resolves with `status: 'reverted'`; ethers' `wait()`
+   * raised CALL_EXCEPTION. Callers here approve and then pay on the strength of the throw
+   * (`MarketAcceptanceModal`, `useOpenChallengeAccept`), so resolving quietly is a payment
+   * against an allowance that was never granted. Both signers are driven over the same
+   * reverted receipt so the claim is a comparison, not an assertion about one of them.
+   */
+  it('a reverted transaction rejects out of wait(), as the ethers signer does', async () => {
+    const revertedReceipt = {
+      transactionHash: TX_HASH, transactionIndex: '0x0', blockHash: '0x' + 'cd'.repeat(32),
+      blockNumber: '0x4000001', from: ACCOUNT, to: TO, cumulativeGasUsed: '0x5208',
+      gasUsed: '0x5208', contractAddress: null, logs: [], logsBloom: '0x' + '00'.repeat(256),
+      status: '0x0', type: '0x0', effectiveGasPrice: '0x1',
+    }
+    const ours = await makeAdapter(fakeTransport({ eth_getTransactionReceipt: revertedReceipt }))
+      .sendTransaction({ to: TO, data: DATA })
+    const theirTx = await makeEthersSigner(fakeTransport({ eth_getTransactionReceipt: revertedReceipt }))
+      .sendTransaction({ to: TO, data: DATA })
+
+    await expect(theirTx.wait()).rejects.toMatchObject({ code: 'CALL_EXCEPTION' })
+    const raised = await ours.wait().then(() => null, (e) => e)
+    expect(raised).toBeInstanceOf(Error)
+    expect(raised.code).toBe('CALL_EXCEPTION')
+    // The receipt rides on the error, because the sweep prices what a failed leg still burned.
+    expect(raised.receipt.status).toBe(0)
+    expect(raised.receipt.gasUsed).toBe(21000n)
+  })
+
+  /*
+   * `signer.estimateGas` is read by two call sites (`useFriendMarketCreation`,
+   * `blockchainService`'s approve), and it was reaching a method on the wrong object — the
+   * factory, not the provider it builds — which throws `not a function` at the moment a member
+   * creates a wager. Nothing caught it: the suite exercised the signer's OWN estimate inside
+   * `sendTransaction` and never this passthrough, so the two looked like one thing.
+   */
+  it('estimates gas through its provider, as ethers\u2019 signer does', async () => {
+    const gas = await makeAdapter(ours).estimateGas({ to: TO, data: DATA })
+    const theirGas = await makeEthersSigner(theirs).estimateGas({ to: TO, data: DATA })
+    expect(gas).toBe(21000n)
+    expect(gas).toBe(theirGas)
+    expect(paramsFor(ours, 'eth_estimateGas').from.toLowerCase()).toBe(ACCOUNT.toLowerCase())
   })
 
   it('signs a message as UTF-8 bytes, the same request ethers makes', async () => {

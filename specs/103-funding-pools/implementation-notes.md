@@ -70,6 +70,9 @@ connected legacy signer: `walletFromSecret` now returns an ethers `NonceManager`
 connected wallet (own nonce count per send, reset on a refused send, explicit nonces passed through
 so the sweep's numbering is untouched), with a regression test. The failed job could not be re-run
 from here (the integration lacks the permission), so the fix is what re-runs CI.
+*(Later, spec 110 T028: that signer is now built by `signerForSecret` over a viem local account,
+and the nonce discipline lives in `lib/chains/localKeySigner.js`. The behaviours described here
+still hold — including at nonce 0, which viem's own manager does not cover and this seam does.)*
 
 **Cypress in the authoring sandbox.** Every run that performs the header connect flow (click "Connect
 Wallet" → pick the injected connector) dies with `read ECONNRESET` in the Cypress server process on the
