@@ -1,12 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from './helpers/walletChain'
 import { DexProvider } from '../contexts/DexContext.jsx'
 import { useDex } from '../hooks/useDex'
 
 // Spec 033 — DexContext must expose the active network's `dexProvider` so the
 // swap UI can name the provider. wagmi is mocked globally in test/setup.js; we
-// override useChainId per render. The wallet hook is stubbed (no provider) since
+// put the wallet on a chain per render (`setWalletChain`). The wallet hook is stubbed since
 // provider identity is derived purely from the active network.
 
 vi.mock('../hooks/useWalletManagement', () => ({
@@ -25,7 +25,7 @@ function ProviderProbe() {
 }
 
 function renderAt(chainId) {
-  useChainId.mockReturnValue(chainId)
+  setWalletChain(chainId)
   return render(
     <DexProvider>
       <ProviderProbe />

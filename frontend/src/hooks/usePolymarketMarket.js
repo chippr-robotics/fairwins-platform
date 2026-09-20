@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { getNetwork, getCurrentChainId } from '../config/networks'
 import { normaliseGammaMarket } from './usePolymarketSearch'
 import logger from '../utils/logger'
@@ -29,7 +29,7 @@ function isRealConditionId(conditionId) {
  * "live market info unavailable" state (the bound challenge terms never depend on this).
  */
 export function usePolymarketMarket(conditionId, { enabled = true } = {}) {
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
   const apiBase = apiBaseFor(chainId)
 

@@ -240,9 +240,13 @@ vi.mock('wagmi', () => ({
   // Real-wagmi passthrough: createConnector is an identity wrapper (spec 041
   // passkey connector unit tests instantiate the connector function directly).
   createConnector: (createConnectorFn) => createConnectorFn,
+  // `chainId` is part of the CONNECTION (spec 110 Phase 3, #1594): the connector's
+  // `chainChanged` handler writes it verbatim, where wagmi's `useChainId()` filtered it to
+  // configured chains and produced #1030. 61 keeps the default the old `useChainId` mock had.
   useAccount: vi.fn(() => ({
     address: '0x1234567890123456789012345678901234567890',
-    isConnected: true
+    isConnected: true,
+    chainId: 61
   })),
   useConnect: vi.fn(() => ({
     connect: vi.fn(),
@@ -251,7 +255,6 @@ vi.mock('wagmi', () => ({
   useDisconnect: vi.fn(() => ({
     disconnect: vi.fn()
   })),
-  useChainId: vi.fn(() => 61), // Unsupported chain — keeps the no-stablecoin path under test
   useSwitchChain: vi.fn(() => ({
     switchChain: vi.fn()
   })),

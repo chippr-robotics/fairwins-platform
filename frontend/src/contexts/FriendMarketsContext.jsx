@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { useAccount, useChainId } from 'wagmi'
+import { useAccount } from 'wagmi'
+import { useWalletChainId } from '../hooks/useWalletChainId'
 import { fetchFriendMarketsForUser } from '../utils/blockchainService'
 import { FriendMarketsContext } from './FriendMarketsContext'
 
@@ -67,7 +68,7 @@ function saveDismissed(address, ids) {
 
 export function FriendMarketsProvider({ children }) {
   const { address, isConnected } = useAccount()
-  const chainId = useChainId()
+  const chainId = useWalletChainId()
   const [friendMarkets, setFriendMarkets] = useState(() => loadFromStorage(chainId))
   const [loading, setLoading] = useState(false)
   const [dismissedIdsArr, setDismissedIdsArr] = useState(() => loadDismissed(address))

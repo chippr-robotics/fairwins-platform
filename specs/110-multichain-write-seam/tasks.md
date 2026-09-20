@@ -162,9 +162,9 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       identical every time, negatives included. Two regression tests were added for the things no
       value assertion can see: that the function is not a Promise, and that the compact form
       recovers.
-- [ ] T021 [P] `lib/hardware/hardwareSigner.js` → viem `toAccount({ address, signMessage,
+- [x] T021 [P] `lib/hardware/hardwareSigner.js` → viem `toAccount({ address, signMessage,
       signTransaction, signTypedData })`; recover-and-verify-before-broadcast behavior preserved.
-- [ ] T022 [P] `lib/recovery/legacyKeys.js`: nonce management re-derived on viem's account
+- [x] T022 [P] `lib/recovery/legacyKeys.js`: nonce management re-derived on viem's account
       `nonceManager` — port the reasoning ("a refused transaction never consumed its nonce"), with
       tests proving refusal/re-submit sequences.
 
@@ -1828,10 +1828,58 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 
 ## Phase 3 — Ambient-chain ban (#1594)
 
-- [ ] T030 Lint ban on `useChainId()` (wagmi) in `frontend/src`; wallet location reads
-      `useAccount().chainId`; target chains come from actions. 27 call sites *(re-measure)* → 0.
-- [ ] T031 Delete `hooks/useWalletChainId.js`; honest rendering for a wallet on a chain absent
-      from the build (acceptance scenario 7) with a test.
+- [x] T030 Lint ban on `useChainId()` (wagmi) in `frontend/src`; wallet location reads
+      `useAccount().chainId`; target chains come from actions. **17 call sites across 14 files → 0.**
+
+      **The ban rides INSIDE the existing `no-restricted-imports` rule, and that is not a style
+      choice.** eslint flat config REPLACES a rule rather than merging it, so a second block
+      setting `no-restricted-imports` would have silently switched the ethers ban off for every
+      file it matched — a lint rule that quietly disables another lint rule is the worst possible
+      shape for a gate. The cost of sharing the rule is that its `ignores` (the 15-entry
+      `ETHERS_ALLOWLIST`, plus `src/test/**`) exempt those files from the wagmi ban too, so
+      `src/test/lint/ambientChainBan.test.js` walks the shipped tree independently and sees exactly
+      the files the rule cannot.
+
+      **DIVERGENCE 33 — the fallback was wagmi's default chain, and nine call sites had already
+      written down that they wanted something else.** `useWalletChainId` fell back to
+      `useChainId()` when there was no connection, which looked equivalent to the build's own
+      default and is not: wagmi's is `chains[0]` = **Polygon**, a MAINNET chain, and it stays
+      Polygon in a TESTNET build where `getCurrentChainId()` is Amoy. That is the cohort-crossing
+      read constitution III forbids, served to every disconnected member of a testnet build.
+
+      It also explains something that read as deliberate and never worked. Nine call sites wrote
+      `useChainId() || getCurrentChainId()` — an explicit fallback to the build's chain that could
+      **never fire**, because `useChainId()` always returns something. They were asking for
+      precisely what the hook now does and silently getting Polygon. Those `||` clauses are
+      deleted rather than carried over: dead code that documents an intention the code did not
+      have is worse than no comment.
+
+      **The test fixtures were the bulk of the work, and converting them was the honest option.**
+      ~20 suites steered the app with `useChainId.mockReturnValue(x)` against a global wagmi mock.
+      Keeping that knob alive would have left a mock of a banned hook as the way every test says
+      where the wallet is — the same "headroom where it could quietly return" the ethers ratchet
+      test exists to close. So the global mock's `useAccount` carries `chainId`, its `useChainId`
+      is gone, and suites steer the CONNECTION through `src/test/helpers/walletChain.js#setWalletChain`,
+      which merges rather than clobbering whatever the suite already configured.
+- [x] T031 Honest rendering for a wallet on a chain absent from the build (acceptance scenario 7),
+      with a test: `src/test/network/walletChainId.test.jsx`. With the wallet on **BNB 56** —
+      deliberately absent from `src/wagmi.js` — `useWalletChainId` reports 56, `useNetworkMode`
+      returns `network: undefined` and `mode: 'other'`, and nothing names a configured network.
+      Both halves are non-vacuous: restoring wagmi's default as the fallback fails the fallback
+      test, and restoring `getNetwork()`'s forgiving lookup in `useNetworkMode` fails the
+      scenario-7 test — each exactly one.
+
+      **DELIBERATE DEVIATION — `hooks/useWalletChainId.js` is KEPT, where #1594 says to delete it.**
+      The issue's reasoning is sound and its conclusion followed from a premise this task changed:
+      the file "existed purely as the workaround" for `useChainId()`, so banning the hook should
+      leave nothing to work around. But the file does two things, and only one of them was the
+      workaround. It also owns the DISCONNECTED fallback — and divergence 33 is exactly the
+      finding that this fallback is a decision with a wrong answer available. Deleting the file
+      means every one of ~17 call sites re-inlines `useAccount().chainId ?? <something>`, and the
+      first one to write `?? useChainId()` out of habit, or to omit the fallback and hand a
+      surface `undefined`, does so with no gate watching. That is the four-copies-of-a-loop shape
+      T026 spent this spec's own effort removing. The file stays as the ONE seam, and it no longer
+      imports wagmi's chain hook at all — which is what "the workaround is gone" actually means.
 
 ## Phase 4 — Surfaces name their target (#1595)
 

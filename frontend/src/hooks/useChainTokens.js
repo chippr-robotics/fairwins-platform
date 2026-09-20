@@ -1,5 +1,5 @@
 import { useMemo } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { getNetwork, getCurrentChainId } from '../config/networks'
 
 /**
@@ -17,7 +17,7 @@ import { getNetwork, getCurrentChainId } from '../config/networks'
  * effects (issue #1027 — the Bridge quote loop).
  */
 export function useChainTokens() {
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
 
   return useMemo(() => {

@@ -7,7 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 
-import { useConnect, useChainId } from 'wagmi'
+import { useConnect } from 'wagmi'
 
 const { detectCapability, getPasskeySupport } = vi.hoisted(() => ({
   detectCapability: vi.fn(),
@@ -19,6 +19,7 @@ vi.mock('../../lib/passkey/credentials', () => ({ detectCapability }))
 // login button that fails at account creation (spec 041 FR-004).
 vi.mock('../../config/passkeySupport', () => ({ getPasskeySupport }))
 
+import { setWalletChain } from '../../test/helpers/walletChain'
 import { useConnectorAvailability } from '../useConnectorAvailability'
 
 const CONNECTORS = [
@@ -30,7 +31,7 @@ const CONNECTORS = [
 beforeEach(() => {
   vi.clearAllMocks()
   useConnect.mockReturnValue({ connect: vi.fn(), connectors: CONNECTORS })
-  useChainId.mockReturnValue(137)
+  setWalletChain(137)
   detectCapability.mockResolvedValue({ available: true, platformAuthenticator: true })
   getPasskeySupport.mockReturnValue({ supported: true, reason: null })
 })

@@ -6,8 +6,9 @@ import { useContext } from 'react'
 let mockAccount = { address: '0xabc0000000000000000000000000000000000001', isConnected: true }
 let mockChainId = 80002
 vi.mock('wagmi', () => ({
-  useAccount: () => mockAccount,
-  useChainId: () => mockChainId,
+  // The chain rides on the CONNECTION now (spec 110 Phase 3) — `useWalletChainId` reads it
+  // from `useAccount()`, never from wagmi's configured-chain singleton.
+  useAccount: () => ({ ...mockAccount, chainId: mockChainId }),
 }))
 
 // The blockchain fetch returns different wager sets per chain so we can assert
