@@ -183,7 +183,7 @@ suite('HardwareSigner against a real Ledger Ethereum app (Speculos)', () => {
        * the Nano wraps it across lines, so the spaces come out before comparing.
        */
       const review = screens.join(' | ')
-      expect(review.replace(/\s+/g, '')).toContain(TO.replace(/^0x/, '0x'))
+      expect(review.replace(/\s+/g, '')).toContain(TO)
       expect(review, 'the network the member approved').toMatch(/Polygon/)
     }
 

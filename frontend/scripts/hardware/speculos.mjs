@@ -19,9 +19,9 @@
  * script any contributor can run is a seed that gets drained; if a broadcast test ever needs
  * value, it needs a protected environment and a cap, not this file.
  */
-import { execFileSync, execSync } from 'node:child_process'
+import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, writeFileSync, copyFileSync } from 'node:fs'
-import { dirname, resolve } from 'node:path'
+import { basename, dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -69,8 +69,23 @@ const AUTOMATION = {
   ],
 }
 
-const sh = (cmd) => execSync(cmd, { stdio: 'inherit', cwd: ROOT })
-const quiet = (cmd) => { try { return execSync(cmd, { stdio: 'pipe' }).toString() } catch { return '' } }
+/*
+ * Commands are argv ARRAYS, never interpolated strings, and no shell is spawned.
+ *
+ * CodeQL flagged the string form and was right: every path here is absolute and derived from the
+ * checkout's own location, so a repository cloned under a directory containing a space — or a
+ * shell metacharacter — would have produced a command that broke, or worse, ran something else.
+ * `execFileSync` with an array cannot be reinterpreted by a shell, which removes the class rather
+ * than escaping around it.
+ */
+const run = (file, args, opts = {}) => execFileSync(file, args, { stdio: 'inherit', cwd: ROOT, ...opts })
+const quiet = (file, args) => {
+  try {
+    return execFileSync(file, args, { stdio: 'pipe' }).toString()
+  } catch {
+    return ''
+  }
+}
 const docker = process.env.DOCKER ?? 'docker'
 
 function buildApp() {
@@ -83,43 +98,57 @@ function buildApp() {
   mkdirSync(WORK, { recursive: true })
   if (!existsSync(appDir)) {
     console.log(`[speculos] cloning ${APP_ETHEREUM_REPO}@${APP_ETHEREUM_REF}`)
-    sh(`git clone --depth 1 --branch ${APP_ETHEREUM_REF} --recurse-submodules --shallow-submodules ${APP_ETHEREUM_REPO} ${appDir}`)
+    run('git', ['clone', '--depth', '1', '--branch', APP_ETHEREUM_REF,
+      '--recurse-submodules', '--shallow-submodules', APP_ETHEREUM_REPO, appDir])
   }
   console.log(`[speculos] building the Ethereum app for ${MODEL} (this takes a few minutes)`)
-  sh(`${docker} run --rm -v "${appDir}":/app -w /app ${BUILDER_IMAGE} bash -c 'make -j BOLOS_SDK=$${SDK_VAR}'`)
+  // The one string is the SCRIPT handed to bash as a single argv element — the SDK variable is
+  // expanded by that bash, inside the container, and no path is interpolated into it.
+  run(docker, ['run', '--rm', '-v', `${appDir}:/app`, '-w', '/app', BUILDER_IMAGE,
+    'bash', '-c', `make -j BOLOS_SDK=$${SDK_VAR}`])
   copyFileSync(resolve(appDir, `build/${BUILD_DIR}/bin/app.elf`), elf)
   return elf
 }
 
-function up() {
+async function up() {
   const elf = buildApp()
   writeFileSync(resolve(WORK, 'automation.json'), JSON.stringify(AUTOMATION, null, 2))
-  quiet(`${docker} rm -f ${CONTAINER}`)
-  sh(
-    `${docker} run -d --name ${CONTAINER} -p ${PORT}:5000 -v "${WORK}":/apps ${SPECULOS_IMAGE} ` +
-      `--display headless --api-port 5000 --model ${MODEL} ` +
-      `--seed "${TEST_SEED}" --automation file:/apps/automation.json /apps/${elf.split('/').pop()}`,
-  )
-  // Wait for the API rather than sleeping a guessed interval: a fixed sleep is a flake generator.
-  for (let i = 0; i < 60; i += 1) {
-    const out = quiet(`curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:${PORT}/events?currentscreenonly=true`)
-    if (out.trim() === '200') {
-      console.log(`[speculos] ready on http://127.0.0.1:${PORT} (${MODEL})`)
-      return
+  quiet(docker, ['rm', '-f', CONTAINER])
+  run(docker, ['run', '-d', '--name', CONTAINER, '-p', `${PORT}:5000`, '-v', `${WORK}:/apps`,
+    SPECULOS_IMAGE,
+    '--display', 'headless', '--api-port', '5000', '--model', MODEL,
+    '--seed', TEST_SEED,
+    // No `--automation`: the suite drives every button itself, because Speculos' rules fire per
+    // text event rather than per screen and overshoot the decision screen (see the test's header).
+    `/apps/${basename(elf)}`])
+  return waitForApi()
+}
+
+/** Poll the API rather than sleeping a guessed interval: a fixed sleep is a flake generator. */
+async function waitForApi() {
+  for (let i = 0; i < 90; i += 1) {
+    try {
+      const res = await fetch(`http://127.0.0.1:${PORT}/events?currentscreenonly=true`)
+      if (res.ok) {
+        console.log(`[speculos] ready on http://127.0.0.1:${PORT} (${MODEL})`)
+        return
+      }
+    } catch {
+      // Not listening yet — that is the normal case for the first second or two.
     }
-    execFileSync('sleep', ['1'])
+    await new Promise((resolve) => { setTimeout(resolve, 1000) })
   }
-  console.error(`[speculos] never became ready; logs:\n${quiet(`${docker} logs ${CONTAINER}`)}`)
+  console.error(`[speculos] never became ready; logs:\n${quiet(docker, ['logs', CONTAINER])}`)
   process.exit(1)
 }
 
 function down() {
-  quiet(`${docker} rm -f ${CONTAINER}`)
+  quiet(docker, ['rm', '-f', CONTAINER])
   console.log('[speculos] stopped')
 }
 
 const cmd = process.argv[2]
-if (cmd === 'up') up()
+if (cmd === 'up') await up()
 else if (cmd === 'down') down()
 else {
   console.error('usage: speculos.mjs up|down')
