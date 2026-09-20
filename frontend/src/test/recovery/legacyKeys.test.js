@@ -281,6 +281,34 @@ describe('signerForSecret — nonces', () => {
     expect(node.sent.map((t) => t.nonce)).toEqual([0, 1])
   })
 
+  /*
+   * The floor is per (account, CHAIN), and the chain half has to be real.
+   *
+   * Every other test in this block uses a distinct chain id to keep module-level state out of its
+   * neighbours' way, which means they would ALSO pass if the key collapsed to the address alone
+   * and each test happened to run first. This one cannot: the same address sends on two chains in
+   * one test, and a shared floor would carry chain A's count onto chain B — a recovered account
+   * that had just swept on Polygon would start its first Mordor transaction several nonces into
+   * the future and sit there unmined. viem sources the id from `chain.id` (or `eth_chainId`) and
+   * `localKeySigner` always passes a chain, so `undefined` has no way in — asserted, not read.
+   */
+  it('keeps a separate floor per chain — one address on two chains does not share a count', async () => {
+    const first = makeNode({ balance: 10n ** 18n, chainId: 1005, nonce: 0 })
+    const second = makeNode({ balance: 10n ** 18n, chainId: 1006, nonce: 0 })
+
+    const onFirst = signerForSecret({ kind: 'privateKey', secret: PK }, { chainId: 1005, client: first.client })
+    await send(onFirst)
+    await send(onFirst)
+    expect(first.sent.map((t) => t.nonce)).toEqual([0, 1])
+
+    // Chain 1006 has seen nothing from this account, so its first transaction is nonce 0 — not
+    // the 2 a floor shared with chain 1005 would have handed it.
+    const onSecond = signerForSecret({ kind: 'privateKey', secret: PK }, { chainId: 1006, client: second.client })
+    await send(onSecond)
+    expect(second.sent.map((t) => t.nonce)).toEqual([0])
+    expect(second.sent[0].chainId, 'and it really was signed for the second chain').toBe(1006)
+  })
+
   it('passes a caller’s own nonce through untouched — what the multi-asset sweep relies on', async () => {
     const node = makeNode({ balance: 10n ** 18n, chainId: 1004, nonce: 0 })
     const signer = signerForSecret({ kind: 'privateKey', secret: PK }, { chainId: 1004, client: node.client })
