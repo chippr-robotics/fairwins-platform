@@ -3378,7 +3378,7 @@
           "risk": "custody",
           "tests": [],
           "issue": "#1552",
-          "note": "Blocked on T040, not on a test. The claim path is still ambient-chain: MyMarketsModal calls `switchNetwork()` with NO argument, resolves the registry with the wallet chain, and its refusal reads \"Please switch to the correct network\" (naming neither chain). FriendMarketsContext reads ONE chain (`useChainId()`), so a wager living on another network is never listed and the test could not establish its precondition."
+          "note": "T040 has LANDED: the list is estate-wide, every wager carries its chain, and Claim/Refund/Resolve resolve the registry from the wager\\u2019s chain (hooks/useWagerChain.js). The blocker is no longer the product \\u2014 this row is now WRITABLE and wants an on-chain spec: a wager on chain A claimed with the wallet on chain B, asserted by reading the payout back from A. Unit coverage exists (src/test/wagers/useWagerChain.test.jsx, estateWagers.test.js); the money path does not, and the e2e policy requires it here."
         },
         {
           "id": "multichain.refused-switch-discloses",

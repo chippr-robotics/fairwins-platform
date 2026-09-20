@@ -1,17 +1,31 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAccount } from 'wagmi'
 import { useWalletChainId } from '../hooks/useWalletChainId'
-import { fetchFriendMarketsForUser } from '../utils/blockchainService'
+import {
+  readWagersAcrossEstate,
+  wagerEstateChainIds,
+  wagersFrom,
+  unreadableNetworks,
+  tagWagers,
+} from '../lib/wagers/estateWagers'
 import { FriendMarketsContext } from './FriendMarketsContext'
 
 const STORAGE_KEY = 'friendMarkets'
 const DISMISSED_STORAGE_PREFIX = 'mywagers_dismissed:'
 
-// The wager cache is scoped per chain so that wagers fetched on the testnet
-// don't leak into the mainnet view (and vice versa) after a network switch.
-// Each entry is also tagged with the `chainId` it was read from, which lets
-// the UI filter/label wagers defensively even if a legacy (unscoped) cache is
-// still present.
+/*
+ * THE LIST IS THE ESTATE NOW (spec 110 Phase 4, T040 — issue #1595).
+ *
+ * It used to be one chain: the wallet's. That is why Claim could not name a chain — a wager on
+ * another network was never in the list to be claimed, so there was no target to name. The read
+ * spans the build's COHORT (never `listSupportedChainIds()`; constitution III), each chain
+ * answering for itself, and every wager carries the chain it was read from.
+ *
+ * The per-chain cache KEYS are unchanged, deliberately: a member who had wagers cached under
+ * `friendMarkets:137` still sees them on first paint, and a chain the app cannot reach right now
+ * keeps showing what it last knew instead of silently emptying. What changed is that all of the
+ * cohort's caches are loaded, not just the connected chain's.
+ */
 function storageKey(chainId) {
   return chainId ? `${STORAGE_KEY}:${chainId}` : STORAGE_KEY
 }
@@ -31,16 +45,6 @@ function saveToStorage(chainId, markets) {
   } catch {
     // localStorage may be full or unavailable — non-fatal
   }
-}
-
-// Stamp each market with the chain it belongs to and a chain-qualified
-// uniqueId so identical market ids on different chains never collide.
-function tagMarkets(markets, chainId) {
-  return markets.map(m => ({
-    ...m,
-    chainId,
-    uniqueId: `${chainId || 'unknown'}-${m.contractAddress || 'unknown'}-${m.id}`,
-  }))
 }
 
 function dismissedKey(address) {
@@ -66,75 +70,80 @@ function saveDismissed(address, ids) {
   }
 }
 
+/**
+ * Every read chain's cached wagers, for the first paint before any chain has answered.
+ *
+ * The SAME roster the read uses, not the raw cohort: a chain the read will never ask about must
+ * not be painted from its cache either, or a stale entry outlives the chain that produced it and
+ * the first paint disagrees with every paint after it.
+ */
+function loadEstateFromStorage() {
+  return wagerEstateChainIds().flatMap((id) => tagWagers(loadFromStorage(id), id))
+}
+
 export function FriendMarketsProvider({ children }) {
   const { address, isConnected } = useAccount()
-  const chainId = useWalletChainId()
-  const [friendMarkets, setFriendMarkets] = useState(() => loadFromStorage(chainId))
+  // Still read — `addMarket` stamps an optimistically-created wager with the chain it was created
+  // on — but it is NO LONGER what decides which chains are read. That is the change.
+  const walletChainId = useWalletChainId()
+  const [friendMarkets, setFriendMarkets] = useState(loadEstateFromStorage)
   const [loading, setLoading] = useState(false)
+  // One three-state reading per chain, kept so a surface can NAME the network it could not read
+  // rather than implying the member has no wagers there (spec 071's partial rule).
+  const [readings, setReadings] = useState([])
   const [dismissedIdsArr, setDismissedIdsArr] = useState(() => loadDismissed(address))
 
-  // Fetch friend markets from blockchain when the wallet connects or the
-  // active network changes. The chainId dependency is essential: when the
-  // user toggles testnet ↔ mainnet we must re-query the chain rather than
-  // keep showing wagers that only exist on the previous network.
-  useEffect(() => {
-    // Immediately swap to the selected network's cached wagers (or nothing)
-    // so stale wagers from the previous network don't linger during the fetch.
-    setFriendMarkets(loadFromStorage(chainId))
-
+  /*
+   * Read the estate when the wallet connects. NOT on a chain change: the list no longer depends
+   * on where the wallet is, which is the point — a member switching networks used to watch their
+   * wagers disappear and come back.
+   *
+   * A chain that answers replaces ITS OWN cache; a chain that does not is left alone, so its
+   * cached wagers survive and `readings` carries the reason.
+   */
+  const runningRef = useRef(0)
+  const readEstate = useCallback(async () => {
     if (!address || !isConnected) return
-
-    let cancelled = false
-
-    const fetchMarkets = async (attempt = 0) => {
-      setLoading(true)
-      try {
-        const blockchainMarkets = await fetchFriendMarketsForUser(address, chainId)
-        if (cancelled) return
-
-        const marketsWithUniqueIds = tagMarkets(blockchainMarkets, chainId)
-
-        setFriendMarkets(marketsWithUniqueIds)
-        saveToStorage(chainId, marketsWithUniqueIds)
-      } catch (error) {
-        console.error('[FriendMarketsContext] Error fetching friend markets:', error)
-        if (!cancelled && attempt < 2) {
-          const delay = (attempt + 1) * 2000
-          setTimeout(() => fetchMarkets(attempt + 1), delay)
-          return
-        }
-        // On final failure, keep existing state (localStorage cache) as fallback
-      }
-      if (!cancelled) setLoading(false)
-    }
-
-    fetchMarkets()
-    return () => { cancelled = true }
-  }, [address, isConnected, chainId])
-
-  // Manual refresh
-  const refresh = useCallback(async () => {
-    if (!address || !isConnected) return
+    const run = ++runningRef.current
     setLoading(true)
-    try {
-      const blockchainMarkets = await fetchFriendMarketsForUser(address, chainId)
-      const marketsWithUniqueIds = tagMarkets(blockchainMarkets, chainId)
-      setFriendMarkets(marketsWithUniqueIds)
-      saveToStorage(chainId, marketsWithUniqueIds)
-    } catch (error) {
-      console.error('[FriendMarketsContext] Error refreshing friend markets:', error)
+    const next = await readWagersAcrossEstate(address)
+    if (runningRef.current !== run) return // a newer read superseded this one
+    setReadings(next)
+    for (const reading of next) {
+      if (reading.status === 'read') saveToStorage(reading.chainId, reading.value)
     }
+    // Chains that answered contribute their fresh wagers; the rest keep whatever was cached, so
+    // an unreachable network is a named gap rather than an empty one.
+    const answered = new Set(next.filter((r) => r.status === 'read').map((r) => r.chainId))
+    setFriendMarkets((prev) => [
+      ...prev.filter((m) => !answered.has(Number(m.chainId))),
+      ...wagersFrom(next),
+    ])
     setLoading(false)
-  }, [address, isConnected, chainId])
+  }, [address, isConnected])
+
+  useEffect(() => {
+    if (!address || !isConnected) {
+      setFriendMarkets(loadEstateFromStorage())
+      setReadings([])
+      return
+    }
+    readEstate()
+  }, [address, isConnected, readEstate])
+
+  // Manual refresh — the same estate read.
+  const refresh = readEstate
 
   // Optimistic add after creation (before next blockchain fetch)
   const addMarket = useCallback((market) => {
+    // A wager is created on ONE chain: the one it names, else the one the wallet was on.
+    const chainId = Number(market?.chainId ?? walletChainId)
     setFriendMarkets(prev => {
       const updated = [...prev, { ...market, chainId }]
-      saveToStorage(chainId, updated)
+      saveToStorage(chainId, updated.filter((m) => Number(m.chainId) === chainId))
       return updated
     })
-  }, [chainId])
+  }, [walletChainId])
 
   // Reload the dismissed set when the active account changes so we don't
   // leak one wallet's dismissed list into another.
@@ -187,6 +196,11 @@ export function FriendMarketsProvider({ children }) {
       value={{
         friendMarkets,
         loading,
+        readings,
+        // Named, never counted silently: a total drawn from this list is incomplete while any
+        // chain is unreadable, and the surface has to be able to say which.
+        unreadableNetworks: unreadableNetworks(readings),
+        partial: unreadableNetworks(readings).length > 0,
         refresh,
         addMarket,
         setFriendMarkets,

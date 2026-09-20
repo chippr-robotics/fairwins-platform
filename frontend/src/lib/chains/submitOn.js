@@ -156,29 +156,59 @@ export async function settleWalletOn(
   { readWallet, switchNetwork, chainName, needsSigner = true, subject = 'This', sleep = defaultSleep },
 ) {
   const target = num(chainId)
-  const here = num(readWallet()?.chainId)
-  if (here === target) return readWallet()
 
-  const refusal = () => chainSwitchRefusal({ to: target, from: here, chainName, subject })
-  if (typeof switchNetwork !== 'function') throw refusal()
+  /*
+   * ONE definition of settled, used by the early return AND the loop (issue #1627).
+   *
+   * These were two different tests. The early return trusted `chainId` alone while the loop below
+   * also asked `signerIsOn` — and `signerIsOn` exists precisely because those two facts disagree
+   * for a beat: the connector's `chainChanged` updates the reported chain, and the chain-scoped
+   * signer is rebuilt by an async effect afterwards. So the one path that did not look was the one
+   * that runs when the wallet ALREADY reports the target, which is every caller that settles just
+   * after something else switched. It returned "settled" holding the pre-switch signer, and the
+   * caller broadcast with it — the failure `signerIsOn` was written to prevent, reached by the
+   * door next to the one it was guarding.
+   */
+  const isSettled = async (snap) => {
+    if (num(snap?.chainId) !== target) return false
+    if (!needsSigner) return true
+    return Boolean(snap?.signer) && (await signerIsOn(snap.signer, target))
+  }
 
-  try {
-    await switchNetwork(target)
-  } catch (cause) {
-    const err = refusal()
-    err.cause = cause
-    throw err
+  const first = readWallet()
+  if (await isSettled(first)) return first
+
+  const here = num(first?.chainId)
+
+  /*
+   * Only ASK for a switch when the wallet is actually elsewhere. When it already reports the
+   * target and only the signer is behind, there is nothing to switch to — prompting for a move
+   * the wallet has already made would be a prompt the member cannot make sense of — and a missing
+   * `switchNetwork` is not a refusal either, because no switch is required. Wait instead.
+   */
+  if (here !== target) {
+    const refusal = () => chainSwitchRefusal({ to: target, from: here, chainName, subject })
+    if (typeof switchNetwork !== 'function') throw refusal()
+
+    try {
+      await switchNetwork(target)
+    } catch (cause) {
+      const err = refusal()
+      err.cause = cause
+      throw err
+    }
   }
 
   const deadline = Date.now() + SETTLE_TIMEOUT_MS
   for (;;) {
     const now = readWallet() || {}
-    if (num(now.chainId) === target && (!needsSigner || (now.signer && (await signerIsOn(now.signer, target))))) {
-      return now
-    }
+    if (await isSettled(now)) return now
     if (Date.now() > deadline) {
+      // Two different stalls, and the member can act on only one of them, so say which it was.
       throw new ChainSwitchRefused(
-        `The switch to ${chainName(target)} did not complete, so nothing has been signed.`,
+        num(now.chainId) === target
+          ? `The wallet is on ${chainName(target)} but its signer did not finish switching, so nothing has been signed.`
+          : `The switch to ${chainName(target)} did not complete, so nothing has been signed.`,
         { from: num(now.chainId), to: target },
       )
     }

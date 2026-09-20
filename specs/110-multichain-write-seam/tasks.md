@@ -1883,9 +1883,53 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
 
 ## Phase 4 — Surfaces name their target (#1595)
 
-- [ ] T040 Estate-wide wager/pool reads for action-bearing surfaces (`createEstateLedger` shape):
-      `FriendMarketsContext` / `fetchFriendMarketsForUser` gain per-chain three-state readings;
-      Claim/Refund/Resolve carry their wager's chain.
+- [x] T040 Estate-wide wager reads, and the actions carry their wager's chain.
+      `lib/wagers/estateWagers.js` + `hooks/useWagerChain.js`. **Pools are NOT included — see the
+      note at the end.**
+
+      **The read and the write had to move together.** An estate-wide list with an ambient-chain
+      Claim is worse than either half alone: it shows a member their Base wager and then claims it
+      on Polygon. So this task is both — the list spans the cohort, and every action resolves its
+      registry from the WAGER's chain.
+
+      **Three states, and one of them was hiding.** `fetchFriendMarketsForUser` answers `[]` for
+      two different situations — this chain has no wager contract, and this chain reported no
+      wagers — and THROWS for a third. The deployment question is now asked BEFORE the fetch, so a
+      chain with no contract is `not-deployed` rather than a claim about the member; an
+      unreachable chain is `unreadable` and NAMED (`unreadableNetworks`), never "you have no
+      wagers on Base". The test cohort supplies a real not-deployed case (Sepolia, Hoodi), so that
+      branch is exercised against the actual roster rather than a contrived id.
+
+      **DIVERGENCE 34 — `switchNetwork()` with no argument goes to PRIMARY_CHAIN_ID.** Every action
+      in My Wagers opened with `if (!isCorrectNetwork) { await switchNetwork() }`, which moved the
+      member to **Polygon** whatever chain the wager was on, and then resolved the registry from
+      the ambient chain. It never mattered only because the list was single-chain: the wager could
+      not be from anywhere else, so the wrong target happened to be the right one. The refusal —
+      *"Please switch to the correct network"* — named neither chain. `settleOnWagerChain` names
+      both and says nothing was signed.
+
+      **THE STALE-CLOSURE TRAP, and why the list re-enters rather than continues.**
+      `useGaslessWrite` binds its chain at RENDER: the EIP-712 domain, the verifying contract and
+      the relayer all come from the chain current when the hook ran. A handler that settles the
+      wallet and then calls `run()` in the same invocation still holds the PRE-switch closure — it
+      would sign the old chain's domain, which is a valid signature over something nobody honours
+      (issue #1038 by another route) and then self-submit to the old chain's address on the new
+      chain. So a cross-chain action RETURNS after settling and the handler is re-entered once
+      React has re-rendered, where the ambient resolution is correct by construction. The two
+      detail views need none of that: they show ONE wager, so its chain is fixed at render and is
+      handed straight to `useGaslessWrite`, whose T027 wrapper settles the self-submit leg itself.
+
+      **The passkey rail is not switched** (`submitOn`'s rail rules): its UserOp addresses the
+      target chain's bundler directly, so the target is returned and the wallet is left alone.
+
+      Scenario 6, partially: ResolutionModal's **"Wrong Network → Switch Network" banner is gone**,
+      along with the `!isCorrectNetwork` disable that would have blocked every cross-chain resolve.
+      The remaining switch call sites are T041.
+
+      **POOLS ARE NOT DONE.** The task says "wager/pool"; this is wagers only. `usePools` has its
+      own eight `useGaslessWrite` call sites and its own read path, and folding them in here would
+      have doubled a money-path diff that already spans a 2,400-line modal. Recorded rather than
+      quietly dropped.
 - [ ] T041 Retire the 26 `switchNetwork`/`switchChain` call sites across 14 member components
       *(re-measure)* — each becomes a declared target through `submitOn` or is deleted; no member
       surface renders a "Switch to <network>" control (operator console exempt, spec 071).

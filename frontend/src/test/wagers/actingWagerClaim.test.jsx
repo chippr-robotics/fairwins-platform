@@ -64,6 +64,22 @@ vi.mock('../../hooks', () => ({
   }),
 }))
 
+/*
+ * `useWagerChain` (spec 110 T040) imports `useWeb3` from its own module, not from the barrel the
+ * modal uses — so the barrel mock above does not cover it. A fake has to cover what the code
+ * under test actually imports, and the two paths are different modules.
+ */
+vi.mock('../../hooks/useWeb3', () => ({
+  useWeb3: () => ({
+    signer: { id: 'connected-signer' },
+    provider: null,
+    switchNetwork: vi.fn(),
+    sendCalls,
+    loginMethod: 'injected',
+    chainId: 137,
+  }),
+}))
+
 // ---- data hooks the modal mounts, reduced to the empty/no-op shapes ------------------
 const refreshFriendMarkets = vi.fn()
 vi.mock('../../contexts/FriendMarketsContext.js', () => ({
