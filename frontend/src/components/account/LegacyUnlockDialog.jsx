@@ -2,7 +2,7 @@
  * Unlock a recovered legacy account into a live signer so the app can "act as"
  * it (spec 062 follow-up). Biometric-protected keys unlock with one Face/Touch ID
  * assertion (no input); passphrase-protected keys prompt for the passphrase. On
- * success the provider-connected ethers signer is handed back to the caller,
+ * success the chain-bound signer is handed back to the caller,
  * which passes it to CustodyContext.operateAsLegacy — the key stays in memory
  * only, never persisted.
  */
@@ -18,7 +18,7 @@ import './LegacyKeyRecoveryPanel.css'
 const shortAddr = (a) => (a ? `${a.substring(0, 6)}…${a.substring(a.length - 4)}` : '')
 
 export default function LegacyUnlockDialog({ open, entry, onClose, onUnlocked, deps = {} }) {
-  const { provider, chainId } = useWallet()
+  const { chainId } = useWallet()
   const [passphrase, setPassphrase] = useState('')
   const [phase, setPhase] = useState('idle') // idle | unlocking
   const [error, setError] = useState(null)
@@ -41,7 +41,10 @@ export default function LegacyUnlockDialog({ open, entry, onClose, onUnlocked, d
       const signer = await unlockLegacyAccount({
         entry,
         passphrase,
-        provider: deps.provider ?? provider,
+        // The chain is an ARGUMENT (spec 110): the signer is bound to the chain the member is on
+        // when they unlock, and `attachActingSigner` records that same chainId beside it.
+        chainId,
+        client: deps.client,
         deps,
       })
       setPhase('idle')
@@ -51,7 +54,7 @@ export default function LegacyUnlockDialog({ open, entry, onClose, onUnlocked, d
       setPhase('idle')
       setError(e.message)
     }
-  }, [entry, passphrase, provider, deps, onUnlocked])
+  }, [entry, passphrase, chainId, deps, onUnlocked])
 
   const busy = phase === 'unlocking'
 
