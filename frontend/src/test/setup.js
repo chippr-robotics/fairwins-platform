@@ -263,11 +263,39 @@ vi.mock('wagmi', () => ({
   // Return a singleton — a fresh object each call would make effects that depend on
   // walletClient re-fire every render (infinite loop / OOM in hooks like usePredictOpenOrders).
   useWalletClient: (() => {
+    /*
+     * The transport carries a `request` since spec 110 T028: WalletContext builds its signer
+     * with viem (`custom(walletClient.transport)`) instead of `new ethers.BrowserProvider(...)`,
+     * so an empty object here would hand every suite a signer whose first RPC throws
+     * `transport.request is not a function` — a failure about the fixture, not the subject.
+     *
+     * It answers the SAME canned world `MockBrowserProvider` answered (chain 61, 1 ETH,
+     * block 1,000,000) and THROWS for anything else, so a suite that needs a specific RPC still
+     * fails loudly and mocks it, exactly as a missing method on the old mock did.
+     */
     const result = {
       data: {
         account: { address: '0x1234567890123456789012345678901234567890' },
         chain: { id: 61 },
-        transport: {}
+        transport: {
+          async request({ method }) {
+            switch (method) {
+              case 'eth_chainId':
+                return '0x3d'
+              case 'eth_accounts':
+              case 'eth_requestAccounts':
+                return ['0x1234567890123456789012345678901234567890']
+              case 'eth_getBalance':
+                return '0xde0b6b3a7640000'
+              case 'eth_blockNumber':
+                return '0xf4240'
+              default:
+                throw new Error(
+                  `mock walletClient transport: unmocked request '${method}' — mock it in this suite`,
+                )
+            }
+          },
+        },
       }
     }
     return vi.fn(() => result)
