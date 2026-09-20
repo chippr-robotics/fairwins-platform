@@ -59,6 +59,15 @@ export function classifyLedgerError(err) {
     return HW_ERROR_CODES.WRONG_APP
   }
   if (status === 0x6985 || status === 0x5501) return HW_ERROR_CODES.USER_CANCELLED
+  /*
+   * 0x6a80 from a SIGN command is the app declining to display the payload, and on the Ethereum
+   * app that means one thing in practice: blind signing is off. Found on the emulator, where the
+   * device's own screen says "Blind signing must be enabled in settings" while the app returned
+   * INCORRECT_DATA — which this layer was classifying UNKNOWN, so the member was told to
+   * "reconnect the device and try again". That advice can never work: the remedy is a toggle in
+   * the app's own settings, and nothing in the UI was saying so.
+   */
+  if (status === 0x6a80) return HW_ERROR_CODES.BLIND_SIGNING_REQUIRED
   return HW_ERROR_CODES.UNKNOWN
 }
 
@@ -89,7 +98,27 @@ async function assertBluetoothRadio() {
 }
 
 /** @returns {Promise<{ transport: object, kind: string }>} */
-async function openTransport() {
+async function openTransport({ transport: requested, speculosUrl } = {}) {
+  /*
+   * The EMULATOR rail, asked for by name and never selected by a capability probe.
+   *
+   * `import.meta.env.DEV` is repeated here even though `connectHardware` already checks it, and
+   * the repetition is the POINT: the caller's guard is a runtime fact, not a static one, so the
+   * bundler cannot prove `requested` is never SPECULOS and it kept the dynamic import — a
+   * production build really did ship `speculosTransport` as its own chunk, with the seam's guard
+   * in place and the structural test green. Only grepping `dist` showed it. With the constant
+   * INSIDE this branch too, the condition folds to `false` and the chunk disappears; the build
+   * check in the nightly workflow is what keeps that true.
+   */
+  if (import.meta.env.DEV && requested === TRANSPORT_KINDS.SPECULOS) {
+    try {
+      const { TransportSpeculosHttp } = await import('./speculosTransport')
+      return { transport: await TransportSpeculosHttp.open(speculosUrl), kind: TRANSPORT_KINDS.SPECULOS }
+    } catch (err) {
+      throw wrap(err)
+    }
+  }
+
   // Spec 102: in the native apps the browser transports do not exist — the
   // rail is the OS Bluetooth stack behind the runtime seam, offered only when
   // the plugin has actually confirmed itself, refused with the seam's own
@@ -129,8 +158,8 @@ async function openTransport() {
   }
 }
 
-export async function connectLedger() {
-  const { transport, kind } = await openTransport()
+export async function connectLedger(options = {}) {
+  const { transport, kind } = await openTransport(options)
   const { default: Eth } = await import('@ledgerhq/hw-app-eth')
   const eth = new Eth(transport)
 

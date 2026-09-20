@@ -1675,6 +1675,67 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         either. Derivation parity (`derivationParity.test.js`) keeps real ethers as the oracle
         over generated phrases and keys: a wrong path here shows a member an address that is not
         theirs, tells them the import worked, and errors nowhere.
+      **`lib/hardware/hardwareSigner.js` — THE INSTRUMENT FIRST, and it found four things before a
+        single line of the conversion was written.** This file is the last of the four
+        signer-shaped files, and it was the one with no way to check it: the fast tier has no
+        chain, a real Nano needs a thumb, and every hardware suite mocks the session — so a fake
+        that signs with an ethers `Wallet` key proved the signer's arithmetic and NOTHING about the
+        APDUs, the derivation path the device used, or what a member would have been shown. The
+        conversion was therefore NOT started first. Converting a file whose only oracle is a mock
+        is how divergences 27a/27b shipped, and the same mistake was available here.
+
+        The rail is **Speculos**, Ledger's emulator of the device: real app firmware, real APDUs,
+        real screens, with the button driven by software. The confirmation gate is KEPT and
+        automated rather than removed, which is what makes it a hardware test. `@ledgerhq/
+        hw-transport` is ALREADY a direct dependency and the APDU endpoint is plain HTTP, so the
+        transport is ONE FILE and the lockfile does not move — `device-transport-kit-speculos`
+        would have re-resolved the root lockfile for a test rail, which is the npm/cli#4828
+        rolldown hazard (spec 075) and a bad trade. Verified end to end against app-ethereum
+        1.22.4 on an emulated Nano S+: 6/6, and non-vacuous — a wrong derivation path fails 3 of
+        them, dropping the new error classification fails exactly 1.
+
+        **FINDING 1 — a Ledger cannot sign our EIP-712 intents with default settings, and the app
+        told the member to do something that can never work.** `signEIP712HashedMessage` hands the
+        device two hashes; the app will only review those with BLIND SIGNING enabled. With the
+        default settings the Nano's own screen reads "Blind signing must be enabled in settings"
+        and the app answers 0x6a80 — which `classifyLedgerError` mapped to UNKNOWN, whose sentence
+        is "Something went wrong talking to the device. Reconnect it and try again." A member
+        reconnecting their device forever would never reach the toggle that fixes it. Now
+        `BLIND_SIGNING_REQUIRED`, which names it.
+
+        **FINDING 2 — the DEV guard did not keep the rail out of the bundle, and every test said it
+        did.** `adapters.js` gated selection behind `import.meta.env.DEV`; `ledgerAdapter.js` then
+        branched on a RUNTIME value (`requested === SPECULOS`) that the bundler cannot fold, so the
+        production build emitted `speculosTransport-*.js` as its own chunk — a module that points
+        device signing at an arbitrary HTTP origin, shipped, with the structural guard test green.
+        `grep` over `dist` is what found it. A source-shaped test cannot see a bundler decision, so
+        the constant is repeated inside the inner branch AND `check:no-emulator` greps the artifact
+        on every PR's build job. This is the sharpest instance yet of the standing lesson: the
+        instrument has to be able to observe the property, not a proxy for it.
+
+        **FINDING 3 — ETC 61 is genuinely supported by the Ethereum app.** It renders "Ethereum
+        Classic" and prices in ETC rather than an unnamed chain id, so 61 is a cohort chain in fact
+        and not only in our config. Asked of the device instead of assumed, and asserted on the
+        screens the member would read.
+
+        **FINDING 4 — Speculos' own `--automation` cannot express what a hardware test needs, and
+        both failure modes are SILENT.** (a) `text` is an EXACT match: the approve screen reads
+        "Sign transaction", so `{text: "Sign"}` never fires and nothing errors — the catch-all
+        keeps pressing right, the carousel loops, the APDU never returns and the suite HANGS.
+        (b) rules fire per TEXT EVENT, not per screen (`seproxyhal.apply_automation` loops the
+        batch), and one screen emits several — "Network" and "Polygon" are two — so a catch-all
+        advances TWICE and overshoots the decision screen; the both-press lands on "Reject
+        transaction" and every signature returns 0x6985, which reads exactly like a device
+        refusing. The suite therefore DRIVES the screen itself (poll, press once, collect), which
+        is what Ledger's own app tests do, and collecting the screens buys the assertion that
+        matters: what the member would actually have read, including the destination address the
+        device displayed.
+
+        Also measured and written down: jsdom's `fetch` drops Speculos' chunked body (its first
+        chunk is empty), returning `''` where the device said `{"data":"…"}` — so the suite has its
+        own config pinned to `environment: 'node'`, and is excluded from the default one.
+        The conversion off ethers is the NEXT commit, with this suite as its oracle: it passes
+        against the ethers implementation today, and must still pass after.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.

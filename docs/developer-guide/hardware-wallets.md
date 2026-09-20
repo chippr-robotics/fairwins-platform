@@ -279,3 +279,68 @@ popup surfaces as a stated permission failure and init is retryable.
 
 See `specs/085-hardware-wallet-protect/` for the spec, and
 `docs/runbooks/hardware-wallet-staging-validation.md` for the real-device validation checklist.
+
+## Testing against real device firmware (Speculos)
+
+Every other hardware suite mocks the session, which means it answers a question the device no
+longer asks: a fake that signs with an ethers `Wallet` key proves the signer's own arithmetic and
+nothing about the APDUs, the derivation path the device really used, or what the member would have
+been shown before approving. `lib/hardware/speculosTransport.js` closes that gap.
+
+**Speculos** is Ledger's own emulator — real app firmware, real APDUs, real screens — reached over
+HTTP instead of USB. The confirmation gate is therefore *kept and automated*, not removed, which is
+what makes this a hardware test rather than a mock with extra steps.
+
+```bash
+cd frontend
+npm run hw:speculos:up     # builds the Ethereum app from a pinned ref, boots the emulator
+npm run test:hw            # the device suite
+npm run hw:speculos:down
+```
+
+### Rules that are not negotiable
+
+- **The rail is DEV-only.** It aims signing at an arbitrary HTTP origin, so every path to it sits
+  behind `import.meta.env.DEV` and is dead-code-eliminated from a release build. No capability
+  probe returns `speculos`; a caller must ask for it by name. `src/test/hardware/speculosSeam.test.js`
+  enforces both, and fails if the guard is removed.
+- **No new dependency.** `@ledgerhq/hw-transport` is already direct, and the APDU endpoint is plain
+  HTTP, so the transport is one file. Adding `@ledgerhq/device-transport-kit-speculos` or
+  `hw-transport-node-speculos-http` would re-resolve the root lockfile, which is the npm/cli#4828
+  rolldown hazard (spec 075) — a bad trade for a test rail.
+- **The seed is the public BIP-39 vector and must stay empty.** A funded seed in a script any
+  contributor can run is a seed that gets drained.
+- **Green here is not firmware certification.** Speculos is not the Secure Element; syscalls, the
+  watchdog and timing differ. It proves the protocol and the screen flow. USB/BLE quirks and
+  firmware drift remain the physical soak in
+  `docs/runbooks/hardware-wallet-staging-validation.md`.
+
+### Two traps that cost real time, written down so they cost nobody else any
+
+Speculos' `--automation` rules look like the obvious way to replace the button press. They cannot
+express what this needs, and both failures are silent:
+
+1. **`text` is an exact match, not containment.** The approve screen reads `Sign transaction`, so a
+   rule written `{ "text": "Sign" }` never fires — and nothing errors. The catch-all keeps pressing
+   right, the carousel loops, and the APDU never returns, so the suite *hangs* until a timeout.
+2. **Rules fire per TEXT EVENT, not per screen** (`seproxyhal.apply_automation` loops over every
+   event in the batch). One screen emits several — `Network` and `Polygon` are two — so a catch-all
+   pressing right advances *twice* for that screen and overshoots the decision screen. The
+   both-press then lands on `Reject transaction` and every signature returns `0x6985`: a suite that
+   looks like the device refusing when it is the automation pressing the wrong button one screen
+   late.
+
+So the suite **drives the screen itself** — poll, press once, collect — which is what Ledger's own
+app tests do (Ragger's navigate-and-compare). It also buys the assertion that matters: the screens
+are collected, so a test can check what the member would actually have read.
+
+### What the emulator found
+
+- **A Ledger cannot sign our EIP-712 intents with default settings.** `signEIP712HashedMessage`
+  hands the app two hashes, and the app will only review those with **blind signing** enabled: the
+  device screen says `Blind signing must be enabled in settings` and the app answers `0x6a80`. That
+  status was classified `UNKNOWN`, whose sentence is *"Something went wrong talking to the device.
+  Reconnect it and try again"* — advice that can never work, on the path a member takes to sign an
+  intent. It is now `BLIND_SIGNING_REQUIRED`, which names the toggle.
+- **ETC 61 is genuinely supported.** The app renders `Ethereum Classic` and prices in `ETC` rather
+  than showing an unnamed chain id, so 61 is a cohort chain in fact and not only in our config.
