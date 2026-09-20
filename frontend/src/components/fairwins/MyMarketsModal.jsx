@@ -875,17 +875,35 @@ function MyMarketsModal({
     const id = String(market.id)
 
     const targetChainId = chainOf(market)
-    if (Number(chainId) !== targetChainId) {
-      try {
-        await settleOnWagerChain(market, 'This claim')
-      } catch (e) {
-        setClaimError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
-        return
-      }
-      // Settled, not continued: see the re-entry note above.
+    const mustSwitch = Number(chainId) !== targetChainId
+    /*
+     * THE HAND-OFF IS ARMED BEFORE THE AWAIT, AND THE SETTLE RUNS ON BOTH PATHS.
+     *
+     * Two orderings had to be wrong together for this to work, and both were (CLM-01, the only
+     * claim in the suite that has to change chain — every later one starts already settled, which
+     * is how it survived the unit suite and the no-chain tier):
+     *
+     *  1. The chain flips DURING the settle, so the effect watching `chainId` fired while this
+     *     call was still awaiting. Arming `afterSettleRef` afterwards meant the effect found
+     *     nothing pending, and nothing ever re-triggered it: the action silently never ran. No
+     *     error, no transaction — the screenshot of the failure is a button and an empty space.
+     *  2. `chainId` arrives a beat BEFORE the chain-scoped signer is rebuilt, so re-entering on
+     *     the chain alone hands the handler a signer still bound to the old chain. Settling on
+     *     the re-entered path too costs nothing when the wallet is already there — it waits for
+     *     the signer and refuses honestly if it never lands (submitOn.js#signerIsOn, issue #1627).
+     */
+    if (mustSwitch) {
       afterSettleRef.current = { chainId: targetChainId, run: () => handlersRef.current.claim?.(market) }
+    }
+    try {
+      await settleOnWagerChain(market, 'This claim')
+    } catch (e) {
+      afterSettleRef.current = null
+      setClaimError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
       return
     }
+    // Settled, not continued: see the re-entry note above.
+    if (mustSwitch) return
 
     setClaimingId(id)
     setClaimError(null)
@@ -972,17 +990,20 @@ function MyMarketsModal({
     const id = String(market.id)
 
     const targetChainId = chainOf(market)
-    if (Number(chainId) !== targetChainId) {
-      try {
-        await settleOnWagerChain(market, 'This refund')
-      } catch (e) {
-        setRefundError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
-        return
-      }
-      // Settled, not continued: see the re-entry note above.
+    const mustSwitch = Number(chainId) !== targetChainId
+    // See the ordering note on the claim handler above.
+    if (mustSwitch) {
       afterSettleRef.current = { chainId: targetChainId, run: () => handlersRef.current.refundRow?.(market) }
+    }
+    try {
+      await settleOnWagerChain(market, 'This refund')
+    } catch (e) {
+      afterSettleRef.current = null
+      setRefundError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
       return
     }
+    // Settled, not continued: see the re-entry note above.
+    if (mustSwitch) return
 
     setRefundingId(id)
     setRefundError(null)
@@ -1071,17 +1092,20 @@ function MyMarketsModal({
       return
     }
     const targetChainId = chainOf(market)
-    if (Number(chainId) !== targetChainId) {
-      try {
-        await settleOnWagerChain(market, 'This refund')
-      } catch (e) {
-        setRefundError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
-        return
-      }
-      // Settled, not continued: see the re-entry note above.
+    const mustSwitch = Number(chainId) !== targetChainId
+    // See the ordering note on the claim handler above.
+    if (mustSwitch) {
       afterSettleRef.current = { chainId: targetChainId, run: () => handlersRef.current.clearExpired?.(market) }
+    }
+    try {
+      await settleOnWagerChain(market, 'This refund')
+    } catch (e) {
+      afterSettleRef.current = null
+      setRefundError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
       return
     }
+    // Settled, not continued: see the re-entry note above.
+    if (mustSwitch) return
 
     setRefundingId(id)
     setRefundError(null)
