@@ -1,0 +1,91 @@
+# The hardware signer, checked against real Ledger firmware — spec 085/110, issue #1593.
+#
+# WHY NIGHTLY AND NOT ON EVERY PR: the job builds the Ledger Ethereum app from source in Ledger's
+# own builder image (a few minutes) and then steps an emulated CPU through every screen. That is
+# too slow to sit on the merge path, and it is not the tier that catches most regressions — the
+# unit suites and the fast E2E shards already gate those. What this catches is the class nothing
+# else can see: an APDU, a derivation path, or a device refusal that a mocked session gets right
+# by construction. A nightly is the right cadence for that, and a physical device stays a manual
+# soak (docs/runbooks/hardware-wallet-staging-validation.md).
+#
+# The seed is the public BIP-39 test vector and holds nothing. Nothing here broadcasts.
+name: Hardware Emulator (Speculos)
+
+on:
+  schedule:
+    # 04:30 UTC daily — after the release train's quiet hours, before the working day.
+    - cron: '30 4 * * *'
+  workflow_dispatch:
+    inputs:
+      app_ref:
+        description: 'LedgerHQ/app-ethereum ref to build'
+        required: false
+        default: 'develop'
+
+# Least privilege: this job checks out, builds and runs an emulator. It writes nothing back —
+# no comments, no releases, no pushes — so the token needs read access to the repository and
+# nothing else. Every other workflow here declares the same block (CodeQL flagged its absence).
+permissions:
+  contents: read
+
+concurrency:
+  group: hardware-emulator
+  cancel-in-progress: true
+
+jobs:
+  speculos:
+    name: Ledger Ethereum app on Speculos
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Spec 075: never `npm install` — it drops the platform rolldown binary from the lockfile.
+      - name: Install
+        run: npm ci
+
+      - name: Cache the built device app
+        id: app-cache
+        uses: actions/cache@v4
+        with:
+          path: frontend/.speculos/ethereum-nanosp.elf
+          # The app binary is a pure function of the ref it was built from, so the ref IS the key.
+          key: app-ethereum-nanosp-${{ github.event.inputs.app_ref || 'develop' }}
+
+      - name: Bring up the emulator
+        working-directory: frontend
+        run: npm run hw:speculos:up
+
+      - name: Run the device suite
+        working-directory: frontend
+        env:
+          HARDWARE_E2E: '1'
+        run: npm run test:hw
+
+      # A failing device test is nearly unreadable without the screen, so capture it either way.
+      - name: Capture the device screen
+        if: always()
+        run: |
+          curl -sS http://127.0.0.1:5000/screenshot -o screen.png || true
+          curl -sS http://127.0.0.1:5000/events -o events.json || true
+          docker logs fairwins-speculos > speculos.log 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: speculos-diagnostics
+          path: |
+            screen.png
+            events.json
+            speculos.log
+          if-no-files-found: ignore
+
+      - name: Tear down
+        if: always()
+        working-directory: frontend
+        run: npm run hw:speculos:down

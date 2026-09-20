@@ -12,7 +12,6 @@ import PropTypes from 'prop-types'
 import { WalletContext } from '../../contexts/WalletContext'
 // Strict lookup, deliberately not getNetwork() — no default-network fallback (specs 068/071).
 import { NETWORKS } from '../../config/networks'
-import { getReadProvider } from '../../utils/rpcProvider'
 import { connectHardwareAccount } from '../../lib/hardware/connectAccount'
 import { reportHardwareError } from '../../lib/hardware/errors'
 import { VENDOR_LABELS } from '../../lib/hardware/adapters'
@@ -45,8 +44,10 @@ export default function HardwareConnectDialog({ open, entry, onClose, onConnecte
     setPhase('connecting')
     try {
       const connect = deps.connectAccount ?? connectHardwareAccount
-      const provider = deps.provider ?? (chainId != null ? getReadProvider(chainId) : null)
-      const signer = await connect({ entry, provider })
+      // Spec 110 T028 — the signer is bound to the wallet's CURRENT chain by id and resolves its
+      // own client, exactly as the legacy unlock does; `attachActingSigner` records the same id
+      // beside it, which is what makes a stale binding detectable later.
+      const signer = await connect({ entry, chainId })
       setPhase('idle')
       onConnected?.(signer)
     } catch (e) {
@@ -88,6 +89,6 @@ HardwareConnectDialog.propTypes = {
   entry: PropTypes.object,
   onClose: PropTypes.func,
   onConnected: PropTypes.func,
-  /** Test seam: { connectAccount, guidance, provider } */
+  /** Test seam: { connectAccount, guidance } */
   deps: PropTypes.object,
 }

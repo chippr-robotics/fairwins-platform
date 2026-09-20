@@ -31,6 +31,9 @@ export const TRANSPORT_KINDS = Object.freeze({
   WEBHID: 'webhid',
   WEBUSB: 'webusb',
   WEBBLE: 'webble',
+  // The EMULATOR rail (Speculos). DEV builds only — it aims signing at an arbitrary HTTP origin,
+  // so a production bundle must contain no path to it (see `connectHardware`).
+  SPECULOS: 'speculos',
   // Spec 102: the native apps' Bluetooth rail — the OS BLE stack via the
   // Capacitor plugin, since a native WebView has no Web Bluetooth. Selected
   // by runtime in ledgerAdapter.js, never by this browser-capability probe.
@@ -94,9 +97,26 @@ export function vendorAvailability(vendor, transports = detectTransports()) {
  * Open a session with the device. The caller owns the session and MUST `close()` it when the flow
  * ends (the sheet's teardown does), so the transport is released for other tabs/tools.
  */
-export async function connectHardware(vendor) {
+export async function connectHardware(vendor, { transport, speculosUrl } = {}) {
   if (import.meta.env.DEV && typeof window !== 'undefined' && typeof window.__fwHardwareTestAdapter__ === 'function') {
     return window.__fwHardwareTestAdapter__(vendor)
+  }
+  /*
+   * The emulator rail, and the guard is the whole of why it is safe.
+   *
+   * Speculos is REAL device firmware reached over HTTP, which is what makes `hardwareSigner.js`
+   * testable without a thumb — but "reached over HTTP" is also a way to point a member's signing
+   * at an origin they never chose. So this branch lives under `import.meta.env.DEV` exactly as the
+   * test-adapter seam above does, and is dead-code-eliminated from a release build. A caller must
+   * ASK for it by name: no capability probe returns `speculos`, so nothing selects it by accident.
+   */
+  if (import.meta.env.DEV && transport === TRANSPORT_KINDS.SPECULOS) {
+    if (vendor !== 'ledger') {
+      throw new HardwareWalletError(HW_ERROR_CODES.TRANSPORT_UNSUPPORTED, 'Only a Ledger can be emulated.', { vendor })
+    }
+    await ensureNodeGlobals()
+    const { connectLedger } = await import('./ledgerAdapter')
+    return connectLedger({ transport: TRANSPORT_KINDS.SPECULOS, speculosUrl })
   }
   const availability = vendorAvailability(vendor)
   if (!availability.available) {

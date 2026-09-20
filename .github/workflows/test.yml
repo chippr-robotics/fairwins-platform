@@ -666,6 +666,14 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # Spec 085/110 — the Speculos emulator rail points device signing at an arbitrary HTTP
+      # origin and must never ship. Its `import.meta.env.DEV` guards are a source property; the
+      # bundler decides whether the chunk is actually emitted, and once it emitted the chunk with
+      # every guard in place and every test green. Only the artifact can answer this, so it is
+      # checked here, on the PR, rather than in the nightly device job.
+      - name: No emulator rail in the bundle
+        run: npm run check:no-emulator
+
       - name: Summarize build output
         if: always()
         run: |

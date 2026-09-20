@@ -21,6 +21,14 @@ and refuse on mismatch (the saved reference proves nothing about the device now 
 `@trezor/connect-web` (Trezor popup), all lazy-loaded behind one adapter seam
 (`frontend/src/lib/hardware/adapters.js`); `ethers` v6 for the signer wrapper.
 
+> **Superseded (spec 110 T028):** the signer wrapper is **viem**, still ethers-SHAPED for its
+> callers. It no longer extends `AbstractSigner`, and its third constructor argument is a
+> `{ chainId, client }` binding rather than an ethers `Provider`. Two library differences are
+> load-bearing — viem's legacy serializer needs `v` as a bigint (it can only bite ETC 61 /
+> Mordor 63), and viem silently drops a field that contradicts an explicit transaction type where
+> ethers refused. See `docs/developer-guide/hardware-wallets.md` § "What the device suite can and
+> cannot witness".
+
 **Storage**: One per-account userStorage key (`hardware_accounts`) + one synced-backup object
 (`hardwareAccounts`, not network-scoped — an EVM address is chain-independent).
 

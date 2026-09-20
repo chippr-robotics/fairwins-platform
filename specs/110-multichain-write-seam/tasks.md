@@ -1675,6 +1675,110 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         either. Derivation parity (`derivationParity.test.js`) keeps real ethers as the oracle
         over generated phrases and keys: a wrong path here shows a member an address that is not
         theirs, tells them the import worked, and errors nowhere.
+      **`lib/hardware/hardwareSigner.js` — THE INSTRUMENT FIRST, and it found four things before a
+        single line of the conversion was written.** This file is the last of the four
+        signer-shaped files, and it was the one with no way to check it: the fast tier has no
+        chain, a real Nano needs a thumb, and every hardware suite mocks the session — so a fake
+        that signs with an ethers `Wallet` key proved the signer's arithmetic and NOTHING about the
+        APDUs, the derivation path the device used, or what a member would have been shown. The
+        conversion was therefore NOT started first. Converting a file whose only oracle is a mock
+        is how divergences 27a/27b shipped, and the same mistake was available here.
+
+        The rail is **Speculos**, Ledger's emulator of the device: real app firmware, real APDUs,
+        real screens, with the button driven by software. The confirmation gate is KEPT and
+        automated rather than removed, which is what makes it a hardware test. `@ledgerhq/
+        hw-transport` is ALREADY a direct dependency and the APDU endpoint is plain HTTP, so the
+        transport is ONE FILE and the lockfile does not move — `device-transport-kit-speculos`
+        would have re-resolved the root lockfile for a test rail, which is the npm/cli#4828
+        rolldown hazard (spec 075) and a bad trade. Verified end to end against app-ethereum
+        1.22.4 on an emulated Nano S+: 6/6, and non-vacuous — a wrong derivation path fails 3 of
+        them, dropping the new error classification fails exactly 1.
+
+        **FINDING 1 — a Ledger cannot sign our EIP-712 intents with default settings, and the app
+        told the member to do something that can never work.** `signEIP712HashedMessage` hands the
+        device two hashes; the app will only review those with BLIND SIGNING enabled. With the
+        default settings the Nano's own screen reads "Blind signing must be enabled in settings"
+        and the app answers 0x6a80 — which `classifyLedgerError` mapped to UNKNOWN, whose sentence
+        is "Something went wrong talking to the device. Reconnect it and try again." A member
+        reconnecting their device forever would never reach the toggle that fixes it. Now
+        `BLIND_SIGNING_REQUIRED`, which names it.
+
+        **FINDING 2 — the DEV guard did not keep the rail out of the bundle, and every test said it
+        did.** `adapters.js` gated selection behind `import.meta.env.DEV`; `ledgerAdapter.js` then
+        branched on a RUNTIME value (`requested === SPECULOS`) that the bundler cannot fold, so the
+        production build emitted `speculosTransport-*.js` as its own chunk — a module that points
+        device signing at an arbitrary HTTP origin, shipped, with the structural guard test green.
+        `grep` over `dist` is what found it. A source-shaped test cannot see a bundler decision, so
+        the constant is repeated inside the inner branch AND `check:no-emulator` greps the artifact
+        on every PR's build job. This is the sharpest instance yet of the standing lesson: the
+        instrument has to be able to observe the property, not a proxy for it.
+
+        **FINDING 3 — ETC 61 is genuinely supported by the Ethereum app.** It renders "Ethereum
+        Classic" and prices in ETC rather than an unnamed chain id, so 61 is a cohort chain in fact
+        and not only in our config. Asked of the device instead of assumed, and asserted on the
+        screens the member would read.
+
+        **FINDING 4 — Speculos' own `--automation` cannot express what a hardware test needs, and
+        both failure modes are SILENT.** (a) `text` is an EXACT match: the approve screen reads
+        "Sign transaction", so `{text: "Sign"}` never fires and nothing errors — the catch-all
+        keeps pressing right, the carousel loops, the APDU never returns and the suite HANGS.
+        (b) rules fire per TEXT EVENT, not per screen (`seproxyhal.apply_automation` loops the
+        batch), and one screen emits several — "Network" and "Polygon" are two — so a catch-all
+        advances TWICE and overshoots the decision screen; the both-press lands on "Reject
+        transaction" and every signature returns 0x6985, which reads exactly like a device
+        refusing. The suite therefore DRIVES the screen itself (poll, press once, collect), which
+        is what Ledger's own app tests do, and collecting the screens buys the assertion that
+        matters: what the member would actually have read, including the destination address the
+        device displayed.
+
+        Also measured and written down: jsdom's `fetch` drops Speculos' chunked body (its first
+        chunk is empty), returning `''` where the device said `{"data":"…"}` — so the suite has its
+        own config pinned to `environment: 'node'`, and is excluded from the default one.
+        The conversion off ethers is the NEXT commit, with this suite as its oracle: it passes
+        against the ethers implementation today, and must still pass after.
+
+        **THE CONVERSION — and the oracle earned its keep twice.** `AbstractSigner`, `getAddress`,
+        `Signature`, `Transaction` and `TypedDataEncoder` are gone; allowlist 16 → 15, which empties
+        the signer-shaped files. The device suite is **6/6 after the swap**, unchanged, and the
+        unit suite keeps REAL ethers as the oracle over a 35-case serialization matrix ({7 fee
+        shapes} × {1, 61, 63, 137, 80002}) asserting the signed envelope BYTE FOR BYTE plus the
+        unsigned bytes the device was shown — a fixture table would only have proved viem agrees
+        with itself. `sendTransaction` is the signer's own now (`prepareTransactionRequest` →
+        device → `sendRawTransaction`), on the chain it was BOUND to: the third constructor
+        argument stopped being an ethers `Provider` and became a `{ chainId, client }` binding, and
+        one passed anyway is REFUSED at construction rather than left quietly unable to send.
+
+        **DIVERGENCE 31 — viem SILENTLY DROPS a field that contradicts an explicit transaction
+        type, where ethers refused to serialize at all.** `{ type: 0, maxFeePerGas: … }` came out
+        as a legacy transaction with `gasPrice` 0: unmineable, built from a request that asked for
+        something else, with nothing raised. ethers' two refusals ("legacy transaction cannot have
+        accessList", "transaction type cannot have maxFeePerGas or maxPriorityFeePerGas") are
+        reproduced verbatim — they are exactly the 10 cases in the full inference matrix where the
+        libraries disagree, and every one of them is ethers refusing. Related and quieter: ethers'
+        `Transaction.from` picks the HIGHEST type its fields admit, so a request carrying only
+        `gasPrice` is type 1 (EIP-2930, empty access list) and one carrying no fee fields at all is
+        type 2 with ZERO fees — viem infers `legacy` for the first and refuses the second. That
+        rule is written out in `transactionTypeOf`; replacing the `gasPrice` branch with viem's own
+        answer fails 5 matrix cases.
+
+        **DIVERGENCE 32 — viem's LEGACY serializer requires `v` as a BIGINT, and the only chains it
+        can bite are the two no EIP-1559 test would have covered.** Handed ethers' `{ r, s, yParity
+        }` it throws `Cannot mix BigInt and other types, use explicit conversions` from inside the
+        library, naming neither the field nor the transaction — so it presents as an unrelated bug.
+        It fires only on a chain with no EIP-1559, which in this cohort means **ETC 61 and Mordor
+        63**. The device suite is what makes that concrete rather than theoretical: reintroducing
+        the `yParity` shape, the emulated Nano displays the full transaction, the member presses
+        **Sign transaction**, and THEN the TypeError lands — a physical confirmation spent on a
+        signature that was never assembled. `signatureForViem` converts once, for every type, and
+        also keeps ethers' 32-byte length check on `r`/`s`: viem would instead trim a short value
+        into a shorter RLP item, which the recover-and-cross-check reports as "a different account"
+        — a true statement naming the wrong cause, on the one screen where the cause matters.
+
+        The typed-data half is the one thing the device suite CANNOT witness, and that is stated
+        rather than glossed: its EIP-712 case asserts the blind-signing refusal (FINDING 1), which
+        arrives before the hashes are examined, so `hashDomain`/`hashStruct` parity with
+        `TypedDataEncoder` is pinned by the unit suite instead — over five domain shapes including
+        `salt` and the empty domain, and a nested `Person[]` table.
 - [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
       no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
       four `110-multichain-write-seam` matrix rows as each lands.
