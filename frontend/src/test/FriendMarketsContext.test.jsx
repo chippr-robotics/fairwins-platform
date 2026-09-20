@@ -34,10 +34,17 @@ function Consumer() {
 }
 
 /*
- * The testnet cohort's chains that carry a wager contract. Asserted by the first test rather
- * than assumed, because every count below is a function of this roster.
+ * The chains this build READS wagers from that also carry a wager contract. Asserted by the first
+ * test rather than assumed, because every count below is a function of this roster.
+ *
+ * 1337 is deliberately ABSENT though it is in the cohort and does carry a contract: the roster is
+ * `wagerEstateChainIds()`, the cohort minus the local-only sandboxes, because a shipped build can
+ * never reach `http://127.0.0.1:8545` and would otherwise name "Hardhat" as a network it could
+ * not read — permanently, to every member, about a node that was never theirs. See
+ * `lib/wagers/estateWagers.js#wagerEstateChainIds` and its own tests for the rule and for the
+ * local-build exception that keeps it.
  */
-const WAGER_CHAINS = [63, 1337, 80002]
+const WAGER_CHAINS = [63, 80002]
 
 function renderProvider() {
   return render(

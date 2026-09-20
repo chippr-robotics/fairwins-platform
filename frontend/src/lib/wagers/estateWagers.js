@@ -27,13 +27,41 @@
  * chain's — behind it, because the list cannot render until the slowest chain answers. So a chain
  * that does not answer in time becomes `unreadable` with a reason, which is what it honestly is.
  */
-import { cohortChainIds, isInCohort, NETWORKS } from '../../config/networks'
-import { getContractAddressForChain } from '../../config/contracts'
+import { cohortChainIds, isInCohort, getCurrentChainId, NETWORKS } from '../../config/networks'
+import { getContractAddressForChain, isLocalOnlyChain } from '../../config/contracts'
 import { readOk, notDeployed, unreadable, READ, UNREADABLE } from '../chains/chainReadResult'
 import { fetchFriendMarketsForUser } from '../../utils/blockchainService'
 
 /** How long one chain gets before its wagers are reported unreadable rather than awaited. */
 export const WAGER_READ_DEADLINE_MS = 20_000
+
+/**
+ * The chains this build actually reads wagers from: the cohort MINUS the local-only sandboxes,
+ * unless this build is ITSELF pointed at one.
+ *
+ * `lib/screening/sources.js#screeningChainIds` established the rule and `isLocalOnlyChain`'s own
+ * docstring names the obligation: a shipped build can never reach `http://127.0.0.1:8545`, so a
+ * read routed there is a GUARANTEED failure, and a caller that would report that failure to a
+ * member as a degraded state has to exclude the chain first. Without this, every shipped testnet
+ * build names "Hardhat" as a network it could not read on the wager list — permanently, for every
+ * member, about a node that was never theirs.
+ *
+ * The exception is the point of the exception: when `getCurrentChainId()` IS the local chain this
+ * is a local build, the node is right there, and dropping it would empty the list it exists to
+ * show. Reachability is the test, not the chain id.
+ *
+ * It also removes a duplicate the e2e rig creates. `setup:e2e` runs with `E2E_AMOY_LOCAL=1` and
+ * records the local node's contracts under chain 80002 while `VITE_NETWORK_ID=80002` makes 1337 a
+ * cohort member too — one node answering to two chain ids, so the estate read returned every
+ * wager TWICE, tagged with a different chain each time. The dedupe cannot collapse those and must
+ * not try: two chain ids with the same registry address is a real production shape (CREATE2), and
+ * a key that merged them would drop a genuinely distinct wager. The right answer is not to read a
+ * chain this build cannot reach.
+ */
+export function wagerEstateChainIds() {
+  const buildChain = Number(getCurrentChainId())
+  return cohortChainIds().filter((id) => !isLocalOnlyChain(id) || Number(id) === buildChain)
+}
 
 /** Display name for a chain, or an honest placeholder — never a guessed one. */
 export const wagerNetworkName = (chainId) => NETWORKS[Number(chainId)]?.name || `Chain ${chainId}`
@@ -82,14 +110,15 @@ function withDeadline(promise, ms, chainId) {
  *
  * @param {string} address the member
  * @param {object} [opts]
- * @param {number[]} [opts.chainIds] defaults to the build's cohort (constitution III — never
- *   `listSupportedChainIds()`, which spans both cohorts)
+ * @param {number[]} [opts.chainIds] defaults to `wagerEstateChainIds()` — the build's cohort minus
+ *   unreachable local-only sandboxes (constitution III — never `listSupportedChainIds()`, which
+ *   spans both cohorts)
  * @param {(address: string, chainId: number) => Promise<Array>} [opts.fetchForChain] injectable
  * @param {number} [opts.deadlineMs]
  * @returns {Promise<Array<object>>} `chainReadResult` shapes; `value` is the tagged wager array
  */
 export async function readWagersAcrossEstate(address, { chainIds, fetchForChain = fetchFriendMarketsForUser, deadlineMs = WAGER_READ_DEADLINE_MS } = {}) {
-  const ids = (chainIds ?? cohortChainIds()).filter(isInCohort)
+  const ids = (chainIds ?? wagerEstateChainIds()).filter(isInCohort)
   if (!address) return ids.map((chainId) => readOk(chainId, []))
 
   return Promise.all(

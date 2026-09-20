@@ -9,11 +9,13 @@
 import { describe, it, expect, vi } from 'vitest'
 import {
   readWagersAcrossEstate,
+  wagerEstateChainIds,
   wagersFrom,
   unreadableNetworks,
   isPartial,
   tagWagers,
 } from '../../lib/wagers/estateWagers'
+import { cohortChainIds } from '../../config/networks'
 
 /*
  * The test build is the TESTNET cohort. Its roster is asserted below rather than assumed, because
@@ -108,5 +110,45 @@ describe('tagWagers', () => {
   it('survives an empty or missing list', () => {
     expect(tagWagers(null, MORDOR)).toEqual([])
     expect(tagWagers([], MORDOR)).toEqual([])
+  })
+})
+
+/*
+ * THE ROSTER IS NOT THE RAW COHORT (issue #1595 follow-up).
+ *
+ * `isLocalOnlyChain`'s own docstring states the obligation: a shipped build can never reach
+ * `http://127.0.0.1:8545`, so a read routed there is a guaranteed failure, and a caller that
+ * would report that failure to a member as a degraded state must exclude the chain first. The
+ * wager list is such a caller — without this every shipped testnet build named "Hardhat" as a
+ * network it could not read, permanently, about a node that was never the member's.
+ *
+ * The test build's `VITE_NETWORK_ID` is 63 (vite.config.js), so it is NOT a local build and 1337
+ * must be absent. The exception is covered by the assertion below it: the rule is written against
+ * `getCurrentChainId()`, so a build pointed at the sandbox keeps it.
+ */
+describe('wagerEstateChainIds', () => {
+  const HARDHAT = 1337
+
+  it('drops the local-only sandbox from a build that is not itself local', () => {
+    // The premise, asserted rather than assumed: 1337 IS in this build's cohort, so its absence
+    // from the roster is this filter doing work and not an accident of the test cohort.
+    expect(cohortChainIds()).toContain(HARDHAT)
+    expect(wagerEstateChainIds()).not.toContain(HARDHAT)
+  })
+
+  it('keeps every other cohort chain', () => {
+    const roster = wagerEstateChainIds()
+    for (const id of cohortChainIds()) {
+      if (id !== HARDHAT) expect(roster).toContain(id)
+    }
+  })
+
+  it('is what the read defaults to, so the cache and the read agree', async () => {
+    const seen = []
+    const fetchForChain = vi.fn(async (_addr, chainId) => { seen.push(chainId); return [] })
+    await readWagersAcrossEstate(ADDR, { fetchForChain })
+    // Only chains with a wager contract reach the fetcher; none of them may be the sandbox.
+    expect(seen).not.toContain(HARDHAT)
+    expect(seen.length).toBeGreaterThan(0)
   })
 })

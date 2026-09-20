@@ -1698,6 +1698,25 @@ function MarketDetailView({
    * here — that is only for the list, where the target varies per row.
    */
   const targetChainId = Number(market?.chainId ?? chainId)
+
+  /*
+   * THE SIGNER IS READ THROUGH A REF, NOT THE CLOSURE (spec 110 T040).
+   *
+   * These writes name a chain, so `useGaslessWrite`'s self-submit fallback settles the wallet on
+   * it FIRST — and wagmi rebuilds the chain-scoped signer an async beat after the switch lands.
+   * A `selfSubmit` closure created when the button was pressed still holds the PRE-switch signer,
+   * bound to the old chain: viem then refuses at BROADCAST with "the current chain of the wallet
+   * does not match the target chain for the transaction" — the worst possible moment, because the
+   * member has already signed. It is the race `submitOn.js#signerIsOn` was written for, arriving
+   * by the one route the settle loop cannot close: the loop settles the WALLET and returns the
+   * settled snapshot, but it cannot reach into a caller's closure.
+   *
+   * The T040 write-up said these two detail views needed none of the list's re-entry machinery,
+   * because they show one wager whose chain is fixed at render. That was right about the chain
+   * and wrong about the signer.
+   */
+  const signerRef = useRef(signer)
+  useEffect(() => { signerRef.current = signer })
   const isPasskey = loginMethod === 'passkey'
   // Spec 088 FR-002 — this detail view's own claimRefund/cancelOpen buttons need the same
   // acting-account routing the list row got: never sign with the connected wallet while the
@@ -1724,7 +1743,7 @@ function MarketDetailView({
     chainId: targetChainId,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const tx = await signer.sendTransaction({
+      const tx = await signerRef.current.sendTransaction({
         to: getContractAddressForChain('wagerRegistry', targetChainId),
         data: registryCall('cancelOpen', [wagerId]),
       })
@@ -1799,7 +1818,7 @@ function MarketDetailView({
     chainId: targetChainId,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const tx = await signer.sendTransaction({
+      const tx = await signerRef.current.sendTransaction({
         to: getContractAddressForChain('wagerRegistry', targetChainId),
         data: registryCall('claimRefund', [wagerId]),
       })
@@ -2280,6 +2299,25 @@ function ResolutionModal({
    * here — that is only for the list, where the target varies per row.
    */
   const targetChainId = Number(market?.chainId ?? chainId)
+
+  /*
+   * THE SIGNER IS READ THROUGH A REF, NOT THE CLOSURE (spec 110 T040).
+   *
+   * These writes name a chain, so `useGaslessWrite`'s self-submit fallback settles the wallet on
+   * it FIRST — and wagmi rebuilds the chain-scoped signer an async beat after the switch lands.
+   * A `selfSubmit` closure created when the button was pressed still holds the PRE-switch signer,
+   * bound to the old chain: viem then refuses at BROADCAST with "the current chain of the wallet
+   * does not match the target chain for the transaction" — the worst possible moment, because the
+   * member has already signed. It is the race `submitOn.js#signerIsOn` was written for, arriving
+   * by the one route the settle loop cannot close: the loop settles the WALLET and returns the
+   * settled snapshot, but it cannot reach into a caller's closure.
+   *
+   * The T040 write-up said these two detail views needed none of the list's re-entry machinery,
+   * because they show one wager whose chain is fixed at render. That was right about the chain
+   * and wrong about the signer.
+   */
+  const signerRef = useRef(signer)
+  useEffect(() => { signerRef.current = signer })
   const isPasskey = loginMethod === 'passkey'
   // Spec 088 FR-002 — resolving (declareDraw/declareWinner) checks `actor` against the wager's
   // creator/opponent/arbitrator on-chain, so signing with the CONNECTED wallet while the switcher
@@ -2364,8 +2402,8 @@ function ResolutionModal({
     chainId: targetChainId,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await signer.sendTransaction({
+      const feeOverrides = await getFeeOverrides(signerRef.current.provider)
+      const tx = await signerRef.current.sendTransaction({
         to: getContractAddressForChain('wagerRegistry', targetChainId),
         data: registryCall('declareDraw', [wagerId]),
         ...feeOverrides,
@@ -2394,8 +2432,8 @@ function ResolutionModal({
     chainId: targetChainId,
     params: (wagerId, winner) => ({ wagerId, winner }),
     selfSubmit: async (wagerId, winner) => {
-      const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await signer.sendTransaction({
+      const feeOverrides = await getFeeOverrides(signerRef.current.provider)
+      const tx = await signerRef.current.sendTransaction({
         to: getContractAddressForChain('wagerRegistry', targetChainId),
         data: registryCall('declareWinner', [wagerId, winner]),
         ...feeOverrides,

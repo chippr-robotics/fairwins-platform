@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAccount } from 'wagmi'
 import { useWalletChainId } from '../hooks/useWalletChainId'
-import { cohortChainIds } from '../config/networks'
 import {
   readWagersAcrossEstate,
+  wagerEstateChainIds,
   wagersFrom,
   unreadableNetworks,
   tagWagers,
@@ -70,9 +70,15 @@ function saveDismissed(address, ids) {
   }
 }
 
-/** Every cohort chain's cached wagers, for the first paint before any chain has answered. */
+/**
+ * Every read chain's cached wagers, for the first paint before any chain has answered.
+ *
+ * The SAME roster the read uses, not the raw cohort: a chain the read will never ask about must
+ * not be painted from its cache either, or a stale entry outlives the chain that produced it and
+ * the first paint disagrees with every paint after it.
+ */
 function loadEstateFromStorage() {
-  return cohortChainIds().flatMap((id) => tagWagers(loadFromStorage(id), id))
+  return wagerEstateChainIds().flatMap((id) => tagWagers(loadFromStorage(id), id))
 }
 
 export function FriendMarketsProvider({ children }) {
