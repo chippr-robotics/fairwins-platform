@@ -22,6 +22,12 @@ on:
         required: false
         default: 'develop'
 
+# Least privilege: this job checks out, builds and runs an emulator. It writes nothing back —
+# no comments, no releases, no pushes — so the token needs read access to the repository and
+# nothing else. Every other workflow here declares the same block (CodeQL flagged its absence).
+permissions:
+  contents: read
+
 concurrency:
   group: hardware-emulator
   cancel-in-progress: true
