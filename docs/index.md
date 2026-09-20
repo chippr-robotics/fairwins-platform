@@ -43,7 +43,7 @@ FairWins is delivered as **tenant instances**: a validated configuration
 manifest defines an instance's brand, theme, domains, feature set, networks,
 and contract set. Branding-only instances front the shared contract estate;
 dedicated instances get an **isolated on-chain estate** — deterministic,
-tenant-salted deployments of the same audited contracts with their own
+tenant-salted deployments of the same contracts with their own
 membership base, fee configuration, treasury, and admin keys. Isolation is
 enforced by separate contract instances, never by an application filter.
 See the [White-Label Tenants guide](developer-guide/white-label-tenants.md).
