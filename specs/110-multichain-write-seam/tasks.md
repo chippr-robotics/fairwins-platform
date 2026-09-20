@@ -1779,9 +1779,52 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
         arrives before the hashes are examined, so `hashDomain`/`hashStruct` parity with
         `TypedDataEncoder` is pinned by the unit suite instead — over five domain shapes including
         `salt` and the empty domain, and a nested `Person[]` table.
-- [ ] T029 E2E per spec 094: on-chain coverage for cross-chain claim and intent-without-switch;
-      no-chain coverage for refused-switch disclosure and before-tap rail unavailability. Flip the
-      four `110-multichain-write-seam` matrix rows as each lands.
+- [ ] T029 E2E per spec 094. **One row of four flipped, and the other three are blocked on the
+      PRODUCT rather than on a test — which is the finding, not an excuse.** Asking what each row
+      needed before writing it is what surfaced that; a test written anyway would have passed by
+      never reaching its subject (anti-pattern 7).
+
+      **`multichain.refused-switch-discloses` → covered (no-chain), and it found a live
+      divergence on its first run.** `fast/50-multichain-write-seam.cy.js`. The row's claim is the
+      GENERALIZATION — one sentence on every write surface — and that is not what the two existing
+      tests prove: `full/45-wrap-cross-chain` WXC-02 and `fast/42-protect-vault-sheet` VS-04 each
+      assert that their surface names both chains, which a surface with a sentence entirely of its
+      own satisfies. So MCW-03 drives two unrelated surfaces in one test and requires the two
+      sentences, with the subject noun and the chain names normalized out, to be BYTE-IDENTICAL.
+
+      It failed immediately. `VaultQueueView` was still carrying a **fifth private copy**: *"Approval
+      not sent — this proposal is on Base, and the wallet stayed on Polygon."* T026 unified the
+      switch-then-settle LOOP, and that unified the sentence for every surface that runs the loop —
+      but this surface legitimately runs its own (switch, then defer the action until the proposals
+      hook has re-bound to the row's chain, which `settleWalletOn` does not model), so the
+      unification never reached it. It named both chains, which is exactly why every test looking at
+      the chain NAMES passed and nothing saw it. The fix is the smallest one that makes the claim
+      true: `submitOn.js#chainSwitchRefusal` composes the sentence, `settleWalletOn` uses it, and a
+      surface with its own settle can still speak it — the NOUN stays the caller's ("This approval"
+      belongs in a queue row). Restoring the private sentence fails MCW-01 and MCW-03 and leaves
+      MCW-02 passing, which is the shape a real gate should have.
+
+      **`multichain.rail-unavailable-before-tap` → still absent, and the reason is structural.** The
+      behaviour is live (`vault-queue-norail`, `wrap-rail-unavailable`) and unit-tested, but the only
+      branch any surface can actually reach is passkey-on-a-bundlerless-chain. That needs a REAL
+      passkey identity — `loginMethod` is derived from the wagmi connector id, so the no-chain tier
+      cannot produce one without asserting against its own fake — and the account-native tier, which
+      can, configures a bundler on **Amoy only** and connects to Amoy, so no bundlerless chain is
+      reachable there either. `proposedTier` moved to `account-native` and the row records the
+      blocker. The other half of the row, "vault signer elsewhere", is not wired at all: no surface
+      passes `walletChainId`/`canSwitchChain` to `resolveWriteRail`, so reachability is `unchecked`
+      in production and a cross-chain vault row switches AT the tap instead — which IS covered, by
+      VS-04 and now MCW-01.
+
+      **The two on-chain rows are blocked on T040/T041.** `multichain.claim-on-action-chain` has no
+      surface to test: `MyMarketsModal` calls `switchNetwork()` with NO argument, resolves the
+      registry from the wallet's chain, and refuses with "Please switch to the correct network" —
+      naming neither chain — while `FriendMarketsContext` reads ONE chain (`useChainId()`), so a
+      wager living on another network is never listed and the test cannot establish its
+      precondition. `multichain.intent-signs-without-switch` is the same shape one layer down:
+      `useGaslessWrite` has accepted `cfg.chainId` since T027, and **all 22 production call sites
+      omit it**, so every intent is still signed against the ambient chain's domain. The capability
+      exists in the seam and nothing names a chain through it yet.
 
 ## Phase 3 — Ambient-chain ban (#1594)
 
