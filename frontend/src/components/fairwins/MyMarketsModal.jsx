@@ -194,24 +194,58 @@ function MyMarketsModal({
     return () => clearInterval(id)
   }, [isOpen, account, refreshFriendMarkets])
 
-  // Draw-proposal scan (spec 040 US2). Keeps the per-wager draw proposer current
-  // while the modal is open (same 30s cadence as the market refresh). A failed
-  // read retains prior state rather than fabricating revokes (honest state).
+  /*
+   * Draw-proposal scan (spec 040 US2). Keeps the per-wager draw proposer current while the modal
+   * is open (same 30s cadence as the market refresh). A failed read retains prior state rather
+   * than fabricating revokes (honest state).
+   *
+   * PER CHAIN, and keyed per chain (spec 110 T040). `id` is a per-registry counter, so with an
+   * estate-wide list this used to ask the WALLET's subgraph about every wager id in the list and
+   * key the answers by bare id: a draw proposed on wager #5 on one chain was then rendered against
+   * wager #5 on another — someone else's name, on someone else's wager. Each chain is asked only
+   * about its own wagers, and a chain that does not answer (no subgraph, or a failed read) leaves
+   * its own entries as they were without disturbing the chains that did.
+   */
   const drawScanKey = useMemo(
-    () => decryptableMarkets.map(m => String(m.id)).sort().join(','),
-    [decryptableMarkets]
+    () => decryptableMarkets
+      .map((m) => `${Number(m.chainId ?? chainId)}:${String(m.id)}`)
+      .sort()
+      .join(','),
+    [decryptableMarkets, chainId]
   )
   useEffect(() => {
     if (!isOpen || !account) return
-    const wagerIds = drawScanKey ? drawScanKey.split(',').filter(Boolean) : []
-    if (wagerIds.length === 0) { setDrawProposerById({}); return }
+    const pairs = drawScanKey ? drawScanKey.split(',').filter(Boolean) : []
+    if (pairs.length === 0) { setDrawProposerById({}); return }
+    const byChain = new Map()
+    for (const pair of pairs) {
+      const [chain, wagerId] = pair.split(':')
+      if (!byChain.has(chain)) byChain.set(chain, [])
+      byChain.get(chain).push(wagerId)
+    }
     let alive = true
     const run = async () => {
-      const { proposals, ok } = await fetchDrawProposals({ chainId, wagerIds })
-      if (!alive || !ok) return
-      const map = {}
-      for (const p of proposals) map[String(p.wagerId)] = p.proposer
-      setDrawProposerById(map)
+      const results = await Promise.all(
+        [...byChain.entries()].map(async ([chain, wagerIds]) => {
+          const { proposals, ok } = await fetchDrawProposals({ chainId: Number(chain), wagerIds })
+          return { chain, proposals, ok }
+        })
+      )
+      if (!alive) return
+      const answered = results.filter((r) => r.ok)
+      if (answered.length === 0) return
+      setDrawProposerById((prev) => {
+        const next = { ...prev }
+        // Clear only what the answering chains were asked about, so their revokes land and the
+        // silent chains keep what they last said.
+        for (const { chain } of answered) {
+          for (const wagerId of byChain.get(chain)) delete next[`${chain}-${wagerId}`]
+        }
+        for (const { chain, proposals } of answered) {
+          for (const p of proposals) next[`${chain}-${String(p.wagerId)}`] = p.proposer
+        }
+        return next
+      })
     }
     run()
     const id = setInterval(run, 30000)
@@ -341,19 +375,25 @@ function MyMarketsModal({
       ...decryptableMarkets.map(m => ({ ...m, marketType: 'friend' }))
     ]
 
-    // Only show wagers that belong to the active network. Wagers are tagged
-    // with the chainId they were read from (see FriendMarketsContext); after a
-    // testnet ↔ mainnet switch this drops wagers that only exist on the other
-    // network instead of displaying them as if they were available here.
-    // Legacy/untagged wagers (no chainId) fall through so we never hide data
-    // written before this tagging existed.
-    const onActiveChain = allMarkets.filter(
-      m => m.chainId == null || !chainId || m.chainId === chainId
-    )
-
-    // Remove duplicates by id
-    const uniqueMarkets = onActiveChain.reduce((acc, market) => {
-      const key = `${market.marketType}-${market.id}`
+    /*
+     * THE LIST IS THE ESTATE (spec 110 T040). There is deliberately NO filter to the wallet's
+     * chain here. There used to be one, and it silently undid the feature: the context now reads
+     * every cohort chain, and this then threw away everything the wallet was not currently sitting
+     * on — so a member still watched their wagers vanish on a network switch, which is the exact
+     * behaviour T040 exists to end. Its stated reason (don't show testnet wagers on a mainnet
+     * build) is handled upstream and better: `readWagersAcrossEstate` and `loadEstateFromStorage`
+     * are both cohort-bounded, so a wager from the other cohort can no longer be in this list to
+     * be filtered out.
+     *
+     * Dedupe is by the CHAIN-SCOPED key. `market.id` is a per-registry counter, so wager #5 on
+     * Polygon and wager #5 on Base collide on `${marketType}-${id}` — with a single-chain list
+     * that could never happen, and with an estate-wide one it silently drops a real wager. The
+     * `uniqueId` that `tagWagers` stamps already carries chain + contract + id.
+     */
+    const uniqueMarkets = allMarkets.reduce((acc, market) => {
+      const key = market.uniqueId
+        ? `${market.marketType}-${market.uniqueId}`
+        : `${market.marketType}-${market.chainId ?? 'unknown'}-${market.id}`
       if (!acc[key]) acc[key] = market
       return acc
     }, {})
@@ -439,7 +479,8 @@ function MyMarketsModal({
       const marketWithStatus = {
         ...market,
         computedStatus: status,
-        drawProposedBy: drawProposerById[String(market.id)] ?? null,
+        drawProposedBy:
+          drawProposerById[`${Number(market.chainId ?? chainId)}-${String(market.id)}`] ?? null,
       }
 
       // Apply status filter. The default ("all") view hides expired offers so
@@ -533,7 +574,9 @@ function MyMarketsModal({
     history.sort(comparator)
 
     return { participating, created, arbitrating, history }
-  }, [markets, decryptableMarkets, userPositions, account, sortKey, statusFilter, selectedMarketId, dismissedIds, chainId, drawProposerById])
+    // `chainId` is read ONLY to fall back for an untagged legacy wager — it no longer decides what
+    // the member can see. What they are looking at does not depend on where their wallet is.
+  }, [markets, decryptableMarkets, userPositions, account, sortKey, statusFilter, selectedMarketId, dismissedIds, drawProposerById, chainId])
 
   // Derive the selected market from the live categorized lists so the detail
   // view reflects fresh data (e.g., decryptedMetadata) after decryption
@@ -1547,7 +1590,10 @@ function MyMarketsModal({
           marketId={acceptanceMarket.id}
           marketData={acceptanceMarket}
           onAccepted={handleMarketAccepted}
-          contractAddress={getContractAddressForChain('wagerRegistry', chainId)}
+          contractAddress={getContractAddressForChain(
+            'wagerRegistry',
+            Number(acceptanceMarket.chainId ?? chainId),
+          )}
           contractABI={WAGER_REGISTRY_ABI}
         />
       )}
@@ -2389,9 +2435,12 @@ function ResolutionModal({
     const registryAddress = getContractAddressForChain('wagerRegistry', targetChainId)
 
     // Named chain, not "whatever the signer is bound to" (spec 110 read-routing decision); the
-    // only read here is `getWager`, and the encoders never needed a runner.
+    // only read here is `getWager`, and the encoders never needed a runner. The chain named is
+    // the WAGER's — the same one `registryAddress` was resolved on. Reading that address against
+    // the wallet's chain instead would ask a different network about an address that means
+    // nothing there, which for a member acting on a wager held elsewhere is every read.
     const askRegistry = (functionName, args) =>
-      readContract(chainId, { address: registryAddress, abi: WAGER_REGISTRY_ABI, functionName, args })
+      readContract(targetChainId, { address: registryAddress, abi: WAGER_REGISTRY_ABI, functionName, args })
 
     try {
       // Draw: returns each party their own stake. For participant types the
