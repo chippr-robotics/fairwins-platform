@@ -135,6 +135,70 @@ automated path, on purpose.
 All three are the system working. A fresh, unreviewed plan applying automatically is exactly what the
 design forbids.
 
+## The repository was renamed and every GCP job now fails auth
+
+**Symptom.** Every workflow that federates into GCP — `Plan`, `Apply`, anything using
+`google-github-actions/auth` — fails before it does any work:
+
+```
+google-github-actions/auth failed with: failed to generate Google Cloud federated token ...
+{"error":"unauthorized_client","error_description":"The given credential is rejected by the attribute condition."}
+```
+
+**Cause.** Workload Identity Federation pins the repository by name. GitHub puts the CURRENT name in
+the OIDC token's `repository` claim, so a rename invalidates two things at once:
+
+| Where | What it holds |
+|---|---|
+| `google_iam_workload_identity_pool_provider.github.attribute_condition` (`bootstrap/main.tf:96`) | `assertion.repository == "owner/name"` — rejects the token outright |
+| the `roles/iam.workloadIdentityUser` members (`bootstrap/main.tf:176`) | `principalSet://.../attribute.repository/owner/name` — would refuse the impersonation even if the token were issued |
+
+Both come from `var.github_repository`.
+
+**Terraform cannot fix this.** Applying requires federating, and federating is what is being refused.
+The credential needed to repair the condition is the credential the condition rejects. The live pool
+has to be corrected out of band, by a human with admin rights, BEFORE any pipeline works again.
+
+**Recovery.** With an admin credential (`gcloud auth login` as a human, not the CI service account):
+
+```bash
+POOL=github-actions
+PROVIDER=github-oidc
+NEW=chippr-robotics/fairwins-platform      # the repo's CURRENT owner/name
+PROJECT_NUMBER=266380754692
+
+# 1. Repoint the provider's attribute condition.
+gcloud iam workload-identity-pools providers update-oidc "$PROVIDER" \
+  --project=chippr-bots-site-wp --location=global --workload-identity-pool="$POOL" \
+  --attribute-condition="assertion.repository == \"$NEW\""
+
+# 2. Grant the new principalSet, for each service account that federates
+#    (fairwins-tf-plan@ and the apply identity).
+POOL_PATH="projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL"
+for SA in fairwins-tf-plan fairwins-tf-apply; do
+  gcloud iam service-accounts add-iam-policy-binding \
+    "$SA@chippr-bots-site-wp.iam.gserviceaccount.com" \
+    --project=chippr-bots-site-wp \
+    --role=roles/iam.workloadIdentityUser \
+    --member="principalSet://iam.googleapis.com/$POOL_PATH/attribute.repository/$NEW"
+done
+```
+
+Use `add-iam-policy-binding`, never `set-iam-policy`: IAM here is **additive only** (see
+`check:iac` and `docs/developer-guide/infrastructure-as-code.md`), and the additive form also leaves
+the old binding in place, so a rollback of the rename does not lock everything out.
+
+**Then remove the stale grant** once a plan has run green — the old `attribute.repository/<old-name>`
+member should not outlive the rename, and a repository name can be re-registered by someone else.
+
+**Finally**, confirm `var.github_repository` in `infra/terraform/bootstrap/variables.tf` matches the
+new name and that a plan comes back **zero-diff**. If the code still names the old repo, the next
+apply reverts the console fix and the outage returns.
+
+**Not only GCP.** A rename also detaches anything else keyed on `owner/repo`: verify the Cloud Build
+GitHub trigger (`gcloud builds triggers list`) still points at the repository, and that its
+`--repo-name` matches.
+
 ## Rotating the Cloudflare token
 
 The one long-lived credential in the design.
