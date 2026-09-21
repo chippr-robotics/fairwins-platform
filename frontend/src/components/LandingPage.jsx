@@ -340,8 +340,8 @@ function LandingPage() {
               <div className="step-content">
                 <h3>Operate</h3>
                 <p>
-                  Payments, trading, custody, and yield run self-custody on audited
-                  contracts, while your operations console reads the whole estate —
+                  Payments, trading, custody, and yield run self-custody on
+                  open-source contracts, while your operations console reads the whole estate —
                   every network, every balance, every control — with honest state.
                 </p>
               </div>
