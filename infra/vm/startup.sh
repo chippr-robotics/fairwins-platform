@@ -8,7 +8,7 @@
 set -euo pipefail
 exec > >(logger -t fairwins-startup) 2>&1
 
-REPO_URL="https://github.com/chippr-robotics/prediction-dao-research.git"
+REPO_URL="https://github.com/chippr-robotics/fairwins-platform.git"
 REPO_DIR=/opt/fairwins/repo
 ROLE="$(curl -fsS -H 'Metadata-Flavor: Google' \
   http://metadata.google.internal/computeMetadata/v1/instance/attributes/fairwins-role)"

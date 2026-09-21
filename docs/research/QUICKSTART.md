@@ -9,7 +9,7 @@
 
 ```bash
 # Clone the repository
-git clone https://github.com/chippr-robotics/prediction-dao-research.git
+git clone https://github.com/chippr-robotics/fairwins-platform.git
 cd prediction-dao-research
 
 # Install dependencies

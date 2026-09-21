@@ -16,17 +16,17 @@ account, external wallet, or multisig vault).
 📖 **Full documentation:** [docs/](docs/index.md) (MkDocs site — user guide,
 architecture, contract reference, runbooks)
 
-> **On the repository name.** This repository is the FairWins platform
-> monorepo. It is still hosted at `chippr-robotics/prediction-dao-research`,
-> which is a **historical name** from the futarchy-research project this code
-> grew out of — not a description of what is in it. The npm package is
-> `fairwins-platform`, the documentation site is FairWins, and the product is
-> FairWins. The GitHub path is kept for now because the old name is still
-> load-bearing outside this repository: the Graph Studio subgraph slug, the
-> Cloud Run service, the Artifact Registry image path and the relayer service
-> names all contain it, and each is a migration with its own cutover rather
-> than a string edit. **229 occurrences across 108 files** are inventoried and
-> sequenced by blast radius in **#1628**; the naming rationale is **#1617**.
+> **On the repository name.** This repository was `prediction-dao-research`
+> until 2026-09-21 — a historical name from the futarchy-research project this
+> code grew out of. It is now `chippr-robotics/fairwins-platform`, and GitHub
+> redirects the old path indefinitely, so existing clones, forks and links keep
+> working.
+>
+> The old name does still appear in **deployment identity that lives outside
+> this repository** — the Graph Studio subgraph slug, the Cloud Run service,
+> the Artifact Registry image path and the relayer service names. Each is a
+> migration with its own cutover rather than a string edit, and they are
+> tracked in **#1628**.
 
 ## Platform capabilities
 

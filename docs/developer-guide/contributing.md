@@ -10,7 +10,7 @@ Be respectful, inclusive, and collaborative. We're building something important 
 
 ### Reporting Bugs
 
-1. Check if the bug is already reported in [GitHub Issues](https://github.com/chippr-robotics/prediction-dao-research/issues)
+1. Check if the bug is already reported in [GitHub Issues](https://github.com/chippr-robotics/fairwins-platform/issues)
 2. If not, create a new issue with:
    - Clear title and description
    - Steps to reproduce

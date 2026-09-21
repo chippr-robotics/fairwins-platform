@@ -6,7 +6,7 @@
 
 **Deciders**: Development Team
 
-**Technical Story**: [Issue: Scalable Architecture & Batch Market Updates for High-Traffic Scenarios](https://github.com/chippr-robotics/prediction-dao-research/issues/)
+**Technical Story**: [Issue: Scalable Architecture & Batch Market Updates for High-Traffic Scenarios](https://github.com/chippr-robotics/fairwins-platform/issues/)
 
 ## Executive Summary
 

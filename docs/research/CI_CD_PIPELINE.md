@@ -146,7 +146,7 @@ Runs on:
 
 3. **Creating Releases**
    - Merge PRs to `main` with proper labels
-   - Review draft release at: `https://github.com/chippr-robotics/prediction-dao-research/releases`
+   - Review draft release at: `https://github.com/chippr-robotics/fairwins-platform/releases`
    - Edit and publish when ready
    - See [RELEASE_PROCESS.md](./RELEASE_PROCESS.md) for complete workflow
 

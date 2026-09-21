@@ -5,7 +5,7 @@ role-gated factory and a per-token admin surface. It revives and modernizes the 
 `FairWinsToken` designs against the platform's current standards (UUPS authority, `SanctionsGuard`, role-gated
 issuance, synced artifacts) — reference-only archive in `contracts-archive/tokens/`, never imported or deployed.
 
-Spec: [`specs/028-token-mint/`](https://github.com/chippr-robotics/prediction-dao-research/tree/main/specs/028-token-mint).
+Spec: [`specs/028-token-mint/`](https://github.com/chippr-robotics/fairwins-platform/tree/main/specs/028-token-mint).
 
 The feature shipped in two stages. The original release (US1–US5) added the factory, the v1 (Ownable) clone
 templates, deploy/verify wiring, the `TokenCreated` subgraph datasource, and the theme-aware Tokens tab. The
