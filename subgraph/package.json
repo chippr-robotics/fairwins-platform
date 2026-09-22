@@ -8,9 +8,10 @@
     "build": "graph build",
     "build:amoy": "graph build --network polygon-amoy",
     "build:mordor": "graph build --network mordor",
-    "deploy:studio": "graph deploy --node https://api.studio.thegraph.com/deploy/ prediction-dao-research",
-    "create-local": "graph create --node http://localhost:8020/ prediction-dao-research",
-    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 prediction-dao-research",
+    "deploy:polygon": "graph deploy fairwins-polygon --studio --network matic",
+    "deploy:amoy": "graph deploy fairwins-amoy --studio --network polygon-amoy",
+    "create-local": "graph create --node http://localhost:8020/ fairwins",
+    "deploy-local": "graph deploy --node http://localhost:8020/ --ipfs http://localhost:5001 fairwins",
     "test:matchstick": "graph test"
   },
   "devDependencies": {

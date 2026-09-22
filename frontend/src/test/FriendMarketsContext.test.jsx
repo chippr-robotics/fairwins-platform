@@ -6,8 +6,9 @@ import { useContext } from 'react'
 let mockAccount = { address: '0xabc0000000000000000000000000000000000001', isConnected: true }
 let mockChainId = 80002
 vi.mock('wagmi', () => ({
-  useAccount: () => mockAccount,
-  useChainId: () => mockChainId,
+  // The chain rides on the CONNECTION now (spec 110 Phase 3) — `useWalletChainId` reads it
+  // from `useAccount()`, never from wagmi's configured-chain singleton.
+  useAccount: () => ({ ...mockAccount, chainId: mockChainId }),
 }))
 
 // The blockchain fetch returns different wager sets per chain so we can assert
@@ -21,14 +22,29 @@ import { FriendMarketsProvider } from '../contexts/FriendMarketsContext.jsx'
 import { FriendMarketsContext } from '../contexts/FriendMarketsContext'
 
 function Consumer() {
-  const { friendMarkets } = useContext(FriendMarketsContext)
+  const { friendMarkets, unreadableNetworks, partial } = useContext(FriendMarketsContext)
   return (
     <div>
       <span data-testid="count">{friendMarkets.length}</span>
-      <span data-testid="ids">{friendMarkets.map(m => `${m.id}@${m.chainId}`).join(',')}</span>
+      <span data-testid="ids">{[...friendMarkets].map(m => `${m.id}@${m.chainId}`).sort().join(',')}</span>
+      <span data-testid="unreadable">{(unreadableNetworks || []).join(',')}</span>
+      <span data-testid="partial">{String(partial)}</span>
     </div>
   )
 }
+
+/*
+ * The chains this build READS wagers from that also carry a wager contract. Asserted by the first
+ * test rather than assumed, because every count below is a function of this roster.
+ *
+ * 1337 is deliberately ABSENT though it is in the cohort and does carry a contract: the roster is
+ * `wagerEstateChainIds()`, the cohort minus the local-only sandboxes, because a shipped build can
+ * never reach `http://127.0.0.1:8545` and would otherwise name "Hardhat" as a network it could
+ * not read — permanently, to every member, about a node that was never theirs. See
+ * `lib/wagers/estateWagers.js#wagerEstateChainIds` and its own tests for the rule and for the
+ * local-build exception that keeps it.
+ */
+const WAGER_CHAINS = [63, 80002]
 
 function renderProvider() {
   return render(
@@ -38,7 +54,7 @@ function renderProvider() {
   )
 }
 
-describe('FriendMarketsContext chain scoping', () => {
+describe('FriendMarketsContext — the list is the estate (spec 110 T040)', () => {
   beforeEach(() => {
     localStorage.clear()
     fetchMock.mockReset()
@@ -50,39 +66,45 @@ describe('FriendMarketsContext chain scoping', () => {
     localStorage.clear()
   })
 
-  it('tags fetched wagers with the active chain id and caches them per chain', async () => {
-    fetchMock.mockResolvedValue([{ id: '1', contractAddress: '0xfactory' }])
+  it('reads every cohort chain that carries a wager contract, tagging each wager with its own', async () => {
+    fetchMock.mockImplementation(async (_addr, chainId) => [{ id: `w${chainId}`, contractAddress: '0xfactory' }])
 
-    await act(async () => {
-      renderProvider()
-    })
+    await act(async () => { renderProvider() })
 
     await waitFor(() => {
-      expect(screen.getByTestId('count').textContent).toBe('1')
+      expect(screen.getByTestId('count').textContent).toBe(String(WAGER_CHAINS.length))
     })
-    expect(screen.getByTestId('ids').textContent).toBe('1@80002')
+    // The roster, and the tag: a wager carries the chain it was READ from, which is what gives
+    // Claim a target to name (T040's whole purpose).
+    expect(screen.getByTestId('ids').textContent).toBe(
+      WAGER_CHAINS.map((c) => `w${c}@${c}`).sort().join(','),
+    )
+    expect(fetchMock.mock.calls.map((c) => c[1]).sort()).toEqual([...WAGER_CHAINS].sort())
 
-    // Cache is stored under a chain-scoped key, not the global one.
-    expect(localStorage.getItem('friendMarkets:80002')).toBeTruthy()
+    // Still cached per chain, under the keys that existed before.
+    for (const chainId of WAGER_CHAINS) {
+      expect(localStorage.getItem(`friendMarkets:${chainId}`)).toBeTruthy()
+    }
     expect(localStorage.getItem('friendMarkets')).toBeNull()
   })
 
-  it('re-queries the chain and swaps the view when the network switches', async () => {
-    fetchMock.mockImplementation(async () => {
-      // Return data appropriate to whichever chain is currently active.
-      return mockChainId === 80002
-        ? [{ id: '1', contractAddress: '0xfactory' }, { id: '2', contractAddress: '0xfactory' }]
-        : []
-    })
+  /*
+   * THE BEHAVIOUR THAT CHANGED, AND THE REASON IT DID.
+   *
+   * This used to re-query and SWAP the view on every network change — a member switching chains
+   * watched their wagers vanish and come back. The list no longer depends on where the wallet is,
+   * which is exactly what lets a wager on another network be claimed at all.
+   */
+  it('does not re-query when the wallet changes network', async () => {
+    fetchMock.mockImplementation(async (_addr, chainId) => [{ id: `w${chainId}`, contractAddress: '0xfactory' }])
 
     const { rerender } = await act(async () => renderProvider())
-
     await waitFor(() => {
-      expect(screen.getByTestId('count').textContent).toBe('2')
+      expect(screen.getByTestId('count').textContent).toBe(String(WAGER_CHAINS.length))
     })
+    const callsAfterFirstRead = fetchMock.mock.calls.length
 
-    // Switch to mainnet (137), where this user has no wagers.
-    mockChainId = 137
+    mockChainId = 63
     await act(async () => {
       rerender(
         <FriendMarketsProvider>
@@ -91,11 +113,28 @@ describe('FriendMarketsContext chain scoping', () => {
       )
     })
 
-    await waitFor(() => {
-      expect(screen.getByTestId('count').textContent).toBe('0')
+    // Same list, no second sweep: the estate does not change because the wallet moved.
+    expect(screen.getByTestId('count').textContent).toBe(String(WAGER_CHAINS.length))
+    expect(fetchMock.mock.calls.length).toBe(callsAfterFirstRead)
+  })
+
+  /*
+   * An unreachable chain is NAMED. Before, one chain failing meant the member was simply shown
+   * nothing for it — indistinguishable from having no wagers there.
+   */
+  it('names a chain it could not read, and keeps the chains that answered', async () => {
+    fetchMock.mockImplementation(async (_addr, chainId) => {
+      if (chainId === 80002) throw new Error('endpoint down')
+      return [{ id: `w${chainId}`, contractAddress: '0xfactory' }]
     })
 
-    // The fetch was re-issued for the new network.
-    expect(fetchMock.mock.calls.length).toBeGreaterThanOrEqual(2)
+    await act(async () => { renderProvider() })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('partial').textContent).toBe('true')
+    })
+    expect(screen.getByTestId('unreadable').textContent).toBe('Polygon Amoy')
+    // The chains that answered are unaffected — per-chain failure isolation.
+    expect(screen.getByTestId('count').textContent).toBe(String(WAGER_CHAINS.length - 1))
   })
 })

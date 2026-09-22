@@ -21,8 +21,9 @@
  * simply has no deployment reads `not-deployed`, which is a fact rather than a gap.
  */
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { zeroAddress } from 'viem'
 import { NETWORKS, cohortChainIds } from '../config/networks'
+import { readContract } from '../lib/chains/readContract'
 import { getContractAddressForChain } from '../config/contracts'
 import { readAcrossEstate } from '../lib/chains/estate'
 import { aggregate } from '../lib/chains/chainReadResult'
@@ -54,8 +55,8 @@ export function useFeeEstate({ walletChainId, walletProvider } = {}) {
       readAcrossEstate({
         chainIds: chains,
         addressFor: (id) => getContractAddressForChain('membershipManager', id),
-        read: ({ provider, address }) =>
-          new ethers.Contract(address, MEMBERSHIP_FEE_ABI, provider).accruedFees(),
+        read: ({ chainId, address }) =>
+          readContract(chainId, { address, abi: MEMBERSHIP_FEE_ABI, functionName: 'accruedFees' }),
         walletChainId,
         walletProvider,
         unitFor: feeUnitFor,
@@ -63,15 +64,24 @@ export function useFeeEstate({ walletChainId, walletProvider } = {}) {
       readAcrossEstate({
         chainIds: chains,
         addressFor: (id) => getContractAddressForChain('feeRouter', id),
-        read: async ({ chainId, provider, address }) => {
+        read: async ({ chainId, address }) => {
           // The FeeRouter holds nothing, so the meaningful figure is what its treasury RECEIVED.
-          const treasury = await new ethers.Contract(address, FEE_ROUTER_ABI, provider).treasury()
-          if (!treasury || treasury === ethers.ZeroAddress) {
+          const treasury = await readContract(chainId, {
+            address,
+            abi: FEE_ROUTER_ABI,
+            functionName: 'treasury',
+          })
+          if (!treasury || treasury === zeroAddress) {
             throw new Error('no treasury configured on this router')
           }
           const token = NETWORKS[chainId]?.stablecoin?.address
           if (!token) throw new Error('no payment token configured for this network')
-          return new ethers.Contract(token, ERC20_BALANCE_ABI, provider).balanceOf(treasury)
+          return readContract(chainId, {
+            address: token,
+            abi: ERC20_BALANCE_ABI,
+            functionName: 'balanceOf',
+            args: [treasury],
+          })
         },
         walletChainId,
         walletProvider,

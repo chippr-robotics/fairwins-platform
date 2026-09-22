@@ -48,25 +48,29 @@ const RE_PROV = /(?<![\w.])getProvider\(\s*\)/g
 
 // file (relative to src/) -> { addr, prov } baseline of accepted occurrences
 const ALLOW = {
-  // resolver fallbacks (hasRoleOnChain / getUserTierOnChain / fetchFriendMarketsForUser),
-  // the generic getContract() helper, and legacy v1 reads (tierRegistry /
-  // roleManager / paymentProcessor / registerZKKey) not deployed on v2.
-  // +1 (spec 022): checkApprovalNeeded's legacy-path paymentProcessor pre-flight,
-  // mirroring purchaseRoleWithStablecoin's own legacy fallback (MM path is
-  // chain-aware via getContractAddressForChain).
-  'utils/blockchainService.js': { addr: 12, prov: 2 },
+  // resolver fallbacks (hasRoleOnChain / getUserTierOnChain / fetchFriendMarketsForUser) and
+  // the legacy v1 paymentProcessor reads (purchaseRoleWithStablecoin's fallback + spec 022's
+  // checkApprovalNeeded pre-flight), neither deployed on v2. 12 → 5 and 2 → 0 at spec 110: the
+  // two build-time `getProvider()` calls are gone (reads name their chain through the seam), and
+  // `getContract()` / `registerZKKey` / `grantRoleOnChain` / `checkRoleSyncNeeded` — four helpers
+  // with no caller in src/ or cypress/ — were deleted rather than converted. As on EventsSource
+  // below, the baseline is TIGHTENED rather than left where it was: a stale ceiling permits a
+  // regression it was only ever meant to record.
+  'utils/blockchainService.js': { addr: 5, prov: 0 },
   // catch-branch fallbacks in getKeyRegistryContract + registerEncryptionKey
   'utils/keyRegistryService.js': { addr: 4, prov: 0 },
   // catch-branch fallback in screenAddress
   'utils/sanctionsScreen.js': { addr: 1, prov: 0 },
   // expireStaleWagers catch + createFriendMarket resolve() fallback
   'hooks/useFriendMarketCreation.js': { addr: 2, prov: 0 },
-  // legacy: treasuryVault not deployed on v2 (module-scope address)
-  'hooks/useTreasuryVault.js': { addr: 1, prov: 0 },
   // legacy: nullifierRegistry not deployed on v2 (module-scope address)
   'hooks/useNullifierContracts.js': { addr: 1, prov: 0 },
-  // legacy: v1 friendGroupMarketFactory event source (not deployed on v2)
-  'data/wagers/EventsSource.js': { addr: 1, prov: 5 },
+  // legacy: v1 friendGroupMarketFactory event source (not deployed on v2). The five build-time
+  // `getProvider()` calls are GONE since spec 110 — reads name the chain through the seam — and the
+  // baseline is tightened to 0 rather than left at 5, because a stale ceiling permits a regression
+  // it was only ever meant to record. The remaining `getContractAddress(` is the module-scope
+  // address for a contract no live network configures.
+  'data/wagers/EventsSource.js': { addr: 1, prov: 0 },
   // open-challenge hooks (spec 024): chain-aware via getContractAddressForChain(name, chainId|execChainId),
   // each with a getContractAddress fallback for the disconnected-wallet case (same pattern as blockchainService).
   'hooks/useOpenChallengeAccept.js': { addr: 2, prov: 0 },
@@ -118,5 +122,27 @@ describe('chain resolution guard (spec 008, FR-011)', () => {
         'or getProvider(chainId); if the change is intentional (a justified fallback or a migration), ' +
         'update the ALLOW baseline in this file:\n  ' + offenders.join('\n  ')
     ).toEqual([])
+  })
+
+  /*
+   * An ALLOW entry is a PERMITTED CEILING, and this guard had no way to notice one outliving the
+   * file it excuses. That is not only untidy: the baseline is keyed by PATH, so a stale entry
+   * silently hands its exemption to whatever is written at that path next. Found when
+   * `hooks/useTreasuryVault.js` was deleted (spec 110 — dead code for a contract that lives in
+   * `contracts-archive/` and is deployed on no network) and its entry would have sat here
+   * indefinitely, matching nothing.
+   *
+   * The same discipline `LEGACY_COLLISIONS` keeps in `scripts/specs/check-spec-registry.js`: the
+   * list has to shrink when what it excuses goes away.
+   */
+  it('has no stale ALLOW entry — a baseline must not outlive its file', () => {
+    const stale = Object.keys(ALLOW).filter((rel) => {
+      try {
+        return !statSync(join(SRC, rel)).isFile()
+      } catch {
+        return true
+      }
+    })
+    expect(stale, 'These ALLOW entries name files that no longer exist — delete them.').toEqual([])
   })
 })

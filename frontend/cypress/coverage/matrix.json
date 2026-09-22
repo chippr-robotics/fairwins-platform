@@ -3377,29 +3377,35 @@
           "depth": "none",
           "risk": "custody",
           "tests": [],
-          "issue": "#1552"
+          "issue": "#1552",
+          "note": "T040 has LANDED: the list is estate-wide, every wager carries its chain, and Claim/Refund/Resolve resolve the registry from the wager\\u2019s chain (hooks/useWagerChain.js). The blocker is no longer the product \\u2014 this row is now WRITABLE and wants an on-chain spec: a wager on chain A claimed with the wallet on chain B, asserted by reading the payout back from A. Unit coverage exists (src/test/wagers/useWagerChain.test.jsx, estateWagers.test.js); the money path does not, and the e2e policy requires it here."
         },
         {
           "id": "multichain.refused-switch-discloses",
           "name": "A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface)",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "disclosure",
-          "tests": [],
-          "issue": "#1552"
+          "tests": [
+            "frontend/cypress/e2e/fast/50-multichain-write-seam.cy.js::MCW-01",
+            "frontend/cypress/e2e/fast/50-multichain-write-seam.cy.js::MCW-02",
+            "frontend/cypress/e2e/fast/50-multichain-write-seam.cy.js::MCW-03"
+          ],
+          "issue": "#1552",
+          "note": "MCW-03 compares the SENTENCES across two unrelated write surfaces, not just that each names both chains \u2014 and found VaultQueueView still carrying a private copy on its first run. The composer is now lib/chains/submitOn.js#chainSwitchRefusal."
         },
         {
           "id": "multichain.rail-unavailable-before-tap",
           "name": "An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out \u2014 never a submit-time chain-support error",
           "status": "absent",
           "tier": "none",
-          "proposedTier": "no-chain",
+          "proposedTier": "account-native",
           "depth": "none",
           "risk": "access",
           "tests": [],
-          "issue": "#1552"
+          "issue": "#1552",
+          "note": "Live in code (VaultQueueView `vault-queue-norail`, WrapView `wrap-rail-unavailable`) but unreachable by a test today: the only branch any surface can reach is passkey-on-a-bundlerless-chain, which needs a REAL passkey identity (loginMethod comes from the wagmi connector, so the no-chain tier cannot produce one without testing its own fake). The account-native tier can, but `dev:e2e:passkey` configures a bundler on Amoy only and Amoy is the chain it connects to, so no bundlerless chain is reachable there either. The signer half (\"vault signer elsewhere\") is not wired: no surface passes `walletChainId`/`canSwitchChain` to resolveWriteRail, so reachability is `unchecked` in production and cross-chain vault rows switch AT the tap instead (covered by VS-04/MCW-01)."
         },
         {
           "id": "multichain.intent-signs-without-switch",
@@ -3410,7 +3416,8 @@
           "depth": "none",
           "risk": "custody",
           "tests": [],
-          "issue": "#1552"
+          "issue": "#1552",
+          "note": "Blocked on T028/T041, not on a test. `useGaslessWrite` accepts `cfg.chainId` (T027) but ALL 22 production call sites omit it, so every intent is still signed against the ambient chain domain. Only the unit suite exercises the target-chain path today."
         }
       ]
     }

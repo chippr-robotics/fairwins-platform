@@ -62,10 +62,17 @@ describe('useEarnSend', () => {
     expect(sent.txHash).toBe('0xtx')
   })
 
-  it('fails with a member-facing message when the wallet refuses the switch', async () => {
+  it('fails with a member-facing message naming BOTH chains when the wallet refuses the switch', async () => {
     mockSwitch.switchChainAsync.mockRejectedValue(new Error('user rejected'))
     const { result } = renderHook(() => useEarnSend())
-    await expect(result.current.sendOnChain(1, CALLS)).rejects.toThrow(/could not switch to ethereum/i)
+    // Spec 110 T026 — this hook's own wording was "Could not switch to Ethereum — approve the
+    // network change and try again", which named neither where the wallet actually was nor that
+    // nothing had been signed. The shared loop's sentence carries both, so that is what is asserted.
+    const err = await result.current.sendOnChain(1, CALLS).catch((e) => e)
+    expect(err.message).toMatch(/Ethereum/)
+    expect(err.message).toMatch(/Polygon/)
+    expect(err.message).toMatch(/nothing has been signed/i)
+    expect(mockWallet.current.sendCalls).not.toHaveBeenCalled()
   })
 
   it('gates passkey sessions honestly on chains without an ERC-4337 rail', async () => {

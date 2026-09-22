@@ -9,7 +9,7 @@
  * networks is two distinct entries (FR-003, FR-007).
  */
 
-import { getAddress, isAddress } from 'ethers'
+import { getAddress, isAddress } from 'viem'
 import { getUserPreference, saveUserPreference } from '../../utils/userStorage'
 import {
   STORAGE_KEY,

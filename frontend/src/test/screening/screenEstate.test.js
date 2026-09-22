@@ -127,3 +127,57 @@ describe('screenAddressAcrossEstate', () => {
     expect(b.chainIds).toEqual([1, 137])
   })
 })
+
+/*
+ * `reason` is COPY. It renders verbatim under an address field as "Could not read — <reason>", so
+ * whatever a read library puts in an error message ends up in front of a member. Both libraries
+ * describe an empty answer in their own vocabulary — ethers "could not decode result data", viem
+ * `The contract function "isAllowed" returned no data ("0x").` — and viem's long form adds a docs
+ * URL and a version number. That is a log line, not a sentence, and on a phone it is also several
+ * lines of a list row.
+ */
+describe('the unreadable reason is written for a member, not for a log', () => {
+  const reasonFor = async (error) => {
+    const res = await screenAddressAcrossEstate(ADDR, {
+      chainIds: [1],
+      sourcesFor: (id) => [src(id, 'x', async () => { throw error })],
+      providerFor: () => ({}),
+      force: true,
+    })
+    return res.readings[0].reason
+  }
+
+  it('says an empty answer plainly, whichever library reported it', async () => {
+    const viemish = Object.assign(new Error('long body\nwith lines\nDocs: https://viem.sh/…\nVersion: viem@2'), {
+      shortMessage: 'The contract function "isAllowed" returned no data ("0x").',
+    })
+    expect(await reasonFor(viemish)).toBe('this network answered with nothing')
+
+    const ethersish = Object.assign(new Error('could not decode result data (value="0x", code=BAD_DATA)'), {
+      shortMessage: 'could not decode result data',
+    })
+    expect(await reasonFor(ethersish)).toBe('this network answered with nothing')
+  })
+
+  it('keeps a specific unknown failure rather than flattening it to something generic', async () => {
+    expect(await reasonFor(new Error('endpoint down'))).toBe('endpoint down')
+  })
+
+  it('never renders a multi-line or unbounded message', async () => {
+    const shouty = new Error(`${'x'.repeat(400)}\nsecond line`)
+    const reason = await reasonFor(shouty)
+    expect(reason).not.toContain('\n')
+    expect(reason.length).toBeLessThanOrEqual(120)
+  })
+
+  it('keeps the underlying error for callers that want it, off the rendered field', async () => {
+    const boom = new Error('endpoint down')
+    const res = await screenAddressAcrossEstate(ADDR, {
+      chainIds: [1],
+      sourcesFor: (id) => [src(id, 'x', async () => { throw boom })],
+      providerFor: () => ({}),
+      force: true,
+    })
+    expect(res.readings[0].error).toBe(boom)
+  })
+})

@@ -18,11 +18,13 @@
  * No network and no chain: fetch is stubbed and providers are plain objects.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { toEventSelector } from 'viem'
+import { encodeEventLog } from '../../../test/helpers/encodeEventLog'
 import {
   BRIDGE_POLL_INTERVAL_MS,
   BRIDGE_STATUS_SOURCE,
   BridgeStatusUnavailable,
-  SPOKE_POOL_IFACE,
+  SPOKE_POOL_ABI,
   bridgeStatusAvailable,
   deriveBridgeState,
   evidenceFromGatewayStatus,
@@ -42,6 +44,11 @@ import {
 } from '../../../data/ledger/sources/bridgeLedgerSource'
 import { LEDGER_STATUS } from '../../../data/ledger/constants'
 import { __clearClientLedger } from '../../../data/ledger/ledgerClientStore'
+
+// Fixture logs are built from the SAME fragments the module parses, via the shared viem helper —
+// `Interface.encodeEventLog` has no single viem twin (spec 110). SPOKE_POOL_ABI is the parsed form.
+const encodeSpokeLog = (name, values) => encodeEventLog(SPOKE_POOL_ABI, name, values)
+const spokeTopic = (name) => toEventSelector(SPOKE_POOL_ABI.find((i) => i.type === 'event' && i.name === name))
 
 const BASE = 'https://relayer.fairwins.example'
 const ACCOUNT = '0xAbCd000000000000000000000000000000000001'
@@ -113,12 +120,12 @@ function fillLog({ name = 'FilledV3Relay', depositId = DEPOSIT_ID, originChainId
           `0x${'00'.repeat(12)}${MEMBER.slice(2)}`, `0x${'00'.repeat(12)}${MEMBER.slice(2)}`, `0x${'00'.repeat(32)}`,
           [`0x${'00'.repeat(12)}${MEMBER.slice(2)}`, `0x${'00'.repeat(32)}`, 996_500n, fillType],
         ]
-  const encoded = SPOKE_POOL_IFACE.encodeEventLog(SPOKE_POOL_IFACE.getEvent(name), values)
+  const encoded = encodeSpokeLog(name, values)
   return { ...encoded, transactionHash: txHash, address: spokePoolAddress(DESTINATION) }
 }
 
 function depositLog({ depositId = DEPOSIT_ID } = {}) {
-  const encoded = SPOKE_POOL_IFACE.encodeEventLog(SPOKE_POOL_IFACE.getEvent('V3FundsDeposited'), [
+  const encoded = encodeSpokeLog('V3FundsDeposited', [
     USDC_POLYGON, USDC_ETHEREUM, 1_000_000n, 996_500n, DESTINATION, Number(depositId),
     1_799_999_900, 1_800_003_600, 0, MEMBER, MEMBER, '0x0000000000000000000000000000000000000000', '0x',
   ])
@@ -428,8 +435,8 @@ describe('readOnChainEvidence — the gateway-free fallback (FR-053)', () => {
     const [filter] = dest.getLogs.mock.calls[0]
     expect(filter.address).toBe(spokePoolAddress(DESTINATION))
     expect(filter.topics[0]).toEqual([
-      SPOKE_POOL_IFACE.getEvent('FilledV3Relay').topicHash,
-      SPOKE_POOL_IFACE.getEvent('FilledRelay').topicHash,
+      spokeTopic('FilledV3Relay'),
+      spokeTopic('FilledRelay'),
     ])
     expect(filter.topics[1]).toBe(`0x${ORIGIN.toString(16).padStart(64, '0')}`)
     expect(filter.topics[2]).toBe(`0x${Number(DEPOSIT_ID).toString(16).padStart(64, '0')}`)

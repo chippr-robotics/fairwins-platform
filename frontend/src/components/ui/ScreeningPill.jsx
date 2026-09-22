@@ -107,8 +107,15 @@ export default function ScreeningPill({ result, loading = false, chainId = null 
         <Icon />
         <span>{label}</span>
       </button>
+      {/*
+        The list scrolls internally once the estate has more sources than fit (see the CSS), and a
+        region that scrolls must be reachable by keyboard — otherwise its lower rows exist only for
+        a mouse. `tabIndex` makes it a stop that arrow keys can scroll, and the label says what the
+        stop is. It stays a plain list — an explicit role here would take the `list` role away from
+        a `<ul>` full of `<li>`, which is both wrong and what the tests read it by.
+      */}
       {open && (
-        <ul id={detailsId} className="screen-pill-details">
+        <ul id={detailsId} className="screen-pill-details" tabIndex={0} aria-label="Screening sources">
           {[...byChain.entries()].map(([id, rows]) => {
             const here = chainId != null && Number(chainId) === Number(id)
             const name = `${networkName(id)}${here ? ' (this network)' : ''}`

@@ -11,8 +11,8 @@
  *    tracked option is a baseline (no retroactive spam); ids are stable; a hard
  *    read failure returns ok:false so the engine keeps the prior slice.
  */
-import { isStakingAvailable, getStakingConfig, NETWORKS } from '../../../config/networks'
-import { makeReadProvider } from '../../../utils/rpcProvider'
+import { isStakingAvailable, getStakingConfig } from '../../../config/networks'
+import { getPublicClient } from '../../../lib/chains/publicClient'
 import { drainStakingActions } from '../../../lib/staking/stakingActivityBuffer'
 import { stakingPath } from '../../../config/staking'
 import { readLidoWithdrawalStatuses } from '../../../lib/staking/lidoStaking'
@@ -40,16 +40,16 @@ function resolveOption(config, optionId) {
 }
 
 /** Read the ready-exit handle keys for one tracked option. */
-async function readReadyKeys({ optionId, coords, account, provider, timing }) {
+async function readReadyKeys({ optionId, coords, account, chainId, timing }) {
   if (coords.providerKind === 'lido') {
-    const statuses = await readLidoWithdrawalStatuses({ contracts: coords.contracts, account, provider })
+    const statuses = await readLidoWithdrawalStatuses({ contracts: coords.contracts, account, chainId })
     return statuses.filter((s) => s.ready).map((s) => `${optionId}:req:${s.requestId}`)
   }
   if (coords.providerKind === 'spol') {
     const nonces = await readSpolOpenNonces({
       contracts: coords.contracts,
       account,
-      provider,
+      chainId,
       currentEpoch: timing?.epoch,
       withdrawalDelay: timing?.withdrawalDelay,
     })
@@ -58,7 +58,7 @@ async function readReadyKeys({ optionId, coords, account, provider, timing }) {
   const unbonds = await readOpenUnbonds({
     validatorShare: coords.validatorShare,
     account,
-    provider,
+    chainId,
     epoch: timing?.epoch,
     withdrawalDelay: timing?.withdrawalDelay,
   })
@@ -109,17 +109,14 @@ export const stakingSource = {
     }
 
     const config = getStakingConfig(chainId)
-    let provider
-    try {
-      provider = makeReadProvider(NETWORKS[chainId].rpcUrl, chainId)
-    } catch {
-      return { ok: false }
-    }
+    // The chain seam is the availability gate: no RPC route means the tracked
+    // exits cannot be read this cycle (engine keeps the prior slice).
+    if (!getPublicClient(chainId)) return { ok: false }
 
     let timing = null
     if (config?.delegated) {
       try {
-        timing = await readStakeManagerTiming({ stakeManager: config.delegated.stakeManager, provider })
+        timing = await readStakeManagerTiming({ stakeManager: config.delegated.stakeManager, chainId })
       } catch {
         timing = null
       }
@@ -133,7 +130,7 @@ export const stakingSource = {
       currentIds.push(sid)
       let readyKeys
       try {
-        readyKeys = await readReadyKeys({ optionId, coords, account, provider, timing })
+        readyKeys = await readReadyKeys({ optionId, coords, account, chainId, timing })
         anyOk = true
       } catch {
         if (priorSnapshots[sid]) nextSnapshots[sid] = priorSnapshots[sid]

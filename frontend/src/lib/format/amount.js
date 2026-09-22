@@ -1,5 +1,4 @@
-import { formatUnits } from 'ethers'
-
+import { formatUnits } from '../evm/units'
 /**
  * Display formatting for token amounts (spec 102, FR-018 / plan D7).
  *
@@ -27,7 +26,7 @@ const SMALL_FRACTION_DIGITS = 6
 const DEFAULT_FRACTION_DIGITS = 4
 
 /**
- * Format a value that is ALREADY a decimal amount — the output of `ethers.formatUnits`, or a
+ * Format a value that is ALREADY a decimal amount — the output of `formatUnits`, or a
  * plain number — for display. Accepts a numeric string or a finite number; anything else is
  * `null`. `maxFractionDigits` applies to values ≥ 1 (the default is 4).
  *
@@ -76,7 +75,7 @@ export function formatUnitsForDisplay(raw, decimals = 18, opts = {}) {
   if (typeof raw !== 'bigint' && typeof raw !== 'string' && typeof raw !== 'number') return null
   let decimal
   try {
-    // ethers validates the input: a non-integer number, a non-numeric string or a bad
+    // The units seam validates the input: a non-integer number, a non-numeric string or a bad
     // `decimals` all throw here, and every one of those is "unparsable", not "zero".
     decimal = formatUnits(raw, decimals)
   } catch {

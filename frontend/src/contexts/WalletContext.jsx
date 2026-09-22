@@ -1,11 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useAccount, useConnect, useDisconnect, useSwitchChain, useWalletClient } from 'wagmi'
 import ConnectModal from '../components/wallet/ConnectModal'
-import { ethers } from 'ethers'
-import { isSupportedChainId, getNetwork, PRIMARY_CHAIN_ID, cohortChainIds } from '../config/networks'
+import { createWalletClient, createPublicClient, custom } from 'viem'
+import { isSupportedChainId, getNetwork, NETWORKS, PRIMARY_CHAIN_ID, cohortChainIds } from '../config/networks'
 import { classifyEstateProbes } from '../lib/chains/estateSweep'
+import { ChainSwitchRefused } from '../lib/chains/submitOn'
 import { useWalletChainId } from '../hooks/useWalletChainId'
 import { makeReadProvider } from '../utils/rpcProvider'
+import { formatEther } from '../lib/evm/units'
+import { walletSigner } from '../lib/chains/walletSigner'
 import {
   getUserRoles,
   addUserRole,
@@ -15,16 +18,21 @@ import { hasRoleOnChain } from '../utils/blockchainService'
 import { WalletContext } from './WalletContext'
 import { beginTx, publishLifecycle, failTx } from '../lib/passkey/txProgressBus'
 
+/** Strict chain name — never `getNetwork()`, which names the DEFAULT network for an unknown id. */
+const strictChainName = (id) => NETWORKS[Number(id)]?.name || `chain ${Number(id)}`
+
 export function WalletProvider({ children }) {
   // Wagmi hooks for wallet connection
   const { address, isConnected, connector: activeConnector, status: accountStatus } = useAccount()
   const { connect, connectAsync, connectors } = useConnect()
   const { disconnect, disconnectAsync } = useDisconnect()
   // The WALLET's chain, never the one wagmi's config settled on (issue #1030). Identical to the
-  // old `useChainId()` for every configured chain and for every passkey session; it differs only
-  // when the wallet sits on a chain the app does not configure — the case this context has to be
-  // able to SEE in order to correct it (auto-switch below) instead of silently reading and
-  // displaying a different network.
+  // banned `useChainId()` for every configured chain and for every passkey session; it differs
+  // only when the wallet sits on a chain the app does not configure — the case this context has
+  // to be able to SEE in order to correct it (auto-switch below) instead of silently reading and
+  // displaying a different network — and, since spec 110 Phase 3, when NOTHING is connected: the
+  // fallback is the build's own `getCurrentChainId()` rather than wagmi's `chains[0]`, which is
+  // Polygon even in a testnet build.
   const chainId = useWalletChainId()
   const { switchChain, switchChainAsync } = useSwitchChain()
   const { data: walletClient } = useWalletClient()
@@ -139,11 +147,22 @@ export function WalletProvider({ children }) {
    *   unchanged for existing users — SC-004).
    * Each call: { target, data, value? }.
    *
-   * `chainId` option (passkey rail only): pins the batch to a NAMED chain instead of the session's
-   * current one. A UserOp is chain-targeted by parameter, and a caller whose batch is only correct
-   * on one chain (Predict approvals → Polygon) must say so — the session's chain state is React
-   * state, so a just-completed switchChain is not yet visible to the closures already running.
-   * Classic wallets ignore it: an injected signer is bound to whatever chain the wallet is on.
+   * `chainId` option: pins the batch to a NAMED chain instead of the session's current one. A
+   * UserOp is chain-targeted by parameter, and a caller whose batch is only correct on one chain
+   * (Predict approvals → Polygon) must say so — the session's chain state is React state, so a
+   * just-completed switchChain is not yet visible to the closures already running.
+   *
+   * A CLASSIC WALLET CANNOT BE PINNED, SO IT REFUSES (spec 110 T028). An injected signer
+   * broadcasts on whatever network the wallet is on, and this used to IGNORE the option there —
+   * a caller that named a chain got its batch sent on a different one, silently, which is the
+   * defect T026 closed in `submitAsActiveAccount`'s personal branch. Nothing passes `chainId` on
+   * this path today (the two callers that pass it are on the passkey rail), so refusing costs
+   * nothing now and converts a silent wrong-chain send into a stated refusal later.
+   *
+   * It refuses rather than switching ON PURPOSE. `sendCalls` is the SUBMISSION primitive;
+   * `lib/chains/submitOn.js#settleWalletOn` is the chain-landing primitive, and composing them is
+   * the caller's job — which is exactly what `useEarnSend.sendOnChain` and `useWrapNative` already
+   * do. Switching from in here would inject a wallet prompt into a path that has never prompted.
    */
   const sendCalls = useCallback(
     async (calls, { onState, chainId: chainOverride } = {}) => {
@@ -192,6 +211,13 @@ export function WalletProvider({ children }) {
         }
       }
       if (!signer) throw new Error('No signer available')
+      if (chainOverride != null && Number(chainOverride) !== Number(chainId)) {
+        throw new ChainSwitchRefused(
+          `This goes to ${strictChainName(chainOverride)}, but the wallet is on ${strictChainName(chainId)} ` +
+            `and a connected wallet sends on the network it is on. Switch it there first — nothing has been sent.`,
+          { from: Number(chainId), to: Number(chainOverride) },
+        )
+      }
       const receipts = []
       for (const c of calls) {
         const tx = await signer.sendTransaction({ to: c.target ?? c.to, data: c.data, value: c.value ?? 0n })
@@ -206,6 +232,31 @@ export function WalletProvider({ children }) {
   // Use wagmi's walletClient for proper authorization
   useEffect(() => {
     let cancelled = false
+
+    /*
+     * Spec 110 T028 — the signer this hands out is `lib/chains/walletSigner.js`, the ethers
+     * SHAPE on viem, instead of an ethers `JsonRpcSigner` wrapped around wagmi's walletClient.
+     * wagmi's walletClient is already viem, so ethers had been sitting in the middle of a
+     * viem-to-viem path purely to provide the object ~90 call sites are written against.
+     *
+     * EVERY RPC THE SIGNER MAKES STILL GOES THROUGH THE WALLET'S OWN TRANSPORT, which is what
+     * ethers did (`new BrowserProvider(walletClient.transport)`) and is not the read-routing
+     * decision applied elsewhere in this migration. A pre-flight gas estimate and a receipt wait
+     * belong to a write the WALLET is performing: routing them to the member's configured
+     * endpoint instead would mean estimating against one node and signing against another, and
+     * "the app says it is mined, the wallet disagrees". Contract READS keep going through the
+     * seam; this is the signer's own connection.
+     */
+    const signerFor = (transportProvider, account) => {
+      const chain = walletClient?.chain ?? null
+      const transport = custom(transportProvider)
+      return walletSigner({
+        walletClient: createWalletClient({ account, chain, transport }),
+        publicClient: createPublicClient({ chain, transport }),
+        address: account,
+      })
+    }
+
     const updateProviderAndSigner = async () => {
       if (loginMethod === 'passkey') {
         if (cancelled) return
@@ -215,39 +266,32 @@ export function WalletProvider({ children }) {
       }
       if (isConnected && walletClient) {
         try {
-          // Create provider from walletClient's transport for proper authorization
-          // This ensures the signer is authorized for the connected account
-          const ethersProvider = new ethers.BrowserProvider(walletClient.transport, {
-            chainId: walletClient.chain?.id,
-            name: walletClient.chain?.name || 'Unknown'
-          })
-
-          // Build the signer directly for the account wagmi already authorized, instead
-          // of `ethersProvider.getSigner(address)` — ethers v6's BrowserProvider.getSigner()
-          // issues its own `eth_requestAccounts` round-trip to re-verify authorization. That
-          // round-trip fires every time this effect re-runs (e.g. right after the auto
-          // chain-switch below changes `walletClient`), and MetaMask can surface it as a
-          // fresh permission prompt even though the account is already connected. A tester
-          // rejecting that redundant prompt threw here, which nulled out a signer that was
-          // already valid — breaking every signer-dependent action (encryption key backup/
+          // The account wagmi already authorized, over the wallet's own transport. Built
+          // directly rather than asking the wallet who it is again: ethers v6's
+          // `BrowserProvider.getSigner()` issues its own `eth_requestAccounts` round-trip to
+          // re-verify authorization, which fires every time this effect re-runs (e.g. right
+          // after the auto chain-switch below changes `walletClient`), and MetaMask can surface
+          // it as a fresh permission prompt even though the account is already connected. A
+          // tester rejecting that redundant prompt threw here, which nulled out a signer that
+          // was already valid — breaking every signer-dependent action (encryption key backup/
           // registration included) while the wallet still showed "connected".
-          const ethersSigner = new ethers.JsonRpcSigner(ethersProvider, walletClient.account.address)
+          const next = signerFor(walletClient.transport, walletClient.account.address)
           if (cancelled) return
-          setProvider(ethersProvider)
-          setSigner(ethersSigner)
+          setProvider(next?.provider ?? null)
+          setSigner(next)
           console.log('[WalletContext] Signer created for:', walletClient.account.address)
         } catch (error) {
           if (cancelled) return
           console.error('Error creating provider/signer from walletClient:', error)
 
-          // Fallback to window.ethereum if walletClient approach fails
+          // Fallback to window.ethereum if the walletClient approach fails
           if (typeof window !== 'undefined' && window.ethereum) {
             try {
-              const fallbackProvider = new ethers.BrowserProvider(window.ethereum)
-              const fallbackSigner = await fallbackProvider.getSigner()
+              const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+              const fallback = signerFor(window.ethereum, account)
               if (cancelled) return
-              setProvider(fallbackProvider)
-              setSigner(fallbackSigner)
+              setProvider(fallback?.provider ?? null)
+              setSigner(fallback)
               console.log('[WalletContext] Using fallback signer')
             } catch (fallbackError) {
               if (cancelled) return
@@ -263,11 +307,11 @@ export function WalletProvider({ children }) {
       } else if (isConnected && typeof window !== 'undefined' && window.ethereum) {
         // If walletClient is not available yet, try window.ethereum directly
         try {
-          const ethersProvider = new ethers.BrowserProvider(window.ethereum)
-          const ethersSigner = await ethersProvider.getSigner()
+          const [account] = await window.ethereum.request({ method: 'eth_requestAccounts' })
+          const next = signerFor(window.ethereum, account)
           if (cancelled) return
-          setProvider(ethersProvider)
-          setSigner(ethersSigner)
+          setProvider(next?.provider ?? null)
+          setSigner(next)
           console.log('[WalletContext] Signer created from window.ethereum')
         } catch (error) {
           if (cancelled) return
@@ -558,7 +602,7 @@ export function WalletProvider({ children }) {
 
       setBalances(prev => ({
         ...prev,
-        native: ethers.formatEther(nativeBalance)
+        native: formatEther(nativeBalance)
       }))
     } catch (error) {
       console.error('Error fetching balances:', error)
@@ -590,36 +634,17 @@ export function WalletProvider({ children }) {
     }
   }, [address, fetchBalances])
 
-  // Get balance for specific token
-  const getTokenBalance = useCallback(async (tokenAddress) => {
-    if (!provider || !address) {
-      throw new Error('Wallet not connected')
-    }
-
-    try {
-      const tokenContract = new ethers.Contract(
-        tokenAddress,
-        ['function balanceOf(address) view returns (uint256)'],
-        provider
-      )
-      const balance = await tokenContract.balanceOf(address)
-      const formatted = ethers.formatEther(balance)
-      
-      // Cache the balance
-      setBalances(prev => ({
-        ...prev,
-        tokens: {
-          ...prev.tokens,
-          [tokenAddress]: formatted
-        }
-      }))
-      
-      return formatted
-    } catch (error) {
-      console.error('Error getting token balance:', error)
-      throw error
-    }
-  }, [provider, address])
+  /*
+   * `getTokenBalance` was here, and spec 110 DELETED it rather than converting it.
+   *
+   * It had no caller: it reached the outside world only through `useWalletBalances`, which no
+   * component uses, and nothing anywhere reads the `balances.tokens` cache it wrote. Its one
+   * behaviour was also wrong — it formatted every token with `formatEther`, i.e. 18 decimals
+   * regardless of the token, so a USDC balance would have rendered a million million times too
+   * small. Converting it would have carried that bug across the migration and made dead code
+   * look maintained. Reads of a named token now go through `readContract(chainId, …)` at the
+   * surface that wants them, where the decimals are known.
+   */
 
   // Connect wallet (spec 045 FR-001/FR-004).
   // - No connectorId: open the unified connect modal so the USER chooses —
@@ -929,7 +954,6 @@ export function WalletProvider({ children }) {
     
     // Balance methods
     refreshBalances,
-    getTokenBalance,
     
     // RVAC role methods
     hasRole,

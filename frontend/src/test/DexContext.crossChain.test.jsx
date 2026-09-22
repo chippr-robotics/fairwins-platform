@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from './helpers/walletChain'
 import { DexProvider } from '../contexts/DexContext.jsx'
 import { useDex } from '../hooks/useDex'
 import { NETWORKS } from '../config/networks'
@@ -43,7 +43,7 @@ function Probe() {
 }
 
 function renderAt(chainId) {
-  useChainId.mockReturnValue(chainId)
+  setWalletChain(chainId)
   return render(
     <DexProvider>
       <Probe />
@@ -65,12 +65,16 @@ describe('DexContext — cross-chain quoting (the read half of multi-network tra
 
     await dex.getBestQuoteOn(8453, BASE_WETH, BASE_USDC, '1')
 
-    // The read provider is built for the PAIR's chain, not the connected one.
-    expect(mockMakeReadProvider).toHaveBeenCalledWith(NETWORKS[8453].rpcUrl, 8453)
     const args = mockQuoteBestRoute.mock.calls.at(-1)[0]
     expect(args.chainId).toBe(8453)
-    // Base's own quoter — Base deliberately does not share Uniswap's canonical addresses.
-    expect(args.quoter.target ?? args.quoter.address).toBe(NETWORKS[8453].dex.quoter)
+    // Base's own quoter, ON BASE. This used to assert that `makeReadProvider` had been called
+    // with `NETWORKS[8453].rpcUrl` — which pinned a hand-built provider that spec 069 forbids in
+    // as many words, so a member who had repointed Base was quoted through the build default
+    // anyway. The quote is read through the endpoint seam now, and the quoter carries the chain
+    // it will read on, so the claim is checked where it actually lives rather than inferred from
+    // a constructor's arguments.
+    expect(args.quoter.address).toBe(NETWORKS[8453].dex.quoter)
+    expect(args.quoter.chainId).toBe(8453)
     expect(args.decimalsIn).toBe(18)
     expect(args.decimalsOut).toBe(6)
     expect(args.symbolIn).toBe('WETH')

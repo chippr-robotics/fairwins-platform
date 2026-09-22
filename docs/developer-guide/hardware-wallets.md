@@ -18,7 +18,7 @@ from taking that seriously.
 | Trezor adapter (`@trezor/connect-web` popup) | `frontend/src/lib/hardware/trezorAdapter.js` |
 | Typed failure vocabulary (`HW_ERROR_CODES`, `describeHardwareError`) | `frontend/src/lib/hardware/errors.js` |
 | Derivation-path schemes | `frontend/src/lib/hardware/derivations.js` |
-| Device-backed ethers signer | `frontend/src/lib/hardware/hardwareSigner.js` |
+| Device-backed signer (viem; ethers-shaped for its callers) | `frontend/src/lib/hardware/hardwareSigner.js` |
 | Reconnect a saved account (re-derive + match) | `frontend/src/lib/hardware/connectAccount.js` |
 | Backup-synced store (public metadata only) | `frontend/src/lib/hardware/hardwareAccountsStore.js` |
 | Per-owner CRUD facade (`hardwareWalletVault`) | `frontend/src/lib/hardware/hardwareAccounts.js` |
@@ -53,7 +53,7 @@ Three reasons the seam is absolute:
   and never a raw SDK message (FR-012).
 - **Testability.** Component tests hand mock adapters through the `deps` props
   (`{ connect, availability, guidance, provider }` on the sheet,
-  `{ connectAccount, guidance, provider }` on the dialog); nothing needs hardware (FR-013).
+  `{ connectAccount, guidance }` on the dialog); nothing needs hardware (FR-013).
 
 The two vendors differ underneath and the seam absorbs it: Ledger is local — WebHID, Web Bluetooth
 or WebUSB (see below), one APDU at a time, and the adapter probes one address at connect time so
@@ -164,9 +164,13 @@ account:
 4. `CustodyContext` holds the attached `HardwareSigner` **in memory only** — never persisted,
    never serialized, cleared on any identity change. It holds no key material (the device does),
    but it wraps a live transport session, so it is session-scoped like the legacy signer.
-5. The chain binding belongs to the SIGNER, set at ceremony time. If the wallet has switched
-   networks since, submit DROPS the stale signer and re-runs the ceremony (binding to the
-   current chain) instead of refusing with a "switch back" error.
+5. The chain binding belongs to the SIGNER, set at ceremony time — a `{ chainId, client }`
+   binding, from which the signer resolves its own read client through the spec-069 seam
+   (`connectHardwareAccount({ entry, chainId })`). If the wallet has switched networks since,
+   submit DROPS the stale signer and re-runs the ceremony (binding to the current chain) instead
+   of refusing with a "switch back" error. A signer built with NO binding can still sign — which
+   is what the emulator suite does — but `sendTransaction` has no network to populate from or
+   broadcast to, and says so rather than guessing one.
 
 After a reload or unplug the in-memory session is gone and the member reconnects — there is
 nothing to restore, by design.
@@ -279,3 +283,94 @@ popup surfaces as a stated permission failure and init is retryable.
 
 See `specs/085-hardware-wallet-protect/` for the spec, and
 `docs/runbooks/hardware-wallet-staging-validation.md` for the real-device validation checklist.
+
+## Testing against real device firmware (Speculos)
+
+Every other hardware suite mocks the session, which means it answers a question the device no
+longer asks: a fake that signs with an ethers `Wallet` key proves the signer's own arithmetic and
+nothing about the APDUs, the derivation path the device really used, or what the member would have
+been shown before approving. `lib/hardware/speculosTransport.js` closes that gap.
+
+**Speculos** is Ledger's own emulator — real app firmware, real APDUs, real screens — reached over
+HTTP instead of USB. The confirmation gate is therefore *kept and automated*, not removed, which is
+what makes this a hardware test rather than a mock with extra steps.
+
+```bash
+cd frontend
+npm run hw:speculos:up     # builds the Ethereum app from a pinned ref, boots the emulator
+npm run test:hw            # the device suite
+npm run hw:speculos:down
+```
+
+### Rules that are not negotiable
+
+- **The rail is DEV-only.** It aims signing at an arbitrary HTTP origin, so every path to it sits
+  behind `import.meta.env.DEV` and is dead-code-eliminated from a release build. No capability
+  probe returns `speculos`; a caller must ask for it by name. `src/test/hardware/speculosSeam.test.js`
+  enforces both, and fails if the guard is removed.
+- **No new dependency.** `@ledgerhq/hw-transport` is already direct, and the APDU endpoint is plain
+  HTTP, so the transport is one file. Adding `@ledgerhq/device-transport-kit-speculos` or
+  `hw-transport-node-speculos-http` would re-resolve the root lockfile, which is the npm/cli#4828
+  rolldown hazard (spec 075) — a bad trade for a test rail.
+- **The seed is the public BIP-39 vector and must stay empty.** A funded seed in a script any
+  contributor can run is a seed that gets drained.
+- **Green here is not firmware certification.** Speculos is not the Secure Element; syscalls, the
+  watchdog and timing differ. It proves the protocol and the screen flow. USB/BLE quirks and
+  firmware drift remain the physical soak in
+  `docs/runbooks/hardware-wallet-staging-validation.md`.
+
+### Two traps that cost real time, written down so they cost nobody else any
+
+Speculos' `--automation` rules look like the obvious way to replace the button press. They cannot
+express what this needs, and both failures are silent:
+
+1. **`text` is an exact match, not containment.** The approve screen reads `Sign transaction`, so a
+   rule written `{ "text": "Sign" }` never fires — and nothing errors. The catch-all keeps pressing
+   right, the carousel loops, and the APDU never returns, so the suite *hangs* until a timeout.
+2. **Rules fire per TEXT EVENT, not per screen** (`seproxyhal.apply_automation` loops over every
+   event in the batch). One screen emits several — `Network` and `Polygon` are two — so a catch-all
+   pressing right advances *twice* for that screen and overshoots the decision screen. The
+   both-press then lands on `Reject transaction` and every signature returns `0x6985`: a suite that
+   looks like the device refusing when it is the automation pressing the wrong button one screen
+   late.
+
+So the suite **drives the screen itself** — poll, press once, collect — which is what Ledger's own
+app tests do (Ragger's navigate-and-compare). It also buys the assertion that matters: the screens
+are collected, so a test can check what the member would actually have read.
+
+### What the emulator found
+
+- **A Ledger cannot sign our EIP-712 intents with default settings.** `signEIP712HashedMessage`
+  hands the app two hashes, and the app will only review those with **blind signing** enabled: the
+  device screen says `Blind signing must be enabled in settings` and the app answers `0x6a80`. That
+  status was classified `UNKNOWN`, whose sentence is *"Something went wrong talking to the device.
+  Reconnect it and try again"* — advice that can never work, on the path a member takes to sign an
+  intent. It is now `BLIND_SIGNING_REQUIRED`, which names the toggle.
+- **ETC 61 is genuinely supported.** The app renders `Ethereum Classic` and prices in `ETC` rather
+  than showing an unnamed chain id, so 61 is a cohort chain in fact and not only in our config.
+
+### What the device suite can and cannot witness (spec 110)
+
+The signer is viem underneath since spec 110 T028, and this suite was built first precisely so the
+conversion had a differential oracle: it passed against the ethers implementation and still passes
+after. Two library differences it found are permanent facts about this file, and both are cheap to
+reintroduce by accident:
+
+- **`serializeTransaction` wants `v` as a `bigint` on a LEGACY transaction.** Handed a `yParity`
+  bit — which is what ethers took on every type — it raises `Cannot mix BigInt and other types`
+  from inside viem, naming neither the field nor the transaction. It can only fire on a chain with
+  no EIP-1559, which here means **ETC 61 and Mordor 63**, so no EIP-1559 test would ever see it.
+  Reintroduce it and the emulated Nano displays the whole transaction, the member presses **Sign
+  transaction**, and *then* the TypeError lands: a physical confirmation spent on a signature that
+  was never assembled. `signatureForViem` converts once, for every type.
+- **viem silently drops a field that contradicts an explicit transaction type**, where ethers
+  refused to serialize. `{ type: 0, maxFeePerGas }` becomes a legacy transaction with `gasPrice` 0
+  — unmineable, and built from a request that asked for something else. ethers' two refusals are
+  reproduced in `transactionTypeOf`, which also writes out ethers' *inference* rule (highest type
+  the fields admit: a bare `gasPrice` is type 1, not legacy).
+
+What this suite **cannot** see is the EIP-712 hashing. Its typed-data case asserts the
+blind-signing refusal, which the app raises before it looks at the hashes, so `hashDomain` /
+`hashStruct` parity with ethers' `TypedDataEncoder` is pinned by `src/test/hardware/
+hardwareSigner.test.js` instead — which keeps real ethers as the oracle over the serialization
+matrix and the domain shapes. Both suites are needed; neither covers the other's half.

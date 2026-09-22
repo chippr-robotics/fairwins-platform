@@ -31,10 +31,14 @@
  * the helper to the rest of the console would have spread that bug across every operator view,
  * so it is fixed here: providers come from `getReadProvider(chainId)`, full stop.
  */
-import { ethers } from 'ethers'
+import { keccak256, stringToHex, zeroHash } from 'viem'
 import { NETWORKS, cohortChainIds, isInCohort } from '../../config/networks'
 import { getReadProvider } from '../../utils/rpcProvider'
+import { readContract } from './readContract'
 import { readOk, notDeployed, unreadable } from './chainReadResult'
+
+/** keccak256 over a role name's UTF-8 bytes — byte-identical to ethers v6 `id()`. */
+const roleId = (name) => keccak256(stringToHex(name))
 
 /** Display name for a chain, or an honest placeholder — never a guessed one. */
 export function networkName(chainId) {
@@ -162,14 +166,14 @@ const ACCESS_CONTROL_ABI = ['function hasRole(bytes32 role, address account) vie
 
 /** DEFAULT_ADMIN_ROLE is bytes32(0), not a keccak of a name. */
 export const ROLE_HASHES = {
-  admin: ethers.ZeroHash,
-  guardian: ethers.id('GUARDIAN_ROLE'),
-  liquidityAdmin: ethers.id('LIQUIDITY_ADMIN_ROLE'),
-  feeAdmin: ethers.id('FEE_ADMIN_ROLE'),
-  stakingAdmin: ethers.id('STAKING_ADMIN_ROLE'),
-  roleManager: ethers.id('ROLE_MANAGER_ROLE'),
-  sanctionsAdmin: ethers.id('SANCTIONS_ADMIN_ROLE'),
-  accountModerator: ethers.id('ACCOUNT_MODERATOR_ROLE'),
+  admin: zeroHash,
+  guardian: roleId('GUARDIAN_ROLE'),
+  liquidityAdmin: roleId('LIQUIDITY_ADMIN_ROLE'),
+  feeAdmin: roleId('FEE_ADMIN_ROLE'),
+  stakingAdmin: roleId('STAKING_ADMIN_ROLE'),
+  roleManager: roleId('ROLE_MANAGER_ROLE'),
+  sanctionsAdmin: roleId('SANCTIONS_ADMIN_ROLE'),
+  accountModerator: roleId('ACCOUNT_MODERATOR_ROLE'),
 }
 
 /**
@@ -197,11 +201,17 @@ export const ROLE_HASHES = {
  * timed out tells an operator who DOES hold it that there isn't one.
  *
  * `deployed: false` IS a definite answer: there is no contract here to hold a role on.
+ *
+ * `chainId` names the chain the question is put to; `provider` stays exactly what it always was —
+ * the AVAILABILITY GATE, whose null means "no read connection to this network". Keeping the gate
+ * where it was is deliberate: callers resolve it through `readProviderFor`, which also enforces
+ * the cohort bound, so folding the gate into the seam would quietly answer for chains this build
+ * must not read (rule 2). The seam only decides which transport asks.
  */
-export async function readAuthority({ provider, address, account, roles = [] }) {
+export async function readAuthority({ chainId, provider, address, account, roles = [] }) {
   const none = Object.fromEntries(roles.map((r) => [r, false]))
   if (!address) return { ...none, roles: none, readable: true, deployed: false, reason: null }
-  if (!provider || !account) {
+  if (!provider || !account || chainId == null) {
     return {
       ...none,
       roles: none,
@@ -211,9 +221,15 @@ export async function readAuthority({ provider, address, account, roles = [] }) 
     }
   }
   try {
-    const c = new ethers.Contract(address, ACCESS_CONTROL_ABI, provider)
     const answers = await Promise.all(
-      roles.map((name) => c.hasRole(ROLE_HASHES[name] ?? ethers.id(name), account)),
+      roles.map((name) =>
+        readContract(chainId, {
+          address,
+          abi: ACCESS_CONTROL_ABI,
+          functionName: 'hasRole',
+          args: [ROLE_HASHES[name] ?? roleId(name), account],
+        }),
+      ),
     )
     const held = Object.fromEntries(roles.map((name, i) => [name, Boolean(answers[i])]))
     return { ...held, roles: held, readable: true, deployed: true, reason: null }

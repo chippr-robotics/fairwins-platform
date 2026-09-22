@@ -25,7 +25,7 @@
  * wallet", which is a different fact and on a passkey session was never true.
  */
 
-import { keccak256, toUtf8Bytes, getBytes } from 'ethers'
+import { keccak256, stringToBytes, toBytes } from 'viem'
 import { decryptJson, utf8ToBytes } from '../../utils/crypto/primitives'
 import { NETWORKS } from '../../config/networks'
 import {
@@ -136,7 +136,7 @@ async function openLegacyEnvelope(envelope, signer) {
     )
   }
   const signature = await signer.signMessage(ADDRESS_BOOK_BACKUP_MESSAGE_V1)
-  const key = getBytes(keccak256(toUtf8Bytes(signature)))
+  const key = toBytes(keccak256(stringToBytes(signature)))
   try {
     return decryptJson(key, envelope.nonce, envelope.ciphertext, legacyAad())
   } catch {

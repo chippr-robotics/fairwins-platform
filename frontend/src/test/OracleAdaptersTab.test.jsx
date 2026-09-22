@@ -19,6 +19,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import '@testing-library/jest-dom'
+import { ethers as realEthers } from 'ethers'
 import { NETWORKS, cohortChainIds } from '../config/networks'
 import OracleAdaptersTab from '../components/admin/OracleAdaptersTab'
 
@@ -48,31 +49,37 @@ const { dataFeedStub, functionsStub, umaStub } = vi.hoisted(() => {
   }
 })
 
+/** address → stub, shared by the read mock and the decoding signer below. */
+const ADDRESS_STUBS = {
+  '0x7ae8220Dc02D0504EDCBa2C1B1AbA579AA3F0f23': dataFeedStub,
+  '0x074fC18C1E322a7537b53B8B2Bf0762629E3b532': functionsStub,
+  '0xcEa9b4A01CcD3aA6545ea834a268C69e7eEfee88': umaStub,
+}
+
 const ADAPTER_ADDRESSES = {
   chainlinkDataFeedAdapter: '0x7ae8220Dc02D0504EDCBa2C1B1AbA579AA3F0f23',
   chainlinkFunctionsAdapter: '0x074fC18C1E322a7537b53B8B2Bf0762629E3b532',
   umaAdapter: '0xcEa9b4A01CcD3aA6545ea834a268C69e7eEfee88',
 }
 
-vi.mock('ethers', async () => {
-  const real = await vi.importActual('ethers')
-  const stubs = {
-    '0x7ae8220Dc02D0504EDCBa2C1B1AbA579AA3F0f23': dataFeedStub,
-    '0x074fC18C1E322a7537b53B8B2Bf0762629E3b532': functionsStub,
-    '0xcEa9b4A01CcD3aA6545ea834a268C69e7eEfee88': umaStub,
-  }
-  // `new ethers.Contract(addr, ...)` requires a constructor; use a real
-  // function expression so the `new` invocation returns the right stub.
-  function FakeContract(addr) {
-    return stubs[addr] || {}
-  }
+/**
+ * Reads and writes through the chain seam (spec 110), routed BY ADDRESS exactly as the
+ * `new ethers.Contract(addr, …)` fake this replaces was — that routing is what makes "the UMA form
+ * wrote to the UMA adapter" assertable, and it is the half most fakes drop.
+ *
+ * Writes are calldata now, so the signer DECODES them with ethers against the same ABI and
+ * dispatches to the same stub method. Every `expect(umaStub.registerCondition).toHaveBeenCalled…`
+ * below reads unchanged — and is now backed by the actual bytes rather than by an argument list a
+ * fake was handed.
+ */
+vi.mock('../lib/chains/readContract', async (orig) => {
+  const actual = await orig()
   return {
-    ...real,
-    ethers: {
-      ...real.ethers,
-      Contract: FakeContract,
-      isAddress: (s) => /^0x[a-fA-F0-9]{40}$/.test(String(s || '').trim()),
-      toUtf8Bytes: real.ethers.toUtf8Bytes,
+    ...actual,
+    readContract: (_chainId, { address, functionName, args = [] }) => {
+      const stub = ADDRESS_STUBS[address]
+      if (!stub || !stub[functionName]) return Promise.resolve(undefined)
+      return stub[functionName](...args)
     },
   }
 })
@@ -108,8 +115,31 @@ const AWAY = COHORT[1]
 const BARE = COHORT[2]
 const nameOf = (chainId) => NETWORKS[chainId].name
 
+/**
+ * The write rail. `encodeFunctionData` + `sendTransaction` (spec 110), decoded back here with
+ * ethers against the same fragments and dispatched to the stub registered for the `to` address —
+ * so the assertions keep their shape and gain the bytes.
+ */
+const WRITE_FRAGMENTS = [
+  'function setFeedAllowed(address feed, bool allowed)',
+  'function registerCondition(bytes32 conditionId, address feed, int256 threshold, uint8 op, uint64 deadline)',
+  'function registerCondition(bytes32 conditionId, bytes encodedRequest, bytes32 sourceHash, uint64 subscriptionId, uint32 gasLimit, bytes32 donId)',
+  'function registerCondition(bytes32 conditionId, bytes claim, address bondCurrency, uint256 bondAmount, uint64 liveness)',
+  'function linkMarket(uint256 friendMarketId, bytes32 conditionId)',
+]
+
+const writeSigner = {
+  provider: {},
+  sendTransaction: async ({ to, data }) => {
+    const parsed = new realEthers.Interface(WRITE_FRAGMENTS).parseTransaction({ data })
+    const stub = ADDRESS_STUBS[to]
+    if (!stub || !stub[parsed.name]) throw new Error(`unexpected write ${parsed.name} to ${to}`)
+    return stub[parsed.name](...Array.from(parsed.args))
+  },
+}
+
 const defaultProps = {
-  signer: { provider: {} },  // truthy is enough; ethers.Contract is mocked
+  signer: writeSigner,
   account: adminAccount,
   // The build's synced record — only ever consulted for the wallet's own chain, where it agrees
   // with the per-chain address book by construction.
@@ -207,7 +237,10 @@ describe('OracleAdaptersTab', () => {
     expect(conditionId).toBe('0x' + 'a'.repeat(64))
     expect(feed).toBe('0xF0d50568e3A7e8259E16663972b11910F89BD8e7')
     expect(threshold).toBe(300000000000n)  // BigInt
-    expect(op).toBe(0)  // default = GT
+    // `0n`, not `0`: these are DECODED FROM CALLDATA now, and ethers decodes `uint8` as a bigint.
+    // The component still passes a number and viem encodes it identically — what changed is that
+    // the assertion reads the transaction rather than the call site.
+    expect(op).toBe(0n)  // default = GT
     expect(typeof deadline).toBe('bigint')
     expect(Number(deadline)).toBeGreaterThan(Math.floor(Date.now() / 1000))
   })
@@ -254,9 +287,14 @@ describe('OracleAdaptersTab', () => {
     const [conditionId, claimBytes, bondCurrency, bondAmount, liveness] =
       umaStub.registerCondition.mock.calls[0]
     expect(conditionId).toBe('0x' + 'c'.repeat(64))
-    // claimBytes should be a Uint8Array of the UTF-8 encoded text.
-    expect(claimBytes).toBeInstanceOf(Uint8Array)
-    expect(new TextDecoder().decode(claimBytes)).toBe('ETH closes above 3000 on 2026-12-31')
+    // ── DIVERGENCE 19, VISIBLE HERE ───────────────────────────────────────────────────────────
+    // The claim used to be asserted as a `Uint8Array`, because that is what `ethers.toUtf8Bytes`
+    // returns and the fake recorded the value it was handed. viem's encoder REFUSES a Uint8Array
+    // for a `bytes` parameter — it wants hex — so the component now passes `stringToHex(...)`, and
+    // what the transaction carries (and what decodes back out) is a hex string. The BYTES are
+    // identical either way; only the JS type at the boundary differs.
+    expect(claimBytes).toBe(realEthers.hexlify(realEthers.toUtf8Bytes('ETH closes above 3000 on 2026-12-31')))
+    expect(realEthers.toUtf8String(claimBytes)).toBe('ETH closes above 3000 on 2026-12-31')
     expect(bondCurrency).toBe('0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582')
     expect(bondAmount).toBe(5000000n)
     expect(liveness).toBe(7200n)
@@ -294,7 +332,7 @@ describe('OracleAdaptersTab', () => {
     expect(encodedRequest).toBe('0xdeadbeef')
     expect(sourceHash).toBe('0x' + 'e'.repeat(64))
     expect(subscriptionId).toBe(42n)
-    expect(gasLimit).toBe(300000)
+    expect(gasLimit).toBe(300000n)  // decoded `uint32` — see the note on `op` above
     expect(donId).toBe('0x66756e2d706f6c79676f6e2d616d6f792d310000000000000000000000000000')
   })
 

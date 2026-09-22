@@ -31,14 +31,20 @@
  * ---------------------------------------------------------------------------------------------
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { getLogsRange } from '../../lib/chains/logRange'
+import { getPublicClient } from '../../lib/chains/publicClient'
+import { getAddress } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { BRIDGE_ROUTER_ABI } from '../../abis/BridgeRouter'
 import { FEE_SERVICES, fetchFeeQuote } from '../../lib/fees/feeQuote'
 import { getBlockscoutUrl, getTransactionUrl } from '../../config/blockExplorer'
 import { useGatewayStatus } from '../../hooks/useGatewayStatus'
 import { BRIDGE_SETTLEMENT, bridgeStateCopy } from '../../lib/bridge/bridgeCopy'
-import { SPOKE_POOL_IFACE, deriveBridgeState, evidenceFromGatewayStatus, fetchBridgeStatus } from '../../lib/bridge/bridgeStatus'
+import { decodeEventLog, toEventSelector } from 'viem'
+import { SPOKE_POOL_ABI, deriveBridgeState, evidenceFromGatewayStatus, fetchBridgeStatus } from '../../lib/bridge/bridgeStatus'
 import { BRIDGE_STATE } from '../../data/ledger/sources/bridgeLedgerSource'
 import { FeeRateCard, HistoryCard, NetworkScopeCard, WriteScopeNotice } from './liquidityAdminCards'
 import {
@@ -90,9 +96,11 @@ const OPS_LIMIT = 10
 
 const safe = (p) => p.then((v) => v).catch(() => undefined)
 
-/** Topic hashes for BOTH Across deposit vocabularies — see SPOKE_POOL_IFACE. */
+/** Topic hashes for BOTH Across deposit vocabularies — see SPOKE_POOL_ABI. */
 const DEPOSIT_TOPICS = new Set(
-  ['V3FundsDeposited', 'FundsDeposited'].map((n) => SPOKE_POOL_IFACE.getEvent(n).topicHash),
+  ['V3FundsDeposited', 'FundsDeposited'].map((n) =>
+    toEventSelector(SPOKE_POOL_ABI.find((i) => i.type === 'event' && i.name === n)),
+  ),
 )
 
 export default function BridgeTab({
@@ -157,12 +165,35 @@ export default function BridgeTab({
 
   const gateway = useGatewayStatus()
 
-  const routerRead = useMemo(
-    () => (routerAddr && readProvider ? new ethers.Contract(routerAddr, BRIDGE_ROUTER_ABI, readProvider) : null),
-    [routerAddr, readProvider],
-  )
+  /**
+   * Reads are bound to the SCOPED chain; `readProvider` stays the availability gate.
+   *
+   * That gate matters more here than on a cohort-bounded tab: `readProviderFor` in
+   * `liquidityAdminCommon` passes `requireCohort: false` ON PURPOSE (these routers live only on
+   * mainnets, so a testnet build would otherwise blank both tabs), so its null means the chain has
+   * no endpoint at all rather than that the cohort refused it.
+   */
+  const routerRead = useMemo(() => {
+    if (!routerAddr || !readProvider) return null
+    return (functionName, args = []) =>
+      readContract(scopeChainId, {
+        address: routerAddr,
+        abi: BRIDGE_ROUTER_ABI,
+        functionName,
+        args,
+      })
+  }, [routerAddr, readProvider, scopeChainId])
+
   const write = useCallback(
-    () => new ethers.Contract(routerAddr, BRIDGE_ROUTER_ABI, signer),
+    (functionName, args = []) =>
+      signer.sendTransaction({
+        to: routerAddr,
+        data: encodeFunctionData({
+          abi: normalizeAbi(BRIDGE_ROUTER_ABI),
+          functionName,
+          args,
+        }),
+      }),
     [routerAddr, signer],
   )
 
@@ -185,21 +216,21 @@ export default function BridgeTab({
       setLastReadAt(null)
       // `paused` is load-bearing: a router we cannot even ask about is reported as unreadable,
       // never as "not paused" (FR-051 — withhold, never invent).
-      const paused = await routerRead.paused()
+      const paused = await routerRead('paused')
       const [spokePool, feeRouter, sanctionsGuard, maxFeeBps, count] = await Promise.all([
-        safe(routerRead.spokePool()),
-        safe(routerRead.feeRouter()),
-        safe(routerRead.sanctionsGuard()),
-        safe(routerRead.MAX_FEE_BPS()),
-        safe(routerRead.routeCount()),
+        safe(routerRead('spokePool')),
+        safe(routerRead('feeRouter')),
+        safe(routerRead('sanctionsGuard')),
+        safe(routerRead('MAX_FEE_BPS')),
+        safe(routerRead('routeCount')),
       ])
 
       const routes = []
       let routesComplete = count !== undefined
       if (count !== undefined) {
         const n = Number(count)
-        const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(routerRead.routeAt(i))))
-        const raws = await Promise.all(ids.map((id) => (id ? safe(routerRead.getRoute(id)) : Promise.resolve(undefined))))
+        const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(routerRead('routeAt', [BigInt(i)]))))
+        const raws = await Promise.all(ids.map((id) => (id ? safe(routerRead('getRoute', [id])) : Promise.resolve(undefined))))
         for (let i = 0; i < n; i += 1) {
           const id = ids[i]
           const raw = raws[i]
@@ -276,17 +307,19 @@ export default function BridgeTab({
   }, [routerAddr, readProvider, scopeChainId, liveFeeRouter])
 
   const fetchHistory = useCallback(async () => {
-    if (!routerRead || !readProvider) return
+    if (!routerAddr || !readProvider) return
     setHistory({ entries: null, error: null })
     setHistory(
       await loadRouterHistory({
-        contract: routerRead,
+        chainId: scopeChainId,
+        address: routerAddr,
+        abi: BRIDGE_ROUTER_ABI,
         provider: readProvider,
         eventNames: HISTORY_EVENTS,
         describe: describeBridgeEvent(scopeChainId),
       }),
     )
-  }, [routerRead, readProvider, scopeChainId])
+  }, [routerAddr, readProvider, scopeChainId])
 
   /**
    * Operations (FR-047).
@@ -302,12 +335,25 @@ export default function BridgeTab({
    * from here. Nothing is ever guessed into "delivered".
    */
   const fetchOps = useCallback(async () => {
-    if (!routerRead || !readProvider || !state) return
+    if (!routerAddr || !readProvider || !state) return
     setOps({ rows: null, error: null })
     try {
-      const latest = await readProvider.getBlockNumber()
-      const fromBlock = Math.max(0, Number(latest) - OPS_LOOKBACK_BLOCKS)
-      const evs = (await routerRead.queryFilter(routerRead.filters.BridgeInitiated(), fromBlock, 'latest')) || []
+      const handle = eventScanHandle(scopeChainId, { address: routerAddr, abi: BRIDGE_ROUTER_ABI })
+      const client = getPublicClient(scopeChainId)
+      if (!handle || !client) return
+      const latest = Number(await handle.provider.getBlockNumber())
+      const fromBlock = Math.max(0, latest - OPS_LOOKBACK_BLOCKS)
+      // Bisects on refusal: a public RPC that caps `eth_getLogs` used to make this panel say it
+      // could not look, on every scan.
+      const logs = await getLogsRange(
+        handle.provider,
+        routerAddr,
+        fromBlock,
+        latest,
+        2000,
+        handle.filters.BridgeInitiated().getTopicFilter(),
+      )
+      const evs = logs.map((log) => ({ ...log, args: handle.interface.parseLog(log).args }))
       const ordered = [...evs].sort((a, b) => b.blockNumber - a.blockNumber || b.index - a.index)
 
       const byRouteId = new Map((state.routes || []).map((r) => [r.routeId, r]))
@@ -324,7 +370,7 @@ export default function BridgeTab({
       const scanned = ordered.slice(0, OPS_SCAN_LIMIT)
       const timed = await Promise.all(
         scanned.map(async (ev) => {
-          const block = await safe(readProvider.getBlock(ev.blockNumber))
+          const block = await safe(client.getBlock({ blockNumber: BigInt(ev.blockNumber) }))
           const at = block ? Number(block.timestamp) * 1000 : null
           const route = byRouteId.get(ev.args?.routeId)
           // A route that is no longer curated (removed, or missing from a partial read) has no
@@ -385,7 +431,7 @@ export default function BridgeTab({
     } catch (e) {
       setOps({ rows: [], error: e?.message || String(e) })
     }
-  }, [routerRead, readProvider, state, gateway.configured, scopeChainId])
+  }, [routerAddr, readProvider, state, gateway.configured, scopeChainId])
 
   // ── THE FEE QUOTE GETS ITS OWN EFFECT (same fix as SupplyTab, #1031) ──────────────────────────
   //
@@ -422,13 +468,13 @@ export default function BridgeTab({
   useEffect(() => {
     let live = true
     setAuthority(null)
-    readRouterAuthority({ provider: readProvider, routerAddress: routerAddr, account }).then((a) => {
+    readRouterAuthority({ chainId: scopeChainId, provider: readProvider, routerAddress: routerAddr, account }).then((a) => {
       if (live) setAuthority(a)
     })
     return () => {
       live = false
     }
-  }, [readProvider, routerAddr, account])
+  }, [readProvider, routerAddr, account, scopeChainId])
 
   const refresh = () => {
     fetchState()
@@ -441,7 +487,7 @@ export default function BridgeTab({
 
   const togglePause = () => {
     const fn = state?.paused ? 'unpause' : 'pause'
-    runTx(() => write()[fn](), state?.paused ? 'Bridging resumed' : 'New bridges paused').then(refresh)
+    runTx(() => write(fn), state?.paused ? 'Bridging resumed' : 'New bridges paused').then(refresh)
   }
 
   const submitRoute = () => {
@@ -469,22 +515,28 @@ export default function BridgeTab({
     }
     runTx(
       () =>
-        write().setRoute({
-          inputToken: forms.inputToken,
-          enabled: forms.enabled,
-          nativeInput: forms.nativeInput,
-          expectedFillSeconds: fill,
-          outputToken: forms.outputToken,
-          destinationChainId: destination,
-          maxAmount,
-        }),
+        write('setRoute', [
+          {
+            // Normalised through `getAddress` (divergence 16): `isValidAddr` now reproduces
+            // ethers' rule and ACCEPTS an all-uppercase address, which viem's encoder refuses.
+            // The two halves have to move together or the validator passes something the encoder
+            // then throws on.
+            inputToken: getAddress(forms.inputToken.trim()),
+            enabled: Boolean(forms.enabled),
+            nativeInput: Boolean(forms.nativeInput),
+            expectedFillSeconds: fill,
+            outputToken: getAddress(forms.outputToken.trim()),
+            destinationChainId: destination,
+            maxAmount,
+          },
+        ]),
       `Route to ${networkName(destination)} saved`,
     ).then(refresh)
   }
 
   const setRouteEnabled = (route, enabled) =>
     runTx(
-      () => write().setRouteEnabled(route.routeId, enabled),
+      () => write('setRouteEnabled', [route.routeId, enabled]),
       `Route to ${networkName(route.destinationChainId)} ${enabled ? 'enabled' : 'disabled'}`,
     ).then(refresh)
 
@@ -512,7 +564,7 @@ export default function BridgeTab({
     )
     if (!ok) return
     return runTx(
-      () => write().removeRoute(route.routeId),
+      () => write('removeRoute', [route.routeId]),
       `Route to ${dest} removed`,
     ).then(refresh)
   }
@@ -526,7 +578,7 @@ export default function BridgeTab({
       setFormError(e.message)
       return
     }
-    runTx(() => write().setRouteLimit(route.routeId, value), 'Per-transaction maximum updated').then(refresh)
+    runTx(() => write('setRouteLimit', [route.routeId, value]), 'Per-transaction maximum updated').then(refresh)
   }
 
   /**
@@ -550,7 +602,7 @@ export default function BridgeTab({
       // and any they accepted by reflex disabled a live route. `runTx` now resolves false on failure
       // and this checks it — rejecting the first prompt IS the cancel.
       const ok = await runTx(
-        () => write().setRouteEnabled(route.routeId, enabled),
+        () => write('setRouteEnabled', [route.routeId, enabled]),
         `Route ${tokenLabel(scopeChainId, route.inputToken)} → ${networkName(destination)} ${enabled ? 'enabled' : 'disabled'}`,
       )
       if (!ok) {
@@ -571,7 +623,9 @@ export default function BridgeTab({
       setFormError(`Enter a valid, non-zero address for the ${label} — the contract rejects malformed and zero addresses.`)
       return
     }
-    runTx(() => write()[fn](value), `${label} updated`).then(refresh)
+    // A fund-path address (spokePool / feeRouter / sanctionsGuard). Repointing one is the change
+    // this repo's guardrails call out as not reversible, so it is normalised, not just validated.
+    runTx(() => write(fn, [getAddress(value.trim())]), `${label} updated`).then(refresh)
   }
 
   /* ------------------------------------------------------------------------------- render */
@@ -1192,7 +1246,7 @@ async function readDepositId(provider, txHash) {
   for (const log of receipt.logs) {
     if (!DEPOSIT_TOPICS.has(log?.topics?.[0])) continue
     try {
-      const parsed = SPOKE_POOL_IFACE.parseLog({ topics: [...log.topics], data: log.data })
+      const parsed = decodeEventLog({ abi: SPOKE_POOL_ABI, topics: [...log.topics], data: log.data ?? '0x' })
       if (parsed?.args?.depositId != null) return parsed.args.depositId
     } catch {
       // Not one of the deposit events after all — ignore rather than count it.

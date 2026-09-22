@@ -190,14 +190,63 @@ vi.mock('ethers', async () => {
   }
 })
 
+// The viem read seam (spec 110 Phase 1, #1592) — the twin of the ethers Contract mock above.
+// Files converted onto lib/chains/readContract leave MockContract's coverage, so the seam's
+// client factory answers with the SAME canned world here: balanceOf/allowance are 1000 tokens,
+// totalSupply a million, roles empty, native balance 1, logs empty. An unmocked functionName
+// THROWS (exactly as a missing method on MockContract did), so a suite that needs a specific
+// read still fails loudly and mocks the seam itself. src/test/chains/* unmocks this to test
+// the real factory.
+vi.mock('../lib/chains/publicClient', async () => {
+  const actual = await vi.importActual('../lib/chains/publicClient')
+  const CANNED = {
+    balanceOf: () => 1000n * 10n ** 18n,
+    allowance: () => 1000n * 10n ** 18n,
+    totalSupply: () => 1000000n * 10n ** 18n,
+    hasRole: () => false,
+    getRoleMember: () => '0x0000000000000000000000000000000000000000',
+    getRoleMemberCount: () => 0n,
+    getEthBalance: () => 10n ** 18n,
+  }
+  const fakeClient = {
+    async readContract({ functionName }) {
+      if (functionName in CANNED) return CANNED[functionName]()
+      throw new Error(`mock publicClient: unmocked read '${functionName}' — mock the seam in this suite`)
+    },
+    async getBalance() {
+      return 10n ** 18n
+    },
+    async getBlockNumber() {
+      return 1000000n
+    },
+    async getLogs() {
+      return []
+    },
+    // eventScanHandle's raw log read (eth_getLogs). Empty history, same as getLogs above.
+    async request({ method }) {
+      if (method === 'eth_getLogs') return []
+      throw new Error(`mock publicClient: unmocked request '${method}' — mock the seam in this suite`)
+    },
+    async call() {
+      // 1000 tokens, the MockJsonRpcProvider.call parity value.
+      return { data: `0x${(1000n * 10n ** 18n).toString(16).padStart(64, '0')}` }
+    },
+  }
+  return { ...actual, getPublicClient: () => fakeClient }
+})
+
 // Mock wagmi hooks for WalletProvider
 vi.mock('wagmi', () => ({
   // Real-wagmi passthrough: createConnector is an identity wrapper (spec 041
   // passkey connector unit tests instantiate the connector function directly).
   createConnector: (createConnectorFn) => createConnectorFn,
+  // `chainId` is part of the CONNECTION (spec 110 Phase 3, #1594): the connector's
+  // `chainChanged` handler writes it verbatim, where wagmi's `useChainId()` filtered it to
+  // configured chains and produced #1030. 61 keeps the default the old `useChainId` mock had.
   useAccount: vi.fn(() => ({
     address: '0x1234567890123456789012345678901234567890',
-    isConnected: true
+    isConnected: true,
+    chainId: 61
   })),
   useConnect: vi.fn(() => ({
     connect: vi.fn(),
@@ -206,7 +255,6 @@ vi.mock('wagmi', () => ({
   useDisconnect: vi.fn(() => ({
     disconnect: vi.fn()
   })),
-  useChainId: vi.fn(() => 61), // Unsupported chain — keeps the no-stablecoin path under test
   useSwitchChain: vi.fn(() => ({
     switchChain: vi.fn()
   })),
@@ -218,11 +266,39 @@ vi.mock('wagmi', () => ({
   // Return a singleton — a fresh object each call would make effects that depend on
   // walletClient re-fire every render (infinite loop / OOM in hooks like usePredictOpenOrders).
   useWalletClient: (() => {
+    /*
+     * The transport carries a `request` since spec 110 T028: WalletContext builds its signer
+     * with viem (`custom(walletClient.transport)`) instead of `new ethers.BrowserProvider(...)`,
+     * so an empty object here would hand every suite a signer whose first RPC throws
+     * `transport.request is not a function` — a failure about the fixture, not the subject.
+     *
+     * It answers the SAME canned world `MockBrowserProvider` answered (chain 61, 1 ETH,
+     * block 1,000,000) and THROWS for anything else, so a suite that needs a specific RPC still
+     * fails loudly and mocks it, exactly as a missing method on the old mock did.
+     */
     const result = {
       data: {
         account: { address: '0x1234567890123456789012345678901234567890' },
         chain: { id: 61 },
-        transport: {}
+        transport: {
+          async request({ method }) {
+            switch (method) {
+              case 'eth_chainId':
+                return '0x3d'
+              case 'eth_accounts':
+              case 'eth_requestAccounts':
+                return ['0x1234567890123456789012345678901234567890']
+              case 'eth_getBalance':
+                return '0xde0b6b3a7640000'
+              case 'eth_blockNumber':
+                return '0xf4240'
+              default:
+                throw new Error(
+                  `mock walletClient transport: unmocked request '${method}' — mock it in this suite`,
+                )
+            }
+          },
+        },
       }
     }
     return vi.fn(() => result)

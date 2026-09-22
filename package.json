@@ -1,7 +1,7 @@
 {
-  "name": "prediction-dao-research",
+  "name": "fairwins-platform",
   "version": "1.18.0",
-  "description": "Futarchy Prediction DAO with privacy-preserving mechanisms",
+  "description": "FairWins — self-custody digital asset infrastructure: embedded wallets, policy-governed custody, payments, markets connectivity and compliance, available white-label",
   "private": true,
   "workspaces": [
     "frontend",
@@ -83,6 +83,8 @@
     "purchase:friend-market": "npx hardhat run ./scripts/operations/purchase-friend-market-membership.js --network mordor",
     "create:friend-bet": "npx hardhat run ./scripts/operations/create-friend-market-bet.js --network mordor",
     "check:deps": "node scripts/deps/check-dependency-hygiene.js",
+    "check:docs-warnings": "node scripts/docs/check-docs-warnings.mjs",
+    "test:docs-warnings": "node --test \"scripts/docs/__tests__/*.test.mjs\"",
     "check:chainlink-closure": "node scripts/security/chainlink-closure.js",
     "dismiss:alerts": "node scripts/security/dismiss-alerts.js",
     "check:iac": "node scripts/infra/check-iac-guardrails.js",
@@ -101,7 +103,7 @@
     "finops:provision": "node scripts/finops/provision-grafana.js",
     "test:finops": "npm test --workspace fairwins-finops-exporter",
     "test:iac-guardrails": "node --test \"scripts/infra/__tests__/*.test.js\"",
-    "test:finops-gate": "node --test \"scripts/finops/__tests__/*.test.mjs\"",
+    "test:finops-gate": "node --test --test-concurrency=1 \"scripts/finops/__tests__/*.test.mjs\"",
     "test:mcp": "node --test \"services/mcp-server/test/*.test.js\"",
     "build:miniapps": "npm run build --workspace @fairwins/miniapp-token-mint && npm run build --workspace @fairwins/miniapp-clearpath && npm run build --workspace @fairwins/miniapp-api-access",
     "deps:reinstall": "bash scripts/deps/reinstall.sh",

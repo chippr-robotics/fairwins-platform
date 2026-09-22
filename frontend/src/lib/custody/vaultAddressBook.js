@@ -11,7 +11,7 @@
 //   vaultReferences  — WHICH vaults are mine, on which chain, and my role. Custody's own record.
 //   address book     — what the vault is CALLED. One rename path, shared with every other address.
 
-import { getAddress } from 'ethers'
+import { getAddress } from 'viem'
 import {
   addContact,
   findByAddress,

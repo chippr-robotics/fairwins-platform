@@ -17,7 +17,13 @@ vi.mock('../../lib/custody/policy', async (importOriginal) => {
 })
 
 import PolicyPanel from '../../components/custody/PolicyPanel'
-import { getPolicyStatus, readPolicy, guardIface, NATIVE_ASSET } from '../../lib/custody/policy'
+import { Interface } from 'ethers'
+import { getPolicyStatus, readPolicy, NATIVE_ASSET } from '../../lib/custody/policy'
+import { SAFE_POLICY_GUARD_ABI } from '../../abis/SafePolicyGuard'
+
+// Decoded with ethers against calldata the panel builds with viem — a cross-library byte check,
+// the same reasoning as policy.test.js and the router suites (spec 110).
+const guardIface = new Interface(SAFE_POLICY_GUARD_ABI)
 import { getContractAddressForChain } from '../../config/contracts'
 
 const CHAIN = 1337

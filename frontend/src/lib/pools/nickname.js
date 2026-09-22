@@ -6,7 +6,7 @@
  * the nickname is purely a friendly label. This is a pure client-side display function; it is NEVER
  * written to or read from the chain.
  */
-import { keccak256, solidityPacked, getBigInt } from 'ethers'
+import { encodePacked, keccak256 } from 'viem'
 import { ADJECTIVES, NOUNS, NICKNAME_VERSION } from './nicknameWords'
 
 const DOMAIN = `FAIRWINS_POOL_NICK_v${NICKNAME_VERSION}`
@@ -22,7 +22,7 @@ export function deriveNickname(address, poolId = '') {
   // address / pool were cased upstream (checksummed vs lowercase are the same account / pool).
   const addr = String(address || '').toLowerCase()
   const scope = String(poolId).toLowerCase()
-  const h = getBigInt(keccak256(solidityPacked(['address', 'string', 'string'], [addr, scope, DOMAIN])))
+  const h = BigInt(keccak256(encodePacked(['address', 'string', 'string'], [addr, scope, DOMAIN])))
 
   const adjCount = BigInt(ADJECTIVES.length)
   const nounCount = BigInt(NOUNS.length)

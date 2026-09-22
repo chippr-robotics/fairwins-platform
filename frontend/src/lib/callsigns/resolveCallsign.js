@@ -8,17 +8,22 @@
  * existing display chain — no surface ever hard-blocks on callsign resolution (FR-013). Only status ACTIVE is safe
  * for a value-bearing action; the caller enforces that.
  */
-import { Contract } from 'ethers'
+import { readContract } from '../chains/readContract'
 import { getContractAddressForChain } from '../../config/contracts'
 import { CALLSIGN_REGISTRY_ABI, CallsignStatus } from '../../abis/callsignRegistry'
 import { normalizeCallsign } from './normalizeCallsign'
 
 export { CallsignStatus }
 
-function getRegistry(provider, chainId, registryAddress) {
+// Spec 110 Phase 1: reads go through the chain-parameterized seam — the chain is the argument.
+// The `provider` option callers still pass is accepted and unused during the transition; it
+// leaves the signatures when the last caller converts.
+function registryFor(chainId, registryAddress) {
   const address = registryAddress || getContractAddressForChain('callsignRegistry', chainId)
-  if (!address || !provider) return null
-  return new Contract(address, CALLSIGN_REGISTRY_ABI, provider)
+  if (!address || chainId == null) return null
+  const read = (functionName, args) =>
+    readContract(chainId, { address, abi: CALLSIGN_REGISTRY_ABI, functionName, args })
+  return { resolve: (c) => read('resolve', [c]), callsignOf: (a) => read('callsignOf', [a]) }
 }
 
 function toInfo(raw, callsign) {
@@ -38,14 +43,14 @@ function toInfo(raw, callsign) {
  * @returns {Promise<{callsign,address,status,verified,pendingOwner,repointEffectiveAt,quarantinedUntil}|null>}
  *          null when the input is not a valid callsign, the registry is unavailable, or the read errors.
  */
-export async function resolveCallsign(input, { provider, chainId, registryAddress } = {}) {
+export async function resolveCallsign(input, { provider: _provider, chainId, registryAddress } = {}) {
   let canonical
   try {
     canonical = normalizeCallsign(input)
   } catch {
     return null // not a callsign — caller treats input as a raw address
   }
-  const registry = getRegistry(provider, chainId, registryAddress)
+  const registry = registryFor(chainId, registryAddress)
   if (!registry) return null
   try {
     const raw = await registry.resolve(canonical)
@@ -59,8 +64,8 @@ export async function resolveCallsign(input, { provider, chainId, registryAddres
  * Reverse-resolve an address to its callsign (only when the callsign's forward resolution is ACTIVE).
  * @returns {Promise<{callsign: string, verified: boolean}|null>} null when the address has no active callsign.
  */
-export async function lookupCallsignOf(address, { provider, chainId, registryAddress } = {}) {
-  const registry = getRegistry(provider, chainId, registryAddress)
+export async function lookupCallsignOf(address, { provider: _provider, chainId, registryAddress } = {}) {
+  const registry = registryFor(chainId, registryAddress)
   if (!registry || !address) return null
   try {
     const callsign = await registry.callsignOf(address)

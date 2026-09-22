@@ -6,24 +6,20 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const m = vi.hoisted(() => ({ fns: {} }))
 
-vi.mock('../../utils/blockchainService', () => ({ getProvider: () => ({}) }))
 vi.mock('../../config/contracts', () => ({ getContractAddressForChain: () => '0x000000000000000000000000000000000000fac0' }))
-vi.mock('ethers', async (orig) => {
-  const actual = await orig()
-  function FakeContract() {
-    return new Proxy({}, {
-      get(_t, prop) {
-        if (prop === 'then') return undefined
-        return (...args) => {
-          const fn = m.fns[prop]
-          if (!fn) throw new Error('unmocked contract method: ' + String(prop))
-          return fn(...args)
-        }
-      },
-    })
-  }
-  return { ...actual, ethers: { ...actual.ethers, Contract: vi.fn(FakeContract) } }
-})
+// The seam answers both the availability gate and the reads (spec 110); `m.fns` is unchanged.
+vi.mock('../../lib/chains/publicClient', async (orig) => ({
+  ...(await orig()),
+  getPublicClient: () => ({}),
+}))
+vi.mock('../../lib/chains/readContract', async (orig) => ({
+  ...(await orig()),
+  readContract: (_chainId, { functionName, args = [] }) => {
+    const fn = m.fns[functionName]
+    if (!fn) throw new Error('unmocked contract method: ' + functionName)
+    return fn(...args)
+  },
+}))
 
 import { tokenSource } from '../../data/notifications/sources/tokenSource'
 

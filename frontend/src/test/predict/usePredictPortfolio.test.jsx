@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import { WalletContext } from '../../contexts/WalletContext.js'
 import { usePredictPositions, usePredictOpenOrders } from '../../hooks/usePredictPortfolio'
 import * as client from '../../lib/predict/predictClient'
@@ -20,7 +20,7 @@ const wrapperFor = (wallet) => ({ children }) => <WalletContext.Provider value={
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useChainId.mockReturnValue(137)
+  setWalletChain(137)
   client.predictAvailable.mockReturnValue(true)
 })
 

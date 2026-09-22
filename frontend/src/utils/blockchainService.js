@@ -5,18 +5,20 @@
  * Provides a clean interface for fetching data from deployed contracts.
  */
 
-import { ethers } from 'ethers'
+import { encodeFunctionData, keccak256, stringToHex, zeroAddress, zeroHash } from 'viem'
 import { getContractAddress, getContractAddressForChain, NETWORK_CONFIG, DEPLOYMENT_BLOCKS, DEPLOYED_CONTRACTS } from '../config/contracts'
 import { getNetwork, membershipChainId } from '../config/networks'
 import { makeReadProvider } from './rpcProvider'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { formatUnits, parseUnits } from '../lib/evm/units'
+import { isAddress, getAddress } from '../lib/evm/address'
 import { ERC20_ABI } from '../abis/ERC20'
-import { ZK_KEY_MANAGER_ABI } from '../abis/ZKKeyManager'
 import { DEX_ADDRESSES } from '../constants/dex'
 import { WAGER_DEFAULTS, deriveWagerType } from '../constants/wagerDefaults'
 import { FRIEND_GROUP_MARKET_FACTORY_ABI } from '../abis/FriendGroupMarketFactory'
 import { WAGER_REGISTRY_ABI } from '../abis/WagerRegistry'
 import { MEMBERSHIP_MANAGER_ABI } from '../abis/MembershipManager'
-import { KEY_REGISTRY_ABI } from '../abis/KeyRegistry'
 import {
   parseEncryptedIpfsReference
 } from './ipfsService'
@@ -126,39 +128,26 @@ export function getProvider(chainId) {
 }
 
 /**
- * Get a contract instance
- * @param {string} contractName - Name of the contract (marketFactory, proposalRegistry, etc.)
- * @param {ethers.Signer|ethers.Provider} signerOrProvider - Signer or provider
- * @returns {ethers.Contract}
+ * The chain a read is made on when the caller could not name one.
+ *
+ * Spec 110: reads go through `readContract(chainId, …)`, which never has an ambient chain — so
+ * the `chainId == null` case every caller here already had (a disconnected wallet, a provider
+ * that would not report a network) needs the same build-time answer the address resolvers give
+ * it. `getContractAddressForChain(name, null)` falls back to the build chain, so resolving the
+ * ADDRESS and reading the CHAIN must fall back to the same place or a read would be aimed at a
+ * different network than the address came from.
  */
-export function getContract(contractName, signerOrProvider = null) {
-  const provider = signerOrProvider || getProvider()
-  const address = getContractAddress(contractName)
-
-  let abi
-  switch (contractName) {
-    case 'wagerRegistry':
-      abi = WAGER_REGISTRY_ABI
-      break
-    case 'membershipManager':
-      abi = MEMBERSHIP_MANAGER_ABI
-      break
-    case 'keyRegistry':
-      abi = KEY_REGISTRY_ABI
-      break
-    case 'zkKeyManager':
-      abi = ZK_KEY_MANAGER_ABI
-      break
-    case 'friendGroupMarketFactory':
-      // Legacy Mordor only — v2 networks should use wagerRegistry instead.
-      abi = FRIEND_GROUP_MARKET_FACTORY_ABI
-      break
-    default:
-      throw new Error(`Unknown contract: ${contractName}`)
-  }
-
-  return new ethers.Contract(address, abi, provider)
+function readChain(chainId) {
+  return chainId != null ? Number(chainId) : NETWORK_CONFIG.chainId
 }
+
+/** MembershipManager read on a NAMED chain. */
+const askMembership = (chainId, address, functionName, args) =>
+  readContract(chainId, { address, abi: MEMBERSHIP_MANAGER_ABI, functionName, args })
+
+/** ERC-20 read on a NAMED chain. */
+const askToken = (chainId, address, functionName, args) =>
+  readContract(chainId, { address, abi: ERC20_ABI, functionName, args })
 
 /**
  * Fetch and resolve market metadata from IPFS
@@ -238,9 +227,9 @@ function saveMarketCache(userAddress, cache) {
  * Discover market IDs for a user via MemberAdded events (indexed by member address).
  * Uses incremental block scanning with a cached watermark.
  */
-async function discoverMarketIds(contract, userAddress, provider) {
+async function discoverMarketIds(handle, userAddress) {
   const index = loadMarketIndex(userAddress)
-  const currentBlock = await provider.getBlockNumber()
+  const currentBlock = await handle.provider.getBlockNumber()
 
   // If we have a cached index and it's recent, just return it
   if (index.lastBlock >= currentBlock) {
@@ -253,8 +242,20 @@ async function discoverMarketIds(contract, userAddress, provider) {
   const fromBlock = index.lastBlock > 0 ? index.lastBlock + 1 : deployBlock
   console.log(`[MarketIndex] Scanning MemberAdded events from block ${fromBlock} to ${currentBlock}`)
 
-  // Query MemberAdded events where member = userAddress (indexed topic)
-  const memberAddedFilter = contract.filters.MemberAdded(null, userAddress)
+  // Query MemberAdded events where member = userAddress (indexed topic). The handle's `filters`
+  // proxy builds the same topic array ethers' filter factory did (trailing "any" slots trimmed);
+  // `queryFilter` is the one piece of the ethers Contract surface it does not carry, so the two
+  // lines it stood for are written out here.
+  const memberAddedTopics = handle.filters.MemberAdded(null, userAddress).getTopicFilter()
+  const queryFilter = async (fromBlock, toBlock) => {
+    const logs = await handle.provider.getLogs({
+      address: handle.target,
+      topics: memberAddedTopics,
+      fromBlock,
+      toBlock,
+    })
+    return logs.map((log) => handle.interface.parseLog(log))
+  }
 
   // Scan in chunks to avoid RPC limits (10k blocks per query)
   const CHUNK_SIZE = 10000
@@ -264,7 +265,7 @@ async function discoverMarketIds(contract, userAddress, provider) {
   while (scanFrom <= currentBlock) {
     const scanTo = Math.min(scanFrom + CHUNK_SIZE - 1, currentBlock)
     try {
-      const events = await contract.queryFilter(memberAddedFilter, scanFrom, scanTo)
+      const events = await queryFilter(scanFrom, scanTo)
       for (const event of events) {
         const marketId = event.args.friendMarketId.toString()
         newMarketIds.add(marketId)
@@ -277,7 +278,7 @@ async function discoverMarketIds(contract, userAddress, provider) {
         for (let s = scanFrom; s <= scanTo; s += smallChunk) {
           const e = Math.min(s + smallChunk - 1, scanTo)
           try {
-            const events = await contract.queryFilter(memberAddedFilter, s, e)
+            const events = await queryFilter(s, e)
             for (const event of events) {
               newMarketIds.add(event.args.friendMarketId.toString())
             }
@@ -306,10 +307,10 @@ function processMarketResult(marketId, marketResult, acceptanceStatus, acceptanc
   const stakeToken = marketResult.stakeToken
   const isStable = stakeToken && stakeToken.toLowerCase() === DEX_ADDRESSES?.STABLECOIN?.toLowerCase()
   const tokenDecimals = isStable ? 6 : 18
-  const stakeAmountFormatted = ethers.formatUnits(marketResult.stakePerParticipant, tokenDecimals)
+  const stakeAmountFormatted = formatUnits(marketResult.stakePerParticipant, tokenDecimals)
 
   const arbitrator = marketResult.arbitrator
-  const hasArbitrator = arbitrator && arbitrator !== ethers.ZeroAddress
+  const hasArbitrator = arbitrator && arbitrator !== zeroAddress
 
   // Safely parse timestamps. `getFriendMarketWithStatus` does not return
   // `tradingEndTime` — it returns `acceptanceDeadline`. Use that for
@@ -449,20 +450,20 @@ export function toWagerShape(id, w, chainId) {
     id: String(id),
     creator: w.creator,
     opponent: w.opponent,
-    arbitrator: (w.arbitrator && w.arbitrator !== ethers.ZeroAddress) ? w.arbitrator : null,
-    participants: [w.creator, w.opponent].filter(a => a && a !== ethers.ZeroAddress),
+    arbitrator: (w.arbitrator && w.arbitrator !== zeroAddress) ? w.arbitrator : null,
+    participants: [w.creator, w.opponent].filter(a => a && a !== zeroAddress),
     type: wagerType,
     oddsMultiplier,
     opponentOddsMultiplier: oddsMultiplier,
-    creatorStake: ethers.formatUnits(w.creatorStake, decimals),
-    opponentStake: ethers.formatUnits(w.opponentStake, decimals),
-    stakeAmount: ethers.formatUnits(w.opponentStake, decimals),
+    creatorStake: formatUnits(w.creatorStake, decimals),
+    opponentStake: formatUnits(w.opponentStake, decimals),
+    stakeAmount: formatUnits(w.opponentStake, decimals),
     stakeToken: tokenAddr,
     stakeTokenAddress: tokenAddr,
     stakeTokenSymbol,
     resolutionType: Number(w.resolutionType),
     status: WAGER_STATUS_NAMES[Number(w.status)] || 'unknown',
-    winner: (w.winner && w.winner !== ethers.ZeroAddress) ? w.winner : null,
+    winner: (w.winner && w.winner !== zeroAddress) ? w.winner : null,
     paid: w.paid,
     acceptanceDeadline: Number(w.acceptDeadline) * 1000,
     endDate: new Date(Number(w.resolveDeadline) * 1000).toISOString(),
@@ -484,13 +485,15 @@ export function toWagerShape(id, w, chainId) {
   }
 }
 
-async function fetchWagersForUserV2(userAddress, provider, registryAddress, chainId) {
-  const registry = new ethers.Contract(registryAddress, WAGER_REGISTRY_ABI, provider)
+async function fetchWagersForUserV2(userAddress, registryAddress, chainId) {
+  const readChainId = readChain(chainId)
+  const ask = (functionName, args) =>
+    readContract(readChainId, { address: registryAddress, abi: WAGER_REGISTRY_ABI, functionName, args })
 
   // O(N_user) read via the contract's per-user EnumerableSet.UintSet index.
   // Avoids `eth_getLogs` — public RPCs (e.g. Polygon Amoy) reject `toBlock: 'latest'`
   // on the full deploy-to-tip range.
-  const count = Number(await registry.getUserWagerCount(userAddress))
+  const count = Number(await ask('getUserWagerCount', [userAddress]))
   if (count === 0) return []
 
   const PAGE = 100
@@ -498,8 +501,8 @@ async function fetchWagersForUserV2(userAddress, provider, registryAddress, chai
   for (let offset = 0; offset < count; offset += PAGE) {
     const limit = Math.min(PAGE, count - offset)
     const [ids, structs] = await Promise.all([
-      registry.getUserWagerIds(userAddress, offset, limit),
-      registry.getUserWagers(userAddress, offset, limit),
+      ask('getUserWagerIds', [userAddress, BigInt(offset), BigInt(limit)]),
+      ask('getUserWagers', [userAddress, BigInt(offset), BigInt(limit)]),
     ])
     for (let i = 0; i < ids.length; i++) {
       wagers.push(toWagerShape(String(ids[i]), structs[i], chainId))
@@ -515,21 +518,25 @@ export async function fetchFriendMarketsForUser(userAddress, chainId) {
   }
 
   try {
-    if (!userAddress || !ethers.isAddress(userAddress)) {
+    if (!userAddress || !isAddress(userAddress)) {
       return []
     }
+    // Checksum ONCE, right after the check that let it through. `isAddress` accepts an
+    // ALL-UPPERCASE address — ethers did, so this app does — and viem's encoder REFUSES one
+    // (divergence 16), so a member whose address arrived uppercased would have passed validation
+    // and then failed inside the read, with My Wagers reporting an error instead of their wagers.
+    // The validator and the encoder move together.
+    const member = getAddress(userAddress)
 
     // Read from the wallet's connected chain so a user on testnet isn't shown
     // mainnet wagers (or vice versa). Falls back to the build-time chain when no
     // chainId is supplied (disconnected/legacy callers).
     const resolve = (name) =>
       chainId != null ? getContractAddressForChain(name, chainId) : getContractAddress(name)
-    const provider = getProvider(chainId)
-
     // v2 path: WagerRegistry event scan
     const registryAddress = resolve('wagerRegistry')
     if (registryAddress) {
-      return await fetchWagersForUserV2(userAddress, provider, registryAddress, chainId)
+      return await fetchWagersForUserV2(member, registryAddress, chainId)
     }
 
     const friendFactoryAddress = resolve('friendGroupMarketFactory')
@@ -539,14 +546,25 @@ export async function fetchFriendMarketsForUser(userAddress, chainId) {
       return []
     }
 
-    const contract = new ethers.Contract(
-      friendFactoryAddress,
-      FRIEND_GROUP_MARKET_FACTORY_ABI,
-      provider
-    )
+    const legacyChainId = readChain(chainId)
+    const handle = eventScanHandle(legacyChainId, {
+      address: friendFactoryAddress,
+      abi: FRIEND_GROUP_MARKET_FACTORY_ABI,
+    })
+    if (!handle) {
+      console.warn(`[fetchFriendMarketsForUser] no RPC route for chain ${legacyChainId}`)
+      return []
+    }
+    const askFactory = (functionName, args) =>
+      readContract(legacyChainId, {
+        address: friendFactoryAddress,
+        abi: FRIEND_GROUP_MARKET_FACTORY_ABI,
+        functionName,
+        args,
+      })
 
     // Step 1: Discover market IDs via events (incremental, cached)
-    const marketIds = await discoverMarketIds(contract, userAddress, provider)
+    const marketIds = await discoverMarketIds(handle, member)
     console.log(`[fetchFriendMarketsForUser] Found ${marketIds.length} markets for ${userAddress}`)
 
     if (marketIds.length === 0) {
@@ -575,9 +593,15 @@ export async function fetchFriendMarketsForUser(userAddress, chainId) {
     const freshMarkets = await Promise.all(
       idsToFetch.map(async (marketId) => {
         try {
+          // The id is a decimal STRING (it comes back through localStorage), and a decimal string
+          // encodes identically in both libraries — but the EMPTY one does not: ethers refused it
+          // and viem encodes it as 0 (divergence 15), which would read market #0 and cache the
+          // answer under a corrupted key. `BigInt()` refuses exactly what ethers refused, inside
+          // the same try, so a bad id still falls back to the cached market.
+          const id = BigInt(marketId)
           const [marketResult, acceptedCount] = await Promise.all([
-            contract.getFriendMarketWithStatus(marketId),
-            contract.acceptedParticipantCount(marketId)
+            askFactory('getFriendMarketWithStatus', [id]),
+            askFactory('acceptedParticipantCount', [id]),
           ])
           const acceptanceStatus = { accepted: acceptedCount }
 
@@ -593,11 +617,11 @@ export async function fetchFriendMarketsForUser(userAddress, chainId) {
           const acceptanceResults = await Promise.all(
             members.map(async (member) => {
               try {
-                const record = await contract.getParticipantAcceptance(marketId, member)
+                const record = await askFactory('getParticipantAcceptance', [id, member])
                 return {
                   address: member.toLowerCase(),
                   hasAccepted: record.hasAccepted,
-                  stakedAmount: ethers.formatUnits(record.stakedAmount, tokenDecimals),
+                  stakedAmount: formatUnits(record.stakedAmount, tokenDecimals),
                   isArbitrator: record.isArbitrator
                 }
               } catch {
@@ -648,15 +672,15 @@ export async function fetchFriendMarketsForUser(userAddress, chainId) {
 // zero hash by OpenZeppelin convention.
 const ROLE_NAME_TO_HASH = {
   // Paid user role
-  'WAGER_PARTICIPANT': ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE')),
-  'Wager Participant': ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE')),
+  'WAGER_PARTICIPANT': keccak256(stringToHex('WAGER_PARTICIPANT_ROLE')),
+  'Wager Participant': keccak256(stringToHex('WAGER_PARTICIPANT_ROLE')),
   // Admin roles
   'ADMIN': '0x0000000000000000000000000000000000000000000000000000000000000000', // DEFAULT_ADMIN_ROLE
-  'GUARDIAN': ethers.keccak256(ethers.toUtf8Bytes('GUARDIAN_ROLE')),
-  'ACCOUNT_MODERATOR': ethers.keccak256(ethers.toUtf8Bytes('ACCOUNT_MODERATOR_ROLE')),
-  'ROLE_MANAGER': ethers.keccak256(ethers.toUtf8Bytes('ROLE_MANAGER_ROLE')),
-  'SANCTIONS_ADMIN': ethers.keccak256(ethers.toUtf8Bytes('SANCTIONS_ADMIN_ROLE')),
-  'FEE_ADMIN': ethers.keccak256(ethers.toUtf8Bytes('FEE_ADMIN_ROLE')),
+  'GUARDIAN': keccak256(stringToHex('GUARDIAN_ROLE')),
+  'ACCOUNT_MODERATOR': keccak256(stringToHex('ACCOUNT_MODERATOR_ROLE')),
+  'ROLE_MANAGER': keccak256(stringToHex('ROLE_MANAGER_ROLE')),
+  'SANCTIONS_ADMIN': keccak256(stringToHex('SANCTIONS_ADMIN_ROLE')),
+  'FEE_ADMIN': keccak256(stringToHex('FEE_ADMIN_ROLE')),
   // STAKING_ADMIN_ROLE on the StakingRouter (spec 066). `ROLES.STAKING_ADMIN` has been
   // declared in RoleContext and read by `useAdminAccess` since that spec landed, but the
   // name was never added here — so `getRoleHash` returned undefined and every lookup took
@@ -664,74 +688,9 @@ const ROLE_NAME_TO_HASH = {
   // warning it presents as: an operator who genuinely holds the role was told they did not,
   // and the staking controls stayed hidden from the only people entitled to use them. A
   // missing entry must never read as a denied one.
-  'STAKING_ADMIN': ethers.keccak256(ethers.toUtf8Bytes('STAKING_ADMIN_ROLE')),
-  'LIQUIDITY_ADMIN': ethers.keccak256(ethers.toUtf8Bytes('LIQUIDITY_ADMIN_ROLE')),
+  'STAKING_ADMIN': keccak256(stringToHex('STAKING_ADMIN_ROLE')),
+  'LIQUIDITY_ADMIN': keccak256(stringToHex('LIQUIDITY_ADMIN_ROLE')),
 }
-
-// Minimal ABI for role manager contract
-const ROLE_MANAGER_ABI = [
-  {
-    "inputs": [
-      { "internalType": "bytes32", "name": "role", "type": "bytes32" },
-      { "internalType": "address", "name": "account", "type": "address" }
-    ],
-    "name": "grantRole",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "bytes32", "name": "role", "type": "bytes32" },
-      { "internalType": "address", "name": "account", "type": "address" }
-    ],
-    "name": "revokeRole",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "bytes32", "name": "role", "type": "bytes32" },
-      { "internalType": "address", "name": "account", "type": "address" }
-    ],
-    "name": "hasRole",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address", "name": "user", "type": "address" },
-      { "internalType": "bytes32", "name": "role", "type": "bytes32" }
-    ],
-    "name": "isActiveMember",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  // Purchase role with ERC20 token - handles payment and role granting internally
-  {
-    "inputs": [
-      { "internalType": "bytes32", "name": "role", "type": "bytes32" },
-      { "internalType": "uint8", "name": "tier", "type": "uint8" },
-      { "internalType": "address", "name": "paymentToken", "type": "address" },
-      { "internalType": "uint256", "name": "amount", "type": "uint256" }
-    ],
-    "name": "purchaseRoleWithTierToken",
-    "outputs": [],
-    "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  // Check payment manager configuration
-  {
-    "inputs": [],
-    "name": "paymentManager",
-    "outputs": [{ "internalType": "address", "name": "", "type": "address" }],
-    "stateMutability": "view",
-    "type": "function"
-  }
-]
 
 // Membership tier enum values - matches TieredRoleManager contract
 const MembershipTier = {
@@ -764,135 +723,6 @@ const TIER_REGISTRY_ABI = [
   }
 ]
 
-// TieredRoleManager ABI for checking role sync status
-const TIERED_ROLE_MANAGER_ABI = [
-  {
-    "inputs": [
-      { "internalType": "bytes32", "name": "role", "type": "bytes32" },
-      { "internalType": "address", "name": "account", "type": "address" }
-    ],
-    "name": "hasRole",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address", "name": "u", "type": "address" },
-      { "internalType": "bytes32", "name": "r", "type": "bytes32" }
-    ],
-    "name": "getUserTier",
-    "outputs": [{ "internalType": "enum TieredRoleManager.MembershipTier", "name": "", "type": "uint8" }],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      { "internalType": "address", "name": "u", "type": "address" },
-      { "internalType": "bytes32", "name": "r", "type": "bytes32" }
-    ],
-    "name": "isMembershipActive",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
-    "type": "function"
-  }
-]
-
-/**
- * Check if user's role needs to be synced from TierRegistry to TieredRoleManager
- *
- * The modular RBAC system (TierRegistry + PaymentProcessor) and FriendGroupMarketFactory's
- * TieredRoleManager are separate systems. This function detects when a user has a role
- * in TierRegistry but NOT in TieredRoleManager, which prevents friend market creation.
- *
- * @param {string} userAddress - User's wallet address
- * @param {string} roleName - Role name to check (e.g., 'Friend Market')
- * @returns {Promise<{needsSync: boolean, tierRegistryTier: number, tieredRoleManagerTier: number, tierName: string}>}
- */
-export async function checkRoleSyncNeeded(userAddress, roleName) {
-  // v2: MembershipManager is the single source of truth — no sync ever needed.
-  if (getContractAddress('membershipManager')) {
-    return { needsSync: false, tierRegistryTier: 0, tieredRoleManagerTier: 0, tierName: 'None' }
-  }
-
-  // Skip blockchain calls in test environment
-  if (import.meta.env.VITE_SKIP_BLOCKCHAIN_CALLS === 'true') {
-    return { needsSync: false, tierRegistryTier: 0, tieredRoleManagerTier: 0, tierName: 'None' }
-  }
-
-  try {
-    const roleHash = getRoleHash(roleName)
-    if (!roleHash) {
-      console.warn(`Unknown role: ${roleName}`)
-      return { needsSync: false, tierRegistryTier: 0, tieredRoleManagerTier: 0, tierName: 'None' }
-    }
-
-    const provider = getProvider()
-    const tierRegistryAddress = getContractAddress('tierRegistry')
-    const tieredRoleManagerAddress = getContractAddress('tieredRoleManager')
-
-    let tierRegistryTier = 0
-    let tieredRoleManagerTier = 0
-    let tieredRoleManagerHasRole = false
-
-    // Check TierRegistry
-    if (tierRegistryAddress) {
-      try {
-        const tierRegistry = new ethers.Contract(tierRegistryAddress, TIER_REGISTRY_ABI, provider)
-        const tier = await tierRegistry.getUserTier(userAddress, roleHash)
-        tierRegistryTier = Number(tier)
-      } catch (e) {
-        console.debug('[checkRoleSyncNeeded] TierRegistry check failed:', e.message)
-      }
-    }
-
-    // Check TieredRoleManager
-    if (tieredRoleManagerAddress) {
-      try {
-        const tieredRoleManager = new ethers.Contract(tieredRoleManagerAddress, TIERED_ROLE_MANAGER_ABI, provider)
-        const [hasRole, tier] = await Promise.all([
-          tieredRoleManager.hasRole(roleHash, userAddress),
-          tieredRoleManager.getUserTier(userAddress, roleHash)
-        ])
-        tieredRoleManagerHasRole = hasRole
-        tieredRoleManagerTier = Number(tier)
-      } catch (e) {
-        console.debug('[checkRoleSyncNeeded] TieredRoleManager check failed:', e.message)
-      }
-    }
-
-    // Sync is needed if:
-    // 1. User has tier in TierRegistry but NOT in TieredRoleManager, OR
-    // 2. TieredRoleManager has a LOWER tier than TierRegistry (upgraded in TierRegistry but not synced)
-    // Note: If TieredRoleManager tier is HIGHER, that's fine - user has more access than minimum required
-    // Note: Tier 0 means no tier/inactive, so it's considered "lower" than any active tier
-    const needsSync = tierRegistryTier > 0 && (
-      !tieredRoleManagerHasRole ||
-      tieredRoleManagerTier === 0 ||  // Tier 0 = no tier = needs sync
-      tieredRoleManagerTier < tierRegistryTier  // Flag if TieredRoleManager has LOWER tier
-    )
-    const tierName = tierRegistryTier > 0 ? (TIER_NAMES[tierRegistryTier] || 'Unknown') : 'None'
-
-    console.log(`[checkRoleSyncNeeded] ${roleName}:`, {
-      userAddress,
-      tierRegistryTier,
-      tieredRoleManagerTier,
-      tieredRoleManagerHasRole,
-      needsSync,
-      tierName
-    })
-
-    return {
-      needsSync,
-      tierRegistryTier,
-      tieredRoleManagerTier,
-      tierName
-    }
-  } catch (error) {
-    console.error('Error checking role sync status:', error)
-    return { needsSync: false, tierRegistryTier: 0, tieredRoleManagerTier: 0, tierName: 'None' }
-  }
-}
 
 /**
  * Get user's current membership tier for a role from blockchain.
@@ -933,8 +763,9 @@ export async function getUserTierOnChain(userAddress, roleName, chainId) {
     try {
       const roleHash = getRoleHash(roleName)
       if (!roleHash) return known(0, 'None')
-      const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, getProvider(refChain))
-      const tier = Number(await mm.getActiveTier(userAddress, roleHash))
+      const tier = Number(
+        await askMembership(refChain, mmAddress, 'getActiveTier', [getAddress(userAddress), roleHash]),
+      )
       const tierName = tier === 0 ? 'None' : (TIER_NAMES[tier] || 'Unknown')
       return known(tier, tierName)
     } catch (e) {
@@ -959,13 +790,12 @@ export async function getUserTierOnChain(userAddress, roleName, chainId) {
       return known(0, 'None')
     }
 
-    const tierRegistry = new ethers.Contract(
-      tierRegistryAddress,
-      TIER_REGISTRY_ABI,
-      getProvider(chainId)
-    )
-
-    const tier = await tierRegistry.getUserTier(userAddress, roleHash)
+    const tier = await readContract(readChain(chainId), {
+      address: tierRegistryAddress,
+      abi: TIER_REGISTRY_ABI,
+      functionName: 'getUserTier',
+      args: [getAddress(userAddress), roleHash],
+    })
     const tierNum = Number(tier)
     const tierName = tierNum === 0 ? 'None' : (TIER_NAMES[tierNum] || 'Unknown')
 
@@ -1019,7 +849,6 @@ export async function hasRoleOnChain(userAddress, roleName, chainId, { detailed 
     return absent()
   }
 
-  const provider = getProvider(chainId)
   // Resolve addresses against the selected chain when one is given so a
   // membership on testnet is not read as active on mainnet (where the
   // MembershipManager isn't deployed) and vice versa.
@@ -1041,8 +870,11 @@ export async function hasRoleOnChain(userAddress, roleName, chainId, { detailed 
     const mmAddress = getContractAddressForChain('membershipManager', refChain)
     if (!mmAddress) return absent()
     try {
-      const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, getProvider(refChain))
-      return held(Boolean(await mm.hasActiveRole(userAddress, roleHash)))
+      return held(
+        Boolean(
+          await askMembership(refChain, mmAddress, 'hasActiveRole', [getAddress(userAddress), roleHash]),
+        ),
+      )
     } catch (e) {
       console.warn('[hasRoleOnChain] membership read failed:', e.message)
       return unread(e?.message || 'membership read failed')
@@ -1115,8 +947,12 @@ export async function hasRoleOnChain(userAddress, roleName, chainId, { detailed 
   let anyFailed = null
   for (const addr of candidates) {
     try {
-      const c = new ethers.Contract(addr, accessControlAbi, provider)
-      const yes = await c.hasRole(roleHash, userAddress)
+      const yes = await readContract(readChain(chainId), {
+        address: addr,
+        abi: accessControlAbi,
+        functionName: 'hasRole',
+        args: [roleHash, getAddress(userAddress)],
+      })
       if (yes) return held(true)
     } catch (e) {
       console.debug(`[hasRoleOnChain] AccessControl read failed on ${addr}:`, e.message)
@@ -1127,54 +963,6 @@ export async function hasRoleOnChain(userAddress, roleName, chainId, { detailed 
   // answer is "could not tell" — a caller sweeping the estate must not record that as a denial.
   if (anyFailed) return unread(anyFailed)
   return held(false)
-}
-
-/**
- * Grant a role to user on-chain (admin function)
- * @param {ethers.Signer} signer - Connected wallet signer (must be admin)
- * @param {string} userAddress - Address to grant role to
- * @param {string} roleName - Role name to grant
- * @param {number} durationDays - Duration in days (0 for permanent)
- * @returns {Promise<Object>} Transaction receipt
- */
-export async function grantRoleOnChain(signer, userAddress, roleName, _durationDays = 365) {
-  if (!signer) {
-    throw new Error('Wallet not connected')
-  }
-
-  const roleManagerAddress = getContractAddress('roleManager')
-  if (!roleManagerAddress) {
-    throw new Error('Role manager contract not deployed. Cannot grant role on-chain.')
-  }
-
-  const roleHash = getRoleHash(roleName)
-  if (!roleHash) {
-    throw new Error(`Unknown role: ${roleName}`)
-  }
-
-  try {
-    const roleManagerContract = new ethers.Contract(
-      roleManagerAddress,
-      ROLE_MANAGER_ABI,
-      signer
-    )
-
-    // RoleManagerCore uses AccessControl: grantRole(role, account)
-    const tx = await roleManagerContract.grantRole(roleHash, userAddress)
-    const receipt = await tx.wait()
-
-    return {
-      hash: receipt.hash,
-      blockNumber: receipt.blockNumber,
-      status: receipt.status === 1 ? 'success' : 'failed',
-      gasUsed: receipt.gasUsed.toString(),
-      roleName,
-      userAddress
-    }
-  } catch (error) {
-    console.error('Error granting role on-chain:', error)
-    throw new Error(error.message || 'Failed to grant role on-chain', { cause: error })
-  }
 }
 
 // PaymentProcessor ABI for role purchases (modular RBAC system)
@@ -1251,37 +1039,46 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
       const validTier = [1, 2, 3, 4].includes(tier) ? tier : MembershipTier.BRONZE
       const tierName = TIER_NAMES[validTier] || 'Bronze'
 
-      const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, signer)
-      const paymentTokenAddr = await mm.paymentToken()
-      if (!paymentTokenAddr || paymentTokenAddr === ethers.ZeroAddress) {
+      // Spec 110: the pre-flight reads name the chain the purchase will settle on, so the member's
+      // own endpoint (spec 069) serves them and an unreadable chain fails loudly instead of being
+      // answered by whatever network the injected wallet's provider happened to be bound to.
+      const chain = readChain(walletChainId)
+      const paymentTokenAddr = await askMembership(chain, mmAddress, 'paymentToken', [])
+      if (!paymentTokenAddr || paymentTokenAddr === zeroAddress) {
         throw new Error('MembershipManager has no payment token configured. Contact the DAO administrator.')
       }
-      const paymentToken = new ethers.Contract(paymentTokenAddr, ERC20_ABI, signer)
-      const userAddress = await signer.getAddress()
+      const userAddress = getAddress(await signer.getAddress())
 
       // Determine the price the contract will charge
       let price
       if (action === 'upgrade') {
-        const membership = await mm.getMembership(userAddress, roleHash)
-        const currentCfg = await mm.getTierConfig(roleHash, membership.tier)
-        const newCfg = await mm.getTierConfig(roleHash, validTier)
+        const membership = await askMembership(chain, mmAddress, 'getMembership', [userAddress, roleHash])
+        const currentCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, membership.tier])
+        const newCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
         price = newCfg.priceUSDC - currentCfg.priceUSDC
       } else {
-        const tierCfg = await mm.getTierConfig(roleHash, validTier)
+        const tierCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
         price = tierCfg.priceUSDC
       }
 
-      const balance = await paymentToken.balanceOf(userAddress)
+      const balance = await askToken(chain, paymentTokenAddr, 'balanceOf', [userAddress])
       if (balance < price) {
         throw new Error(
-          `Insufficient USDC balance. Have ${ethers.formatUnits(balance, 6)}, need ${ethers.formatUnits(price, 6)}.`
+          `Insufficient USDC balance. Have ${formatUnits(balance, 6)}, need ${formatUnits(price, 6)}.`
         )
       }
 
-      const allowance = await paymentToken.allowance(userAddress, mmAddress)
+      const allowance = await askToken(chain, paymentTokenAddr, 'allowance', [userAddress, mmAddress])
       if (allowance < price) {
         emit('approve', 'start')
-        const approveTx = await paymentToken.approve(mmAddress, price)
+        const approveTx = await signer.sendTransaction({
+          to: paymentTokenAddr,
+          data: encodeFunctionData({
+            abi: normalizeAbi(ERC20_ABI),
+            functionName: 'approve',
+            args: [getAddress(mmAddress), price],
+          }),
+        })
         emit('approve', 'sent', { txHash: approveTx.hash })
         await approveTx.wait()
         emit('approve', 'confirmed', { txHash: approveTx.hash })
@@ -1296,19 +1093,27 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
         ? (termsHash.startsWith('0x') ? termsHash : '0x' + termsHash)
         : null
       const hasTerms = normTerms !== null && /^0x[0-9a-fA-F]{64}$/.test(normTerms)
-      let tx
-      emit('pay', 'start')
+      let payMethod
+      let payArgs
       if (action === 'upgrade') {
-        tx = hasTerms
-          ? await mm.upgradeTierWithTerms(roleHash, validTier, normTerms)
-          : await mm.upgradeTier(roleHash, validTier)
+        payMethod = hasTerms ? 'upgradeTierWithTerms' : 'upgradeTier'
+        payArgs = hasTerms ? [roleHash, validTier, normTerms] : [roleHash, validTier]
       } else if (action === 'extend') {
-        tx = await mm.extendMembership(roleHash)
+        payMethod = 'extendMembership'
+        payArgs = [roleHash]
       } else {
-        tx = hasTerms
-          ? await mm.purchaseTierWithTerms(roleHash, validTier, normTerms)
-          : await mm.purchaseTier(roleHash, validTier)
+        payMethod = hasTerms ? 'purchaseTierWithTerms' : 'purchaseTier'
+        payArgs = hasTerms ? [roleHash, validTier, normTerms] : [roleHash, validTier]
       }
+      emit('pay', 'start')
+      const tx = await signer.sendTransaction({
+        to: mmAddress,
+        data: encodeFunctionData({
+          abi: normalizeAbi(MEMBERSHIP_MANAGER_ABI),
+          functionName: payMethod,
+          args: payArgs,
+        }),
+      })
       emit('pay', 'sent', { txHash: tx.hash })
       const receipt = await tx.wait()
       emit('pay', 'confirmed', { txHash: receipt.hash })
@@ -1320,7 +1125,7 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
         roleName,
         tier: validTier,
         tierName,
-        amount: parseFloat(ethers.formatUnits(price, 6)),
+        amount: parseFloat(formatUnits(price, 6)),
         roleGrantedOnChain: receipt.status === 1,
         roleGrantTxHash: receipt.hash,
       }
@@ -1338,15 +1143,14 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
       )
     }
 
-    const stableContract = new ethers.Contract(stableAddress, ERC20_ABI, signer)
-    const paymentProcessor = new ethers.Contract(paymentProcessorAddress, PAYMENT_PROCESSOR_ABI, signer)
+    const legacyChain = readChain(walletChainId)
 
     // Convert price to stablecoin units (USDC has 6 decimals).
-    const amountWei = ethers.parseUnits(String(priceUSD), 6)
+    const amountWei = parseUnits(String(priceUSD), 6)
 
     // Check stablecoin balance
-    const userAddress = await signer.getAddress()
-    const balanceRaw = await stableContract.balanceOf(userAddress)
+    const userAddress = getAddress(await signer.getAddress())
+    const balanceRaw = await askToken(legacyChain, stableAddress, 'balanceOf', [userAddress])
     const balance = BigInt(balanceRaw.toString())
     const amount = BigInt(amountWei.toString())
 
@@ -1354,13 +1158,13 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
     console.log('Stablecoin Balance Check:', {
       userAddress,
       balanceWei: balance.toString(),
-      balanceFormatted: ethers.formatUnits(balance, 6),
+      balanceFormatted: formatUnits(balance, 6),
       requiredWei: amount.toString(),
       requiredFormatted: priceUSD
     })
 
     if (balance < amount) {
-      const balanceFormatted = ethers.formatUnits(balance, 6)
+      const balanceFormatted = formatUnits(balance, 6)
       throw new Error(`Insufficient stablecoin balance. You have ${parseFloat(balanceFormatted).toFixed(2)} but need ${priceUSD}.`)
     }
 
@@ -1373,17 +1177,25 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
     // Check if payment manager is configured on PaymentProcessor
     let paymentManagerAddress
     try {
-      paymentManagerAddress = await paymentProcessor.paymentManager()
+      paymentManagerAddress = await readContract(legacyChain, {
+        address: paymentProcessorAddress,
+        abi: PAYMENT_PROCESSOR_ABI,
+        functionName: 'paymentManager',
+        args: [],
+      })
     } catch {
-      paymentManagerAddress = ethers.ZeroAddress
+      paymentManagerAddress = zeroAddress
     }
 
-    if (paymentManagerAddress === ethers.ZeroAddress) {
+    if (paymentManagerAddress === zeroAddress) {
       throw new Error('MembershipPaymentManager not configured on this network.')
     }
 
     // Check and approve the stablecoin for the PaymentProcessor
-    const allowanceRaw = await stableContract.allowance(userAddress, paymentProcessorAddress)
+    const allowanceRaw = await askToken(legacyChain, stableAddress, 'allowance', [
+      userAddress,
+      getAddress(paymentProcessorAddress),
+    ])
     const allowance = BigInt(allowanceRaw.toString())
 
     if (allowance < amount) {
@@ -1391,13 +1203,19 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
       console.log('Approving the stablecoin for PaymentProcessor...', {
         spender: paymentProcessorAddress,
         amount: amountWei.toString(),
-        amountFormatted: ethers.formatUnits(amountWei, 6) + ' stable'
+        amountFormatted: formatUnits(amountWei, 6) + ' stable'
       })
       try {
+        const approveData = encodeFunctionData({
+          abi: normalizeAbi(ERC20_ABI),
+          functionName: 'approve',
+          args: [getAddress(paymentProcessorAddress), amountWei],
+        })
+
         // First try to estimate gas to see if the transaction would succeed
         let gasEstimate
         try {
-          gasEstimate = await stableContract.approve.estimateGas(paymentProcessorAddress, amountWei)
+          gasEstimate = await signer.estimateGas({ to: stableAddress, data: approveData })
           console.log('Gas estimate for approve:', gasEstimate.toString())
         } catch (estimateError) {
           console.warn('Gas estimation failed, using default:', estimateError.message)
@@ -1407,8 +1225,10 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
         // Add 20% buffer to gas estimate
         const gasLimit = (gasEstimate * 120n) / 100n
 
-        const approveTx = await stableContract.approve(paymentProcessorAddress, amountWei, {
-          gasLimit: gasLimit
+        const approveTx = await signer.sendTransaction({
+          to: stableAddress,
+          data: approveData,
+          gasLimit,
         })
         emit('approve', 'sent', { txHash: approveTx.hash })
         console.log('Approve transaction sent:', approveTx.hash)
@@ -1429,7 +1249,7 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
       }
     } else {
       emit('approve', 'skipped')
-      console.log('Stablecoin already approved for PaymentProcessor, allowance:', ethers.formatUnits(allowance, 6))
+      console.log('Stablecoin already approved for PaymentProcessor, allowance:', formatUnits(allowance, 6))
     }
 
     // Validate tier value
@@ -1447,12 +1267,14 @@ export async function purchaseRoleWithStablecoin(signer, roleName, priceUSD, tie
     })
 
     emit('pay', 'start')
-    const purchaseTx = await paymentProcessor.purchaseTierWithToken(
-      roleHash,
-      validTier,
-      stableAddress,
-      amountWei
-    )
+    const purchaseTx = await signer.sendTransaction({
+      to: paymentProcessorAddress,
+      data: encodeFunctionData({
+        abi: normalizeAbi(PAYMENT_PROCESSOR_ABI),
+        functionName: 'purchaseTierWithToken',
+        args: [roleHash, validTier, getAddress(stableAddress), amountWei],
+      }),
+    })
     emit('pay', 'sent', { txHash: purchaseTx.hash })
     const receipt = await purchaseTx.wait()
     emit('pay', 'confirmed', { txHash: receipt.hash })
@@ -1522,18 +1344,18 @@ export async function resolveMembershipIntentParams(signer, roleName, tier = Mem
     throw new Error(`No membership contract is configured on the connected network (chain ${walletChainId ?? 'unknown'}).`)
   }
 
-  const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, signer)
-  const userAddress = await signer.getAddress()
+  const chain = readChain(walletChainId)
+  const userAddress = getAddress(await signer.getAddress())
 
   // Determine the price the contract will charge (exact — this becomes the EIP-3009 value).
   let price
   if (action === 'upgrade') {
-    const membership = await mm.getMembership(userAddress, roleHash)
-    const currentCfg = await mm.getTierConfig(roleHash, membership.tier)
-    const newCfg = await mm.getTierConfig(roleHash, validTier)
+    const membership = await askMembership(chain, mmAddress, 'getMembership', [userAddress, roleHash])
+    const currentCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, membership.tier])
+    const newCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
     price = newCfg.priceUSDC - currentCfg.priceUSDC
   } else {
-    const tierCfg = await mm.getTierConfig(roleHash, validTier)
+    const tierCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
     price = tierCfg.priceUSDC
   }
 
@@ -1542,7 +1364,7 @@ export async function resolveMembershipIntentParams(signer, roleName, tier = Mem
     ? (termsHash.startsWith('0x') ? termsHash : '0x' + termsHash)
     : null
   const hasTerms = normTerms !== null && /^0x[0-9a-fA-F]{64}$/.test(normTerms)
-  const acceptedTermsHash = hasTerms ? normTerms : ethers.ZeroHash
+  const acceptedTermsHash = hasTerms ? normTerms : zeroHash
 
   return { roleHash, validTier, price, acceptedTermsHash }
 }
@@ -1591,29 +1413,29 @@ export async function buildMembershipPurchaseCalls(provider, account, roleName, 
     )
   }
 
-  const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, provider)
-  const paymentTokenAddr = await mm.paymentToken()
-  if (!paymentTokenAddr || paymentTokenAddr === ethers.ZeroAddress) {
+  const chain = readChain(walletChainId)
+  const member = getAddress(account)
+  const paymentTokenAddr = await askMembership(chain, mmAddress, 'paymentToken', [])
+  if (!paymentTokenAddr || paymentTokenAddr === zeroAddress) {
     throw new Error('MembershipManager has no payment token configured. Contact the DAO administrator.')
   }
-  const paymentToken = new ethers.Contract(paymentTokenAddr, ERC20_ABI, provider)
 
   // Exact price the contract will charge (this becomes the batched approve amount).
   let price
   if (action === 'upgrade') {
-    const membership = await mm.getMembership(account, roleHash)
-    const currentCfg = await mm.getTierConfig(roleHash, membership.tier)
-    const newCfg = await mm.getTierConfig(roleHash, validTier)
+    const membership = await askMembership(chain, mmAddress, 'getMembership', [member, roleHash])
+    const currentCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, membership.tier])
+    const newCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
     price = newCfg.priceUSDC - currentCfg.priceUSDC
   } else {
-    const tierCfg = await mm.getTierConfig(roleHash, validTier)
+    const tierCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
     price = tierCfg.priceUSDC
   }
 
-  const balance = await paymentToken.balanceOf(account)
+  const balance = await askToken(chain, paymentTokenAddr, 'balanceOf', [member])
   if (balance < price) {
     throw new Error(
-      `Insufficient USDC balance. Have ${ethers.formatUnits(balance, 6)}, need ${ethers.formatUnits(price, 6)}.`
+      `Insufficient USDC balance. Have ${formatUnits(balance, 6)}, need ${formatUnits(price, 6)}.`
     )
   }
 
@@ -1623,19 +1445,26 @@ export async function buildMembershipPurchaseCalls(provider, account, roleName, 
     : null
   const hasTerms = normTerms !== null && /^0x[0-9a-fA-F]{64}$/.test(normTerms)
 
+  const encodeMembership = (functionName, args) =>
+    encodeFunctionData({ abi: normalizeAbi(MEMBERSHIP_MANAGER_ABI), functionName, args })
+
   let purchaseData
   if (action === 'upgrade') {
     purchaseData = hasTerms
-      ? mm.interface.encodeFunctionData('upgradeTierWithTerms', [roleHash, validTier, normTerms])
-      : mm.interface.encodeFunctionData('upgradeTier', [roleHash, validTier])
+      ? encodeMembership('upgradeTierWithTerms', [roleHash, validTier, normTerms])
+      : encodeMembership('upgradeTier', [roleHash, validTier])
   } else if (action === 'extend') {
-    purchaseData = mm.interface.encodeFunctionData('extendMembership', [roleHash])
+    purchaseData = encodeMembership('extendMembership', [roleHash])
   } else {
     purchaseData = hasTerms
-      ? mm.interface.encodeFunctionData('purchaseTierWithTerms', [roleHash, validTier, normTerms])
-      : mm.interface.encodeFunctionData('purchaseTier', [roleHash, validTier])
+      ? encodeMembership('purchaseTierWithTerms', [roleHash, validTier, normTerms])
+      : encodeMembership('purchaseTier', [roleHash, validTier])
   }
-  const approveData = paymentToken.interface.encodeFunctionData('approve', [mmAddress, price])
+  const approveData = encodeFunctionData({
+    abi: normalizeAbi(ERC20_ABI),
+    functionName: 'approve',
+    args: [getAddress(mmAddress), price],
+  })
 
   return {
     calls: [
@@ -1677,33 +1506,34 @@ export async function checkApprovalNeeded(signer, roleName, priceUSD, tier = Mem
       const roleHash = getRoleHash(roleName)
       if (!roleHash) return true
       const validTier = [1, 2, 3, 4].includes(tier) ? tier : MembershipTier.BRONZE
-      const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, signer)
-      const paymentTokenAddr = await mm.paymentToken()
-      if (!paymentTokenAddr || paymentTokenAddr === ethers.ZeroAddress) return true
-      const paymentToken = new ethers.Contract(paymentTokenAddr, ERC20_ABI, signer)
-      const userAddress = await signer.getAddress()
+      const chain = readChain(walletChainId)
+      const paymentTokenAddr = await askMembership(chain, mmAddress, 'paymentToken', [])
+      if (!paymentTokenAddr || paymentTokenAddr === zeroAddress) return true
+      const userAddress = getAddress(await signer.getAddress())
 
       let price
       if (action === 'upgrade') {
-        const membership = await mm.getMembership(userAddress, roleHash)
-        const currentCfg = await mm.getTierConfig(roleHash, membership.tier)
-        const newCfg = await mm.getTierConfig(roleHash, validTier)
+        const membership = await askMembership(chain, mmAddress, 'getMembership', [userAddress, roleHash])
+        const currentCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, membership.tier])
+        const newCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
         price = newCfg.priceUSDC - currentCfg.priceUSDC
       } else {
-        const tierCfg = await mm.getTierConfig(roleHash, validTier)
+        const tierCfg = await askMembership(chain, mmAddress, 'getTierConfig', [roleHash, validTier])
         price = tierCfg.priceUSDC
       }
-      const allowance = await paymentToken.allowance(userAddress, mmAddress)
+      const allowance = await askToken(chain, paymentTokenAddr, 'allowance', [userAddress, mmAddress])
       return allowance < price
     }
 
     // Legacy PaymentProcessor path
     const paymentProcessorAddress = getContractAddress('paymentProcessor')
     if (!paymentProcessorAddress) return true
-    const stableContract = new ethers.Contract(DEX_ADDRESSES.STABLECOIN, ERC20_ABI, signer)
-    const userAddress = await signer.getAddress()
-    const amountWei = ethers.parseUnits(String(priceUSD), 6)
-    const allowance = await stableContract.allowance(userAddress, paymentProcessorAddress)
+    const userAddress = getAddress(await signer.getAddress())
+    const amountWei = parseUnits(String(priceUSD), 6)
+    const allowance = await askToken(readChain(walletChainId), DEX_ADDRESSES.STABLECOIN, 'allowance', [
+      userAddress,
+      getAddress(paymentProcessorAddress),
+    ])
     return BigInt(allowance.toString()) < BigInt(amountWei.toString())
   } catch (e) {
     console.warn('[checkApprovalNeeded] pre-flight failed, assuming approval needed:', e?.message)
@@ -1740,13 +1570,18 @@ export async function checkApprovalNeededForAddress(
   if (!address) return true
   try {
     const chainId = opts.chainId ?? membershipChainId()
-    const provider = opts.provider || getProvider(chainId)
-    if (!provider) return true
 
+    // Spec 110: the reads below name their chain, so `opts.provider` no longer carries them — but
+    // a caller that passes one is NAMING A CHAIN with it, and that has always been what decided
+    // where this pre-flight looked. So it is still asked, and only for that. With no provider the
+    // requested chain stands; a chain with no RPC route makes the reads throw, which the catch
+    // below turns into the same conservative `true` the missing-provider gate used to return.
     let readChainId = chainId
-    try {
-      readChainId = Number((await provider.getNetwork()).chainId)
-    } catch { /* provider without a network; keep the requested chain */ }
+    if (opts.provider) {
+      try {
+        readChainId = Number((await opts.provider.getNetwork()).chainId)
+      } catch { /* provider without a network; keep the requested chain */ }
+    }
 
     const mmAddress = getContractAddressForChain('membershipManager', readChainId)
     if (!mmAddress) return true
@@ -1754,83 +1589,27 @@ export async function checkApprovalNeededForAddress(
     if (!roleHash) return true
     const validTier = [1, 2, 3, 4].includes(tier) ? tier : MembershipTier.BRONZE
 
-    const mm = new ethers.Contract(mmAddress, MEMBERSHIP_MANAGER_ABI, provider)
-    const paymentTokenAddr = await mm.paymentToken()
-    if (!paymentTokenAddr || paymentTokenAddr === ethers.ZeroAddress) return true
-    const paymentToken = new ethers.Contract(paymentTokenAddr, ERC20_ABI, provider)
+    const member = getAddress(address)
+    const paymentTokenAddr = await askMembership(readChainId, mmAddress, 'paymentToken', [])
+    if (!paymentTokenAddr || paymentTokenAddr === zeroAddress) return true
 
     // The exact amount the contract will pull — an upgrade charges only the delta, so quoting the
     // full tier price here would show an approve step the purchase never needs.
     let price
     if (action === 'upgrade') {
-      const membership = await mm.getMembership(address, roleHash)
-      const currentCfg = await mm.getTierConfig(roleHash, membership.tier)
-      const newCfg = await mm.getTierConfig(roleHash, validTier)
+      const membership = await askMembership(readChainId, mmAddress, 'getMembership', [member, roleHash])
+      const currentCfg = await askMembership(readChainId, mmAddress, 'getTierConfig', [roleHash, membership.tier])
+      const newCfg = await askMembership(readChainId, mmAddress, 'getTierConfig', [roleHash, validTier])
       price = newCfg.priceUSDC - currentCfg.priceUSDC
     } else {
-      const tierCfg = await mm.getTierConfig(roleHash, validTier)
+      const tierCfg = await askMembership(readChainId, mmAddress, 'getTierConfig', [roleHash, validTier])
       price = tierCfg.priceUSDC
     }
 
-    const allowance = await paymentToken.allowance(address, mmAddress)
+    const allowance = await askToken(readChainId, paymentTokenAddr, 'allowance', [member, mmAddress])
     return BigInt(allowance) < BigInt(price)
   } catch (e) {
     console.warn('[checkApprovalNeededForAddress] pre-flight failed, assuming approval needed:', e?.message)
     return true
-  }
-}
-
-/**
- * Register a zero-knowledge public key
- * @param {ethers.Signer} signer - Connected wallet signer
- * @param {string} publicKey - Zero-knowledge public key (base64 or hex encoded)
- * @returns {Promise<Object>} Transaction receipt
- */
-export async function registerZKKey(signer, publicKey) {
-  if (!signer) {
-    throw new Error('Wallet not connected')
-  }
-
-  if (!publicKey || publicKey.trim().length === 0) {
-    throw new Error('Public key is required')
-  }
-
-  try {
-    // v2 = KeyRegistry, legacy = ZKKeyManager
-    const keyRegistryAddress = getContractAddress('keyRegistry')
-    const zkKeyManagerAddress = getContractAddress('zkKeyManager')
-    const address = keyRegistryAddress || zkKeyManagerAddress
-
-    if (!address) {
-      throw new Error('Key registry contract not deployed yet. Please register your key later.')
-    }
-
-    const abi = keyRegistryAddress ? KEY_REGISTRY_ABI : ZK_KEY_MANAGER_ABI
-    const contract = new ethers.Contract(address, abi, signer)
-
-    // Both old (string) and new (bytes) registerKey accept a 0x-prefixed hex string.
-    const trimmed = publicKey.trim()
-    const arg = keyRegistryAddress
-      ? (trimmed.startsWith('0x') ? trimmed : '0x' + trimmed)
-      : trimmed
-    const tx = await contract.registerKey(arg)
-    const receipt = await tx.wait()
-
-    return {
-      hash: receipt.transactionHash,
-      blockNumber: receipt.blockNumber,
-      status: receipt.status === 1 ? 'success' : 'failed',
-      gasUsed: receipt.gasUsed.toString()
-    }
-  } catch (error) {
-    console.error('Error registering ZK key:', error)
-
-    if (error.code === 'ACTION_REJECTED') {
-      throw new Error('Transaction rejected by user', { cause: error })
-    } else if (error.message.includes('not deployed')) {
-      throw error
-    } else {
-      throw new Error(error.message || 'ZK key registration failed', { cause: error })
-    }
   }
 }

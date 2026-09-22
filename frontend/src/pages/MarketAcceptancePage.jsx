@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useSearchParams, useNavigate } from 'react-router-dom'
-import { ethers } from 'ethers'
+import { zeroAddress } from 'viem'
+import { readContract } from '../lib/chains/readContract'
+import { formatUnits } from '../lib/evm/units'
 import { useWallet, useWeb3 } from '../hooks'
 import MarketAcceptanceModal from '../components/fairwins/MarketAcceptanceModal'
 import { WAGER_REGISTRY_ABI } from '../abis/WagerRegistry'
@@ -15,7 +17,7 @@ const STATUS_NAMES = ['none', 'pending_acceptance', 'active', 'resolved', 'cance
 // Map token address → friendly metadata (decimals, symbol). Anything else is
 // treated as a generic 18-decimal token.
 function tokenInfo(addr) {
-  if (!addr || addr === ethers.ZeroAddress) return { decimals: 18, symbol: 'tokens' }
+  if (!addr || addr === zeroAddress) return { decimals: 18, symbol: 'tokens' }
   const a = addr.toLowerCase()
   const usdc = (DEPLOYED_CONTRACTS.paymentToken || '').toLowerCase()
   const wmatic = (DEPLOYED_CONTRACTS.wmatic || '').toLowerCase()
@@ -105,10 +107,18 @@ function MarketAcceptancePage() {
         const registryAddress = getContractAddressForChain('wagerRegistry', chainId)
         if (!registryAddress) throw new Error('WagerRegistry not deployed on this network')
 
-        const registry = new ethers.Contract(registryAddress, WAGER_REGISTRY_ABI, provider)
-        const w = await registry.getWager(marketId)
+        // `getWager` returns ONE named struct, so viem hands back an object with the same field
+        // names ethers gave — but `status` and `resolutionType` are uint8, which viem decodes as a
+        // NUMBER where ethers gave a bigint. Every read of them below already goes through
+        // `Number(...)`, so both shapes land the same; a new one must keep doing that (spec 110).
+        const w = await readContract(chainId, {
+          address: registryAddress,
+          abi: WAGER_REGISTRY_ABI,
+          functionName: 'getWager',
+          args: [marketId],
+        })
 
-        if (!w.creator || w.creator === ethers.ZeroAddress) {
+        if (!w.creator || w.creator === zeroAddress) {
           throw new Error(`Wager #${marketId} not found`)
         }
 
@@ -117,7 +127,7 @@ function MarketAcceptancePage() {
         const statusName = STATUS_NAMES[status] || 'unknown'
 
         // The opponent puts up opponentStake on acceptance; that's what the modal cares about.
-        const stakePerParticipant = ethers.formatUnits(w.opponentStake, decimals)
+        const stakePerParticipant = formatUnits(w.opponentStake, decimals)
 
         // v2 WagerRegistry has no marketType field — an Offer is encoded
         // as asymmetric stakes (creatorStake !== opponentStake). Derive the subtype
@@ -135,7 +145,7 @@ function MarketAcceptancePage() {
 
         const opponentAddr = w.opponent
         const acceptances = {}
-        if (opponentAddr && opponentAddr !== ethers.ZeroAddress) {
+        if (opponentAddr && opponentAddr !== zeroAddress) {
           acceptances[opponentAddr.toLowerCase()] = {
             hasAccepted: status >= Status.Active,
             stakedAmount: stakePerParticipant,
@@ -146,7 +156,7 @@ function MarketAcceptancePage() {
         if (w.creator) {
           acceptances[w.creator.toLowerCase()] = {
             hasAccepted: true,
-            stakedAmount: ethers.formatUnits(w.creatorStake, decimals),
+            stakedAmount: formatUnits(w.creatorStake, decimals),
             isArbitrator: false,
           }
         }
@@ -162,8 +172,8 @@ function MarketAcceptancePage() {
           ipfsCid,
           sharedSignature: urlSharedSignature,
           creator: w.creator,
-          participants: opponentAddr && opponentAddr !== ethers.ZeroAddress ? [w.creator, opponentAddr] : [w.creator],
-          arbitrator: (w.arbitrator && w.arbitrator !== ethers.ZeroAddress) ? w.arbitrator : null,
+          participants: opponentAddr && opponentAddr !== zeroAddress ? [w.creator, opponentAddr] : [w.creator],
+          arbitrator: (w.arbitrator && w.arbitrator !== zeroAddress) ? w.arbitrator : null,
           marketType: wagerType,
           opponentOddsMultiplier: oddsMultiplier,
           status: statusName,
@@ -171,8 +181,8 @@ function MarketAcceptancePage() {
           resolveDeadline: resolveDeadlineMs,
           minAcceptanceThreshold: 1,
           stakePerParticipant,
-          creatorStake: ethers.formatUnits(w.creatorStake, decimals),
-          opponentStake: ethers.formatUnits(w.opponentStake, decimals),
+          creatorStake: formatUnits(w.creatorStake, decimals),
+          opponentStake: formatUnits(w.opponentStake, decimals),
           stakeToken: w.token,
           stakeTokenSymbol: symbol,
           stakeTokenDecimals: decimals,

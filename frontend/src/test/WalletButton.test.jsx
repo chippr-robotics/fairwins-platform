@@ -30,7 +30,6 @@ vi.mock('wagmi', () => ({
   useDisconnect: vi.fn(() => ({
     disconnect: vi.fn()
   })),
-  useChainId: vi.fn(() => 61),
   useWalletClient: vi.fn(() => ({
     data: {
       account: { address: '0x1234567890123456789012345678901234567890' },
@@ -125,7 +124,7 @@ vi.mock('../components/ui/AddressQRModal', () => ({
   )
 }))
 
-import { useAccount, useConnect, useDisconnect, useChainId } from 'wagmi'
+import { useAccount, useConnect, useDisconnect } from 'wagmi'
 import { useWalletRoles, useWeb3 } from '../hooks'
 import { useDex } from '../hooks/useDex'
 import { useUserPreferences } from '../hooks/useUserPreferences'
@@ -215,7 +214,6 @@ describe('WalletButton Component - Wagers', () => {
     useDisconnect.mockReturnValue({
       disconnect: vi.fn()
     })
-    useChainId.mockReturnValue(61)
     useWalletRoles.mockReturnValue({
       roles: [],
       hasRole: vi.fn(() => false)

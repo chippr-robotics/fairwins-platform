@@ -11,7 +11,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { renderHook } from '@testing-library/react'
 
 let mockChainId = 137
-vi.mock('wagmi', () => ({ useChainId: () => mockChainId }))
+vi.mock('wagmi', () => ({ useAccount: () => ({ chainId: mockChainId }) }))
 
 import { useChainTokens } from '../useChainTokens'
 

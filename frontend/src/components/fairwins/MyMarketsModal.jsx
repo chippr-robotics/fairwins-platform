@@ -1,10 +1,13 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { decodeEventLog, encodeFunctionData, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { errorParser } from '../../lib/evm/revertParser'
 import { useWallet, useWeb3 } from '../../hooks'
 import { useActiveAccount } from '../../hooks/useActiveAccount'
 import { useLazyMarketDecryption } from '../../hooks/useEncryption'
 import { useLazyIpfsEnvelope } from '../../hooks/useIpfs'
 import { useWagerActivityOptional } from '../../hooks/useWagerActivity'
+import { useWagerChain } from '../../hooks/useWagerChain'
 import { useFriendMarkets } from '../../contexts/FriendMarketsContext.js'
 import { WagerStatus as MarketStatus, DisputeStatus, WAGER_DEFAULTS } from '../../constants/wagerDefaults'
 import { getContractAddressForChain } from '../../config/contracts'
@@ -34,12 +37,19 @@ import './WagerRow.css'
  * of the useGaslessWrite/signer path. Returns the same `{ txHash }` shape the classic `.run()` yields,
  * so callers stay branch-light. Claim/refund/resolve are single calls (no token approval).
  */
+const REGISTRY_ABI_PARSED = normalizeAbi(WAGER_REGISTRY_ABI)
+/** Calldata for a WagerRegistry call — one encoder for every rail in this file. */
+const registryCall = (functionName, args) =>
+  encodeFunctionData({ abi: REGISTRY_ABI_PARSED, functionName, args })
+/** The registry's own error table, for naming a revert this file turns into a sentence. */
+const REGISTRY_ERRORS = errorParser(WAGER_REGISTRY_ABI)
+
 async function sendRegistryCall(sendCalls, chainId, method, args) {
   if (typeof sendCalls !== 'function') {
     throw new Error('This wallet cannot submit this action on the current transaction rail.')
   }
   const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-  const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData(method, args)
+  const data = registryCall(method, args)
   const sent = await sendCalls([{ target: registryAddr, data, value: 0n }])
   return { txHash: sent?.txHash ?? sent?.userOpHash ?? sent?.intentId }
 }
@@ -64,8 +74,35 @@ function MyMarketsModal({
   initialSelectedMarketId = null
 }) {
   const { isConnected, account, chainId } = useWallet()
-  const { signer, isCorrectNetwork, switchNetwork, sendCalls, loginMethod } = useWeb3()
+  const { signer, sendCalls, loginMethod } = useWeb3()
   const isPasskey = loginMethod === 'passkey'
+
+  /*
+   * THE LIST'S WRITES READ THE SIGNER THROUGH A REF TOO (spec 110 T040).
+   *
+   * These hooks name no target chain, so `useGaslessWrite` never switches inside them — which is
+   * why they looked exempt. They are not: the HANDLER around them runs immediately after the
+   * re-entry effect fires, and that effect fires on the render where `chainId` reached the
+   * wager's chain, which is one render BEFORE the chain-scoped signer is rebuilt. So the
+   * `selfSubmit` closure captured at that render holds the pre-switch signer and broadcasts on
+   * the old chain, while `settleOnWagerChain` — which polls a per-render ref — correctly saw the
+   * later, settled one and reported success. The settle was right and the closure was stale.
+   *
+   * CLM-01 is the only claim in the suite that changes chain, so it is the only one that could
+   * ever show this.
+   */
+  const signerRef = useRef(signer)
+  useEffect(() => { signerRef.current = signer })
+  /*
+   * Spec 110 Phase 4 (T040) — the action goes to the WAGER's chain, not the wallet's.
+   *
+   * The list is estate-wide now, so `chainId` and the wager's chain no longer agree by
+   * coincidence. `settleOnWagerChain` moves a classic wallet there (naming both chains and
+   * signing nothing if it declines) and leaves a passkey session where it is, because its UserOp
+   * addresses the target chain's bundler directly. Every address below resolves with the chain it
+   * returns, never with the ambient one.
+   */
+  const { chainOf, settleOnWagerChain } = useWagerChain()
   // Spec 043 (US3, FR-022c): a vault-won payout claim is a threshold-gated vault transaction (the registry
   // binds the claimer to the winner). Refunds stay single-owner and need no change.
   // Spec 088 FR-002: a recovered (legacy) or hardware acting account claims with ITS OWN signer. The
@@ -174,24 +211,58 @@ function MyMarketsModal({
     return () => clearInterval(id)
   }, [isOpen, account, refreshFriendMarkets])
 
-  // Draw-proposal scan (spec 040 US2). Keeps the per-wager draw proposer current
-  // while the modal is open (same 30s cadence as the market refresh). A failed
-  // read retains prior state rather than fabricating revokes (honest state).
+  /*
+   * Draw-proposal scan (spec 040 US2). Keeps the per-wager draw proposer current while the modal
+   * is open (same 30s cadence as the market refresh). A failed read retains prior state rather
+   * than fabricating revokes (honest state).
+   *
+   * PER CHAIN, and keyed per chain (spec 110 T040). `id` is a per-registry counter, so with an
+   * estate-wide list this used to ask the WALLET's subgraph about every wager id in the list and
+   * key the answers by bare id: a draw proposed on wager #5 on one chain was then rendered against
+   * wager #5 on another — someone else's name, on someone else's wager. Each chain is asked only
+   * about its own wagers, and a chain that does not answer (no subgraph, or a failed read) leaves
+   * its own entries as they were without disturbing the chains that did.
+   */
   const drawScanKey = useMemo(
-    () => decryptableMarkets.map(m => String(m.id)).sort().join(','),
-    [decryptableMarkets]
+    () => decryptableMarkets
+      .map((m) => `${Number(m.chainId ?? chainId)}:${String(m.id)}`)
+      .sort()
+      .join(','),
+    [decryptableMarkets, chainId]
   )
   useEffect(() => {
     if (!isOpen || !account) return
-    const wagerIds = drawScanKey ? drawScanKey.split(',').filter(Boolean) : []
-    if (wagerIds.length === 0) { setDrawProposerById({}); return }
+    const pairs = drawScanKey ? drawScanKey.split(',').filter(Boolean) : []
+    if (pairs.length === 0) { setDrawProposerById({}); return }
+    const byChain = new Map()
+    for (const pair of pairs) {
+      const [chain, wagerId] = pair.split(':')
+      if (!byChain.has(chain)) byChain.set(chain, [])
+      byChain.get(chain).push(wagerId)
+    }
     let alive = true
     const run = async () => {
-      const { proposals, ok } = await fetchDrawProposals({ chainId, wagerIds })
-      if (!alive || !ok) return
-      const map = {}
-      for (const p of proposals) map[String(p.wagerId)] = p.proposer
-      setDrawProposerById(map)
+      const results = await Promise.all(
+        [...byChain.entries()].map(async ([chain, wagerIds]) => {
+          const { proposals, ok } = await fetchDrawProposals({ chainId: Number(chain), wagerIds })
+          return { chain, proposals, ok }
+        })
+      )
+      if (!alive) return
+      const answered = results.filter((r) => r.ok)
+      if (answered.length === 0) return
+      setDrawProposerById((prev) => {
+        const next = { ...prev }
+        // Clear only what the answering chains were asked about, so their revokes land and the
+        // silent chains keep what they last said.
+        for (const { chain } of answered) {
+          for (const wagerId of byChain.get(chain)) delete next[`${chain}-${wagerId}`]
+        }
+        for (const { chain, proposals } of answered) {
+          for (const p of proposals) next[`${chain}-${String(p.wagerId)}`] = p.proposer
+        }
+        return next
+      })
     }
     run()
     const id = setInterval(run, 30000)
@@ -321,19 +392,25 @@ function MyMarketsModal({
       ...decryptableMarkets.map(m => ({ ...m, marketType: 'friend' }))
     ]
 
-    // Only show wagers that belong to the active network. Wagers are tagged
-    // with the chainId they were read from (see FriendMarketsContext); after a
-    // testnet ↔ mainnet switch this drops wagers that only exist on the other
-    // network instead of displaying them as if they were available here.
-    // Legacy/untagged wagers (no chainId) fall through so we never hide data
-    // written before this tagging existed.
-    const onActiveChain = allMarkets.filter(
-      m => m.chainId == null || !chainId || m.chainId === chainId
-    )
-
-    // Remove duplicates by id
-    const uniqueMarkets = onActiveChain.reduce((acc, market) => {
-      const key = `${market.marketType}-${market.id}`
+    /*
+     * THE LIST IS THE ESTATE (spec 110 T040). There is deliberately NO filter to the wallet's
+     * chain here. There used to be one, and it silently undid the feature: the context now reads
+     * every cohort chain, and this then threw away everything the wallet was not currently sitting
+     * on — so a member still watched their wagers vanish on a network switch, which is the exact
+     * behaviour T040 exists to end. Its stated reason (don't show testnet wagers on a mainnet
+     * build) is handled upstream and better: `readWagersAcrossEstate` and `loadEstateFromStorage`
+     * are both cohort-bounded, so a wager from the other cohort can no longer be in this list to
+     * be filtered out.
+     *
+     * Dedupe is by the CHAIN-SCOPED key. `market.id` is a per-registry counter, so wager #5 on
+     * Polygon and wager #5 on Base collide on `${marketType}-${id}` — with a single-chain list
+     * that could never happen, and with an estate-wide one it silently drops a real wager. The
+     * `uniqueId` that `tagWagers` stamps already carries chain + contract + id.
+     */
+    const uniqueMarkets = allMarkets.reduce((acc, market) => {
+      const key = market.uniqueId
+        ? `${market.marketType}-${market.uniqueId}`
+        : `${market.marketType}-${market.chainId ?? 'unknown'}-${market.id}`
       if (!acc[key]) acc[key] = market
       return acc
     }, {})
@@ -419,7 +496,8 @@ function MyMarketsModal({
       const marketWithStatus = {
         ...market,
         computedStatus: status,
-        drawProposedBy: drawProposerById[String(market.id)] ?? null,
+        drawProposedBy:
+          drawProposerById[`${Number(market.chainId ?? chainId)}-${String(market.id)}`] ?? null,
       }
 
       // Apply status filter. The default ("all") view hides expired offers so
@@ -513,7 +591,9 @@ function MyMarketsModal({
     history.sort(comparator)
 
     return { participating, created, arbitrating, history }
-  }, [markets, decryptableMarkets, userPositions, account, sortKey, statusFilter, selectedMarketId, dismissedIds, chainId, drawProposerById])
+    // `chainId` is read ONLY to fall back for an untagged legacy wager — it no longer decides what
+    // the member can see. What they are looking at does not depend on where their wallet is.
+  }, [markets, decryptableMarkets, userPositions, account, sortKey, statusFilter, selectedMarketId, dismissedIds, drawProposerById, chainId])
 
   // Derive the selected market from the live categorized lists so the detail
   // view reflects fresh data (e.g., decryptedMetadata) after decryption
@@ -649,7 +729,7 @@ function MyMarketsModal({
     const isOpponent = market.participants?.length > 1 &&
       market.participants[1]?.toLowerCase() === userAddr
     const isArbitrator = market.arbitrator &&
-      market.arbitrator !== ethers.ZeroAddress &&
+      market.arbitrator !== zeroAddress &&
       market.arbitrator.toLowerCase() === userAddr
 
     // Resolution authority depends on resolutionType
@@ -774,28 +854,67 @@ function MyMarketsModal({
   const claimPayoutTx = useGaslessWrite('claimPayout', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await registry.claimPayout(wagerId)
+      const tx = await signerRef.current.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('claimPayout', [wagerId]),
+      })
       return tx.wait()
     },
   })
+
+  /*
+   * ── RE-ENTRY AFTER THE CHAIN SETTLES, AND WHY IT IS NOT OPTIONAL ─────────────────────────
+   *
+   * `useGaslessWrite` binds its chain at RENDER: the EIP-712 domain it signs, the verifying
+   * contract it resolves and the relayer it probes all come from the chain that was current when
+   * the hook ran. A handler that settles the wallet and then calls `run()` in the same invocation
+   * is still holding the PRE-switch closure, so it would sign the old chain's domain — a valid
+   * signature over something nobody will honour, which is issue #1038 by another route and which
+   * no assertion about the params can see. Its self-submit fallback would then send to the old
+   * chain's registry address on the new chain.
+   *
+   * So a cross-chain action does not continue after the switch — it RE-ENTERS. The handler
+   * returns, React re-renders with the settled chain, and this effect calls the same handler
+   * again through a ref, where `chainId` now equals the wager's chain and every ambient
+   * resolution below is correct by construction rather than by coincidence.
+   */
+  const afterSettleRef = useRef(null)
+  const handlersRef = useRef({})
 
   const handleClaimPayout = useCallback(async (market) => {
     if (!isPasskey && !signer) return
     const id = String(market.id)
 
-    if (!isCorrectNetwork) {
-      try {
-        await switchNetwork()
-      } catch {
-        setClaimError({ id, message: 'Please switch to the correct network.' })
-        return
-      }
+    const targetChainId = chainOf(market)
+    const mustSwitch = Number(chainId) !== targetChainId
+    /*
+     * THE HAND-OFF IS ARMED BEFORE THE AWAIT, AND THE SETTLE RUNS ON BOTH PATHS.
+     *
+     * Two orderings had to be wrong together for this to work, and both were (CLM-01, the only
+     * claim in the suite that has to change chain — every later one starts already settled, which
+     * is how it survived the unit suite and the no-chain tier):
+     *
+     *  1. The chain flips DURING the settle, so the effect watching `chainId` fired while this
+     *     call was still awaiting. Arming `afterSettleRef` afterwards meant the effect found
+     *     nothing pending, and nothing ever re-triggered it: the action silently never ran. No
+     *     error, no transaction — the screenshot of the failure is a button and an empty space.
+     *  2. `chainId` arrives a beat BEFORE the chain-scoped signer is rebuilt, so re-entering on
+     *     the chain alone hands the handler a signer still bound to the old chain. Settling on
+     *     the re-entered path too costs nothing when the wallet is already there — it waits for
+     *     the signer and refuses honestly if it never lands (submitOn.js#signerIsOn, issue #1627).
+     */
+    if (mustSwitch) {
+      afterSettleRef.current = { chainId: targetChainId, run: () => handlersRef.current.claim?.(market) }
     }
+    try {
+      await settleOnWagerChain(market, 'This claim')
+    } catch (e) {
+      afterSettleRef.current = null
+      setClaimError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
+      return
+    }
+    // Settled, not continued: see the re-entry note above.
+    if (mustSwitch) return
 
     setClaimingId(id)
     setClaimError(null)
@@ -805,8 +924,8 @@ function MyMarketsModal({
       // Spec 043 (FR-022c): claiming as a vault → threshold-gated proposal calling claimPayout FROM the Safe.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to claim as the vault.")
-        const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimPayout', [wagerId])
+        const registryAddr = getContractAddressForChain('wagerRegistry', targetChainId)
+        const data = registryCall('claimPayout', [wagerId])
         await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast('Vault claim proposed — awaiting co-owner approval')
@@ -818,8 +937,8 @@ function MyMarketsModal({
       // connected wallet's rail and has no acting-account twin, and self-submit is the
       // never-stranded fallback that rail already promises.
       if (actingAsSigner) {
-        const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimPayout', [wagerId])
+        const registryAddr = getContractAddressForChain('wagerRegistry', targetChainId)
+        const data = registryCall('claimPayout', [wagerId])
         const res = await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast(res?.txHash ? 'Winnings claimed 🎉' : 'Claim submitted — confirming…')
@@ -827,7 +946,7 @@ function MyMarketsModal({
         return
       }
       const result = isPasskey
-        ? await sendRegistryCall(sendCalls, chainId, 'claimPayout', [wagerId])
+        ? await sendRegistryCall(sendCalls, targetChainId, 'claimPayout', [wagerId])
         : await claimPayoutTx.run(wagerId)
       if (result?.error) throw result.error
       // Pull fresh on-chain data so the claimed wager flips to paid (which
@@ -854,7 +973,7 @@ function MyMarketsModal({
     } finally {
       setClaimingId(null)
     }
-  }, [signer, isPasskey, sendCalls, isCorrectNetwork, switchNetwork, markWagerRead, refreshFriendMarkets, fireToast, claimPayoutTx, operatingAsVault, canActAsVault, submitAsActive, actingAsSigner, chainId])
+  }, [signer, isPasskey, sendCalls, chainOf, settleOnWagerChain, markWagerRead, refreshFriendMarkets, fireToast, claimPayoutTx, operatingAsVault, canActAsVault, submitAsActive, actingAsSigner, chainId])
 
   // Participant reclaims their stake on a wager that ran past its resolution
   // window without a winner being declared (the "refundable" state). Mirrors
@@ -869,12 +988,10 @@ function MyMarketsModal({
   const claimRefundRowTx = useGaslessWrite('claimRefund', {
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await registry.claimRefund(wagerId)
+      const tx = await signerRef.current.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', chainId),
+        data: registryCall('claimRefund', [wagerId]),
+      })
       return tx.wait()
     },
   })
@@ -883,14 +1000,21 @@ function MyMarketsModal({
     if (!isPasskey && !signer) return
     const id = String(market.id)
 
-    if (!isCorrectNetwork) {
-      try {
-        await switchNetwork()
-      } catch {
-        setRefundError({ id, message: 'Please switch to the correct network.' })
-        return
-      }
+    const targetChainId = chainOf(market)
+    const mustSwitch = Number(chainId) !== targetChainId
+    // See the ordering note on the claim handler above.
+    if (mustSwitch) {
+      afterSettleRef.current = { chainId: targetChainId, run: () => handlersRef.current.refundRow?.(market) }
     }
+    try {
+      await settleOnWagerChain(market, 'This refund')
+    } catch (e) {
+      afterSettleRef.current = null
+      setRefundError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
+      return
+    }
+    // Settled, not continued: see the re-entry note above.
+    if (mustSwitch) return
 
     setRefundingId(id)
     setRefundError(null)
@@ -901,8 +1025,8 @@ function MyMarketsModal({
       // as claimPayout: acting as a vault → threshold-gated proposal calling claimRefund FROM the Safe.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to reclaim as the vault.")
-        const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const registryAddr = getContractAddressForChain('wagerRegistry', targetChainId)
+        const data = registryCall('claimRefund', [wagerId])
         await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast('Vault refund proposed — awaiting co-owner approval')
@@ -913,8 +1037,8 @@ function MyMarketsModal({
       // Deliberately not the gasless leg below: a relayed intent has no acting-account twin, and
       // self-submit is the never-stranded fallback that rail already promises.
       if (actingAsSigner) {
-        const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const registryAddr = getContractAddressForChain('wagerRegistry', targetChainId)
+        const data = registryCall('claimRefund', [wagerId])
         const res = await submitAsActive({ to: registryAddr, value: 0n, data })
         markWagerRead?.(id)
         fireToast(res?.txHash ? 'Refund claimed' : 'Refund submitted — confirming…')
@@ -922,7 +1046,7 @@ function MyMarketsModal({
         return
       }
       const result = isPasskey
-        ? await sendRegistryCall(sendCalls, chainId, 'claimRefund', [wagerId])
+        ? await sendRegistryCall(sendCalls, targetChainId, 'claimRefund', [wagerId])
         : await claimRefundRowTx.run(wagerId)
       if (result?.error) throw result.error
       // Pull fresh on-chain data so the refunded wager leaves the list and clear
@@ -947,7 +1071,7 @@ function MyMarketsModal({
     } finally {
       setRefundingId(null)
     }
-  }, [signer, isPasskey, sendCalls, chainId, isCorrectNetwork, switchNetwork, markWagerRead, refreshFriendMarkets, fireToast, claimRefundRowTx, operatingAsVault, canActAsVault, submitAsActive, actingAsSigner])
+  }, [signer, isPasskey, sendCalls, chainId, chainOf, settleOnWagerChain, markWagerRead, refreshFriendMarkets, fireToast, claimRefundRowTx, operatingAsVault, canActAsVault, submitAsActive, actingAsSigner])
 
   // "Reclaim & Clear" on an expired offer. For the CREATOR this is a money move
   // first and a dismissal second: the offer is still Open on chain with their
@@ -978,14 +1102,21 @@ function MyMarketsModal({
       setRefundError({ id, message: 'Connect your wallet to reclaim this stake.' })
       return
     }
-    if (!isCorrectNetwork) {
-      try {
-        await switchNetwork()
-      } catch {
-        setRefundError({ id, message: 'Please switch to the correct network.' })
-        return
-      }
+    const targetChainId = chainOf(market)
+    const mustSwitch = Number(chainId) !== targetChainId
+    // See the ordering note on the claim handler above.
+    if (mustSwitch) {
+      afterSettleRef.current = { chainId: targetChainId, run: () => handlersRef.current.clearExpired?.(market) }
     }
+    try {
+      await settleOnWagerChain(market, 'This refund')
+    } catch (e) {
+      afterSettleRef.current = null
+      setRefundError({ id, message: e?.message || 'Could not reach this wager\u2019s network.' })
+      return
+    }
+    // Settled, not continued: see the re-entry note above.
+    if (mustSwitch) return
 
     setRefundingId(id)
     setRefundError(null)
@@ -993,7 +1124,7 @@ function MyMarketsModal({
     try {
       const wagerId = market.wagerId ?? market.id
       const result = isPasskey
-        ? await sendRegistryCall(sendCalls, chainId, 'claimRefund', [wagerId])
+        ? await sendRegistryCall(sendCalls, targetChainId, 'claimRefund', [wagerId])
         : await claimRefundRowTx.run(wagerId)
       if (result?.error) throw result.error
       // A txHash is the ONLY evidence the refund landed. The relay rail can also
@@ -1034,7 +1165,38 @@ function MyMarketsModal({
     } finally {
       setRefundingId(null)
     }
-  }, [account, signer, isPasskey, sendCalls, chainId, isCorrectNetwork, switchNetwork, dismissMarket, markWagerRead, refreshFriendMarkets, fireToast, claimRefundRowTx])
+  }, [account, signer, isPasskey, sendCalls, chainId, chainOf, settleOnWagerChain, dismissMarket, markWagerRead, refreshFriendMarkets, fireToast, claimRefundRowTx])
+
+  // The re-entry effect below calls these by name once the wallet has settled on the wager's chain.
+  useEffect(() => {
+    handlersRef.current = {
+      claim: handleClaimPayout,
+      refundRow: handleClaimRefund,
+      clearExpired: handleClearExpired,
+    }
+  })
+
+  /*
+   * RE-ENTRY, AND IT MUST BE DECLARED *AFTER* THE REF IT READS.
+   *
+   * React runs effects in DECLARATION order. This effect used to sit beside the refs above —
+   * before the handlers exist, and so before the effect that refreshes `handlersRef` — so on the
+   * render where the chain finally settled it fired FIRST and called the PREVIOUS render's
+   * handler, still closed over the pre-switch `chainId`. That handler computed `mustSwitch` from
+   * the stale chain, armed the hand-off again, settled a wallet that was already settled, and
+   * returned. Nothing re-triggered the effect, because the chain had already finished changing.
+   *
+   * The visible result was a claim that produced no transaction and no error: CLM-01 clicks
+   * "Claim Winnings" and the screenshot is a button and an empty space. It is the only claim in
+   * the suite that has to change chain — every later one starts already settled and never
+   * re-enters — which is why the unit suite and the no-chain tier could not see it.
+   */
+  useEffect(() => {
+    const pending = afterSettleRef.current
+    if (!pending || Number(chainId) !== pending.chainId) return
+    afterSettleRef.current = null
+    pending.run()
+  }, [chainId])
 
   if (!isOpen) return null
 
@@ -1233,8 +1395,6 @@ function MyMarketsModal({
                       onDecrypt={handleDecryptMarket}
                       isDecrypting={isMarketDecrypting(selectedMarket?.id)}
                       signer={signer}
-                      isCorrectNetwork={isCorrectNetwork}
-                      switchNetwork={switchNetwork}
                       onClaimPayout={handleClaimPayout}
                       claimingId={claimingId}
                       claimError={claimError}
@@ -1308,8 +1468,6 @@ function MyMarketsModal({
                       onDecrypt={handleDecryptMarket}
                       isDecrypting={isMarketDecrypting(selectedMarket?.id)}
                       signer={signer}
-                      isCorrectNetwork={isCorrectNetwork}
-                      switchNetwork={switchNetwork}
                       onWithdraw={() => {
                         setSelectedMarketId(null)
                         fetchMarketsData?.()
@@ -1379,8 +1537,6 @@ function MyMarketsModal({
                       onDecrypt={handleDecryptMarket}
                       isDecrypting={isMarketDecrypting(selectedMarket?.id)}
                       signer={signer}
-                      isCorrectNetwork={isCorrectNetwork}
-                      switchNetwork={switchNetwork}
                     />
                   ) : categorizedMarkets.arbitrating.length === 0 ? (
                     <div className="mm-empty-state">
@@ -1480,8 +1636,6 @@ function MyMarketsModal({
             fetchMarketsData()
           }}
           signer={signer}
-          isCorrectNetwork={isCorrectNetwork}
-          switchNetwork={switchNetwork}
         />
       )}
 
@@ -1493,7 +1647,10 @@ function MyMarketsModal({
           marketId={acceptanceMarket.id}
           marketData={acceptanceMarket}
           onAccepted={handleMarketAccepted}
-          contractAddress={getContractAddressForChain('wagerRegistry', chainId)}
+          contractAddress={getContractAddressForChain(
+            'wagerRegistry',
+            Number(acceptanceMarket.chainId ?? chainId),
+          )}
           contractABI={WAGER_REGISTRY_ABI}
         />
       )}
@@ -1548,8 +1705,6 @@ function MarketDetailView({
   isCreatorView = false,
   isHistoryView = false,
   signer,
-  isCorrectNetwork,
-  switchNetwork,
   onWithdraw,
   onRefunded,
   onClaimPayout,
@@ -1592,6 +1747,33 @@ function MarketDetailView({
   // Active chain id so explorer links resolve to the right network
   // (Polygon mainnet vs Amoy testnet) instead of a hardcoded testnet URL.
   const { chainId, sendCalls, loginMethod } = useWeb3()
+  /*
+   * Spec 110 Phase 4 (T040) — this view shows ONE wager, so its chain is fixed at render and can
+   * be handed straight to `useGaslessWrite`: the intent's domain, the verifying contract and the
+   * relayer all follow it, and T027's wrapper settles the wallet before the self-submit fallback
+   * (naming both chains, signing nothing, if the wallet declines). No re-entry dance is needed
+   * here — that is only for the list, where the target varies per row.
+   */
+  const targetChainId = Number(market?.chainId ?? chainId)
+
+  /*
+   * THE SIGNER IS READ THROUGH A REF, NOT THE CLOSURE (spec 110 T040).
+   *
+   * These writes name a chain, so `useGaslessWrite`'s self-submit fallback settles the wallet on
+   * it FIRST — and wagmi rebuilds the chain-scoped signer an async beat after the switch lands.
+   * A `selfSubmit` closure created when the button was pressed still holds the PRE-switch signer,
+   * bound to the old chain: viem then refuses at BROADCAST with "the current chain of the wallet
+   * does not match the target chain for the transaction" — the worst possible moment, because the
+   * member has already signed. It is the race `submitOn.js#signerIsOn` was written for, arriving
+   * by the one route the settle loop cannot close: the loop settles the WALLET and returns the
+   * settled snapshot, but it cannot reach into a caller's closure.
+   *
+   * The T040 write-up said these two detail views needed none of the list's re-entry machinery,
+   * because they show one wager whose chain is fixed at render. That was right about the chain
+   * and wrong about the signer.
+   */
+  const signerRef = useRef(signer)
+  useEffect(() => { signerRef.current = signer })
   const isPasskey = loginMethod === 'passkey'
   // Spec 088 FR-002 — this detail view's own claimRefund/cancelOpen buttons need the same
   // acting-account routing the list row got: never sign with the connected wallet while the
@@ -1615,14 +1797,13 @@ function MarketDetailView({
   // Gasless cancelOpen (spec 035/036): relayed where the relayer serves the chain (user pays no gas),
   // otherwise a transparent self-submit — identical on-chain result, and the UI below is unchanged.
   const cancelOpenTx = useGaslessWrite('cancelOpen', {
+    chainId: targetChainId,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const contract = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await contract.cancelOpen(wagerId)
+      const tx = await signerRef.current.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', targetChainId),
+        data: registryCall('cancelOpen', [wagerId]),
+      })
       setWithdrawTxHash(tx.hash)
       return tx.wait()
     },
@@ -1631,14 +1812,9 @@ function MarketDetailView({
   const handleWithdraw = async () => {
     if (!isPasskey && !signer) return
 
-    if (!isCorrectNetwork) {
-      try {
-        await switchNetwork()
-      } catch {
-        setWithdrawError('Please switch to the correct network')
-        return
-      }
-    }
+    // Spec 110 Phase 4 — no switch here. `useGaslessWrite` was given this wager's chain, so its
+    // intent signs that chain's domain and its self-submit fallback settles the wallet there
+    // first, refusing with BOTH chains named rather than this sentence, which named neither.
 
     setWithdrawing(true)
     setWithdrawError(null)
@@ -1646,7 +1822,7 @@ function MarketDetailView({
     try {
       const wagerId = market.wagerId ?? market.id
       const result = isPasskey
-        ? await sendRegistryCall(sendCalls, chainId, 'cancelOpen', [wagerId])
+        ? await sendRegistryCall(sendCalls, targetChainId, 'cancelOpen', [wagerId])
         : await cancelOpenTx.run(wagerId)
       if (result?.error) throw result.error
       if (result?.txHash) {
@@ -1696,14 +1872,13 @@ function MarketDetailView({
 
   // Gasless claimRefund (spec 035/036): relayed where available, transparent self-submit otherwise.
   const claimRefundTx = useGaslessWrite('claimRefund', {
+    chainId: targetChainId,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const tx = await registry.claimRefund(wagerId)
+      const tx = await signerRef.current.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', targetChainId),
+        data: registryCall('claimRefund', [wagerId]),
+      })
       setRefundTxHash(tx.hash)
       return tx.wait()
     },
@@ -1712,14 +1887,9 @@ function MarketDetailView({
   const handleClaimRefund = async () => {
     if (!isPasskey && !signer) return
 
-    if (!isCorrectNetwork) {
-      try {
-        await switchNetwork()
-      } catch {
-        setRefundError('Please switch to the correct network')
-        return
-      }
-    }
+    // Spec 110 Phase 4 — no switch here. `useGaslessWrite` was given this wager's chain, so its
+    // intent signs that chain's domain and its self-submit fallback settles the wallet there
+    // first, refusing with BOTH chains named rather than this sentence, which named neither.
 
     setRefunding(true)
     setRefundError(null)
@@ -1729,8 +1899,8 @@ function MarketDetailView({
       // Spec 088 FR-002 — acting as a vault → threshold-gated claimRefund proposal FROM the Safe.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to reclaim as the vault.")
-        const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const registryAddr = getContractAddressForChain('wagerRegistry', targetChainId)
+        const data = registryCall('claimRefund', [wagerId])
         await submitAsActive({ to: registryAddr, value: 0n, data })
         setRefundSuccess(true)
         onRefunded?.(market)
@@ -1739,8 +1909,8 @@ function MarketDetailView({
       // Spec 088 FR-002 — acting as a recovered or hardware account: same single call, signed by
       // that account's own signer through the active-account seam, never the connected wallet's.
       if (actingAsSigner) {
-        const registryAddr = getContractAddressForChain('wagerRegistry', chainId)
-        const data = new ethers.Interface(WAGER_REGISTRY_ABI).encodeFunctionData('claimRefund', [wagerId])
+        const registryAddr = getContractAddressForChain('wagerRegistry', targetChainId)
+        const data = registryCall('claimRefund', [wagerId])
         const res = await submitAsActive({ to: registryAddr, value: 0n, data })
         if (res?.txHash) {
           setRefundTxHash(res.txHash)
@@ -1752,7 +1922,7 @@ function MarketDetailView({
         return
       }
       const result = isPasskey
-        ? await sendRegistryCall(sendCalls, chainId, 'claimRefund', [wagerId])
+        ? await sendRegistryCall(sendCalls, targetChainId, 'claimRefund', [wagerId])
         : await claimRefundTx.run(wagerId)
       if (result?.error) throw result.error
       if (result?.txHash) {
@@ -2166,8 +2336,6 @@ function ResolutionModal({
   onClose,
   onResolved,
   signer,
-  isCorrectNetwork,
-  switchNetwork
 }) {
   const [selectedOutcome, setSelectedOutcome] = useState(null)
   const [resolutionNotes, setResolutionNotes] = useState('')
@@ -2179,7 +2347,34 @@ function ResolutionModal({
   // counterparty); the second SETTLES. Detected from the WagerDrawn event below.
   const [drawSettled, setDrawSettled] = useState(false)
   // Chain-aware explorer link for the payout receipt (avoids a hardcoded testnet host).
-  const { chainId, sendCalls, loginMethod, provider } = useWeb3()
+  const { chainId, sendCalls, loginMethod } = useWeb3()
+  /*
+   * Spec 110 Phase 4 (T040) — this view shows ONE wager, so its chain is fixed at render and can
+   * be handed straight to `useGaslessWrite`: the intent's domain, the verifying contract and the
+   * relayer all follow it, and T027's wrapper settles the wallet before the self-submit fallback
+   * (naming both chains, signing nothing, if the wallet declines). No re-entry dance is needed
+   * here — that is only for the list, where the target varies per row.
+   */
+  const targetChainId = Number(market?.chainId ?? chainId)
+
+  /*
+   * THE SIGNER IS READ THROUGH A REF, NOT THE CLOSURE (spec 110 T040).
+   *
+   * These writes name a chain, so `useGaslessWrite`'s self-submit fallback settles the wallet on
+   * it FIRST — and wagmi rebuilds the chain-scoped signer an async beat after the switch lands.
+   * A `selfSubmit` closure created when the button was pressed still holds the PRE-switch signer,
+   * bound to the old chain: viem then refuses at BROADCAST with "the current chain of the wallet
+   * does not match the target chain for the transaction" — the worst possible moment, because the
+   * member has already signed. It is the race `submitOn.js#signerIsOn` was written for, arriving
+   * by the one route the settle loop cannot close: the loop settles the WALLET and returns the
+   * settled snapshot, but it cannot reach into a caller's closure.
+   *
+   * The T040 write-up said these two detail views needed none of the list's re-entry machinery,
+   * because they show one wager whose chain is fixed at render. That was right about the chain
+   * and wrong about the signer.
+   */
+  const signerRef = useRef(signer)
+  useEffect(() => { signerRef.current = signer })
   const isPasskey = loginMethod === 'passkey'
   // Spec 088 FR-002 — resolving (declareDraw/declareWinner) checks `actor` against the wager's
   // creator/opponent/arbitrator on-chain, so signing with the CONNECTED wallet while the switcher
@@ -2238,7 +2433,7 @@ function ResolutionModal({
   const isOpponent = market.participants?.length > 1 &&
     market.participants[1]?.toLowerCase() === userAddr
   const isArbitrator = market.arbitrator &&
-    market.arbitrator !== ethers.ZeroAddress &&
+    market.arbitrator !== zeroAddress &&
     market.arbitrator.toLowerCase() === userAddr
   const resType = market.resolutionType ?? 0
   const isOracleType = resType >= 4 // Polymarket(4), Chainlink(5,6), UMA(7)
@@ -2261,15 +2456,15 @@ function ResolutionModal({
   // and receipt-status guards; the draw closure also inspects the WagerDrawn event to decide the
   // proposed-vs-settled messaging (a receipt-only signal, so it lives where the receipt exists).
   const declareDrawTx = useGaslessWrite('declareDraw', {
+    chainId: targetChainId,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await registry.declareDraw(wagerId, feeOverrides)
+      const feeOverrides = await getFeeOverrides(signerRef.current.provider)
+      const tx = await signerRef.current.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', targetChainId),
+        data: registryCall('declareDraw', [wagerId]),
+        ...feeOverrides,
+      })
       const receipt = await tx.wait()
       if (receipt && receipt.status === 0) {
         throw new Error('Transaction reverted on-chain. Draw failed.')
@@ -2280,7 +2475,10 @@ function ResolutionModal({
       // A WagerDrawn event means the draw settled now; otherwise it's a pending
       // proposal awaiting the counterparty's confirmation.
       const settled = receipt.logs.some((l) => {
-        try { return registry.interface.parseLog(l)?.name === 'WagerDrawn' } catch { return false }
+        try {
+          return decodeEventLog({ abi: REGISTRY_ABI_PARSED, topics: l.topics, data: l.data })
+            .eventName === 'WagerDrawn'
+        } catch { return false }
       })
       setDrawSettled(settled)
       return receipt
@@ -2288,15 +2486,15 @@ function ResolutionModal({
   })
 
   const declareWinnerTx = useGaslessWrite('declareWinner', {
+    chainId: targetChainId,
     params: (wagerId, winner) => ({ wagerId, winner }),
     selfSubmit: async (wagerId, winner) => {
-      const registry = new ethers.Contract(
-        getContractAddressForChain('wagerRegistry', chainId),
-        WAGER_REGISTRY_ABI,
-        signer
-      )
-      const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await registry.declareWinner(wagerId, winner, feeOverrides)
+      const feeOverrides = await getFeeOverrides(signerRef.current.provider)
+      const tx = await signerRef.current.sendTransaction({
+        to: getContractAddressForChain('wagerRegistry', targetChainId),
+        data: registryCall('declareWinner', [wagerId, winner]),
+        ...feeOverrides,
+      })
       const receipt = await tx.wait()
       if (receipt && receipt.status === 0) {
         throw new Error('Transaction reverted on-chain. Resolution failed.')
@@ -2315,11 +2513,6 @@ function ResolutionModal({
       return
     }
 
-    if (!isCorrectNetwork) {
-      setError('Please switch to the correct network')
-      return
-    }
-
     if (!isPasskey && !signer) {
       setError('Please connect your wallet to resolve this wager.')
       return
@@ -2334,14 +2527,15 @@ function ResolutionModal({
     setSubmitting(true)
     setError(null)
 
-    const registryAddress = getContractAddressForChain('wagerRegistry', chainId)
-    // Reads (getWager for the winner address) use the signer when present, else the session read
-    // provider — a passkey session has no signer but WalletContext exposes an RPC reader.
-    const registry = new ethers.Contract(
-      registryAddress,
-      WAGER_REGISTRY_ABI,
-      signer || provider
-    )
+    const registryAddress = getContractAddressForChain('wagerRegistry', targetChainId)
+
+    // Named chain, not "whatever the signer is bound to" (spec 110 read-routing decision); the
+    // only read here is `getWager`, and the encoders never needed a runner. The chain named is
+    // the WAGER's — the same one `registryAddress` was resolved on. Reading that address against
+    // the wallet's chain instead would ask a different network about an address that means
+    // nothing there, which for a member acting on a wager held elsewhere is every read.
+    const askRegistry = (functionName, args) =>
+      readContract(targetChainId, { address: registryAddress, abi: WAGER_REGISTRY_ABI, functionName, args })
 
     try {
       // Draw: returns each party their own stake. For participant types the
@@ -2353,7 +2547,7 @@ function ResolutionModal({
         // this signature cannot see ahead of co-owner approval, so drawSettled is left false.
         if (operatingAsVault) {
           if (!canActAsVault) throw new Error("Switch to the vault's network to resolve as the vault.")
-          const data = registry.interface.encodeFunctionData('declareDraw', [market.id])
+          const data = registryCall('declareDraw', [market.id])
           const res = await submitAsActive({ to: registryAddress, value: 0n, data })
           if (res?.safeTxHash) setTxHash(res.safeTxHash)
           setStep('success')
@@ -2362,14 +2556,14 @@ function ResolutionModal({
         // Spec 088 FR-002 — acting as a recovered or hardware account: the SAME single call,
         // signed by that account's own signer, never the connected wallet's.
         if (actingAsSigner) {
-          const data = registry.interface.encodeFunctionData('declareDraw', [market.id])
+          const data = registryCall('declareDraw', [market.id])
           const res = await submitAsActive({ to: registryAddress, value: 0n, data })
           if (res?.txHash) setTxHash(res.txHash)
           setStep('success')
           return
         }
         const result = isPasskey
-          ? await sendRegistryCall(sendCalls, chainId, 'declareDraw', [market.id])
+          ? await sendRegistryCall(sendCalls, targetChainId, 'declareDraw', [market.id])
           : await declareDrawTx.run(market.id)
         if (result?.error) throw result.error
         if (result?.txHash) setTxHash(result.txHash)
@@ -2380,7 +2574,7 @@ function ResolutionModal({
       // outcome: true = first option wins (Pass/Yes/creator), false = second option (Fail/No/opponent)
       const outcomeBool = selectedOutcome === outcomes[0]
 
-      const w = await registry.getWager(market.id)
+      const w = await askRegistry('getWager', [market.id])
       const winner = outcomeBool ? w.creator : w.opponent
       console.log('Resolving wager on-chain:', {
         marketId: market.id,
@@ -2393,7 +2587,7 @@ function ResolutionModal({
       // Spec 088 FR-002 — acting as a vault → threshold-gated declareWinner proposal FROM the Safe.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to resolve as the vault.")
-        const data = registry.interface.encodeFunctionData('declareWinner', [market.id, winner])
+        const data = registryCall('declareWinner', [market.id, winner])
         const res = await submitAsActive({ to: registryAddress, value: 0n, data })
         if (res?.safeTxHash) setTxHash(res.safeTxHash)
         setStep('success')
@@ -2404,7 +2598,7 @@ function ResolutionModal({
       // leg below: a relayed intent has no acting-account twin, and self-submit is the
       // never-stranded fallback that rail already promises.
       if (actingAsSigner) {
-        const data = registry.interface.encodeFunctionData('declareWinner', [market.id, winner])
+        const data = registryCall('declareWinner', [market.id, winner])
         const res = await submitAsActive({ to: registryAddress, value: 0n, data })
         if (res?.txHash) setTxHash(res.txHash)
         setStep('success')
@@ -2412,7 +2606,7 @@ function ResolutionModal({
       }
 
       const result = isPasskey
-        ? await sendRegistryCall(sendCalls, chainId, 'declareWinner', [market.id, winner])
+        ? await sendRegistryCall(sendCalls, targetChainId, 'declareWinner', [market.id, winner])
         : await declareWinnerTx.run(market.id, winner)
       if (result?.error) throw result.error
       if (result?.txHash) setTxHash(result.txHash)
@@ -2426,7 +2620,7 @@ function ResolutionModal({
       if (!errorData && err.error?.data) errorData = err.error.data
       if (typeof errorData === 'string' && errorData.length >= 10) {
         try {
-          const decoded = registry.interface.parseError(errorData)
+          const decoded = REGISTRY_ERRORS.parseError(errorData)
           if (decoded?.name) {
             const decodedName = decoded.name
             if (decodedName === 'ResolveExpired') {
@@ -2562,19 +2756,6 @@ function ResolutionModal({
                 />
               </div>
 
-              {!isCorrectNetwork && (
-                <div className="mm-warning-banner">
-                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-                    <line x1="12" y1="9" x2="12" y2="13"/>
-                    <line x1="12" y1="17" x2="12.01" y2="17"/>
-                  </svg>
-                  <div>
-                    <strong>Wrong Network</strong>
-                    <button type="button" onClick={switchNetwork}>Switch Network</button>
-                  </div>
-                </div>
-              )}
 
               {error && <div className="mm-error-banner">{error}</div>}
 
@@ -2591,7 +2772,7 @@ function ResolutionModal({
                   type="button"
                   className="mm-btn-primary"
                   onClick={() => setStep('confirm')}
-                  disabled={!selectedOutcome || submitting || !isCorrectNetwork}
+                  disabled={!selectedOutcome || submitting}
                 >
                   Continue
                 </button>

@@ -402,7 +402,7 @@ strategy:
 ## Support
 
 For issues or questions:
-- Check [GitHub Issues](https://github.com/chippr-robotics/prediction-dao-research/issues)
+- Check [GitHub Issues](https://github.com/chippr-robotics/fairwins-platform/issues)
 - Review [Cloud Run documentation](https://cloud.google.com/run/docs)
 - Check [GitHub Actions documentation](https://docs.github.com/en/actions)
 

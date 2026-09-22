@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { getAddress, isAddress as isAddressSeam } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { estateNetworks, networkName, readProviderFor } from '../../lib/chains/estate'
 import { NetworkScopeCard } from './scopeControls'
@@ -32,10 +35,10 @@ const GUARD_ABI = [
 ]
 
 function isAddr(s) {
-  try { return ethers.isAddress((s || '').trim()) } catch { return false }
+  try { return isAddressSeam((s || '').trim()) } catch { return false }
 }
 function shortAddr(a) {
-  return a && ethers.isAddress(a) ? a.slice(0, 6) + '…' + a.slice(-4) : (a || '—')
+  return a && isAddressSeam(a) ? a.slice(0, 6) + '…' + a.slice(-4) : (a || '—')
 }
 
 function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
@@ -64,7 +67,11 @@ function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
 
   const writer = useCallback(() => {
     if (!isAddr(guardAddress) || !signer) return null
-    return new ethers.Contract(guardAddress, GUARD_ABI, signer)
+    return (functionName, args) =>
+      signer.sendTransaction({
+        to: guardAddress,
+        data: encodeFunctionData({ abi: normalizeAbi(GUARD_ABI), functionName, args }),
+      })
   }, [guardAddress, signer])
 
   const loadHistory = useCallback(async () => {
@@ -72,10 +79,10 @@ function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
     setLoadingHistory(true)
     setError('')
     try {
-      const provider = readProvider
-      const reader = new ethers.Contract(guardAddress, GUARD_ABI, provider)
-      const filter = reader.filters.DenyListUpdated()
-      const latest = await provider.getBlockNumber()
+      const handle = eventScanHandle(scopeChainId, { address: guardAddress, abi: GUARD_ABI })
+      if (!handle) { setError(`Could not reach ${networkName(scopeChainId)}`); return }
+      const topics = handle.filters.DenyListUpdated().getTopicFilter()
+      const latest = Number(await handle.provider.getBlockNumber())
       // Page in bounded ranges: a single unbounded queryFilter scans the whole chain and
       // times out / hits provider log-range limits on Polygon mainnet. CHUNK keeps each
       // eth_getLogs call safe; MAX_SPAN bounds the total scan to recent history (older
@@ -87,8 +94,15 @@ function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
       let to = latest
       while (to >= floor) {
         const from = Math.max(floor, to - CHUNK + 1)
-        const batch = await reader.queryFilter(filter, from, to)
-        events.push(...batch)
+        const logs = await handle.provider.getLogs({
+          address: guardAddress,
+          topics,
+          fromBlock: from,
+          toBlock: to,
+        })
+        for (const log of logs) {
+          events.push({ ...log, args: handle.interface.parseLog(log).args })
+        }
         if (from === floor) break
         to = from - 1
       }
@@ -108,7 +122,7 @@ function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
     } finally {
       setLoadingHistory(false)
     }
-  }, [guardAddress, readProvider])
+  }, [guardAddress, readProvider, scopeChainId])
 
   useEffect(() => { loadHistory() }, [loadHistory])
 
@@ -125,7 +139,10 @@ function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
     const c = writer()
     if (!c) { setError(`SanctionsGuard is not configured on ${networkName(scopeChainId)}`); return }
     runTx(
-      () => c.setDenied(address.trim(), denied, reason.trim()),
+      // `getAddress` before encoding (spec 110 divergence 16) — `isAddr` reproduces ethers' rule
+      // and accepts an all-uppercase address, which viem's encoder refuses. Denying the wrong
+      // account is not a recoverable mistake.
+      () => c('setDenied', [getAddress(address.trim()), Boolean(denied), reason.trim()]),
       `Deny-list ${denied ? 'add' : 'remove'} on ${networkName(scopeChainId)}: ${shortAddr(address)}`,
     )
   }
@@ -137,11 +154,14 @@ function DenyListAdmin({ signer, contracts, chainId, runTx, pendingTx }) {
     if (!isAddr(guardAddress)) { setError(`SanctionsGuard is not configured on ${networkName(scopeChainId)}`); return }
     if (!readProvider) { setError(`Could not reach ${networkName(scopeChainId)} — status is unknown, not clear.`); return }
     try {
-      const reader = new ethers.Contract(guardAddress, GUARD_ABI, readProvider)
-      const [denied, allowed] = await Promise.all([
-        reader.isDenied(address.trim()),
-        reader.isAllowed(address.trim()),
-      ])
+      const ask = (functionName) =>
+        readContract(scopeChainId, {
+          address: guardAddress,
+          abi: GUARD_ABI,
+          functionName,
+          args: [getAddress(address.trim())],
+        })
+      const [denied, allowed] = await Promise.all([ask('isDenied'), ask('isAllowed')])
       setStatus({ denied, allowed })
     } catch (err) {
       setError(`Status read failed: ${err.message || err}`)

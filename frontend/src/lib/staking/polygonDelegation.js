@@ -9,14 +9,19 @@
  * Validator targets come ONLY from the curated allowlist (FR-008). The Polygon
  * staking API decorates allowlisted entries with live commission/status; it
  * never expands the list.
+ *
+ * Spec 110 Phase 1: reads go through the chain seam — the chain is an argument
+ * (`chainId`), never an ambient provider.
  */
-import { Contract, Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import { POLYGON_VALIDATOR_SHARE_ABI, POL_TOKEN_ABI } from '../../abis/PolygonValidatorShare'
 import { POLYGON_STAKE_MANAGER_ABI } from '../../abis/PolygonStakeManager'
 import { toBaseUnitString } from '../earn/format'
+import { readContract, normalizeAbi } from '../chains/readContract'
 
-const VS_IFACE = new Interface(POLYGON_VALIDATOR_SHARE_ABI)
-const POL_IFACE = new Interface(POL_TOKEN_ABI)
+const VS_ABI = normalizeAbi(POLYGON_VALIDATOR_SHARE_ABI)
+const POL_ABI = normalizeAbi(POL_TOKEN_ABI)
+const SM_ABI = normalizeAbi(POLYGON_STAKE_MANAGER_ABI)
 
 // Slippage tolerance for buyVoucher's _minSharesToMint (0 = accept any). We
 // pass 0 because the exchange rate moves slowly and a strict bound would risk
@@ -57,9 +62,11 @@ export async function fetchValidatorDecoration(stakingApi, allowlistIds) {
 }
 
 /** Read StakeManager epoch + withdrawalDelay (governance-mutable — read live). */
-export async function readStakeManagerTiming({ stakeManager, provider }) {
-  const sm = new Contract(stakeManager, POLYGON_STAKE_MANAGER_ABI, provider)
-  const [epoch, withdrawalDelay] = await Promise.all([sm.epoch(), sm.withdrawalDelay()])
+export async function readStakeManagerTiming({ stakeManager, chainId }) {
+  const [epoch, withdrawalDelay] = await Promise.all([
+    readContract(chainId, { address: stakeManager, abi: SM_ABI, functionName: 'epoch' }),
+    readContract(chainId, { address: stakeManager, abi: SM_ABI, functionName: 'withdrawalDelay' }),
+  ])
   return { epoch, withdrawalDelay }
 }
 
@@ -67,11 +74,15 @@ export async function readStakeManagerTiming({ stakeManager, provider }) {
  * Read the member's delegated position + pending rewards for one validator.
  * Returns { stakedRaw, rewardsClaimableRaw }.
  */
-export async function readDelegationPosition({ validatorShare, account, provider }) {
-  const vs = new Contract(validatorShare, POLYGON_VALIDATOR_SHARE_ABI, provider)
+export async function readDelegationPosition({ validatorShare, account, chainId }) {
   const [totalStake, rewards] = await Promise.all([
-    vs.getTotalStake(account),
-    vs.getLiquidRewards(account).catch(() => 0n),
+    readContract(chainId, { address: validatorShare, abi: VS_ABI, functionName: 'getTotalStake', args: [account] }),
+    readContract(chainId, {
+      address: validatorShare,
+      abi: VS_ABI,
+      functionName: 'getLiquidRewards',
+      args: [account],
+    }).catch(() => 0n),
   ])
   return { stakedRaw: totalStake[0], rewardsClaimableRaw: rewards }
 }
@@ -80,21 +91,29 @@ export async function readDelegationPosition({ validatorShare, account, provider
  * Delegate POL to a validator. Needs a POL approval to the StakeManager when
  * short. Returns { calls, requiresApproval }.
  */
-export async function buildDelegateCalls({ validatorShare, stakeManager, polToken, account, amount, provider }) {
-  const pol = new Contract(polToken, POL_TOKEN_ABI, provider)
-  const allowance = await pol.allowance(account, stakeManager)
+export async function buildDelegateCalls({ validatorShare, stakeManager, polToken, account, amount, chainId }) {
+  const allowance = await readContract(chainId, {
+    address: polToken,
+    abi: POL_ABI,
+    functionName: 'allowance',
+    args: [account, stakeManager],
+  })
   const requiresApproval = allowance < amount
   const calls = []
   if (requiresApproval) {
     calls.push({
       target: polToken,
-      data: POL_IFACE.encodeFunctionData('approve', [stakeManager, amount]),
+      data: encodeFunctionData({ abi: POL_ABI, functionName: 'approve', args: [stakeManager, amount] }),
       value: 0n,
     })
   }
   calls.push({
     target: validatorShare,
-    data: VS_IFACE.encodeFunctionData('buyVoucherPOL', [amount, MIN_SHARES_TO_MINT]),
+    data: encodeFunctionData({
+      abi: VS_ABI,
+      functionName: 'buyVoucherPOL',
+      args: [amount, MIN_SHARES_TO_MINT],
+    }),
     value: 0n,
   })
   return { calls, requiresApproval }
@@ -106,7 +125,11 @@ export function buildUndelegateCalls({ validatorShare, amount }) {
     calls: [
       {
         target: validatorShare,
-        data: VS_IFACE.encodeFunctionData('sellVoucherPOL', [amount, MAX_SHARES_TO_BURN]),
+        data: encodeFunctionData({
+          abi: VS_ABI,
+          functionName: 'sellVoucherPOL',
+          args: [amount, MAX_SHARES_TO_BURN],
+        }),
         value: 0n,
       },
     ],
@@ -119,7 +142,11 @@ export function buildDelegationWithdrawCalls({ validatorShare, unbondNonce }) {
     calls: [
       {
         target: validatorShare,
-        data: VS_IFACE.encodeFunctionData('unstakeClaimTokens_newPOL', [BigInt(unbondNonce)]),
+        data: encodeFunctionData({
+          abi: VS_ABI,
+          functionName: 'unstakeClaimTokens_newPOL',
+          args: [BigInt(unbondNonce)],
+        }),
         value: 0n,
       },
     ],
@@ -132,7 +159,7 @@ export function buildDelegationClaimCalls({ validatorShare }) {
     calls: [
       {
         target: validatorShare,
-        data: VS_IFACE.encodeFunctionData('withdrawRewardsPOL', []),
+        data: encodeFunctionData({ abi: VS_ABI, functionName: 'withdrawRewardsPOL', args: [] }),
         value: 0n,
       },
     ],
@@ -151,14 +178,15 @@ const UNBOND_SCAN_WINDOW = 20n
  * returns every one that still has shares, with its claimable flag.
  * Returns [{ unbondNonce, withdrawEpoch, shares, ready }] (newest first).
  */
-export async function readOpenUnbonds({ validatorShare, account, provider, epoch, withdrawalDelay }) {
-  const vs = new Contract(validatorShare, POLYGON_VALIDATOR_SHARE_ABI, provider)
-  const latest = await vs.unbondNonces(account)
+export async function readOpenUnbonds({ validatorShare, account, chainId, epoch, withdrawalDelay }) {
+  const vsRead = (functionName, args) =>
+    readContract(chainId, { address: validatorShare, abi: VS_ABI, functionName, args })
+  const latest = await vsRead('unbondNonces', [account])
   if (latest === 0n) return []
   const from = latest > UNBOND_SCAN_WINDOW ? latest - UNBOND_SCAN_WINDOW + 1n : 1n
   const nonces = []
   for (let n = latest; n >= from; n -= 1n) nonces.push(n)
-  const rows = await Promise.all(nonces.map((n) => vs.unbonds_new(account, n).then((u) => ({ n, u }))))
+  const rows = await Promise.all(nonces.map((n) => vsRead('unbonds_new', [account, n]).then((u) => ({ n, u }))))
   const out = []
   for (const { n, u } of rows) {
     const shares = BigInt(u.shares ?? u[0])

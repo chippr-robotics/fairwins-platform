@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { isAddress } from 'ethers'
+import { isAddress } from 'viem'
 import AddressInput from '../ui/AddressInput'
 import AddressBookButton from '../ui/AddressBookButton'
 import { MAX_GROUP_RECIPIENTS, makeRecipient } from '../../lib/payments/groupPay'

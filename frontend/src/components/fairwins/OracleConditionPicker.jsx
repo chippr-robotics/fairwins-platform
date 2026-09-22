@@ -1,5 +1,6 @@
 import { useState } from 'react'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
+import { formatUnits } from '../../lib/evm/units'
 import { useOracleConditions } from '../../hooks/useOracleConditions'
 import InfoTip from '../ui/InfoTip'
 
@@ -36,7 +37,7 @@ function formatTimestamp(secs) {
 function formatThreshold(bi, decimals = 8) {
   if (bi === undefined || bi === null) return ''
   try {
-    return ethers.formatUnits(bi, decimals)
+    return formatUnits(bi, decimals)
   } catch { return String(bi) }
 }
 
@@ -66,7 +67,7 @@ function OracleConditionPicker({ kind, adapterAddress, value, onChange, error, d
 
   const { conditions, loading, error: loadError, refresh } = useOracleConditions(adapterAddress, kind)
 
-  if (!adapterAddress || !ethers.isAddress(adapterAddress)) {
+  if (!adapterAddress || !isAddress(adapterAddress)) {
     return (
       <div className="fm-oracle-picker fm-oracle-picker--unavailable">
         <span className="fm-error">

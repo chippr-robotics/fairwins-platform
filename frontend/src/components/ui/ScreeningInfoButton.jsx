@@ -44,7 +44,7 @@ export default function ScreeningInfoButton({ className = '' }) {
       <p className="ab-info-doc">
         See the{' '}
         <a
-          href="https://chippr-robotics.github.io/prediction-dao-research/user-guide/address-book/"
+          href="https://docs.fairwins.app/user-guide/address-book/"
           target="_blank"
           rel="noopener noreferrer"
         >

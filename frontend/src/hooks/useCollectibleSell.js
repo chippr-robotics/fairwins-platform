@@ -9,9 +9,8 @@
  * "View on OpenSea" path (never stranded, FR-017). All external calls are injectable for tests.
  */
 import { useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { WalletContext } from '../contexts/WalletContext.js'
-import { getCurrentChainId } from '../config/networks'
 import { buildOrder as defaultBuildOrder } from '../lib/collectibles/seaportOrder'
 import { resolveOrderSigner as defaultResolveOrderSigner } from '../lib/collectibles/orderSigner'
 import {
@@ -46,7 +45,7 @@ export function useCollectibleSell(item, options = {}) {
   )
   const walletCtx = useContext(WalletContext)
   const wallet = useMemo(() => walletCtx || {}, [walletCtx])
-  const activeChainId = useChainId() || getCurrentChainId()
+  const activeChainId = useWalletChainId()
 
   const [status, setStatus] = useState('idle') // idle|checking|ready|blocked|signing|submitting|done|error
   const [reason, setReason] = useState(null)

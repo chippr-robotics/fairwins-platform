@@ -207,7 +207,17 @@ describe('VaultQueueView', () => {
     const baseRow = screen.getAllByTestId('vault-queue-row')[1]
     fireEvent.click(within(baseRow).getByRole('button', { name: /^approve$/i }))
     const alert = await within(baseRow).findByRole('alert')
-    expect(alert).toHaveTextContent('Approval not sent — this proposal is on Base, and the wallet stayed on Polygon.')
+    /*
+     * Spec 110 T029 — the SHARED sentence (`submitOn.js#chainSwitchRefusal`), not this surface's
+     * own. It used to read "Approval not sent — this proposal is on Base, and the wallet stayed on
+     * Polygon", which named both chains and so satisfied every test that looked for the chain
+     * NAMES — including this one — while being the fifth private copy of a sentence T026 had
+     * unified everywhere else. Assert the whole sentence, not the two names, or the next private
+     * copy passes here too.
+     */
+    expect(alert).toHaveTextContent(
+      'This approval goes to Base, but the wallet stayed on Polygon, so nothing has been signed.',
+    )
     expect(approve).not.toHaveBeenCalled()
     expect(screen.getAllByTestId('vault-queue-row')).toHaveLength(2)
   })
@@ -256,7 +266,7 @@ describe('VaultQueueView', () => {
  *
  * Ethereum Classic and Mordor have no bundler, so a keyless passkey session cannot submit there —
  * but the buttons still rendered, and the refusal arrived from inside the batch sender after the
- * tap. The rail is knowable beforehand (lib/custody/writeRail.js), so it is said beforehand.
+ * tap. The rail is knowable beforehand (lib/chains/writeRail.js), so it is said beforehand.
  */
 describe('VaultQueueView — a network this session cannot sign on', () => {
   const RAIL_REASON =

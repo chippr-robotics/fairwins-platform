@@ -14,7 +14,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
-import { formatEther } from 'ethers'
+import { formatEther } from '../../lib/evm/units'
 import ActionSheet from '../account/ActionSheet'
 import { useWallet } from '../../hooks/useWalletManagement'
 // UIContext read with a no-op fallback — see HardwareWalletSection.

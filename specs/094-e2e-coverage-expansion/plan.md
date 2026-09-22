@@ -3,7 +3,7 @@
 **Branch**: `claude/issue-1228-e2e-testing-cqx3lj` | **Date**: 2026-08-18 | **Spec**: [spec.md](./spec.md)
 
 **Input**: Feature specification from `/specs/094-e2e-coverage-expansion/spec.md`, tracking issue
-[#1228](https://github.com/chippr-robotics/prediction-dao-research/issues/1228)
+[#1228](https://github.com/chippr-robotics/fairwins-platform/issues/1228)
 
 ## Summary
 

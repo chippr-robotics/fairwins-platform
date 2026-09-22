@@ -1,6 +1,6 @@
 # Infrastructure as Code
 
-**Spec**: [087-infrastructure-as-code](https://github.com/chippr-robotics/prediction-dao-research/tree/main/specs/087-infrastructure-as-code) · **Issue**: #1177
+**Spec**: [087-infrastructure-as-code](https://github.com/chippr-robotics/fairwins-platform/tree/main/specs/087-infrastructure-as-code) · **Issue**: #1177
 
 The FairWins cloud estate is described declaratively: **Terraform** provisions cloud resources,
 **Ansible** converges node interiors. The goal is that the environment can be reconstructed or

@@ -18,7 +18,7 @@
  * without a synchronous setState in the effect.
  */
 import { useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { getAddress, isAddress } from 'ethers'
+import { getAddress, isAddress } from 'viem'
 import { WalletContext } from '../contexts/WalletContext'
 import { forgetEstateScreening, screenAddressAcrossEstate } from '../lib/screening/screenEstate'
 import { verdictOnChain } from '../lib/screening/verdict'

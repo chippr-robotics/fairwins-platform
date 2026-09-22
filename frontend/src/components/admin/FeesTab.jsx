@@ -17,26 +17,42 @@
  * on-chain audit trail — bounded lookback with an explorer link for the rest.
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, keccak256, stringToBytes, zeroAddress } from 'viem'
 import { getContractAddressForChain } from '../../config/contracts'
 import { FEE_ROUTER_ABI } from '../../abis/FeeRouter'
 import { gatewayBaseUrl } from '../../hooks/useGatewayStatus'
 import { getBlockscoutUrl } from '../../config/blockExplorer'
 import { estateNetworks, networkName, readProviderFor, readAuthority, authorityGate } from '../../lib/chains/estate'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { getLogsRange } from '../../lib/chains/logRange'
+import { getPublicClient } from '../../lib/chains/publicClient'
+import { getAddress, isAddress } from '../../lib/evm/address'
 import { NetworkScopeCard } from './scopeControls'
 import { useScopedChain } from './scopeGate'
 
+/**
+ * `keccak256(utf8(label))` — the FeeRouter's `bytes32 serviceId`.
+ *
+ * This replaced `ethers.id`, and the two were byte-compared before the swap over all nine labels
+ * below plus empty, unicode and whitespace-padded fuzz: identical every time. They have to be.
+ * These strings key `KNOWN_SERVICES`, so one wrong byte does not throw — it makes a live service
+ * fall through to the `Service 0x1234abcd…` fallback label, which reads as an unknown service
+ * somebody registered rather than as a bug in this file.
+ */
+const serviceId = (label) => keccak256(stringToBytes(label))
+
 // Friendly names for known service ids (keccak256 of the registered label).
 const KNOWN_SERVICES = {
-  [ethers.id('earn.lend')]: { label: 'Earn — vault lending (Morpho)', surface: 'Earn deposits' },
-  [ethers.id('polymarket.taker')]: { label: 'Predict — Polymarket builder fee (taker)', surface: 'Predict orders' },
-  [ethers.id('polymarket.maker')]: { label: 'Predict — Polymarket builder fee (maker)', surface: 'Predict orders' },
-  [ethers.id('stake.lido')]: { label: 'Stake — Lido', surface: 'Staking (future)' },
-  [ethers.id('stake.polygon')]: { label: 'Stake — Polygon liquid staking', surface: 'Staking (future)' },
-  [ethers.id('swap.uniswap')]: { label: 'Swap — Uniswap', surface: 'Swaps (future)' },
-  [ethers.id('bridge.transfer')]: { label: 'Bridge — Across transfer', surface: 'Bridge (Transfer)' },
-  [ethers.id('liquidity.deposit')]: { label: 'Supply — Uniswap liquidity', surface: 'Earn supplies' },
-  [ethers.id('perps.hyperliquid.builder')]: {
+  [serviceId('earn.lend')]: { label: 'Earn — vault lending (Morpho)', surface: 'Earn deposits' },
+  [serviceId('polymarket.taker')]: { label: 'Predict — Polymarket builder fee (taker)', surface: 'Predict orders' },
+  [serviceId('polymarket.maker')]: { label: 'Predict — Polymarket builder fee (maker)', surface: 'Predict orders' },
+  [serviceId('stake.lido')]: { label: 'Stake — Lido', surface: 'Staking (future)' },
+  [serviceId('stake.polygon')]: { label: 'Stake — Polygon liquid staking', surface: 'Staking (future)' },
+  [serviceId('swap.uniswap')]: { label: 'Swap — Uniswap', surface: 'Swaps (future)' },
+  [serviceId('bridge.transfer')]: { label: 'Bridge — Across transfer', surface: 'Bridge (Transfer)' },
+  [serviceId('liquidity.deposit')]: { label: 'Supply — Uniswap liquidity', surface: 'Earn supplies' },
+  [serviceId('perps.hyperliquid.builder')]: {
     label: 'Perps — Hyperliquid builder fee',
     surface: 'Perps link-outs (Trade)',
   },
@@ -47,7 +63,7 @@ const HISTORY_LOOKBACK_BLOCKS = 200_000
 const HISTORY_LIMIT = 25
 
 function shortAddr(a) {
-  return a && a !== ethers.ZeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
+  return a && a !== zeroAddress ? `${a.substring(0, 6)}...${a.substring(a.length - 4)}` : ''
 }
 
 function bpsPct(bps) {
@@ -75,6 +91,7 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
   useEffect(() => {
     let cancelled = false
     readAuthority({
+      chainId: scopeChainId,
       provider: readProvider,
       address: routerAddr,
       account,
@@ -83,7 +100,7 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
       if (!cancelled) setAuthority(a)
     })
     return () => { cancelled = true }
-  }, [readProvider, routerAddr, account])
+  }, [readProvider, routerAddr, account, scopeChainId])
 
   const feeGate = authorityGate(authority, ['admin', 'feeAdmin'])
   const treasuryGate = authorityGate(authority, ['admin'])
@@ -101,27 +118,36 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
   const [treasuryForm, setTreasuryForm] = useState('')
   const [formError, setFormError] = useState(null)
 
-  // Reads come from the SCOPED chain's endpoint, so the address and the provider cannot disagree.
-  const routerRead = useMemo(
-    () => (routerAddr && readProvider ? new ethers.Contract(routerAddr, FEE_ROUTER_ABI, readProvider) : null),
-    [routerAddr, readProvider]
-  )
+  /**
+   * Reads come from the SCOPED chain, so the address and the chain cannot disagree.
+   *
+   * `readProvider` stays in the condition as the AVAILABILITY GATE it always was: `readProviderFor`
+   * is cohort-bounded (spec 071), and a null from it means this build may not read that chain at
+   * all — a different answer from a read that was attempted and failed. The chain itself is now an
+   * argument rather than something baked into a provider, which is what makes the history scan
+   * below able to be on the right one.
+   */
+  const readRouter = useMemo(() => {
+    if (!routerAddr || !readProvider) return null
+    return (functionName, args = []) =>
+      readContract(scopeChainId, { address: routerAddr, abi: FEE_ROUTER_ABI, functionName, args })
+  }, [routerAddr, readProvider, scopeChainId])
 
   const fetchServices = useCallback(async () => {
-    if (!routerRead) return
+    if (!readRouter) return
     try {
       setReadError(null)
       const [count, treasuryAddr, maxCap] = await Promise.all([
-        routerRead.serviceCount(),
-        routerRead.treasury(),
-        routerRead.MAX_WRAPPED_FEE_BPS(),
+        readRouter('serviceCount'),
+        readRouter('treasury'),
+        readRouter('MAX_WRAPPED_FEE_BPS'),
       ])
       const ids = await Promise.all(
-        Array.from({ length: Number(count) }, (_, i) => routerRead.serviceAt(i))
+        Array.from({ length: Number(count) }, (_, i) => readRouter('serviceAt', [BigInt(i)]))
       )
       const entries = await Promise.all(
         ids.map(async (id) => {
-          const svc = await routerRead.getService(id)
+          const svc = await readRouter('getService', [id])
           return {
             serviceId: id,
             label: KNOWN_SERVICES[id]?.label || `Service ${id.substring(0, 10)}…`,
@@ -138,35 +164,69 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
     } catch (e) {
       setReadError(`Could not read the FeeRouter: ${e?.message || e}`)
     }
-  }, [routerRead])
+  }, [readRouter])
 
+  /**
+   * Rate-change history for the SCOPED chain's FeeRouter.
+   *
+   * ── THIS SCAN WAS READING TWO CHAINS AT ONCE (found converting it, spec 110 T028) ──
+   * It took `latest` from `provider.getBlockNumber()` and each entry's timestamp from
+   * `provider.getBlock(...)` — the WALLET's provider — while the logs themselves came from the
+   * scoped chain's router. The whole point of this tab is that a fee schedule is per-chain and you
+   * read one chain while your wallet sits on another (the banner above says exactly that), so the
+   * mismatch was not an edge case: reading Polygon's fees from a wallet on Ethereum computed the
+   * 200k-block window from ETHEREUM's height and then dated every Polygon change by whatever
+   * Ethereum block happened to share its number. Chains do not advance together, so the window
+   * could miss every change or ask for blocks that do not exist yet, and the dates shown were
+   * simply another chain's — rendered as fact, with nothing failing. Every read here is now on
+   * `scopeChainId`.
+   *
+   * The scan also bisects on refusal (`getLogsRange`) instead of asking for 200,000 blocks in one
+   * request. Public RPCs cap log ranges at ~10k, so the old single `queryFilter` threw on them and
+   * the catch below rendered "no history" — which is what an operator reading a busy chain would
+   * have seen every time.
+   */
   const fetchHistory = useCallback(async () => {
-    if (!routerRead || !provider) return
+    if (!routerAddr || !readProvider) return
     try {
-      const latest = await provider.getBlockNumber()
+      const handle = eventScanHandle(scopeChainId, { address: routerAddr, abi: FEE_ROUTER_ABI })
+      const client = getPublicClient(scopeChainId)
+      if (!handle || !client) return
+      const latest = await handle.provider.getBlockNumber()
       const fromBlock = Math.max(0, Number(latest) - HISTORY_LOOKBACK_BLOCKS)
-      const events = await routerRead.queryFilter(routerRead.filters.FeeBpsChanged(), fromBlock, 'latest')
-      const recent = events.slice(-HISTORY_LIMIT).reverse()
+      const logs = await getLogsRange(
+        handle.provider,
+        routerAddr,
+        fromBlock,
+        Number(latest),
+        2000,
+        handle.filters.FeeBpsChanged().getTopicFilter(),
+      )
+      const recent = logs.slice(-HISTORY_LIMIT).reverse()
       const entries = await Promise.all(
-        recent.map(async (ev) => {
-          const block = await provider.getBlock(ev.blockNumber).catch(() => null)
+        recent.map(async (log) => {
+          const { args } = handle.interface.parseLog(log)
+          const block = await client
+            .getBlock({ blockNumber: BigInt(log.blockNumber) })
+            .catch(() => null)
           return {
-            serviceId: ev.args.serviceId,
-            label: KNOWN_SERVICES[ev.args.serviceId]?.label || `${ev.args.serviceId.substring(0, 10)}…`,
-            oldBps: Number(ev.args.oldBps),
-            newBps: Number(ev.args.newBps),
-            actor: ev.args.actor,
-            at: block ? new Date(block.timestamp * 1000) : null,
-            txHash: ev.transactionHash,
+            serviceId: args.serviceId,
+            label: KNOWN_SERVICES[args.serviceId]?.label || `${args.serviceId.substring(0, 10)}…`,
+            oldBps: Number(args.oldBps),
+            newBps: Number(args.newBps),
+            actor: args.actor,
+            at: block ? new Date(Number(block.timestamp) * 1000) : null,
+            txHash: log.transactionHash,
           }
         })
       )
       setHistory({ entries, truncated: fromBlock > 0, error: null })
     } catch (e) {
-      // Some RPCs bound log ranges — the full history stays available on the explorer.
+      // Some RPCs bound log ranges below what bisecting can reach — the full history stays
+      // available on the explorer.
       setHistory({ entries: [], truncated: true, error: e?.message || String(e) })
     }
-  }, [routerRead, provider])
+  }, [routerAddr, readProvider, scopeChainId])
 
   useEffect(() => {
     fetchServices()
@@ -216,7 +276,15 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
       return
     }
     runTx(
-      () => new ethers.Contract(routerAddr, FEE_ROUTER_ABI, signer).setFeeBps(feeForm.serviceId, bps),
+      () =>
+        signer.sendTransaction({
+          to: routerAddr,
+          data: encodeFunctionData({
+            abi: normalizeAbi(FEE_ROUTER_ABI),
+            functionName: 'setFeeBps',
+            args: [feeForm.serviceId, bps],
+          }),
+        }),
       `${selectedService.label} fee set to ${bps} bps (${bpsPct(bps)})`
     ).then(refresh)
   }
@@ -224,12 +292,31 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
   const handleSetTreasury = () => {
     setFormError(null)
     const value = treasuryForm.trim()
-    if (!ethers.isAddress(value) || value === ethers.ZeroAddress) {
+    if (!isAddress(value) || value === zeroAddress) {
       setFormError('Enter a valid, nonzero treasury address — fees would otherwise be skipped or lost.')
       return
     }
+    /**
+     * Normalised before encoding, and that is load-bearing (spec 110 divergence 16).
+     *
+     * `isAddress` here reproduces ethers' rule, which ACCEPTS an all-uppercase address: the casing
+     * carries no checksum, so there is nothing to verify and it is a perfectly valid address.
+     * viem's `encodeFunctionData` disagrees — it REFUSES one outright. So a member pasting
+     * `0X…`-cased hex from a tool that emits upper case would pass validation and then have the
+     * encode throw underneath, on the control that decides where every platform fee lands.
+     * `getAddress` first produces calldata byte-identical to what ethers built (measured).
+     */
+    const treasuryAddress = getAddress(value)
     runTx(
-      () => new ethers.Contract(routerAddr, FEE_ROUTER_ABI, signer).setTreasury(value),
+      () =>
+        signer.sendTransaction({
+          to: routerAddr,
+          data: encodeFunctionData({
+            abi: normalizeAbi(FEE_ROUTER_ABI),
+            functionName: 'setTreasury',
+            args: [treasuryAddress],
+          }),
+        }),
       `Fee treasury set to ${shortAddr(value)}`
     ).then(refresh)
   }
@@ -297,7 +384,7 @@ export default function FeesTab({ signer, account, chainId, provider, runTx, pen
             <span className="status-label">Fee treasury (this network)</span>
             <span className="status-value">
               {treasury === undefined ? '…'
-                : treasury && treasury !== ethers.ZeroAddress
+                : treasury && treasury !== zeroAddress
                   ? <code title={treasury}>{shortAddr(treasury)}</code>
                   : <span className="status-value paused">unset — fees are skipped, not charged</span>}
             </span>

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { useChainId, useSwitchChain } from 'wagmi'
+import { useSwitchChain } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import NetworkPanel from '../../components/account/NetworkPanel'
 import {
   getEndpointSettings,
@@ -25,7 +26,7 @@ describe('NetworkPanel — network selector', () => {
 
   beforeEach(() => {
     vi.clearAllMocks()
-    useChainId.mockReturnValue(61) // unsupported chain → every network offers "Switch"
+    setWalletChain(61) // unsupported chain → every network offers "Switch"
     useSwitchChain.mockReturnValue({
       switchChain,
       isPending: false,
@@ -61,7 +62,7 @@ describe('NetworkPanel — network selector', () => {
   })
 
   it('marks the connected network instead of offering a switch button', () => {
-    useChainId.mockReturnValue(137)
+    setWalletChain(137)
     render(<NetworkPanel />)
     const polygonCard = screen.getByText('Polygon').closest('.network-card')
     expect(within(polygonCard).getByText('Connected')).toBeInTheDocument()
@@ -158,7 +159,7 @@ describe('NetworkPanel — network selector', () => {
     })
 
     it('offers the testnet card instead while the app is in testnet mode (wallet on 80002)', () => {
-      useChainId.mockReturnValue(80002)
+      setWalletChain(80002)
       render(<NetworkPanel />)
       const mainnetCard = screen.getByText('Bitcoin').closest('.network-card')
       const testnetCard = screen.getByText('Bitcoin Testnet4').closest('.network-card')
@@ -230,7 +231,7 @@ describe('NetworkPanel — member RPC endpoints (spec 069)', () => {
     vi.clearAllMocks()
     localStorage.clear()
     __resetEndpointStoreForTests()
-    useChainId.mockReturnValue(137)
+    setWalletChain(137)
     useSwitchChain.mockReturnValue({
       switchChain: vi.fn(),
       isPending: false,

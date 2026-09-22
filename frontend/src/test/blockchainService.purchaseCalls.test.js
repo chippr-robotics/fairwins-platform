@@ -3,11 +3,19 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 // Unit test for buildMembershipPurchaseCalls (spec 041, FR-016): the read-only helper that shapes the
 // [approve, purchase] batch a passkey session submits through WalletContext.sendCalls — ONE ceremony,
 // no separate on-chain approval. We stub the contract resolver and the MembershipManager / ERC20 reads
-// so no real chain call happens, but keep the real ethers Interface so the encoded calldata is genuine
-// (and must match the exact price the contract pulls).
-const { resolverMock, stubs } = vi.hoisted(() => ({
+// so no real chain call happens.
+//
+// Spec 110: the reads go through the chain seam, so the seam is what is faked — and the fake is
+// keyed by (chain, address), which the `new ethers.Contract(address, abi, …)` fake it replaces could
+// only half do (it dispatched on the address and ignored the chain and the ABI entirely).
+//
+// ethers stays imported, UNMOCKED, as the calldata oracle: every `decodeFunctionData` below reads
+// bytes this module encoded with viem. That is a live cross-library byte check over exactly the code
+// this migration replaced, and it only means anything if the decoder is the real one.
+const { resolverMock, stubs, reads } = vi.hoisted(() => ({
   resolverMock: vi.fn(),
   stubs: {},
+  reads: [],
 }))
 
 vi.mock('../config/contracts', async (importOriginal) => {
@@ -15,15 +23,17 @@ vi.mock('../config/contracts', async (importOriginal) => {
   return { ...actual, getContractAddressForChain: resolverMock }
 })
 
-vi.mock('ethers', async () => {
-  const real = await vi.importActual('ethers')
-  // Real Interface (genuine calldata), but reads dispatch to a per-address stub.
-  function FakeContract(address, abi) {
-    const iface = new real.ethers.Interface(abi)
-    const reads = stubs[String(address).toLowerCase()] || {}
-    return { interface: iface, ...reads }
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      reads.push({ chainId, address, functionName, args })
+      const stub = stubs[String(address).toLowerCase()]?.[functionName]
+      if (!stub) throw new Error(`unexpected read: ${functionName} at ${address}`)
+      return stub(...args)
+    },
   }
-  return { ...real, ethers: { ...real.ethers, Contract: FakeContract } }
 })
 
 import { buildMembershipPurchaseCalls, checkApprovalNeededForAddress, getRoleHash } from '../utils/blockchainService'
@@ -48,6 +58,7 @@ const realIface = new ethers.Interface([
 ])
 
 beforeEach(() => {
+  reads.length = 0
   resolverMock.mockReset()
   resolverMock.mockReturnValue(MM_ADDR)
   stubs[MM_ADDR.toLowerCase()] = {
@@ -69,6 +80,14 @@ describe('buildMembershipPurchaseCalls (passkey batch)', () => {
     expect(membershipManager).toBe(MM_ADDR)
     expect(paymentToken).toBe(TOKEN_ADDR)
     expect(calls).toHaveLength(2)
+
+    // Every read named the chain the provider reported, and the price came from the MANAGER while
+    // the balance came from the TOKEN — the reads the batch's `approve` amount rests on.
+    expect(reads).toEqual([
+      { chainId: 137, address: MM_ADDR, functionName: 'paymentToken', args: [] },
+      { chainId: 137, address: MM_ADDR, functionName: 'getTierConfig', args: [getRoleHash(ROLE), 2] },
+      { chainId: 137, address: TOKEN_ADDR, functionName: 'balanceOf', args: [ACCOUNT] },
+    ])
 
     // Leg 1: approve the membership manager for EXACTLY the price.
     expect(calls[0].target).toBe(TOKEN_ADDR)

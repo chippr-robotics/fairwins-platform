@@ -66,7 +66,7 @@ All can be replicated with open source tools:
 **How to use:**
 1. Label PRs with `feature`, `fix`, `documentation`, etc.
 2. Merge PRs to `main`
-3. Review draft at [Releases page](https://github.com/chippr-robotics/prediction-dao-research/releases)
+3. Review draft at [Releases page](https://github.com/chippr-robotics/fairwins-platform/releases)
 4. Edit if needed and click "Publish release"
 
 ## Roadmap for Future Phases
@@ -155,14 +155,14 @@ The original issue asked us to explore devion.dev's potential benefits and ident
 ## How to Test
 
 1. **Verify workflow is active**:
-   - Check [Actions tab](https://github.com/chippr-robotics/prediction-dao-research/actions)
+   - Check [Actions tab](https://github.com/chippr-robotics/fairwins-platform/actions)
    - Should see "Release Drafter" workflow
 
 2. **Test with a PR**:
    - Create a PR with changes
    - Add a label (e.g., `feature` or `documentation`)
    - Merge to `main`
-   - Check [Releases](https://github.com/chippr-robotics/prediction-dao-research/releases) for updated draft
+   - Check [Releases](https://github.com/chippr-robotics/fairwins-platform/releases) for updated draft
 
 3. **Review documentation**:
    - Read `RELEASE_PROCESS.md` for workflow details

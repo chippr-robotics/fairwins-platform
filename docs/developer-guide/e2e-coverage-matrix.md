@@ -29,9 +29,9 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 | Spec directories | 114 |
 | With a member-facing flow | 90 |
 | Member-facing flows | 210 |
-| 🟢 covered | 188 |
+| 🟢 covered | 189 |
 | 🟡 partial | 5 |
-| 🔴 absent | 8 |
+| 🔴 absent | 7 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -345,7 +345,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Disclosure — a member consents to a cost
 
-19 flows — 🟢 17 · 🟡 0 · 🔴 1 · ⚪ 1 · covered-but-not-proven 0
+19 flows — 🟢 18 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -419,7 +419,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `multichain.refused-switch-discloses` | A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface) | 🔴 absent | none | — (proposed: no-chain) | #1552 |  |
+| `multichain.refused-switch-discloses` | A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface) | 🟢 covered | flow | `no-chain` | `50-multichain-write-seam.cy.js` (MCW-01, MCW-02, MCW-03) |  |
 
 ## Access — gating, identity and permission
 
@@ -604,7 +604,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `multichain.rail-unavailable-before-tap` | An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out — never a submit-time chain-support error | 🔴 absent | none | — (proposed: no-chain) | #1552 |  |
+| `multichain.rail-unavailable-before-tap` | An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out — never a submit-time chain-support error | 🔴 absent | none | — (proposed: account-native) | #1552 |  |
 
 ## Information — read-only surfaces
 

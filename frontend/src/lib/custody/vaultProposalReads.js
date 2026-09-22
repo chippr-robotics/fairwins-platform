@@ -8,8 +8,10 @@
 // backfill is still catching up; a caller must disclose that rather than present the partial set as
 // this vault's whole history.
 
-import { Contract, getAddress } from 'ethers'
+import { getAddress } from 'viem'
 import { SAFE_ABI } from '../../abis/Safe'
+import { eventScanHandle } from '../chains/eventScan'
+import { readContract, NoRpcEndpointError } from '../chains/readContract'
 import { scanLogs } from '../chain/logScan'
 import { readVerifiedProposals } from './proposalHub'
 import { deriveProposalStatus } from './proposalStatus'
@@ -18,11 +20,18 @@ import { deriveProposalStatus } from './proposalStatus'
  * @returns {Promise<{owners:string[], threshold:number, nonce:number, proposals:object[], complete:boolean}>}
  */
 export async function readVaultProposalState({ safeAddress, hubAddress, chainId, provider, fromBlock, maxChunks }) {
-  const safe = new Contract(safeAddress, SAFE_ABI, provider)
+  // Spec 110 Phase 1: the Safe's views read through the chain seam; `provider` still rides to
+  // readVerifiedProposals until proposalHub converts. The scan handle satisfies scanLogs' duck
+  // contract, so readExecutionOutcomes below is unchanged (its Phase-2 callers pass an ethers
+  // Contract into the same parameter — both shapes work by construction).
+  const safeRead = (functionName, args) =>
+    readContract(chainId, { address: safeAddress, abi: SAFE_ABI, functionName, args })
+  const safe = eventScanHandle(chainId, { address: safeAddress, abi: SAFE_ABI })
+  if (!safe) throw new NoRpcEndpointError(chainId)
   const [ownersRaw, thresholdRaw, nonceRaw] = await Promise.all([
-    safe.getOwners(),
-    safe.getThreshold(),
-    safe.nonce(),
+    safeRead('getOwners'),
+    safeRead('getThreshold'),
+    safeRead('nonce'),
   ])
   const owners = ownersRaw.map((o) => getAddress(o))
   const threshold = Number(thresholdRaw)
@@ -48,7 +57,9 @@ export async function readVaultProposalState({ safeAddress, hubAddress, chainId,
     verified.map(async (p) => {
       const hashLc = String(p.safeTxHash).toLowerCase()
       const approvalFlags = await Promise.all(
-        owners.map((o) => safe.approvedHashes(o, p.safeTxHash).then((n) => (n > 0n ? o : null))),
+        owners.map((o) =>
+          safeRead('approvedHashes', [o, p.safeTxHash]).then((n) => (n > 0n ? o : null)),
+        ),
       )
       const approvers = approvalFlags.filter(Boolean)
       const status = deriveProposalStatus({

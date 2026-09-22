@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ethers } from 'ethers'
+import { keccak256, stringToHex } from 'viem'
+import { readContract } from '../lib/chains/readContract'
 import { useWeb3 } from './useWeb3'
 import { useEffectiveAccount } from './useEffectiveAccount'
 import { getContractAddressForChain } from '../config/contracts'
@@ -53,7 +54,7 @@ export const TIER_COLORS = {
 }
 
 export const ROLE_BYTES32 = {
-  WAGER_PARTICIPANT: ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE')),
+  WAGER_PARTICIPANT: keccak256(stringToHex('WAGER_PARTICIPANT_ROLE')),
 }
 
 /**
@@ -204,7 +205,24 @@ export function useRoleDetails() {
     if (!readProvider) return { ...emptyDetails(roleName), readable: false }
 
     try {
-      const mgr = new ethers.Contract(managerAddr, MEMBERSHIP_MANAGER_ABI, readProvider)
+      // Reads NAME the reference chain (spec 110); `readProvider` above stays the availability
+      // gate, so a chain with no route is still `readable: false` rather than "no membership".
+      const mgr = {
+        getMembership: (...args) =>
+          readContract(refChain, {
+            address: managerAddr,
+            abi: MEMBERSHIP_MANAGER_ABI,
+            functionName: 'getMembership',
+            args,
+          }),
+        getTierConfig: (...args) =>
+          readContract(refChain, {
+            address: managerAddr,
+            abi: MEMBERSHIP_MANAGER_ABI,
+            functionName: 'getTierConfig',
+            args,
+          }),
+      }
       // The outer ceiling covers the WHOLE read, every hop of it: what must be bounded is how
       // long a consumer can be left in "checking…", which is the sum, not any single call. The
       // sub-ceiling inside only decides whether a stalled follow-up degrades or counts against

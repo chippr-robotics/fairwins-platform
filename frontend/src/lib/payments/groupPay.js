@@ -28,7 +28,8 @@
  *   the amount the calls carry.
  */
 
-import { formatUnits, isAddress, parseUnits } from 'ethers'
+import { isAddress } from 'viem'
+import { formatUnits, parseUnits } from '../evm/units'
 import { BATCH_SUPPORT } from '../custody/batchPreflight'
 import { classifyAddress } from '../bitcoin/addresses'
 import { isBitcoinNetworkId } from '../../config/bitcoinNetworks'
@@ -312,7 +313,7 @@ export const GROUP_UNAVAILABLE = Object.freeze({
  * Should the multi-recipient affordance be OFFERED at all? Answered before anything is typed, so
  * a member is never shown a control whose submission would not be the one it implies.
  *
- * Shaped like `lib/custody/writeRail.js#resolveWriteRail`: `{ available, code, reason }`, where an
+ * Shaped like `lib/chains/writeRail.js#resolveWriteRail`: `{ available, code, reason }`, where an
  * unavailable answer NAMES what is missing rather than only that something is. Nothing here reads
  * the network — `passkeySupported` is passed in — so this stays a pure function the surfaces and
  * the hook can both call.

@@ -11,9 +11,10 @@ const ME = '0x9999999999999999999999999999999999999999'
 const OTHER = '0x8888888888888888888888888888888888888888'
 const HUB = '0x7777777777777777777777777777777777777777'
 
-let walletCtx = { address: ME, chainId: 137, provider: { tag: 'wallet' } }
+// The wallet supplies the member's identity and nothing else — since spec 110 the hook takes no
+// provider from it, so a chainId here would be inert. Leaving one would suggest it still steers a read.
+let walletCtx = { address: ME }
 vi.mock('../../hooks', () => ({ useWallet: () => walletCtx }))
-vi.mock('../../utils/blockchainService', () => ({ getProvider: (id) => ({ tag: `rpc-${id}` }) }))
 
 // Per-chain hub config: address + deploy block; absent ⇒ not-configured.
 let hubConfig = {}
@@ -31,42 +32,41 @@ const readExecutionOutcomes = vi.fn()
 vi.mock('../../lib/custody/proposalHub', () => ({ readVerifiedProposals: (...a) => readVerifiedProposals(...a) }))
 vi.mock('../../lib/custody/vaultProposalReads', () => ({ readExecutionOutcomes: (...a) => readExecutionOutcomes(...a) }))
 
-const chainOf = (provider) => (provider.tag === 'wallet' ? Number(walletCtx.chainId) : Number(provider.tag.replace('rpc-', '')))
-
-vi.mock('ethers', async (importOriginal) => {
+/*
+ * The chain seam, faked at the seam rather than at ethers (spec 110). The whole point of the
+ * conversion is that a read NAMES its chain, so the fake is keyed on the chainId the hook passes —
+ * which is also what makes "reads its own chain" assertable without inspecting a transport.
+ */
+const facts = (chainId) => {
+  const s = safeState[chainId]
+  if (s instanceof Error) throw s
+  if (!s) throw new Error(`no safe on ${chainId}`)
+  return s
+}
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
-  class FakeContract {
-    constructor(address, abi, provider) {
-      this.chainId = chainOf(provider)
-      this.address = address
-      this.filters = { ExecutionSuccess: () => ({}), ExecutionFailure: () => ({}) }
-    }
-    #facts() {
-      const s = safeState[this.chainId]
-      if (s instanceof Error) throw s
-      if (!s) throw new Error(`no safe on ${this.chainId}`)
-      return s
-    }
-    async getOwners() {
-      // 'hang' models an endpoint that never answers (ethers retrying network detection forever).
-      if (safeState[this.chainId] === 'hang') return new Promise(() => {})
-      return this.#facts().owners
-    }
-    async getThreshold() {
-      if (safeState[this.chainId] === 'hang') return new Promise(() => {})
-      return BigInt(this.#facts().threshold)
-    }
-    async nonce() {
-      if (safeState[this.chainId] === 'hang') return new Promise(() => {})
-      return BigInt(this.#facts().nonce ?? 0)
-    }
-    async approvedHashes(owner, hash) {
-      const approved = this.#facts().approved?.[hash] || []
-      return approved.some((a) => a.toLowerCase() === owner.toLowerCase()) ? 1n : 0n
-    }
+  return {
+    ...actual,
+    readContract: async (chainId, { functionName, args }) => {
+      // 'hang' models an endpoint that never answers — the case the read ceiling exists for.
+      if (safeState[chainId] === 'hang') return new Promise(() => {})
+      if (functionName === 'getOwners') return facts(chainId).owners
+      if (functionName === 'getThreshold') return BigInt(facts(chainId).threshold)
+      if (functionName === 'nonce') return BigInt(facts(chainId).nonce ?? 0)
+      if (functionName === 'approvedHashes') {
+        const [owner, hash] = args
+        const approved = facts(chainId).approved?.[hash] || []
+        return approved.some((a) => a.toLowerCase() === owner.toLowerCase()) ? 1n : 0n
+      }
+      throw new Error(`unexpected read ${functionName}`)
+    },
   }
-  return { ...actual, Contract: FakeContract }
 })
+// A non-null handle means "this chain has an endpoint"; the hook only uses it for the log scan,
+// which `readExecutionOutcomes` is faked out of.
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId) => ({ chainId, filters: { ExecutionSuccess: () => ({}), ExecutionFailure: () => ({}) } }),
+}))
 
 import { useVaultQueueAcrossChains, QUEUE_READ_TIMEOUT_MS } from '../../hooks/useVaultQueueAcrossChains'
 
@@ -76,7 +76,7 @@ const proposal = (hash, nonce, blockNumber) => ({ safeTxHash: hash, nonce, block
 
 beforeEach(() => {
   vi.clearAllMocks()
-  walletCtx = { address: ME, chainId: 137, provider: { tag: 'wallet' } }
+  walletCtx = { address: ME }
   hubConfig = { 137: { address: HUB, block: 100 }, 10: { address: HUB, block: 100 }, 8453: { address: HUB, block: 100 } }
   safeState = {
     137: { owners: [ME, OTHER], threshold: 2, nonce: 5, approved: { '0xp1': [ME] } },
@@ -91,16 +91,19 @@ beforeEach(() => {
 })
 
 describe('useVaultQueueAcrossChains', () => {
-  it('reads every instance through a provider for ITS chain and tags each row with its chain, newest first', async () => {
+  it('reads every instance ON ITS OWN chain and tags each row with its chain, newest first', async () => {
     const { result } = renderHook(() => useVaultQueueAcrossChains(group([137, 10])))
     await waitFor(() => expect(result.current.loading).toBe(false))
     await waitFor(() => expect(Object.keys(result.current.byChain)).toHaveLength(2))
 
     expect(result.current.byChain[137].state).toBe('read')
     expect(result.current.byChain[10].state).toBe('read')
-    // Wallet is on 137 → its provider; Optimism → the chain's own read provider.
-    expect(readVerifiedProposals).toHaveBeenCalledWith(expect.objectContaining({ chainId: 137, provider: { tag: 'wallet' }, fromBlock: 100 }))
-    expect(readVerifiedProposals).toHaveBeenCalledWith(expect.objectContaining({ chainId: 10, provider: { tag: 'rpc-10' } }))
+    // Each read NAMES the chain it belongs to. This used to assert which transport was handed in,
+    // which got the right answer for the wrong reason: the chain came off the connection. Naming it
+    // is the stronger claim, and it is the only one left once no provider is passed at all.
+    expect(readVerifiedProposals).toHaveBeenCalledWith(expect.objectContaining({ chainId: 137, fromBlock: 100 }))
+    expect(readVerifiedProposals).toHaveBeenCalledWith(expect.objectContaining({ chainId: 10 }))
+    for (const call of readVerifiedProposals.mock.calls) expect(call[0]).not.toHaveProperty('provider')
 
     // Queued rows only (the nonce-4 proposal on 137 is superseded), sorted by blockNumber desc.
     expect(result.current.rows.map((r) => [r.safeTxHash, r.chainId])).toEqual([

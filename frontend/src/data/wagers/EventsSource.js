@@ -12,8 +12,13 @@
  * envelope can be lazy-decrypted by `useLazyMarketDecryption`.
  */
 
-import { ethers } from 'ethers'
+import { zeroAddress } from 'viem'
 import { getContractAddress, NETWORK_CONFIG, DEPLOYMENT_BLOCKS } from '../../config/contracts'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { NoRpcEndpointError, readContract } from '../../lib/chains/readContract'
+import { scanLogRange } from '../../lib/chain/logScan'
+import { isAddress } from '../../lib/evm/address'
+import { formatUnits } from '../../lib/evm/units'
 import { DEX_ADDRESSES } from '../../constants/dex'
 import { FRIEND_GROUP_MARKET_FACTORY_ABI } from '../../abis/FriendGroupMarketFactory'
 import { parseEncryptedIpfsReference } from '../../utils/ipfsService'
@@ -33,14 +38,35 @@ const STATUS_NAMES = [
   'oracle_timed_out',
 ]
 
-function getProvider() {
-  return new ethers.JsonRpcProvider(NETWORK_CONFIG.rpcUrl)
-}
+/**
+ * This source reads the BUILD's chain and only that one — it always did, via
+ * `NETWORK_CONFIG.rpcUrl`. Spec 110 names the chain rather than hand-building a transport from
+ * that URL, which is the same chain by a route that honours the member's own endpoint and
+ * failover (spec 069). Widening legacy v1 to multichain is deliberately NOT part of this: no live
+ * network configures `friendGroupMarketFactory`, and `RegistrySource` is what replaced it.
+ */
+const SOURCE_CHAIN_ID = NETWORK_CONFIG.chainId
 
-function getFactoryContract(signerOrProvider) {
+function factoryAddress() {
   const address = getContractAddress('friendGroupMarketFactory')
   if (!address) throw new Error('FriendGroupMarketFactory address not configured')
-  return new ethers.Contract(address, FRIEND_GROUP_MARKET_FACTORY_ABI, signerOrProvider)
+  return address
+}
+
+/**
+ * The read facade the hydration path used to get from `new Contract(...)`. Both views are
+ * MULTI-OUTPUT (14 and 22 outputs), which viem returns as a bare array; `readContract` re-attaches
+ * the parameter names, so `toWager`'s field reads are unchanged. Their uint8/uint16 members decode
+ * as NUMBERS rather than bigints and every one of them already goes through `Number(...)`.
+ */
+function getFactoryContract() {
+  const address = factoryAddress()
+  const call = (functionName, args) =>
+    readContract(SOURCE_CHAIN_ID, { address, abi: FRIEND_GROUP_MARKET_FACTORY_ABI, functionName, args })
+  return {
+    getFriendMarketWithStatus: (id) => call('getFriendMarketWithStatus', [BigInt(id)]),
+    friendMarkets: (id) => call('friendMarkets', [BigInt(id)]),
+  }
 }
 
 function detectEncryption(description) {
@@ -110,7 +136,7 @@ function toWager(marketId, withStatus, full) {
 
   const members = (withStatus.members || []).map(m => m.toLowerCase())
   const arbitrator = withStatus.arbitrator
-  const hasArbitrator = arbitrator && arbitrator !== ethers.ZeroAddress
+  const hasArbitrator = arbitrator && arbitrator !== zeroAddress
 
   return {
     id: String(marketId),
@@ -120,7 +146,7 @@ function toWager(marketId, withStatus, full) {
     creator: withStatus.creator,
     participants: members,
     arbitrator: hasArbitrator ? arbitrator : null,
-    stakeAmount: ethers.formatUnits(withStatus.stakePerParticipant || 0, tokenDecimals),
+    stakeAmount: formatUnits(withStatus.stakePerParticipant || 0, tokenDecimals),
     stakeTokenAddress: stakeToken,
     stakeTokenSymbol: isStable ? 'USDC' : 'POL',
     tradingPeriodSeconds,
@@ -147,47 +173,47 @@ function toWager(marketId, withStatus, full) {
   }
 }
 
-export async function syncIndex(userAddress, opts = {}) {
-  if (!userAddress || !ethers.isAddress(userAddress)) {
+export async function syncIndex(userAddress) {
+  if (!userAddress || !isAddress(userAddress)) {
     return { marketIds: [], lastBlock: 0 }
   }
   if (import.meta.env.VITE_SKIP_BLOCKCHAIN_CALLS === 'true') {
     return { marketIds: [], lastBlock: 0 }
   }
 
-  const provider = opts.provider || getProvider()
-  const contract = getFactoryContract(provider)
+  const scan = eventScanHandle(SOURCE_CHAIN_ID, {
+    address: factoryAddress(),
+    abi: FRIEND_GROUP_MARKET_FACTORY_ABI,
+  })
+  if (!scan) throw new NoRpcEndpointError(SOURCE_CHAIN_ID)
   const cached = loadIndex(userAddress)
-  const currentBlock = await provider.getBlockNumber()
+  const currentBlock = await scan.runner.provider.getBlockNumber()
 
   if (cached.lastBlock >= currentBlock) return cached
 
   const deployBlock = DEPLOYMENT_BLOCKS.friendGroupMarketFactory || 0
   const fromBlock = cached.lastBlock > 0 ? cached.lastBlock + 1 : deployBlock
-  const filter = contract.filters.MemberAdded(null, userAddress)
-  const CHUNK = 10_000
   const ids = new Set(cached.marketIds.map(String))
 
-  let from = fromBlock
-  while (from <= currentBlock) {
-    const to = Math.min(from + CHUNK - 1, currentBlock)
-    try {
-      const events = await contract.queryFilter(filter, from, to)
-      for (const ev of events) ids.add(ev.args.friendMarketId.toString())
-    } catch (err) {
-      console.warn(`[EventsSource] scan ${from}-${to} failed:`, err?.message)
-      const small = 1_000
-      for (let s = from; s <= to; s += small) {
-        const e = Math.min(s + small - 1, to)
-        try {
-          const evs = await contract.queryFilter(filter, s, e)
-          for (const ev of evs) ids.add(ev.args.friendMarketId.toString())
-        } catch {
-          // skip the sub-chunk; the watermark will not be advanced past errors
-        }
-      }
-    }
-    from = to + 1
+  /*
+   * This used to hand-roll the chunking that `lib/chain/logScan` owns — 10k windows with a 1k
+   * retry — and differed from it in one consequential way: a sub-chunk that still failed was
+   * SKIPPED, and the watermark was then saved at `currentBlock` anyway. A range that failed twice
+   * therefore became a permanent hole in the member's wager list, indistinguishable from having no
+   * wagers in those blocks, with only a `console.warn` to show for it. `scanLogRange` keeps the
+   * same window sizes and the same narrowing retry, and THROWS when a sub-chunk cannot be read —
+   * so the watermark below is never saved over an unread range and the next call retries it.
+   */
+  const logs = await scanLogRange({
+    provider: scan.runner.provider,
+    address: factoryAddress(),
+    topics: await scan.filters.MemberAdded(null, userAddress).getTopicFilter(),
+    fromBlock,
+    toBlock: currentBlock,
+  })
+  for (const log of logs) {
+    const { args } = scan.interface.parseLog({ topics: [...log.topics], data: log.data })
+    ids.add(String(args.friendMarketId))
   }
 
   const next = { marketIds: Array.from(ids), lastBlock: currentBlock }
@@ -220,7 +246,6 @@ export async function listPage({
   pageSize = 25,
   sortKey = WagerSortKey.CREATED,
   filter,
-  provider,
 }) {
   if (!userAddress) {
     return { items: [], nextCursor: null, hasMore: false, totalKnown: 0, source: 'events' }
@@ -229,10 +254,9 @@ export async function listPage({
     return { items: [], nextCursor: null, hasMore: false, totalKnown: 0, source: 'events' }
   }
 
-  const _provider = provider || getProvider()
-  const contract = getFactoryContract(_provider)
+  const contract = getFactoryContract()
 
-  await syncIndex(userAddress, { provider: _provider })
+  await syncIndex(userAddress)
   const index = loadIndex(userAddress)
   const cache = loadCache(userAddress)
 
@@ -254,11 +278,10 @@ export async function listPage({
   return { ...page, source: 'events' }
 }
 
-export async function getById(id, userAddress, opts = {}) {
+export async function getById(id, userAddress) {
   if (!id || !userAddress) return null
   if (import.meta.env.VITE_SKIP_BLOCKCHAIN_CALLS === 'true') return null
-  const provider = opts.provider || getProvider()
-  const contract = getFactoryContract(provider)
+  const contract = getFactoryContract()
   const wagers = await hydrate(contract, [String(id)])
   const wager = wagers[0] || null
   if (wager) upsertCache(userAddress, [wager])
@@ -266,12 +289,11 @@ export async function getById(id, userAddress, opts = {}) {
 }
 
 export async function fetchAllCompat(userAddress) {
-  if (!userAddress || !ethers.isAddress(userAddress)) return []
+  if (!userAddress || !isAddress(userAddress)) return []
   if (import.meta.env.VITE_SKIP_BLOCKCHAIN_CALLS === 'true') return []
 
-  const provider = getProvider()
-  const contract = getFactoryContract(provider)
-  await syncIndex(userAddress, { provider })
+  const contract = getFactoryContract()
+  await syncIndex(userAddress)
   const index = loadIndex(userAddress)
   const cache = loadCache(userAddress)
   const missing = index.marketIds.filter(id => !cache[id] || cache[id].needsRehydration)

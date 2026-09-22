@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { useSwitchChain } from 'wagmi'
 import AmountKeypad from '../ui/AmountKeypad'
 import AddressInput from '../ui/AddressInput'
@@ -42,7 +42,7 @@ function groupNotice(summary) {
 
 /** Format base units for the keypad; trims trailing zeros ("12.50" → "12.5"). */
 function formatUnitsForKeypad(units, decimals) {
-  const s = ethers.formatUnits(units, decimals)
+  const s = formatUnits(units, decimals)
   const trimmed = s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s
   return trimmed === '' ? '0' : trimmed
 }

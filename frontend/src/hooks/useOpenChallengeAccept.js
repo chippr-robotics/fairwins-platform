@@ -1,5 +1,8 @@
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, keccak256, stringToHex, maxUint256, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { formatUnits } from '../lib/evm/units'
+import { getAddress } from '../lib/evm/address'
 import { useWeb3 } from './useWeb3'
 import { useGaslessWrite } from '../lib/relay/useGaslessWrite'
 import { WAGER_REGISTRY_ABI } from '../abis/WagerRegistry'
@@ -10,7 +13,7 @@ import { isValidCode } from '../utils/claimCode/wordlist.js'
 import { decryptEnvelopeCode, isCodeEnvelope } from '../utils/crypto/envelopeEncryption.js'
 import { revertReasonFrom, sanctionedAddressFrom, screenedPartyMessage } from '../lib/wagers/sanctionsRevert.js'
 
-const WAGER_PARTICIPANT_ROLE = ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE'))
+const WAGER_PARTICIPANT_ROLE = keccak256(stringToHex('WAGER_PARTICIPANT_ROLE'))
 const MEMBERSHIP_ABI = ['function hasActiveRole(address user, bytes32 role) view returns (bool)']
 const ERC20_ABI = [
   'function balanceOf(address owner) view returns (uint256)',
@@ -19,6 +22,13 @@ const ERC20_ABI = [
   'function decimals() view returns (uint8)',
   'function symbol() view returns (string)',
 ]
+
+const REGISTRY_ABI_PARSED = normalizeAbi(WAGER_REGISTRY_ABI)
+const ERC20_ABI_PARSED = normalizeAbi(ERC20_ABI)
+const registryCall = (functionName, args) =>
+  encodeFunctionData({ abi: REGISTRY_ABI_PARSED, functionName, args })
+const erc20Call = (functionName, args) =>
+  encodeFunctionData({ abi: ERC20_ABI_PARSED, functionName, args })
 
 /**
  * Take-a-challenge flow for open-challenge wagers (feature 024). The four-word code does triple duty:
@@ -47,27 +57,43 @@ export function useOpenChallengeAccept() {
     params: (wagerId, claimCodeSig) => ({ wagerId, claimCodeSig }),
     payment: (wagerId, claimCodeSig, stake) => ({ value: stake }),
     selfSubmit: async (wagerId, claimCodeSig, stake, tokenAddr, registryAddr, symbol, onProgress = () => {}) => {
-      const registry = new ethers.Contract(registryAddr, WAGER_REGISTRY_ABI, signer)
-      const token = new ethers.Contract(tokenAddr, ERC20_ABI, signer)
-
       // Approve the registry to escrow the stake (skip if already approved). Kept in the self-submit
       // closure because the gasless path never approves — EIP-3009 pulls the stake instead.
-      const allowance = await token.allowance(actor, registryAddr)
-      if (allowance < stake) {
+      const allowance = await readContract(chainId, {
+        address: tokenAddr,
+        abi: ERC20_ABI,
+        functionName: 'allowance',
+        args: [getAddress(String(actor)), getAddress(String(registryAddr))],
+      })
+      if (BigInt(allowance) < stake) {
         onProgress({ step: 'approve', message: `Approve ${symbol} spending in your wallet…` })
-        const approveTx = await token.approve(registryAddr, ethers.MaxUint256)
+        const approveTx = await signer.sendTransaction({
+          to: tokenAddr,
+          data: erc20Call('approve', [getAddress(String(registryAddr)), maxUint256]),
+        })
         await approveTx.wait()
       }
 
-      // Pre-flight to surface a clear revert reason before the final wallet prompt.
+      // Pre-flight to surface a clear revert reason before the final wallet prompt. The caller is
+      // named explicitly (ethers' staticCall took it from the signer); the guard screens BOTH
+      // parties, so who is asking changes the answer.
       try {
-        await registry.acceptOpenWager.staticCall(wagerId, claimCodeSig)
+        await readContract(chainId, {
+          address: registryAddr,
+          abi: WAGER_REGISTRY_ABI,
+          functionName: 'acceptOpenWager',
+          args: [wagerId, claimCodeSig],
+          account: getAddress(String(actor)),
+        })
       } catch (sim) {
         throw new Error(translateAcceptRevert(revertReasonFrom(sim), { error: sim, account: actor }), { cause: sim })
       }
 
       onProgress({ step: 'accept', message: 'Confirm acceptance in your wallet…' })
-      const tx = await registry.acceptOpenWager(wagerId, claimCodeSig)
+      const tx = await signer.sendTransaction({
+        to: registryAddr,
+        data: registryCall('acceptOpenWager', [wagerId, claimCodeSig]),
+      })
       const receipt = await tx.wait()
       if (!receipt || receipt.status === 0) throw new Error('Acceptance reverted on-chain.')
       return receipt
@@ -98,13 +124,14 @@ export function useOpenChallengeAccept() {
     }
     try {
       const registryAddr = resolveRegistry()
-      const registry = new ethers.Contract(registryAddr, WAGER_REGISTRY_ABI, readProvider)
+      const askRegistry = (functionName, args) =>
+        readContract(chainId, { address: registryAddr, abi: WAGER_REGISTRY_ABI, functionName, args })
       const { claimAddress, symKey } = deriveFromCode(code)
 
-      const wagerId = await registry.openWagerIdForClaim(claimAddress)
+      const wagerId = await askRegistry('openWagerIdForClaim', [getAddress(String(claimAddress))])
       if (wagerId === 0n) return { status: 'not-found', reason: 'no-match' }
 
-      const wager = await registry.getWager(wagerId)
+      const wager = await askRegistry('getWager', [wagerId])
 
       // Decrypt the terms (code-keyed envelope on IPFS). A retrieval/tamper failure is surfaced as
       // "terms unavailable" — on-chain accept does not need the plaintext (FR-020).
@@ -125,8 +152,12 @@ export function useOpenChallengeAccept() {
       try {
         const mAddr = chainId != null ? getContractAddressForChain('membershipManager', chainId) : getContractAddress('membershipManager')
         if (mAddr && actor) {
-          const mm = new ethers.Contract(mAddr, MEMBERSHIP_ABI, readProvider)
-          needsMembership = !(await mm.hasActiveRole(actor, WAGER_PARTICIPANT_ROLE))
+          needsMembership = !(await readContract(chainId, {
+            address: mAddr,
+            abi: MEMBERSHIP_ABI,
+            functionName: 'hasActiveRole',
+            args: [getAddress(String(actor)), WAGER_PARTICIPANT_ROLE],
+          }))
         }
       } catch {
         needsMembership = false // non-fatal; the contract is the source of truth at accept
@@ -174,29 +205,37 @@ export function useOpenChallengeAccept() {
       if (!isValidCode(code)) throw new Error('Enter the four words exactly as they were shared with you.')
 
       const registryAddr = resolveRegistry()
-      const registry = new ethers.Contract(registryAddr, WAGER_REGISTRY_ABI, readProvider)
+      const askRegistry = (functionName, args, account) =>
+        readContract(chainId, {
+          address: registryAddr,
+          abi: WAGER_REGISTRY_ABI,
+          functionName,
+          args,
+          ...(account ? { account } : {}),
+        })
       const net = chainId != null ? { chainId: BigInt(chainId) } : await readProvider.getNetwork()
 
       // 1. Read the authoritative stake the contract will pull (opponentStake == creatorStake for open
       //    challenges) and make sure the taker can cover it before any wallet prompt.
       onProgress({ step: 'check', message: 'Checking your balance and approval…' })
-      const w = await registry.getWager(wagerId)
+      const w = await askRegistry('getWager', [wagerId])
       const tokenAddr = w.token
       const stake = w.opponentStake
-      if (!tokenAddr || tokenAddr === ethers.ZeroAddress) {
+      if (!tokenAddr || tokenAddr === zeroAddress) {
         throw new Error('This challenge has no stake token configured.')
       }
-      const token = new ethers.Contract(tokenAddr, ERC20_ABI, readProvider)
+      const askToken = (functionName, args) =>
+        readContract(chainId, { address: tokenAddr, abi: ERC20_ABI, functionName, args })
       let decimals = 18
       let symbol = 'tokens'
-      try { decimals = Number(await token.decimals()) } catch { /* default 18 */ }
-      try { symbol = await token.symbol() } catch { /* default tokens */ }
+      try { decimals = Number(await askToken('decimals')) } catch { /* default 18 */ }
+      try { symbol = await askToken('symbol') } catch { /* default tokens */ }
 
-      const balance = await token.balanceOf(actor)
-      if (balance < stake) {
+      const balance = await askToken('balanceOf', [getAddress(String(actor))])
+      if (BigInt(balance) < stake) {
         throw new Error(
           `Insufficient ${symbol} balance to take this challenge. ` +
-          `You have ${ethers.formatUnits(balance, decimals)} but need ${ethers.formatUnits(stake, decimals)}.`
+          `You have ${formatUnits(balance, decimals)} but need ${formatUnits(stake, decimals)}.`
         )
       }
 
@@ -224,17 +263,19 @@ export function useOpenChallengeAccept() {
         throw new Error('This wallet cannot accept challenges on the current transaction rail.')
       }
       const calls = []
-      const allowance = await token.allowance(actor, registryAddr)
+      const allowance = BigInt(
+        await askToken('allowance', [getAddress(String(actor)), getAddress(String(registryAddr))]),
+      )
       if (allowance < stake) {
         onProgress({ step: 'approve', message: `Approve ${symbol} spending in your wallet…` })
         calls.push({
           target: tokenAddr,
-          data: token.interface.encodeFunctionData('approve', [registryAddr, ethers.MaxUint256]),
+          data: erc20Call('approve', [getAddress(String(registryAddr)), maxUint256]),
           value: 0n,
         })
       }
       try {
-        await registry.acceptOpenWager.staticCall(wagerId, signature, { from: actor })
+        await askRegistry('acceptOpenWager', [wagerId, signature], getAddress(String(actor)))
       } catch (sim) {
         const raw = revertReasonFrom(sim)
         // A not-yet-granted allowance is expected here: the approve above is batched with the
@@ -249,7 +290,7 @@ export function useOpenChallengeAccept() {
       onProgress({ step: 'accept', message: 'Confirm acceptance in your wallet…' })
       calls.push({
         target: registryAddr,
-        data: registry.interface.encodeFunctionData('acceptOpenWager', [wagerId, signature]),
+        data: registryCall('acceptOpenWager', [wagerId, signature]),
         value: 0n,
       })
       const sent = await sendCalls(calls)

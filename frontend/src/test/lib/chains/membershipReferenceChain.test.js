@@ -12,38 +12,39 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
-const m = vi.hoisted(() => ({ constructedAt: [], hasActiveRole: null, getActiveTier: null }))
+const m = vi.hoisted(() => ({ askedOn: [], constructedAt: [], hasActiveRole: null, getActiveTier: null }))
+
+/** A per-chain MembershipManager address that is a REAL, encodable address: `mmFor(137)` ≠ `mmFor(63)`. */
+const mmFor = (chainId) => '0x' + Number(chainId).toString(16).padStart(40, '0')
 
 vi.mock('../../../config/contracts', async (orig) => {
   const actual = await orig()
   return {
     ...actual,
     // Every cohort chain "has" a MembershipManager at a chain-distinctive address, so the address
-    // the code constructs against proves which chain it actually asked.
+    // the code reads against proves which chain the ADDRESS came from — and, since spec 110, the
+    // seam records the chain the READ was made on as well, which is the thing that actually
+    // decides where the answer comes from. The old fixture spelled these `0xmm${chainId}`, which
+    // is not an address at all: it survived only because the `new ethers.Contract(address, …)`
+    // fake it fed took the string and never used it for anything.
     getContractAddressForChain: (name, chainId) =>
-      name === 'membershipManager' ? `0xmm${chainId}` : '',
+      name === 'membershipManager' ? mmFor(chainId) : '',
     getContractAddress: () => '',
   }
 })
 
-vi.mock('ethers', async (orig) => {
+vi.mock('../../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract(address) {
-    m.constructedAt.push(String(address))
-    return new Proxy({}, {
-      get(_t, prop) {
-        if (prop === 'then') return undefined
-        const key = String(prop)
-        return (...args) => {
-          if (key === 'hasActiveRole') return m.hasActiveRole(...args)
-          if (key === 'getActiveTier') return m.getActiveTier(...args)
-          return Promise.resolve(undefined)
-        }
-      },
-    })
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      m.askedOn.push(Number(chainId))
+      m.constructedAt.push(String(address))
+      if (functionName === 'hasActiveRole') return m.hasActiveRole(...args)
+      if (functionName === 'getActiveTier') return m.getActiveTier(...args)
+      return undefined
+    },
   }
-  const Ctor = vi.fn(FakeContract)
-  return { ...actual, Contract: Ctor, ethers: { ...actual.ethers, Contract: Ctor } }
 })
 
 import { hasRoleOnChain, getUserTierOnChain } from '../../../utils/blockchainService'
@@ -54,6 +55,7 @@ const REF = membershipChainId()
 const NOT_REF = cohortChainIds().find((id) => Number(id) !== Number(REF))
 
 beforeEach(() => {
+  m.askedOn = []
   m.constructedAt = []
   m.hasActiveRole = () => Promise.resolve(true)
   m.getActiveTier = () => Promise.resolve(3)
@@ -67,23 +69,30 @@ describe('membership resolves on the reference chain, whatever the wallet says (
     const held = await hasRoleOnChain(USER, 'WAGER_PARTICIPANT', NOT_REF)
 
     expect(held).toBe(true)
-    expect(m.constructedAt).toContain(`0xmm${REF}`)
-    expect(m.constructedAt).not.toContain(`0xmm${NOT_REF}`)
+    // Both halves, because they are different facts: the address came from the reference chain's
+    // entry, and the read was MADE on the reference chain. Before the seam only the first was
+    // observable, and a read aimed at the right address on the wrong chain would have passed.
+    expect(m.constructedAt).toContain(mmFor(REF))
+    expect(m.constructedAt).not.toContain(mmFor(NOT_REF))
+    expect(m.askedOn).toEqual([Number(REF)])
   })
 
   it('gives the same answer from every cohort chain — SC-001', async () => {
     for (const chainId of cohortChainIds()) {
       m.constructedAt = []
+      m.askedOn = []
       const held = await hasRoleOnChain(USER, 'WAGER_PARTICIPANT', chainId)
       expect(held).toBe(true)
-      expect(m.constructedAt).toEqual([`0xmm${REF}`])
+      expect(m.constructedAt).toEqual([mmFor(REF)])
+      expect(m.askedOn).toEqual([Number(REF)])
     }
   })
 
   it('reads the tier from the reference chain too', async () => {
     const res = await getUserTierOnChain(USER, 'WAGER_PARTICIPANT', NOT_REF)
     expect(res).toMatchObject({ tier: 3, readable: true })
-    expect(m.constructedAt).toContain(`0xmm${REF}`)
+    expect(m.constructedAt).toContain(mmFor(REF))
+    expect(m.askedOn).toEqual([Number(REF)])
   })
 })
 
@@ -92,8 +101,10 @@ describe('the admin-role branch still honours its explicit chain (research R3)',
     // Admin roles resolve against the registry/router candidates for the chain passed in, so the
     // reference-chain rule must NOT have leaked into this branch.
     await hasRoleOnChain(USER, 'GUARDIAN', NOT_REF)
-    // The membership address is never constructed for an admin-role read.
-    expect(m.constructedAt).not.toContain(`0xmm${REF}`)
+    // The membership address is never read for an admin-role lookup, and nothing was asked of the
+    // reference chain on its behalf.
+    expect(m.constructedAt).not.toContain(mmFor(REF))
+    expect(m.askedOn).not.toContain(Number(REF))
   })
 })
 

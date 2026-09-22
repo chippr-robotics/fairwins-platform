@@ -26,6 +26,7 @@ const withdrawData = (v) => IFACE.encodeFunctionData('withdraw', [v])
 const getBalance = vi.fn()
 const balanceOf = vi.fn()
 const symbolCall = vi.fn()
+const readCalls = []
 const getFeeData = vi.fn()
 const sendTransaction = vi.fn()
 const sendCalls = vi.fn()
@@ -54,19 +55,26 @@ vi.mock('../../config/passkeySupport', () => ({
 }))
 vi.mock('../../hooks/useRpcEndpoints', () => ({ useEndpointsRevision: () => 0 }))
 
-// Only `Contract` is stubbed — every read this hook makes goes through one, and the rest of ethers
-// (Interface, parseUnits, formatUnits) is the real thing so the encoded calldata under test is
-// genuinely what ethers would produce.
-vi.mock('ethers', async (importOriginal) => {
+/**
+ * Spec 110: the contract reads go through the chain seam, so the seam is what is faked — the
+ * `vi.mock('ethers')` that stood here stubbed `new ethers.Contract(address, abi, runner)`, a
+ * constructor whose fake (like every fake of it) IGNORED THE ADDRESS. A balance read aimed at the
+ * wrong contract, or at the wrong chain, passed every assertion in this file. Both are recorded
+ * and asserted now.
+ *
+ * ethers is still imported below, unmocked, purely as the cross-library oracle for the calldata:
+ * `IFACE.encodeFunctionData` is what the hook's viem encoder is being compared AGAINST, so it must
+ * be the real thing.
+ */
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: function MockContract(address, abi) {
-        // The symbol probe is built with a one-entry ABI; the balance reads use the full one.
-        return abi.length === 1 ? { symbol: symbolCall } : { balanceOf }
-      },
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      readCalls.push({ chainId, address, functionName, args })
+      if (functionName === 'symbol') return symbolCall()
+      if (functionName === 'balanceOf') return balanceOf(args[0])
+      throw new Error(`unexpected read: ${functionName}`)
     },
   }
 })
@@ -75,6 +83,7 @@ const { useWrapNative } = await import('../../hooks/useWrapNative')
 
 beforeEach(() => {
   vi.clearAllMocks()
+  readCalls.length = 0
   passkeySupport.supported = true
   passkeySupport.reason = null
   wallet.current = {
@@ -238,7 +247,11 @@ describe('who is acting', () => {
   // Guards the finding that wrap/unwrap read the CONNECTED wallet's balances and signed with the
   // connected signer while operating as a hardware account.
   it('reads balances from the hardware acting address, not the connected wallet (spec 088 FR-001)', async () => {
-    const HW = '0xHaRd000000000000000000000000000000000009'
+    // A REAL address. The placeholder that stood here ('0xHaRd…') is not hex and was only ever
+    // accepted because the fake `new Contract(address, …)` ignored its first argument entirely.
+    // Checksummed: the hook normalises the acting address before the read (divergence 16),
+    // so a fixture in another casing would assert on a string the seam never sees.
+    const HW = '0x00000000000000000000000000000000000000A9'
     active.current = {
       ...active.current,
       isHardware: true,
@@ -251,6 +264,14 @@ describe('who is acting', () => {
     await waitFor(() => expect(result.current.wrappedBalance).not.toBeNull())
     expect(balanceOf).toHaveBeenCalledWith(HW)
     expect(balanceOf).not.toHaveBeenCalledWith(wallet.current.address)
+    // And the read was aimed at the wrapper on the wrapper's own chain — the two facts the
+    // address-ignoring Contract fake could never distinguish.
+    expect(readCalls).toContainEqual({
+      chainId: MORDOR,
+      address: WRAPPED,
+      functionName: 'balanceOf',
+      args: [HW],
+    })
   })
 
   it('routes a hardware wrap through the acting-account seam, never the connected signer (spec 088 FR-002)', async () => {
@@ -343,7 +364,14 @@ describe('the target chain (spec 108) — the asset is the entry point', () => {
     const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
     await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
     await act(async () => {
-      await expect(view.result.current.wrap('1')).rejects.toThrow(/Polygon.*Mordor|Mordor.*Polygon/s)
+      // Spec 110 T026a — the GUARANTEE, not just "both names appear somewhere". This assertion used
+      // to be the loose regex alone, so when the refusal moved to the shared `settleWalletOn` its
+      // tail changed from "— nothing was sent" to "so nothing has been signed" and this suite stayed
+      // green; only the Cypress spec, which pinned the sentence, caught it. Pinning the phrase here
+      // means a wording change is a LOCAL failure rather than a CI one.
+      const err = await view.result.current.wrap('1').catch((e) => e)
+      expect(err.message).toMatch(/Polygon.*Mordor|Mordor.*Polygon/s)
+      expect(err.message).toMatch(/nothing has been signed/i)
     })
     expect(switchNetwork).toHaveBeenCalledWith(POLYGON)
     expect(sendTransaction).not.toHaveBeenCalled()

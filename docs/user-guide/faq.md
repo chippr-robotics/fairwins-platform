@@ -236,4 +236,4 @@ refunded wagers move there.
 ### Where can I get more help?
 
 Open an issue on
-[GitHub](https://github.com/chippr-robotics/prediction-dao-research/issues).
+[GitHub](https://github.com/chippr-robotics/fairwins-platform/issues).

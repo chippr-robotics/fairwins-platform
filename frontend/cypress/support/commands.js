@@ -1330,6 +1330,42 @@ Cypress.Commands.add('waitForWagerActive', (wagerId, tries = 60) => {
 })
 
 /**
+ * Refuse every JSON-RPC call the PAGE makes over HTTP, so the no-chain tier genuinely has no
+ * chain. Call BEFORE `cy.visit`.
+ *
+ * The fast tier's premise is that no node is running, but nothing was enforcing it: the app's
+ * read transports point at PUBLIC endpoints, and a CI runner has internet, so any chain the app
+ * happened to read answered for real. That was harmless only while the wager list read exactly
+ * one chain — the wallet's, which in this tier is 1337 at 127.0.0.1:8545 and refuses instantly.
+ * Spec 110 made the list span the build's whole cohort, and a `dev:fast` build has no
+ * VITE_NETWORK_ID, so the cohort is the five MAINNETS. Live Polygon then answered the seeded
+ * test account authoritatively — "this address has no wagers" — and the estate read did the
+ * correct thing with a correct answer: it replaced that chain's cache with the empty truth,
+ * deleting the wagers the spec had just seeded.
+ *
+ * So this is not a workaround for the product. It removes a dependency the tier was never
+ * supposed to have, and on which its result would otherwise turn: whether a public RPC host is
+ * reachable from the runner at that moment.
+ *
+ * Matching is on the REQUEST BODY, not the URL: a JSON-RPC envelope is unmistakable and no
+ * endpoint list has to be kept in step with `NETWORKS`. Everything else — IPFS, the gateway,
+ * Vite's own asset requests — is left to `req.continue()` untouched. The injected wallet is
+ * unaffected too: `cy.mockWeb3Provider` answers in-process on `window.ethereum` and never
+ * issues an HTTP request for the interceptor to see.
+ */
+Cypress.Commands.add('refuseChainReads', () => {
+  cy.intercept({ method: 'POST' }, (req) => {
+    const body = req.body
+    const envelope = Array.isArray(body) ? body[0] : body
+    if (envelope && typeof envelope === 'object' && envelope.jsonrpc === '2.0') {
+      req.destroy()
+      return
+    }
+    req.continue()
+  })
+})
+
+/**
  * Mock the IPFS (Pinata) boundary: store uploaded JSON in-memory and serve it back
  * on fetch, so the app's real encrypt → store → retrieve → decrypt round-trip runs
  * without a network. Call BEFORE cy.visit. `{ failFetch:true }` makes gateway reads

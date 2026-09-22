@@ -1,6 +1,6 @@
 # Runbook: Infrastructure operations
 
-**Spec**: [087-infrastructure-as-code](https://github.com/chippr-robotics/prediction-dao-research/tree/main/specs/087-infrastructure-as-code)
+**Spec**: [087-infrastructure-as-code](https://github.com/chippr-robotics/fairwins-platform/tree/main/specs/087-infrastructure-as-code)
 
 Operational procedures for the declarative estate. Design rationale lives in
 `docs/developer-guide/infrastructure-as-code.md`; this is what to do when something needs doing.
@@ -134,6 +134,97 @@ automated path, on purpose.
 
 All three are the system working. A fresh, unreviewed plan applying automatically is exactly what the
 design forbids.
+
+## The repository was renamed and every GCP job now fails auth
+
+**Symptom.** Every workflow that federates into GCP — `Plan`, `Apply`, anything using
+`google-github-actions/auth` — fails before it does any work:
+
+```
+google-github-actions/auth failed with: failed to generate Google Cloud federated token ...
+{"error":"unauthorized_client","error_description":"The given credential is rejected by the attribute condition."}
+```
+
+**Cause.** Workload Identity Federation pins the repository by name. GitHub puts the CURRENT name in
+the OIDC token's `repository` claim, so a rename invalidates two things at once:
+
+| Where | What it holds |
+|---|---|
+| `google_iam_workload_identity_pool_provider.github.attribute_condition` (`bootstrap/main.tf:96`) | `assertion.repository == "owner/name"` — rejects the token outright |
+| `google_service_account_iam_member.tf_plan_wif` (`bootstrap/main.tf:173`) | `principalSet://.../attribute.repository/owner/name` — would refuse the impersonation even if the token were issued |
+
+Both come from `var.github_repository`. **Only those two.** The apply and Android-signing bindings
+(`main.tf:180`, `main.tf:190`) are keyed on `attribute.ref/refs/heads/<default branch>`, which holds no
+repository name and survives a rename untouched — the provider condition is what bounds them to this
+repository.
+
+**Terraform cannot fix this.** Applying requires federating, and federating is what is being refused.
+The credential needed to repair the condition is the credential the condition rejects. The live pool
+has to be corrected out of band, by a human with admin rights, BEFORE any pipeline works again.
+
+**Recovery.** With an admin credential (`gcloud auth login` as a human, not the CI service account):
+
+```bash
+POOL=github-actions
+PROVIDER=github-oidc
+NEW=chippr-robotics/fairwins-platform      # the repo's CURRENT owner/name
+PROJECT_NUMBER=266380754692
+
+# 1. Repoint the provider's attribute condition.
+gcloud iam workload-identity-pools providers update-oidc "$PROVIDER" \
+  --project=chippr-bots-site-wp --location=global --workload-identity-pool="$POOL" \
+  --attribute-condition="assertion.repository == \"$NEW\""
+
+# 2. Grant the new principalSet on the PLAN identity — and ONLY the plan identity.
+POOL_PATH="projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL"
+gcloud iam service-accounts add-iam-policy-binding \
+  "fairwins-tf-plan@chippr-bots-site-wp.iam.gserviceaccount.com" \
+  --project=chippr-bots-site-wp \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/$POOL_PATH/attribute.repository/$NEW"
+```
+
+**Never add an `attribute.repository` member to `fairwins-tf-apply@` or the Android signing account.**
+Their bindings are `attribute.ref/refs/heads/<default branch>` on purpose: that is what makes "only
+merged, reviewed code applies" an authentication fact rather than a workflow convention
+(`main.tf:180`). A repository-wide member would let any branch that can trigger a workflow
+impersonate the apply identity — a step taken while recovering an outage, granting strictly more
+than the outage removed. Those two accounts need no action here.
+
+**Step 1 alone is not recovery.** It gets the token issued; the impersonation is a separate check, and
+skipping step 2 moves the failure rather than fixing it — `terraform init` then dies at the state
+bucket with `Permission 'iam.serviceAccounts.getAccessToken' denied`, which reads like a missing
+storage role and is not one.
+
+Use `add-iam-policy-binding`, never `set-iam-policy`: IAM here is **additive only** (see
+`check:iac` and `docs/developer-guide/infrastructure-as-code.md`). That covers step 2, which leaves
+the old member in place. It does **not** cover step 1: `update-oidc --attribute-condition` is a
+single-valued REPLACE, so after it the old name is rejected even though its member still exists.
+If the rename might be rolled back, make step 1 accept both names until it is final, then narrow it:
+
+```bash
+  --attribute-condition="assertion.repository in [\"$NEW\", \"chippr-robotics/<old-name>\"]"
+```
+
+Run **step 2 before step 1**, despite the numbering. Step 2 is additive and inert on its own, so
+doing it first means the impersonation grant is already in place when the cutover starts issuing
+tokens under the new name. In the other order, every run in the gap between the two commands fails
+on the `getAccessToken` 403 above — auth succeeds and the job dies at the state bucket, which is the
+confusing failure rather than the obvious one, and is exactly what happened here.
+
+**Then remove the stale grant** once a plan has run green — the old `attribute.repository/<old-name>`
+member should not outlive the rename, and a repository name can be re-registered by someone else.
+
+**Finally**, confirm `var.github_repository` in `infra/terraform/bootstrap/variables.tf` matches the
+new name and that a plan comes back **zero-diff**. If the code still names the old repo, the next
+apply reverts the console fix and the outage returns. Bootstrap state is local and committed, and
+no CI job applies it, so the committed `terraform.tfstate` still records the old condition and
+member. Run `terraform apply -refresh-only` in `infra/terraform/bootstrap` and commit the state, or
+the zero-diff check fails for reasons that have nothing to do with the live estate.
+
+**Not only GCP.** A rename also detaches anything else keyed on `owner/repo`: verify the Cloud Build
+GitHub trigger (`gcloud builds triggers list`) still points at the repository, and that its
+`--repo-name` matches.
 
 ## Rotating the Cloudflare token
 

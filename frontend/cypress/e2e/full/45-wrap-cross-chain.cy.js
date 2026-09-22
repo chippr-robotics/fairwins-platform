@@ -91,7 +91,11 @@ describe('Wrap across chains (spec 108)', () => {
     cy.get('[role="alert"]', { timeout: 20000 })
       .should('contain.text', 'Amoy')
       .and('contain.text', 'Mordor')
-      .and('contain.text', 'nothing was sent')
+      // Spec 110 T026a — the wrap refusal is now the SHARED one (`settleWalletOn`), so this reads
+      // "…so nothing has been signed" where spec 108's private loop said "— nothing was sent".
+      // Four surfaces had four sentences for the identical event; the shared one is spec 102's,
+      // already pinned by useActiveAccount's suite. Both chains named is the part that matters.
+      .and('contain.text', 'nothing has been signed')
     cy.contains('Done —').should('not.exist')
   })
 

@@ -11,7 +11,7 @@
 //   vi.mock('<rel>/hooks/useSelectableAssets', async () =>
 //     await import('<rel>/test/helpers/selectableAssetsMock'))
 
-// Chain 61 (Ethereum Classic) matches the global wagmi useChainId() test mock in
+// Chain 61 (Ethereum Classic) matches the chainId on the global wagmi useAccount() test mock in
 // src/test/setup.js, so panels that gate on the connected chain (Wager create) see
 // no false network mismatch when they render with this fixture.
 const USDC = '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359'

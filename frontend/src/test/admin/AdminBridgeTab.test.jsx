@@ -12,6 +12,11 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/rea
 import { axe } from 'vitest-axe'
 
 const m = vi.hoisted(() => ({
+  scanCalls: [],
+  readCalls: [],
+  blockTimestamp: null,
+  counts: {},
+  scanFails: null,
   addr: {},
   reads: {},
   events: {},
@@ -46,26 +51,84 @@ vi.mock('../../lib/bridge/bridgeStatus', async (orig) => ({
   ...(await orig()),
   fetchBridgeStatus: vi.fn(() => (m.status ? Promise.resolve(m.status) : Promise.reject(new Error('no gateway')))),
 }))
-vi.mock('ethers', async (orig) => {
+
+// The router AUTHORITY read (`hasRole`) moved onto the spec-110 chain seam; the tab's own router
+// reads still go through the contract mock above. Both serve `m.reads`, so a test's seed is unchanged.
+/**
+ * EVERY router read the tab makes, through the one chain seam.
+ *
+ * The `vi.mock('ethers')` this replaces had stopped intercepting anything once the tab left
+ * ethers — the retired-mock shape `src/test/lint/ethersMockRatchet.test.js` exists to catch. It
+ * mattered more than usual here: the per-read COUNTER lived in that fake, and the refetch-loop
+ * regression test at the bottom of this file asserts on it. Left behind, that test would have
+ * counted nothing while still looking like a guard.
+ *
+ * It records the CHAIN too, which the fake could not: it was handed a `runner` and the chain lived
+ * inside it, so a read against the wrong network's endpoint passed every assertion in this file —
+ * on a tab whose entire purpose is reading one network while the wallet sits on another.
+ */
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          // Name the event on the filter object so a single queryFilter stub can answer per event.
-          if (prop === 'filters') {
-            return new Proxy({}, { get: (_f, name) => () => ({ __event: String(name) }) })
-          }
-          const key = String(prop)
-          return (...args) => (m.reads[key] ? m.reads[key](...args) : Promise.resolve(undefined))
+  return {
+    ...actual,
+    readContract: (chainId, { address, functionName, args = [] }) => {
+      m.counts[functionName] = (m.counts[functionName] || 0) + 1
+      m.readCalls.push({ chainId, address, functionName, args })
+      return m.reads[functionName] ? m.reads[functionName](...args) : Promise.resolve(undefined)
+    },
+  }
+})
+
+/**
+ * The event scans (history + operations) moved onto the spec-110 chain seam.
+ *
+ * `m.events` is keyed by EVENT NAME exactly as before, so every test's seed is unchanged — what is
+ * new is that the mock records the CHAIN each scan was made on. The ethers fake it replaces got
+ * its chain from a `runner` object, so a scan against the wrong network's endpoint passed every
+ * assertion in this file, on a tab whose whole purpose is reading one network while the wallet
+ * sits on another.
+ */
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    m.scanCalls.push({ chainId, address })
+    return {
+      target: address,
+      provider: {
+        getBlockNumber: async () => 1_000_000,
+        // The seam hands `getLogsRange` a reader; the name rides on the topic filter so one stub
+        // can answer per event, exactly as the old `queryFilter` stub did.
+        getLogs: async ({ topics }) => {
+          // A seeded rejection stands in for an RPC that refuses the range — the path that must
+          // report the scan as UNREADABLE rather than as zero.
+          if (m.scanFails) throw m.scanFails
+          return (m.events[topics?.__event] || []).map((e) => ({ ...e }))
         },
       },
-    )
+      filters: new Proxy(
+        {},
+        {
+          get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }),
+        },
+      ),
+      // Logs are seeded already decoded — the seam's own parseLog has its own suite.
+      interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: (chainId) => ({
+      // Block timestamps come from the SCOPED chain's client now, not from the wallet's provider,
+      // so "this happened two hours ago" is seeded here.
+      getBlock: async () => ({
+        timestamp: BigInt(m.blockTimestamp ?? Math.floor(Date.now() / 1000) - 60),
+      }),
+      __chainId: chainId,
+    }),
   }
-  const FakeCtor = vi.fn(FakeContract)
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
 })
 
 import BridgeTab from '../../components/admin/BridgeTab'
@@ -76,7 +139,7 @@ const USDC_ETH = '0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48'
 const USDC_POLYGON = '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359'
 
 const ROUTE_TO_POLYGON = {
-  routeId: '0xroute1',
+  routeId: `0x${'a1'.repeat(32)}`,
   inputToken: USDC_ETH,
   outputToken: USDC_POLYGON,
   destinationChainId: 137n,
@@ -86,7 +149,7 @@ const ROUTE_TO_POLYGON = {
   nativeInput: false,
 }
 const ROUTE_TO_BASE = {
-  routeId: '0xroute2',
+  routeId: `0x${'a2'.repeat(32)}`,
   inputToken: USDC_ETH,
   outputToken: USDC_ETH,
   destinationChainId: 8453n,
@@ -155,6 +218,11 @@ afterEach(() => {
 
 beforeEach(() => {
   m.addr = { 1: ROUTER }
+  m.scanFails = null
+  m.scanCalls = []
+  m.readCalls = []
+  m.blockTimestamp = null
+  m.counts = {}
   m.events = {}
   m.receipts = {}
   m.feeQuote = { available: true, bps: 10, capBps: 250 }
@@ -496,9 +564,12 @@ describe('BridgeTab — operations are observational only (T126, FR-047)', () =>
         },
       },
     ]
-    // Two hours ago against a 15-minute window ⇒ past its expected delivery.
-    const stub = { ...providerStub, getBlock: () => Promise.resolve({ timestamp: longAgo }) }
-    render(<BridgeTab {...props({ isAdmin: true }).node} provider={stub} />)
+    // Two hours ago against a 15-minute window ⇒ past its expected delivery. Seeded on the
+    // SCOPED chain's client, which is where the timestamp is read from (spec 110) — it used to
+    // come from the wallet's provider, which is a different chain whenever this tab is doing the
+    // job it exists for.
+    m.blockTimestamp = longAgo
+    render(<BridgeTab {...props({ isAdmin: true }).node} />)
     const table = await screen.findByRole('table', { name: 'Recent bridges' })
     expect(within(table).getByText('Taking longer than expected')).toBeInTheDocument()
     expect(within(table).getByText('1.0 USDC')).toBeInTheDocument()
@@ -543,4 +614,46 @@ describe('BridgeTab — scope is a network, not the wallet (FR-050)', () => {
     await screen.findByRole('table', { name: 'Curated bridge routes' })
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  /**
+   * THE ASSERTION THE OLD FAKE COULD NOT MAKE (spec 110).
+   *
+   * This tab exists to read ONE network while the wallet sits on another. The ethers fake carried
+   * its chain inside a `runner` object and ignored the address it was constructed with, so a read
+   * or a scan aimed at the WRONG network — or at the other network's router — passed every
+   * assertion in this file. The chain is an argument now and the mocks record it.
+   *
+   * The invariant asserted is CHAIN AND ADDRESS ALWAYS AGREE, over every call, rather than "after
+   * the switch, everything is on 137". The second phrasing is what this test said first and it was
+   * FLAKY: clearing the recorder does not cancel reads already in flight from the previous mount,
+   * so a late chain-1 read lands after the clear and fails an assertion that is only usually true.
+   * Same defect as the mnemonic fixtures earlier in this task — a test that is right most of the
+   * time is a test that fails on somebody else's commit.
+   */
+  it('never reads one network at another network\'s router', async () => {
+    const OTHER = '0x7777777777777777777777777777777777777777'
+    // The two addresses must DIFFER, or every assertion below is satisfied by a collision rather
+    // than by correct routing — which is exactly how this test first passed with the defect
+    // reintroduced: the OTHER address chosen happened to equal this file's ROUTER.
+    expect(OTHER).not.toBe(ROUTER)
+    const HOME_OF = { 1: ROUTER, 137: OTHER }
+    m.addr = HOME_OF
+    render(<BridgeTab {...props({ isAdmin: true }).node} />)
+    await screen.findByRole('table', { name: 'Curated bridge routes' })
+
+    fireEvent.change(screen.getByLabelText(/^Network/), { target: { value: '137' } })
+    await waitFor(() =>
+      expect(m.readCalls.some((c) => Number(c.chainId) === 137)).toBe(true),
+    )
+
+    // Every call, whenever it landed: the address must be the router that lives on the chain the
+    // call names. A read for Polygon sent to Ethereum's router is the failure this tab must never
+    // have, and it is the one the fake could not see.
+    for (const call of [...m.readCalls, ...m.scanCalls]) {
+      expect(call.address, `chain ${call.chainId}`).toBe(HOME_OF[Number(call.chainId)])
+    }
+    // And both chains really were exercised, or the loop above proves nothing.
+    expect(m.readCalls.some((c) => Number(c.chainId) === 1)).toBe(true)
+  })
+
 })

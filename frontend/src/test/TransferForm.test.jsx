@@ -28,7 +28,6 @@ const quoteGaslessForAsset = (asset) => Number(asset?.chainId) === 137
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChainAsync, isPending: false }),
-  useChainId: () => 137,
   useAccount: () => ({ address: '0xAaAa000000000000000000000000000000000001', chainId: 137 }),
 }))
 vi.mock('../hooks/useWalletManagement', () => ({

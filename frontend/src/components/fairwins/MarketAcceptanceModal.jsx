@@ -1,9 +1,12 @@
 import { useState, useEffect, useCallback } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { formatUnits } from '../../lib/evm/units'
+import { getAddress } from '../../lib/evm/address'
 import { useWallet, useWeb3 } from '../../hooks'
 import { useActiveAccount } from '../../hooks/useActiveAccount'
 import { useGaslessWrite } from '../../lib/relay/useGaslessWrite'
-import { sanctionedAddressFrom, screenedPartyMessage } from '../../lib/wagers/sanctionsRevert'
+import { revertReasonFrom, sanctionedAddressFrom, screenedPartyMessage } from '../../lib/wagers/sanctionsRevert'
 import { useEncryption } from '../../hooks/useEncryption'
 import { fetchEncryptedEnvelope } from '../../utils/ipfsService'
 import {
@@ -71,6 +74,17 @@ const getWagerTypeLabel = (marketType) => {
  * - Accept/Decline actions
  * - Transaction processing states
  */
+const STAKE_TOKEN_ABI = [
+  'function approve(address,uint256) returns (bool)',
+  'function allowance(address,address) view returns (uint256)',
+  'function balanceOf(address) view returns (uint256)',
+  'function symbol() view returns (string)',
+  'function decimals() view returns (uint8)',
+]
+const STAKE_TOKEN_ABI_PARSED = normalizeAbi(STAKE_TOKEN_ABI)
+const stakeTokenCall = (functionName, args) =>
+  encodeFunctionData({ abi: STAKE_TOKEN_ABI_PARSED, functionName, args })
+
 function MarketAcceptanceModal({
   isOpen,
   onClose,
@@ -81,7 +95,7 @@ function MarketAcceptanceModal({
   contractABI
 }) {
   const { isConnected, account } = useWallet()
-  const { signer, isCorrectNetwork, switchNetwork, chainId, sendCalls, loginMethod, provider } = useWeb3()
+  const { signer, isCorrectNetwork, switchNetwork, chainId, sendCalls, loginMethod } = useWeb3()
   const isPasskey = loginMethod === 'passkey'
   // Spec 043 (US3): accepting a wager while operating as a vault becomes a threshold-gated vault proposal.
   // Spec 088 FR-001/FR-002: a recovered (legacy) or hardware acting account accepts AS ITSELF — its
@@ -349,42 +363,32 @@ function MarketAcceptanceModal({
         throw new Error('The acceptance deadline has passed. This offer can no longer be accepted.')
       }
 
-      // Reads use the signer when present, else the session read provider (a passkey session has no
-      // signer, but WalletContext exposes an RPC reader). Calldata encoding needs no signer.
-      const contract = new ethers.Contract(
-        contractAddress,
-        contractABI,
-        signer || provider
-      )
+      // Named chain, not "whatever the signer is bound to" (spec 110 read-routing decision).
+      // Calldata encoding needs no signer and never did.
+      const registryCall = (functionName, args) =>
+        encodeFunctionData({ abi: normalizeAbi(contractABI), functionName, args })
+      const askRegistry = (functionName, args) =>
+        readContract(chainId, { address: contractAddress, abi: contractABI, functionName, args })
 
       // v2: ERC20-only stakes. Pull on-chain wager to get authoritative stake amounts.
-      const w = await contract.getWager(marketId)
+      const w = await askRegistry('getWager', [marketId])
       const stakeAmount = w.opponentStake
       const stakeTokenAddress = w.token
 
-      if (!stakeTokenAddress || stakeTokenAddress === ethers.ZeroAddress) {
+      if (!stakeTokenAddress || stakeTokenAddress === zeroAddress) {
         throw new Error('Wager has no stake token configured. (Native stakes are not supported in v2.)')
       }
 
-      const tokenContract = new ethers.Contract(
-        stakeTokenAddress,
-        [
-          'function approve(address,uint256) returns (bool)',
-          'function allowance(address,address) view returns (uint256)',
-          'function balanceOf(address) view returns (uint256)',
-          'function symbol() view returns (string)',
-          'function decimals() view returns (uint8)',
-        ],
-        signer || provider
-      )
+      const askToken = (functionName, args) =>
+        readContract(chainId, { address: stakeTokenAddress, abi: STAKE_TOKEN_ABI, functionName, args })
 
       // Spec 043 (US3, FR-021): accepting AS a vault → batch [approve, acceptWager] as a threshold-gated
       // vault proposal (the Safe is the opponent; stake pulled from the vault). Only in the vault queue until
       // co-owners approve + execute (FR-022b). Skips the personal balance check — execution enforces it.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to accept as the vault.")
-        const approveData = tokenContract.interface.encodeFunctionData('approve', [contractAddress, stakeAmount])
-        const acceptData = contract.interface.encodeFunctionData('acceptWager', [marketId])
+        const approveData = stakeTokenCall('approve', [getAddress(String(contractAddress)), stakeAmount])
+        const acceptData = registryCall('acceptWager', [marketId])
         const res = await submitAsActive({
           batch: [
             { to: stakeTokenAddress, value: 0n, data: approveData },
@@ -400,17 +404,17 @@ function MarketAcceptanceModal({
       // Spec 088 FR-001 — the stake comes out of the ACTING account, so that is the balance the
       // check has to be about. Checking the connected wallet's balance would clear an accept the
       // acting account cannot cover, and reject one it can.
-      const balance = await tokenContract.balanceOf(takerAddress)
+      const balance = BigInt(await askToken('balanceOf', [getAddress(String(takerAddress))]))
       let tokenSymbol = marketData?.stakeTokenSymbol || 'tokens'
       let tokenDecimals = marketData?.stakeTokenDecimals || 18
-      try { tokenSymbol = await tokenContract.symbol() } catch { /* fall back to default */ }
-      try { tokenDecimals = Number(await tokenContract.decimals()) } catch { /* fall back to default */ }
+      try { tokenSymbol = await askToken('symbol') } catch { /* fall back to default */ }
+      try { tokenDecimals = Number(await askToken('decimals')) } catch { /* fall back to default */ }
 
       if (balance < stakeAmount) {
         throw new Error(
           `Insufficient ${tokenSymbol} balance. ` +
-          `Have ${ethers.formatUnits(balance, tokenDecimals)}, ` +
-          `need ${ethers.formatUnits(stakeAmount, tokenDecimals)}.`
+          `Have ${formatUnits(balance, tokenDecimals)}, ` +
+          `need ${formatUnits(stakeAmount, tokenDecimals)}.`
         )
       }
 
@@ -423,18 +427,20 @@ function MarketAcceptanceModal({
       // never-stranded fallback those rails already promise.
       if (actingAsSigner) {
         const calls = []
-        const allowance = await tokenContract.allowance(takerAddress, contractAddress)
+        const allowance = BigInt(
+          await askToken('allowance', [getAddress(String(takerAddress)), getAddress(String(contractAddress))]),
+        )
         if (allowance < stakeAmount) {
           calls.push({
             to: stakeTokenAddress,
             value: 0n,
-            data: tokenContract.interface.encodeFunctionData('approve', [contractAddress, stakeAmount]),
+            data: stakeTokenCall('approve', [getAddress(String(contractAddress)), stakeAmount]),
           })
         }
         calls.push({
           to: contractAddress,
           value: 0n,
-          data: contract.interface.encodeFunctionData('acceptWager', [marketId]),
+          data: registryCall('acceptWager', [marketId]),
         })
         const res = await submitAsActive({ batch: calls })
         if (res?.txHash) setTxHash(res.txHash)
@@ -450,17 +456,19 @@ function MarketAcceptanceModal({
           throw new Error('This wallet cannot accept on the current transaction rail.')
         }
         const calls = []
-        const allowance = await tokenContract.allowance(account, contractAddress)
+        const allowance = BigInt(
+          await askToken('allowance', [getAddress(String(account)), getAddress(String(contractAddress))]),
+        )
         if (allowance < stakeAmount) {
           calls.push({
             target: stakeTokenAddress,
-            data: tokenContract.interface.encodeFunctionData('approve', [contractAddress, stakeAmount]),
+            data: stakeTokenCall('approve', [getAddress(String(contractAddress)), stakeAmount]),
             value: 0n,
           })
         }
         calls.push({
           target: contractAddress,
-          data: contract.interface.encodeFunctionData('acceptWager', [marketId]),
+          data: registryCall('acceptWager', [marketId]),
           value: 0n,
         })
         const sent = await sendCalls(calls)
@@ -484,8 +492,11 @@ function MarketAcceptanceModal({
     } catch (err) {
       console.error('Error accepting offer:', err)
 
-      // v2 WagerRegistry custom-error string matches (selectors omitted — ethers v6
-      // already surfaces the named error in err.shortMessage / err.reason).
+      // v2 WagerRegistry custom-error string matches. These used to read `err.reason`, which ethers
+      // populated with the DECODED custom error name; viem puts that name in no message at all
+      // (spec 110 divergence 23), so the reads here route through `revertReasonFrom`, which knows
+      // both shapes. Without it every one of these five would fall through to the generic sentence
+      // the moment a revert came back from the chain seam instead of an ethers contract.
       const knownRevertReasons = {
         'NotOpen': 'Wager is not open. It may have already been accepted or cancelled.',
         'NotOpponent': 'You are not the named opponent for this wager.',
@@ -494,7 +505,7 @@ function MarketAcceptanceModal({
         'NotAllowedToken': 'The wager stake token is not on the allowlist.',
       }
 
-      let errorMessage = err.reason || err.message || 'Failed to accept offer'
+      let errorMessage = revertReasonFrom(err) || err.message || 'Failed to accept offer'
 
       // The sanctions guard is the one revert ethers cannot name: ISanctionsGuard's errors are NOT in
       // the registry ABI the frontend ships (they bubble up *through* the registry call), so a screened
@@ -552,24 +563,29 @@ function MarketAcceptanceModal({
     params: (wagerId) => ({ wagerId }),
     payment: (wagerId, stakeAmount) => ({ value: stakeAmount }),
     selfSubmit: async (wagerId, stakeAmount, stakeTokenAddress) => {
-      const contract = new ethers.Contract(contractAddress, contractABI, signer)
-      const tokenContract = new ethers.Contract(
-        stakeTokenAddress,
-        [
-          'function approve(address,uint256) returns (bool)',
-          'function allowance(address,address) view returns (uint256)',
-        ],
-        signer
+      const currentAllowance = BigInt(
+        await readContract(chainId, {
+          address: stakeTokenAddress,
+          abi: STAKE_TOKEN_ABI,
+          functionName: 'allowance',
+          args: [getAddress(String(account)), getAddress(String(contractAddress))],
+        }),
       )
-      const currentAllowance = await tokenContract.allowance(account, contractAddress)
       if (currentAllowance < stakeAmount) {
         console.log('Approving stake token for WagerRegistry...')
-        const approveTx = await tokenContract.approve(contractAddress, stakeAmount)
+        const approveTx = await signer.sendTransaction({
+          to: stakeTokenAddress,
+          data: stakeTokenCall('approve', [getAddress(String(contractAddress)), stakeAmount]),
+        })
         await approveTx.wait()
       }
       console.log('Sending acceptWager transaction...')
       const feeOverrides = await getFeeOverrides(signer.provider)
-      const tx = await contract.acceptWager(wagerId, feeOverrides)
+      const tx = await signer.sendTransaction({
+        to: contractAddress,
+        data: encodeFunctionData({ abi: normalizeAbi(contractABI), functionName: 'acceptWager', args: [wagerId] }),
+        ...feeOverrides,
+      })
       setTxHash(tx.hash)
       return tx.wait()
     },
@@ -582,8 +598,10 @@ function MarketAcceptanceModal({
     targetContract: contractAddress,
     params: (wagerId) => ({ wagerId }),
     selfSubmit: async (wagerId) => {
-      const contract = new ethers.Contract(contractAddress, contractABI, signer)
-      const tx = await contract.declineWager(wagerId)
+      const tx = await signer.sendTransaction({
+        to: contractAddress,
+        data: encodeFunctionData({ abi: normalizeAbi(contractABI), functionName: 'declineWager', args: [wagerId] }),
+      })
       setTxHash(tx.hash)
       return tx.wait()
     },
@@ -613,7 +631,11 @@ function MarketAcceptanceModal({
         if (typeof sendCalls !== 'function') {
           throw new Error('This wallet cannot decline on the current transaction rail.')
         }
-        const data = new ethers.Interface(contractABI).encodeFunctionData('declineWager', [marketId])
+        const data = encodeFunctionData({
+          abi: normalizeAbi(contractABI),
+          functionName: 'declineWager',
+          args: [marketId],
+        })
         const sent = await sendCalls([{ target: contractAddress, data, value: 0n }])
         result = { txHash: sent?.txHash ?? sent?.userOpHash ?? sent?.intentId }
       } else {
@@ -624,7 +646,9 @@ function MarketAcceptanceModal({
       setStep('declined')
     } catch (err) {
       let errorMessage = 'Failed to decline the offer.'
-      const reason = err?.reason || err?.data?.message || err?.message || ''
+      // Same divergence-23 reason as the accept path above: a decoded custom error's name is not
+      // in any viem message, so it is read through the shared helper rather than off `.reason`.
+      const reason = revertReasonFrom(err) || err?.data?.message || err?.message || ''
       if (reason.includes('NotOpen')) {
         errorMessage = 'This wager is no longer open. It may have been cancelled or already accepted.'
       } else if (reason.includes('NotOpponent')) {

@@ -1,6 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
-import { useChainId } from 'wagmi'
+import { encodeFunctionData } from 'viem'
+import { useWalletChainId } from '../hooks/useWalletChainId'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { formatEther, formatUnits, parseEther, parseUnits } from '../lib/evm/units'
+import { getAddress } from '../lib/evm/address'
 import { useWallet } from '../hooks/useWalletManagement'
 import { useEffectiveAccount } from '../hooks/useEffectiveAccount'
 import { useActiveAccount } from '../hooks/useActiveAccount'
@@ -20,6 +23,50 @@ import {
 } from '../lib/uniswap/swapUniverse'
 import { makeReadProvider } from '../utils/rpcProvider'
 import logger from '../utils/logger'
+
+const ERC20_ABI_PARSED = normalizeAbi(ERC20_ABI)
+const WNATIVE_ABI_PARSED = normalizeAbi(WNATIVE_ABI)
+const SWAP_ROUTER_ABI_PARSED = normalizeAbi(SWAP_ROUTER_02_ABI)
+const erc20Call = (functionName, args) =>
+  encodeFunctionData({ abi: ERC20_ABI_PARSED, functionName, args })
+const wnativeCall = (functionName, args) =>
+  encodeFunctionData({ abi: WNATIVE_ABI_PARSED, functionName, args })
+const swapRouterCall = (functionName, args) =>
+  encodeFunctionData({ abi: SWAP_ROUTER_ABI_PARSED, functionName, args })
+
+/**
+ * A QuoterV2 for `chainId`, shaped the way `lib/uniswap/quote.js` duck-types it
+ * (`quoter.quoteExactInputSingle.staticCall(params)`).
+ *
+ * The quote module is already off ethers and takes the quoter as an argument precisely so a
+ * cross-chain quote and a local one are the same computation; satisfying its duck type from the
+ * read seam keeps that true without touching it — the same move `resolvePool` and `getLogsRange`
+ * take with their readers.
+ */
+const quoterOn = (chainId, address) => ({
+  // The quoter names the chain and address it will read — so a caller (and a test) can check WHERE
+  // a quote comes from, not merely that some provider was constructed somewhere.
+  chainId,
+  address,
+  quoteExactInputSingle: {
+    staticCall: (params) =>
+      readContract(chainId, {
+        address,
+        abi: QUOTER_V2_ABI,
+        functionName: 'quoteExactInputSingle',
+        // Checksummed HERE, at the boundary, because this is where a caller's struct meets the
+        // encoder. `quoteBestRoute` builds the struct from whatever addresses it was handed and
+        // has no encoder of its own to answer for — and viem refuses an all-uppercase address
+        // ethers accepted (divergence 16). Normalising inside the adapter keeps the duck type
+        // honest for every caller rather than asking each one to remember.
+        args: [{
+          ...params,
+          tokenIn: getAddress(String(params.tokenIn)),
+          tokenOut: getAddress(String(params.tokenOut)),
+        }],
+      }),
+  },
+})
 
 const ZERO = '0x0000000000000000000000000000000000000000'
 
@@ -41,7 +88,7 @@ export function DexProvider({ children }) {
   } = useActiveAccount()
   // Spec 088: the shared acting-address seam covers every kind (legacy, hardware, derived).
   const { address: effectiveTradingAddress, isActingAccount: actingForTrade } = useEffectiveAccount()
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
   const network = getNetwork(chainId)
 
@@ -149,20 +196,27 @@ export function DexProvider({ children }) {
   const [quotingPrice, setQuotingPrice] = useState(false)
   const [slippage, setSlippage] = useState(DEFAULT_SLIPPAGE)
 
-  // Stablecoin contract for balance reads — available even when DEX is not.
-  const stableContract = useMemo(() => {
-    if (!readProvider || !stableConfig?.address) return null
-    return new ethers.Contract(stableConfig.address, ERC20_ABI, readProvider)
-  }, [readProvider, stableConfig])
+  /**
+   * Spec 110: these were four `new Contract(addr, abi, readProvider)` instances. They are now the
+   * ADDRESSES plus the chain they live on — the reads name the chain (`readContract(chainId, …)`)
+   * and the encoders are module-level, because neither ever needed a provider.
+   *
+   * `readProvider` stays in the gate, not the read: it is what answers "is there anything to read
+   * with", and `fetchBalances` still uses it for the NATIVE balance, which is a provider call and
+   * not a contract call.
+   */
+  const stableTokenAddress = useMemo(
+    () => (readProvider && stableConfig?.address ? stableConfig.address : null),
+    [readProvider, stableConfig],
+  )
 
   const contracts = useMemo(() => {
     if (!readProvider || !isDexAvailable) return null
-
     return {
-      wnative: new ethers.Contract(addresses.WNATIVE, WNATIVE_ABI, readProvider),
-      stable: new ethers.Contract(addresses.STABLECOIN, ERC20_ABI, readProvider),
-      swapRouter: new ethers.Contract(addresses.SWAP_ROUTER_02, SWAP_ROUTER_02_ABI, readProvider),
-      quoter: new ethers.Contract(addresses.QUOTER_V2, QUOTER_V2_ABI, readProvider),
+      wnative: addresses.WNATIVE,
+      stable: addresses.STABLECOIN,
+      swapRouter: addresses.SWAP_ROUTER_02,
+      quoter: addresses.QUOTER_V2,
     }
   }, [readProvider, isDexAvailable, addresses])
 
@@ -172,30 +226,29 @@ export function DexProvider({ children }) {
     }
 
     if (!readProvider || !tradingAddress) return
-    // Need at least stableContract or full DEX contracts to fetch anything useful
-    if (!stableContract && !contracts) return
+    // Need at least the stablecoin or the full DEX set to fetch anything useful
+    if (!stableTokenAddress && !contracts) return
 
     try {
       setLoading(true)
 
       const nativeBalance = await readProvider.getBalance(tradingAddress)
+      const holder = getAddress(String(tradingAddress))
+      const balanceOfOn = (address) =>
+        readContract(chainId, { address, abi: ERC20_ABI, functionName: 'balanceOf', args: [holder] })
 
-      // Fetch wnative only when DEX contracts are available
-      const wnativeBalance = contracts
-        ? await contracts.wnative.balanceOf(tradingAddress)
-        : 0n
+      // Fetch wnative only when the DEX set is available
+      const wnativeBalance = contracts ? await balanceOfOn(contracts.wnative) : 0n
 
-      // Fetch stable balance from DEX contracts if available, otherwise
-      // fall back to the standalone stableContract
-      const stableReader = contracts?.stable || stableContract
-      const stableBalance = stableReader
-        ? await stableReader.balanceOf(tradingAddress)
-        : 0n
+      // Fetch the stable balance from the DEX set if available, otherwise from the
+      // standalone stablecoin address
+      const stableAddress = contracts?.stable || stableTokenAddress
+      const stableBalance = stableAddress ? await balanceOfOn(stableAddress) : 0n
 
       const newBalances = {
-        native: ethers.formatEther(nativeBalance),
-        wnative: ethers.formatEther(wnativeBalance),
-        stable: ethers.formatUnits(stableBalance, tokens.STABLE.decimals),
+        native: formatEther(nativeBalance),
+        wnative: formatEther(wnativeBalance),
+        stable: formatUnits(stableBalance, tokens.STABLE.decimals),
       }
 
       // Balances for the rest of the tradeable set (curated commodities/tools/
@@ -215,9 +268,8 @@ export function DexProvider({ children }) {
       await Promise.all(
         extraTokens.map(async (t) => {
           try {
-            const erc20 = new ethers.Contract(t.address, ERC20_ABI, readProvider)
-            const bal = await erc20.balanceOf(tradingAddress)
-            tokenBalances[t.address.toLowerCase()] = ethers.formatUnits(bal, t.decimals)
+            const bal = await balanceOfOn(t.address)
+            tokenBalances[t.address.toLowerCase()] = formatUnits(bal, t.decimals)
           } catch {
             tokenBalances[t.address.toLowerCase()] = '0'
           }
@@ -239,7 +291,7 @@ export function DexProvider({ children }) {
     } finally {
       setLoading(false)
     }
-  }, [readProvider, tradingAddress, contracts, stableContract, tokens.STABLE.decimals, tradeTokens, addresses])
+  }, [readProvider, chainId, tradingAddress, contracts, stableTokenAddress, tokens.STABLE.decimals, tradeTokens, addresses])
 
   // Reset balances when the chain or the active account changes so the user
   // doesn't see stale numbers (e.g. personal balances while operating as a vault).
@@ -267,8 +319,8 @@ export function DexProvider({ children }) {
 
     try {
       setLoading(true)
-      const amountWei = ethers.parseEther(amount)
-      const data = contracts.wnative.interface.encodeFunctionData('deposit', [])
+      const amountWei = parseEther(amount)
+      const data = wnativeCall('deposit', [])
       const call = { to: addresses.WNATIVE, value: amountWei, data }
 
       if (operatingAsVault) {
@@ -308,8 +360,8 @@ export function DexProvider({ children }) {
 
     try {
       setLoading(true)
-      const amountWei = ethers.parseEther(amount)
-      const data = contracts.wnative.interface.encodeFunctionData('withdraw', [amountWei])
+      const amountWei = parseEther(amount)
+      const data = wnativeCall('withdraw', [amountWei])
       const call = { to: addresses.WNATIVE, value: 0n, data }
 
       if (operatingAsVault) {
@@ -367,25 +419,25 @@ export function DexProvider({ children }) {
       setQuotingPrice(true)
       const decIn = decimalsOf(tokenIn)
       const decOut = decimalsOf(tokenOut)
-      const amountInWei = ethers.parseUnits(amountIn, decIn)
+      const amountInWei = parseUnits(amountIn, decIn)
 
       const params = {
-        tokenIn,
-        tokenOut,
+        tokenIn: getAddress(String(tokenIn)),
+        tokenOut: getAddress(String(tokenOut)),
         amountIn: amountInWei,
         fee: feeTier,
         sqrtPriceLimitX96: 0,
       }
 
-      const result = await contracts.quoter.quoteExactInputSingle.staticCall(params)
-      return ethers.formatUnits(result[0], decOut)
+      const result = await quoterOn(chainId, contracts.quoter).quoteExactInputSingle.staticCall(params)
+      return formatUnits(result[0], decOut)
     } catch (error) {
       console.error('Error getting quote:', error)
       throw error
     } finally {
       setQuotingPrice(false)
     }
-  }, [contracts, decimalsOf])
+  }, [contracts, chainId, decimalsOf])
 
   /**
    * Quote a pair on ANY swap-capable network — the read half of multi-network
@@ -409,7 +461,7 @@ export function DexProvider({ children }) {
       throw new Error(`Swapping is not available on ${NETWORKS[target]?.name || 'that network'}`)
     }
 
-    let quoter = contracts?.quoter
+    let quoter = contracts ? quoterOn(chainId, contracts.quoter) : null
     let decIn = decimalsOf(tokenIn)
     let decOut = decimalsOf(tokenOut)
     let symIn = symbolOf(tokenIn)
@@ -417,8 +469,11 @@ export function DexProvider({ children }) {
 
     if (!isActive) {
       const targetAddresses = getSwapAddresses(target)
-      const provider = makeReadProvider(NETWORKS[target].rpcUrl, target)
-      quoter = new ethers.Contract(targetAddresses.quoter, QUOTER_V2_ABI, provider)
+      // The seam resolves the endpoint for `target` (spec 069 precedence: member override →
+      // issued → build default). The line it replaces hand-built a provider from
+      // `NETWORKS[target].rpcUrl`, which spec 069 forbids in as many words — so a member who had
+      // repointed that network was quoted through the build default anyway.
+      quoter = quoterOn(target, targetAddresses.quoter)
       const metaIn = getSwapTokenMeta(target, tokenIn)
       const metaOut = getSwapTokenMeta(target, tokenOut)
       decIn = metaIn?.decimals ?? 18
@@ -485,7 +540,7 @@ export function DexProvider({ children }) {
       const quote = await getBestQuote(tokenIn, tokenOut, amountIn)
 
       const decIn = decimalsOf(tokenIn)
-      const amountInWei = ethers.parseUnits(amountIn, decIn)
+      const amountInWei = parseUnits(amountIn, decIn)
       const isLimit = opts.limitMinOutWei != null
       const minAmountOutWei = isLimit ? BigInt(opts.limitMinOutWei) : quote.minimumReceivedWei
 
@@ -495,25 +550,33 @@ export function DexProvider({ children }) {
         )
       }
 
-      const erc20 = new ethers.Interface(ERC20_ABI)
+      // Every address is checksummed before it reaches the encoder (divergence 16); the router
+      // and the recipient decide where the member's money goes, so the validator and the encoder
+      // have to agree about what an address is.
+      const routerAddress = getAddress(String(addresses.SWAP_ROUTER_02))
       const swapParams = (recipient) => ({
-        tokenIn,
-        tokenOut,
+        tokenIn: getAddress(String(tokenIn)),
+        tokenOut: getAddress(String(tokenOut)),
         fee: quote.feeTier,
-        recipient,
+        recipient: getAddress(String(recipient)),
         amountIn: amountInWei,
         amountOutMinimum: minAmountOutWei,
         sqrtPriceLimitX96: 0,
       })
+      const allowanceOf = (owner) =>
+        readContract(chainId, {
+          address: tokenIn,
+          abi: ERC20_ABI,
+          functionName: 'allowance',
+          args: [getAddress(String(owner)), routerAddress],
+        })
 
       // Spec 043 (US3, FR-022a): swap AS a vault → batch [approve, exactInputSingle] with recipient = the
       // vault, proposed as a threshold-gated vault transaction. Only in the vault queue until executed.
       if (operatingAsVault) {
         if (!canActAsVault) throw new Error("Switch to the vault's network to swap as the vault.")
-        const approveData = erc20.encodeFunctionData('approve', [addresses.SWAP_ROUTER_02, amountInWei])
-        const swapData = contracts.swapRouter.interface.encodeFunctionData('exactInputSingle', [
-          swapParams(activeIdentity.vaultAddress),
-        ])
+        const approveData = erc20Call('approve', [routerAddress, amountInWei])
+        const swapData = swapRouterCall('exactInputSingle', [swapParams(activeIdentity.vaultAddress)])
         const res = await submitAsActive({
           batch: [
             { to: tokenIn, value: 0n, data: approveData },
@@ -529,16 +592,15 @@ export function DexProvider({ children }) {
       // Approve is included only when the current allowance is short.
       if (operatingAsLegacy || operatingAsHardware) {
         // Spec 088: acting signer obtained on demand by submitAsActive — see wrapNative.
-        const legacyAllowance = await new ethers.Contract(tokenIn, ERC20_ABI, readProvider)
-          .allowance(tradingAddress, addresses.SWAP_ROUTER_02)
+        const legacyAllowance = BigInt(await allowanceOf(tradingAddress))
         const batch = []
         if (legacyAllowance < amountInWei) {
-          batch.push({ to: tokenIn, value: 0n, data: erc20.encodeFunctionData('approve', [addresses.SWAP_ROUTER_02, amountInWei]) })
+          batch.push({ to: tokenIn, value: 0n, data: erc20Call('approve', [routerAddress, amountInWei]) })
         }
         batch.push({
           to: addresses.SWAP_ROUTER_02,
           value: 0n,
-          data: contracts.swapRouter.interface.encodeFunctionData('exactInputSingle', [swapParams(tradingAddress)]),
+          data: swapRouterCall('exactInputSingle', [swapParams(tradingAddress)]),
         })
         const res = await submitAsActive({ batch })
         await fetchBalances()
@@ -551,23 +613,20 @@ export function DexProvider({ children }) {
       // signed transactions for classic wallets.
       if (typeof sendCalls !== 'function') throw new Error('Wallet not connected')
 
-      const tokenInContract = new ethers.Contract(tokenIn, ERC20_ABI, readProvider)
-      const allowance = await tokenInContract.allowance(tradingAddress, addresses.SWAP_ROUTER_02)
+      const allowance = BigInt(await allowanceOf(tradingAddress))
 
       const calls = []
       if (allowance < amountInWei) {
         calls.push({
           to: tokenIn,
           value: 0n,
-          data: erc20.encodeFunctionData('approve', [addresses.SWAP_ROUTER_02, amountInWei]),
+          data: erc20Call('approve', [routerAddress, amountInWei]),
         })
       }
       calls.push({
         to: addresses.SWAP_ROUTER_02,
         value: 0n,
-        data: contracts.swapRouter.interface.encodeFunctionData('exactInputSingle', [
-          swapParams(tradingAddress),
-        ]),
+        data: swapRouterCall('exactInputSingle', [swapParams(tradingAddress)]),
       })
 
       const res = await sendCalls(calls)
@@ -581,7 +640,7 @@ export function DexProvider({ children }) {
     } finally {
       setLoading(false)
     }
-  }, [contracts, chainId, tradingAddress, readProvider, getBestQuote, fetchBalances, decimalsOf, addresses, operatingAsVault, canActAsVault, operatingAsLegacy, operatingAsHardware, activeIdentity, submitAsActive, sendCalls])
+  }, [contracts, chainId, tradingAddress, getBestQuote, fetchBalances, decimalsOf, addresses, operatingAsVault, canActAsVault, operatingAsLegacy, operatingAsHardware, activeIdentity, submitAsActive, sendCalls])
 
   const value = {
     balances,

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { ethers } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { sortParticipants } from '../../lib/pools/participantOrder'
 import SensitiveValue from '../common/SensitiveValue'
 
@@ -123,7 +123,7 @@ export default function PoolParticipants({
               {hasPayout && (
                 <span className="pool-participant-payout" data-testid="participant-payout">
                   {inMoney ? (
-                    <SensitiveValue>{`${ethers.formatUnits(amount, tokenDecimals)} ${tokenSymbol}`}</SensitiveValue>
+                    <SensitiveValue>{`${formatUnits(amount, tokenDecimals)} ${tokenSymbol}`}</SensitiveValue>
                   ) : (
                     'No payout'
                   )}

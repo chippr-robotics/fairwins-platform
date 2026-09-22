@@ -18,9 +18,31 @@
  * funds to a smart account" the recommended follow-up, but it is OPTIONAL —
  * storing the key completes recovery on its own. When chosen, the move sweeps
  * ALL supported assets (native + supported ERC-20s), not just the native coin.
+ *
+ * ── THE CHAIN IS AN ARGUMENT (spec 110) ───────────────────────────────────────────────────────
+ * Every function that touches a network takes `chainId` (with `client` as the injection point a
+ * test or a caller holding its own client uses), not a provider object. That is the structural
+ * point of issue #1552: `new Contract(address, abi, provider)` fused "which contract" with
+ * "which chain", so a chain could only ever be the one the caller's provider happened to be on.
+ * Reads go through the spec-069 route resolver; writes go through `signerForSecret`, which is an
+ * ethers-SHAPED duck type over a viem local account — the callers of this module (the sweep, the
+ * acting-account broker, `CustodyContext`) are unchanged by that, deliberately.
+ *
+ * TWO behaviours that the libraries do NOT share are load-bearing here and are handled at the
+ * seams rather than restated per call site: the fee policy (`lib/chains/feeData.js`, divergence
+ * 28 — viem's estimate is 1.2× base where ethers' was 2×, and it THROWS outright on a
+ * legacy-priced chain like ETC/Mordor), and the revert contract (`lib/chains/ethersCompat.js`,
+ * divergence 29 — `tx.wait()` must REJECT on a reverted receipt, or a failed transfer is recorded
+ * as an asset that moved).
  */
 
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { isAddress } from '../evm/address'
+import { isValidMnemonic } from '../evm/mnemonic'
+import { getPublicClient } from '../chains/publicClient'
+import { normalizeAbi } from '../chains/readContract'
+import { estimateFeeData } from '../chains/feeData'
+import { localAccount, localKeySigner } from '../chains/localKeySigner'
 import { getPortfolioRegistry } from '../../config/assetTaxonomy'
 import { TRANSFER_ABI } from '../transfer/eip3009Transfer'
 import { loadLegacyRecoveredKeys, saveLegacyRecoveredKeys } from './legacyRecoveredKeysStore'
@@ -64,8 +86,8 @@ export function classifySecret(input) {
   const hex = raw.startsWith('0x') ? raw : `0x${raw}`
   if (PRIVATE_KEY_RE.test(hex)) {
     try {
-      const wallet = new ethers.Wallet(hex)
-      return { kind: 'privateKey', address: wallet.address, secret: hex.toLowerCase(), wordCount: 0 }
+      const address = localAccount({ kind: 'privateKey', secret: hex }).address
+      return { kind: 'privateKey', address, secret: hex.toLowerCase(), wordCount: 0 }
     } catch {
       /* not a usable key — fall through to invalid */
     }
@@ -76,9 +98,14 @@ export function classifySecret(input) {
   if (VALID_WORD_COUNTS.includes(words.length)) {
     const phrase = words.join(' ').toLowerCase()
     try {
-      if (ethers.Mnemonic.isValidMnemonic(phrase)) {
-        const wallet = ethers.HDNodeWallet.fromPhrase(phrase)
-        return { kind: 'mnemonic', address: wallet.address, secret: phrase, wordCount: words.length }
+      // Spec 110 — the seam, NOT `ethers.Mnemonic.isValidMnemonic`, and never dropped as
+      // redundant. This gate is what stops viem's `mnemonicToAccount` deriving a real, plausible
+      // address from a phrase with one mistyped word (divergence h, measured): the member would be
+      // shown an address, told the import worked, and find an empty account while their actual
+      // funds sit somewhere they were never shown.
+      if (isValidMnemonic(phrase)) {
+        const address = localAccount({ kind: 'mnemonic', secret: phrase }).address
+        return { kind: 'mnemonic', address, secret: phrase, wordCount: words.length }
       }
     } catch {
       /* invalid checksum / word — fall through */
@@ -89,46 +116,43 @@ export function classifySecret(input) {
 }
 
 /**
- * A provider-connected legacy signer that assigns its OWN nonces.
+ * The address a secret controls — derivation only, no chain, no network.
  *
- * A bare ethers Wallet asks the provider for its nonce on every send, and ethers v6's provider
- * caches every call result for 250 ms (`cacheTimeout`). Two sends in quick succession — approve
- * then pay, or a sweep's ERC-20 transfers — can therefore both be handed the SAME nonce when the
- * first mines inside that window (an automining local chain, a fast L2): the second is refused with
- * "Nonce too low" and the flow fails on the pay leg. The CI log for spec 098's recovered-account
- * purchase showed exactly this — no nonce lookup at all between the approve receipt and the failed
- * pay. ethers' NonceManager tracks the nonce locally and increments per send, so sequential sends
- * are 0, 1, 2 whatever the provider cache says. On a FAILED send the local count is reset, because
- * NonceManager increments before the send and a refused transaction never consumed its nonce —
- * without the reset the next send would be one too high. A transaction that arrives with its own
- * nonce (the multi-asset sweep numbers each leg itself) is sent as given.
- *
- * `address` is kept on the wrapper so callers that read the wallet's address property keep working.
+ * Spec 110: `mnemonicToAccount`/`privateKeyToAccount` derive at m/44'/60'/0'/0/0, the same path
+ * `ethers.HDNodeWallet.fromPhrase` and `new ethers.Wallet` did. That equality is the one thing
+ * here a member cannot survive being wrong about — a different address is their funds pointed
+ * somewhere they were never shown — so it is proven over generated phrases and keys rather than
+ * read off the documentation (`src/test/recovery/derivationParity.test.js`).
  */
-class ManagedLegacySigner extends ethers.NonceManager {
-  get address() {
-    return this.signer.address
-  }
-
-  async sendTransaction(tx) {
-    // A caller that numbers its own transactions (the multi-asset sweep) keeps its numbering.
-    if (tx && tx.nonce != null) return this.signer.sendTransaction(tx)
-    try {
-      return await super.sendTransaction(tx)
-    } catch (e) {
-      this.reset()
-      throw e
-    }
-  }
+export function addressFromSecret({ kind, secret }) {
+  return localAccount({ kind, secret }).address
 }
 
 /**
- * Build a signer from a classified secret: a bare Wallet when no provider is given (address
- * derivation only), or a provider-connected, nonce-managed signer for sending.
+ * An ethers-shaped signer for a legacy secret on a NAMED chain, assigning its OWN nonces.
+ *
+ * The nonce discipline is the reason this is not a bare account. A signer that asks the node for
+ * its nonce on every send can be handed the SAME one twice when the first transaction mines
+ * inside a cache window or a failover pool answers from a node that has not caught up — approve
+ * then pay, or a sweep's consecutive transfers — and the second is refused "Nonce too low". The
+ * spec-098 recovered-account purchase failed exactly that way in CI, with no nonce lookup at all
+ * between the approve receipt and the failed pay.
+ *
+ * That used to be an `ethers.NonceManager` subclass, and it is now the nonce manager in
+ * `lib/chains/localKeySigner.js` — viem's, with the ZERO case closed, because viem's own
+ * stale-read guard is written `previousNonce > 0` and a never-used recovered account is exactly
+ * the account that falls through it (divergence 30; the behaviours are pinned by test, because
+ * "the library does this" is a claim about a version). A caller that numbers its own
+ * transactions (the multi-asset sweep) is passed through untouched: viem bypasses the manager
+ * entirely when an explicit nonce is given.
+ *
+ * @param {{kind: 'mnemonic'|'privateKey', secret: string}} classified
+ * @param {{chainId?: number, client?: import('viem').PublicClient}} [route]
+ * @returns {object|null} the ethers duck type, or null when the chain has no RPC route
  */
-export function walletFromSecret({ kind, secret }, provider = null) {
-  const wallet = kind === 'mnemonic' ? ethers.HDNodeWallet.fromPhrase(secret) : new ethers.Wallet(secret)
-  return provider ? new ManagedLegacySigner(wallet.connect(provider)) : wallet
+export function signerForSecret({ kind, secret }, { chainId, client } = {}) {
+  const account = localAccount({ kind, secret }, { managed: true })
+  return localKeySigner({ account, chainId, client })
 }
 
 async function deriveWrapKey(passphrase, salt, iterations, subtle) {
@@ -272,16 +296,20 @@ export async function unlockLegacySecret({ entry, passphrase, deps = {} }) {
 }
 
 /**
- * Unlock a stored recovered account into a live, provider-connected ethers signer
- * that can be used to "act as" that account (spec 062 follow-up). The secret is
- * decrypted (biometric or passphrase) into a signer and returned; the caller
- * holds it in memory only for the session and never persists it.
+ * Unlock a stored recovered account into a live signer on a NAMED chain, so the app can "act as"
+ * that account (spec 062 follow-up). The secret is decrypted (biometric or passphrase) into a
+ * signer and returned; the caller holds it in memory only for the session and never persists it.
  *
- * @returns {Promise<ethers.Signer>}
+ * Raises rather than returning null when the chain has no route: a caller handed `null` here
+ * would report "unlocked" and fail at the first send, and the member has just proved who they are.
+ *
+ * @returns {Promise<object>} an ethers-shaped signer (see `signerForSecret`)
  */
-export async function unlockLegacyAccount({ entry, passphrase, provider, deps = {} }) {
+export async function unlockLegacyAccount({ entry, passphrase, chainId, client, deps = {} }) {
   const secret = await unlockLegacySecret({ entry, passphrase, deps })
-  return walletFromSecret({ kind: entry.kind, secret }, provider)
+  const signer = signerForSecret({ kind: entry.kind, secret }, { chainId, client })
+  if (!signer) throw new Error('There is no network connection to this chain, so this account cannot sign here.')
+  return signer
 }
 
 /**
@@ -333,13 +361,20 @@ const TRANSFER_GAS_LIMIT = 21000n
  * Quote a native-currency sweep from a legacy key to a destination: how much is
  * on it, the reserved gas, and the sendable remainder. Read-only.
  *
+ * @param {object} args
+ * @param {number} [args.chainId] - the chain to read; never ambient
+ * @param {import('viem').PublicClient} [args.client] - resolved from `chainId` when absent
  * @returns {Promise<{ from: string, balance: bigint, gasReserve: bigint,
  *   sendable: bigint, gasLimit: bigint, gasPrice: bigint }>}
  */
-export async function quoteNativeSweep({ kind, secret, provider }) {
-  if (!provider) throw new Error('No network connection to check the balance.')
-  const from = walletFromSecret({ kind, secret }).address
-  const [balance, feeData] = await Promise.all([provider.getBalance(from), provider.getFeeData()])
+export async function quoteNativeSweep({ kind, secret, chainId, client }) {
+  const publicClient = client ?? getPublicClient(chainId)
+  if (!publicClient) throw new Error('No network connection to check the balance.')
+  const from = addressFromSecret({ kind, secret })
+  const [balance, feeData] = await Promise.all([
+    publicClient.getBalance({ address: from }),
+    estimateFeeData(publicClient),
+  ])
   const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n
   const gasReserve = (TRANSFER_GAS_LIMIT * gasPrice * GAS_BUFFER_NUM) / GAS_BUFFER_DEN
   const sendable = balance > gasReserve ? balance - gasReserve : 0n
@@ -353,18 +388,21 @@ export async function quoteNativeSweep({ kind, secret, provider }) {
  *
  * @returns {Promise<object>} the sent transaction (already broadcast)
  */
-export async function sweepNativeToSmartAccount({ kind, secret, to, provider }) {
-  if (!ethers.isAddress(to)) throw new Error('Enter a valid destination address.')
-  const quote = await quoteNativeSweep({ kind, secret, provider })
+export async function sweepNativeToSmartAccount({ kind, secret, to, chainId, client }) {
+  if (!isAddress(to)) throw new Error('Enter a valid destination address.')
+  const publicClient = client ?? getPublicClient(chainId)
+  const quote = await quoteNativeSweep({ kind, secret, chainId, client: publicClient })
   if (quote.sendable <= 0n) {
     throw new Error('This key does not hold enough to cover the network fee — there is nothing to transfer.')
   }
-  const wallet = walletFromSecret({ kind, secret }, provider)
-  return wallet.sendTransaction({ to, value: quote.sendable, gasLimit: quote.gasLimit })
+  const signer = signerForSecret({ kind, secret }, { chainId, client: publicClient })
+  return signer.sendTransaction({ to, value: quote.sendable, gasLimit: quote.gasLimit })
 }
 
-// Minimal ABI for reading an arbitrary account's ERC-20 balance.
-const BALANCE_OF_ABI = ['function balanceOf(address) view returns (uint256)']
+// Minimal ABI for reading an arbitrary account's ERC-20 balance. Normalised once, at module
+// scope, because `normalizeAbi` caches on the array's identity.
+const BALANCE_OF_ABI = normalizeAbi(['function balanceOf(address) view returns (uint256)'])
+const TRANSFER_CALL_ABI = normalizeAbi(TRANSFER_ABI)
 
 /**
  * The fee fields a transaction must CARRY so it is priced exactly as the reserve set aside for
@@ -391,9 +429,9 @@ export function pinnedFeeFields(price, priority) {
  * by the legs behind it; a fee that falls is not a reason to cut the margin the member was quoted.
  * Monotone by construction, so the schedule the sweep pins is the highest price it has seen.
  */
-async function raisedFeeSchedule(provider, price, priority) {
+async function raisedFeeSchedule(client, price, priority) {
   try {
-    const fresh = await provider.getFeeData()
+    const fresh = await estimateFeeData(client)
     const freshPrice = fresh?.maxFeePerGas ?? fresh?.gasPrice ?? 0n
     if (freshPrice > price) {
       return {
@@ -435,17 +473,27 @@ function coinSpentBy(tx, receipt, price) {
 }
 
 /**
- * The node's own words, where ethers wrapped them in a placeholder.
+ * The node's own words, wherever the library put them.
  *
- * ethers raises `could not coalesce error` whenever a JSON-RPC failure matches none of the shapes
- * it knows — which includes Hardhat's insufficient-funds message, because that message does not
- * contain the string "insufficient funds". The underlying error is still attached; reaching for it
- * is the difference between telling a member their coin could not cover the fee and telling them
- * nothing at all.
+ * Both libraries bury them, differently, and neither surfaces them in `message` alone. ethers
+ * raised `could not coalesce error` whenever a JSON-RPC failure matched none of the shapes it
+ * knew — which includes Hardhat's insufficient-funds message, because that message does not
+ * contain the string "insufficient funds" — and attached the original under `info.error`. viem
+ * keeps them in `details` and nests the raw `RpcRequestError` under `cause`, sometimes two deep,
+ * while `message` is a multi-line block with the whole request echoed into it. Reaching for the
+ * node's sentence is the difference between telling a member their coin could not cover the fee
+ * and telling them nothing they can act on.
  */
 function nodeMessageOf(e) {
-  return e?.info?.error?.message ?? e?.error?.message ?? e?.info?.message ?? null
+  for (let err = e, depth = 0; err && depth < 6; err = err.cause, depth += 1) {
+    const words = err.details ?? err.info?.error?.message ?? err.error?.message ?? err.info?.message
+    if (typeof words === 'string' && words.trim()) return words.trim()
+  }
+  return null
 }
+
+/** viem's `message` is a multi-line block; its first line is the sentence, the rest is the dump. */
+const firstLine = (text) => String(text).split('\n')[0].trim()
 
 /**
  * A stable, honest reason for a per-asset failure. Never surfaces the library's own
@@ -455,15 +503,18 @@ function nodeMessageOf(e) {
  */
 export function describeTransferFailure(e) {
   const node = nodeMessageOf(e)
-  const raw = e?.reason || e?.shortMessage || e?.message || ''
+  const raw = e?.reason || e?.shortMessage || (e?.message ? firstLine(e.message) : '')
   const both = `${raw} ${node ?? ''}`
-  if (/insufficient funds|enough funds|max upfront cost|gas \* price \+ value/i.test(both)) {
+  // The last two alternatives are viem's own wording for the same condition — its
+  // `InsufficientFundsError` says "exceeds the balance of the account", and a send it could not
+  // even price says the total cost exceeds it. Same fact, different sentence.
+  if (/insufficient funds|enough funds|max upfront cost|gas \* price \+ value|exceeds the balance|exceeds transaction sender account balance/i.test(both)) {
     return 'Not enough coin left to cover this transfer and its network fee.'
   }
   if (/could not coalesce/i.test(raw)) {
     return node || 'The network refused this transfer without saying why.'
   }
-  return raw || 'The transfer did not go through.'
+  return raw || node || 'The transfer did not go through.'
 }
 
 /**
@@ -502,19 +553,27 @@ export function supportedAssetsForChain(chainId, registry) {
  *   nativeGasReserve: bigint, nativeGasLimit: bigint, gasPrice: bigint,
  *   maxPriorityFeePerGas: bigint|null, hasNative: boolean }>}
  */
-export async function quoteAllAssets({ kind, secret, chainId, provider, registry, to }) {
-  if (!provider) throw new Error('No network connection to read balances.')
-  const from = walletFromSecret({ kind, secret }).address
+export async function quoteAllAssets({ kind, secret, chainId, client, registry, to }) {
+  const publicClient = client ?? getPublicClient(chainId)
+  if (!publicClient) throw new Error('No network connection to read balances.')
+  const from = addressFromSecret({ kind, secret })
   const assets = supportedAssetsForChain(chainId, registry)
 
   const reads = await Promise.all(
     assets.map(async (asset) => {
       try {
         if (asset.kind === 'native') {
-          return { asset, balance: await provider.getBalance(from) }
+          return { asset, balance: await publicClient.getBalance({ address: from }) }
         }
-        const erc20 = new ethers.Contract(asset.address, BALANCE_OF_ABI, provider)
-        return { asset, balance: await erc20.balanceOf(from) }
+        return {
+          asset,
+          balance: await publicClient.readContract({
+            address: asset.address,
+            abi: BALANCE_OF_ABI,
+            functionName: 'balanceOf',
+            args: [from],
+          }),
+        }
       } catch {
         // A single unreadable token must not fail the whole quote — treat as zero.
         return { asset, balance: 0n }
@@ -526,7 +585,7 @@ export async function quoteAllAssets({ kind, secret, chainId, provider, registry
   const nativeRead = reads.find((h) => h.asset.kind === 'native')
   const hasNative = Boolean(nativeRead && nativeRead.balance > 0n)
 
-  const feeData = await provider.getFeeData()
+  const feeData = await estimateFeeData(publicClient)
   const gasPrice = feeData.maxFeePerGas ?? feeData.gasPrice ?? 0n
   /*
    * The tip that goes with that price, or null on a chain that priced in legacy `gasPrice`.
@@ -541,9 +600,9 @@ export async function quoteAllAssets({ kind, secret, chainId, provider, registry
   // to the EOA baseline if estimation is unavailable. Buffer the gas units by 20%
   // and derive the reserve from the SAME buffered limit, so `value + gas ≤ balance`.
   let estimatedGas = TRANSFER_GAS_LIMIT
-  if (hasNative && to && ethers.isAddress(to) && typeof provider.estimateGas === 'function') {
+  if (hasNative && to && isAddress(to)) {
     try {
-      estimatedGas = await provider.estimateGas({ from, to, value: 1n })
+      estimatedGas = await publicClient.estimateGas({ account: from, to, value: 1n })
     } catch {
       estimatedGas = TRANSFER_GAS_LIMIT
     }
@@ -568,13 +627,24 @@ export async function quoteAllAssets({ kind, secret, chainId, provider, registry
  * @returns {Promise<Array<{ asset: object, status: 'sent'|'skipped'|'failed',
  *   txHash?: string, error?: string, detail?: object }>>}
  */
-export async function sweepAllAssets({ kind, secret, to, chainId, provider, registry, onProgress }) {
-  if (!ethers.isAddress(to)) throw new Error('Enter a valid destination address.')
-  const quote = await quoteAllAssets({ kind, secret, chainId, provider, registry, to })
+export async function sweepAllAssets({ kind, secret, to, chainId, client, registry, onProgress }) {
+  if (!isAddress(to)) throw new Error('Enter a valid destination address.')
+  const publicClient = client ?? getPublicClient(chainId)
+  if (!publicClient) throw new Error('No network connection to read balances.')
+  const quote = await quoteAllAssets({ kind, secret, chainId, client: publicClient, registry, to })
   if (to.toLowerCase() === quote.from.toLowerCase()) {
     throw new Error('Choose a destination other than the legacy account.')
   }
-  const signer = walletFromSecret({ kind, secret }, provider)
+  /*
+   * ONE client for the whole sweep — the reads, the nonce, the fee schedule and every send.
+   *
+   * Both of the bookkeeping arguments below (the sweep's own nonce, the sweep's own coin figure)
+   * are about a node that has not yet caught up with the leg before it. Resolving a second client
+   * for the writes would put the sends on a route the reads never used, which does not make those
+   * arguments wrong so much as unanchored: there would be no single node whose view they are
+   * about.
+   */
+  const signer = signerForSecret({ kind, secret }, { chainId, client: publicClient })
   const outcomes = []
   const record = (o) => {
     outcomes.push(o)
@@ -596,19 +666,20 @@ export async function sweepAllAssets({ kind, secret, to, chainId, provider, regi
    * before broadcast consumes no nonce, and one that reverts after broadcast consumes its own,
    * so the assets behind it never queue up behind a gap that will never be filled.
    */
-  let nonce = await provider.getTransactionCount(quote.from, 'pending')
+  let nonce = await publicClient.getTransactionCount({ address: quote.from, blockTag: 'pending' })
 
   /*
    * The coin balance is tracked HERE as well, for the same reason the nonce is — and it is the
    * same failure, one layer along.
    *
    * The coin leg re-reads its balance so the ERC-20 legs' gas is accounted for. But that read can
-   * be STALE: ethers shares an identical `getBalance` for 250ms (`cacheTimeout`), and a failover
-   * RPC pool (spec 069) can answer from a node that has not yet seen the token transfer. On a fast
-   * local chain an ERC-20 leg mines well inside that window, so the "fresh" read comes back as the
-   * balance BEFORE it paid its gas — the sweep then asks to send coin the account no longer holds,
-   * the node refuses it for insufficient funds, and (because Hardhat's wording contains no string
-   * ethers recognises) the member is shown `could not coalesce error` against their coin.
+   * be STALE: a node serves from the state it has, and a failover RPC pool (spec 069) can answer
+   * from one that has not yet seen the token transfer — ethers additionally shared an identical
+   * `getBalance` for 250ms of its own. On a fast local chain an ERC-20 leg mines well inside that
+   * window, so the "fresh" read comes back as the balance BEFORE it paid its gas — the sweep then
+   * asks to send coin the account no longer holds, the node refuses it for insufficient funds,
+   * and (because Hardhat's wording contains no string the library recognises) the member was
+   * shown a placeholder against their coin rather than a reason.
    *
    * So the sweep keeps its own figure: the quoted balance, less what each BROADCAST leg actually
    * took, from its receipt. The coin leg is then sized from the SMALLER of that and the live read
@@ -641,7 +712,7 @@ export async function sweepAllAssets({ kind, secret, to, chainId, provider, regi
        */
       let read = null
       try {
-        read = await provider.getBalance(quote.from)
+        read = await publicClient.getBalance({ address: quote.from })
       } catch {
         /* the live read is one of two estimates, not the only one — fall back to the tracked figure */
       }
@@ -662,7 +733,7 @@ export async function sweepAllAssets({ kind, secret, to, chainId, provider, regi
        * Never reserve LESS than the quote did: a falling fee is not a reason to cut the margin the
        * member was quoted, and `raisedFeeSchedule` keeps this strictly safer than what it replaces.
        */
-      const coinFee = await raisedFeeSchedule(provider, price, priority)
+      const coinFee = await raisedFeeSchedule(publicClient, price, priority)
       price = coinFee.price
       priority = coinFee.priority
       const reserve = quote.nativeGasLimit * price
@@ -720,13 +791,17 @@ export async function sweepAllAssets({ kind, secret, to, chainId, provider, regi
      * sent, which is what lets the reserve behind it be sized honestly; the schedule only ever
      * rises, so a token transfer is never pinned below a base fee that would leave it unmineable.
      */
-    const tokenFee = await raisedFeeSchedule(provider, price, priority)
+    const tokenFee = await raisedFeeSchedule(publicClient, price, priority)
     price = tokenFee.price
     priority = tokenFee.priority
     let tokenTx = null
     try {
-      const erc20 = new ethers.Contract(asset.address, TRANSFER_ABI, signer)
-      tokenTx = await erc20.transfer(to, balance, { nonce, ...pinnedFeeFields(price, priority) })
+      tokenTx = await signer.sendTransaction({
+        to: asset.address,
+        data: encodeFunctionData({ abi: TRANSFER_CALL_ABI, functionName: 'transfer', args: [to, balance] }),
+        nonce,
+        ...pinnedFeeFields(price, priority),
+      })
       nonce += 1
       const receipt = await tokenTx.wait()
       coinSpent += coinSpentBy(tokenTx, receipt, price)

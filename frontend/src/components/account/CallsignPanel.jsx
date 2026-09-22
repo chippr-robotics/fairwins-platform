@@ -17,7 +17,10 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ethers } from 'ethers'
+import { encodeFunctionData, toHex } from 'viem'
+import { isAddress } from '../../lib/evm/address'
+import { errorParser } from '../../lib/evm/revertParser'
+import { normalizeAbi, readContract } from '../../lib/chains/readContract'
 import { useWallet } from '../../hooks/useWalletManagement'
 import useRoleDetails, { MembershipTier } from '../../hooks/useRoleDetails'
 import {
@@ -118,7 +121,20 @@ function formatDate(seconds) {
   }
 }
 
-function describeError(err, iface) {
+const ABI = normalizeAbi(CALLSIGN_REGISTRY_ABI)
+
+/**
+ * The registry's own fragments, for decoding a revert the wallet did not decode for us.
+ *
+ * Spec 110 T028 — `errorParser`, not an ethers `Interface`. It matters here specifically: the
+ * `ChangeCooldownActive` branch below reads `revert.args.nextAllowedAt` BY NAME, and viem's
+ * `decodeErrorResult` returns a bare array (divergence 13), so without the seam's name-attaching
+ * the member would be told "please try again later" instead of when — silently, since the
+ * positional fallback beside it would quietly take over.
+ */
+const REGISTRY_ERRORS = errorParser(CALLSIGN_REGISTRY_ABI)
+
+function describeError(err, errors) {
   // A dismissed passkey ceremony (spec 041) is a clean abort, not a failure.
   if (
     err?.name === 'CeremonyCancelled' ||
@@ -127,7 +143,7 @@ function describeError(err, iface) {
   ) {
     return 'Transaction was rejected.'
   }
-  const revert = extractRevert(err, iface)
+  const revert = extractRevert(err, errors)
   if (revert) {
     switch (revert.name) {
       // GOLD-specific copy — intentionally NOT the Silver open-challenge wording.
@@ -189,14 +205,25 @@ export default function CallsignPanel() {
     () => getContractAddressForChain('callsignRegistry', chainId),
     [chainId],
   )
-  const iface = useMemo(() => new ethers.Interface(CALLSIGN_REGISTRY_ABI), [])
-  const readRegistry = useMemo(
-    () =>
-      registryAddress && provider
-        ? new ethers.Contract(registryAddress, CALLSIGN_REGISTRY_ABI, provider)
-        : null,
-    [registryAddress, provider],
-  )
+  /**
+   * Registry reads on the wallet's chain.
+   *
+   * Spec 110 T028 — the chain is an ARGUMENT (`readContract(chainId, …)`) and `provider` stays
+   * exactly where it was, as the availability gate: it is the "is a wallet connected" test, not a
+   * transport this code needs, and folding it away would change what the gate means. Same Phase-1
+   * rule the read seam converted every other caller under.
+   */
+  const readRegistry = useMemo(() => {
+    if (!registryAddress || !provider) return null
+    const call = (functionName, args) =>
+      readContract(chainId, { address: registryAddress, abi: ABI, functionName, args })
+    return {
+      callsignOf: (account_) => call('callsignOf', [account_]),
+      resolve: (callsign) => call('resolve', [callsign]),
+      isAvailable: (callsign) => call('isAvailable', [callsign]),
+      makeCommitment: (callsign, owner, salt) => call('makeCommitment', [callsign, owner, salt]),
+    }
+  }, [registryAddress, provider, chainId])
 
   const [busy, setBusy] = useState(false)
   const [notice, setNotice] = useState(null) // { kind: 'error'|'success'|'info', text }
@@ -330,14 +357,14 @@ export default function CallsignPanel() {
       }
       setBusy(true)
       try {
-        const salt = ethers.hexlify(ethers.randomBytes(32))
+        const salt = toHex(crypto.getRandomValues(new Uint8Array(32)))
         // makeCommitment is a pure view — resolve it over the read transport so passkey
         // sessions (which have no signer) can compute it too.
         const commitment = await readRegistry.makeCommitment(canonical, account, salt)
         // Persist BEFORE sending so a reload after signing can still reveal.
         const record = { mode, callsign: canonical, salt, commitment, committedAt: Date.now() }
         savePending(chainId, account, record)
-        await sendCalls([{ target: registryAddress, data: iface.encodeFunctionData('commit', [commitment]) }])
+        await sendCalls([{ target: registryAddress, data: encodeFunctionData({ abi: ABI, functionName: 'commit', args: [commitment] }) }])
         // Anchor the countdown to the mined moment.
         const mined = { ...record, committedAt: Date.now() }
         savePending(chainId, account, mined)
@@ -349,12 +376,12 @@ export default function CallsignPanel() {
         })
       } catch (e) {
         clearPending(chainId, account)
-        setNotice({ kind: 'error', text: describeError(e, iface) })
+        setNotice({ kind: 'error', text: describeError(e, REGISTRY_ERRORS) })
       } finally {
         setBusy(false)
       }
     },
-    [desiredCallsign, registryAddress, account, readRegistry, sendCalls, chainId, iface],
+    [desiredCallsign, registryAddress, account, readRegistry, sendCalls, chainId],
   )
 
   const completeReveal = useCallback(async () => {
@@ -364,8 +391,8 @@ export default function CallsignPanel() {
     try {
       const data =
         pending.mode === 'change'
-          ? iface.encodeFunctionData('changeCallsign', [pending.callsign, pending.salt])
-          : iface.encodeFunctionData('register', [pending.callsign, pending.salt])
+          ? encodeFunctionData({ abi: ABI, functionName: 'changeCallsign', args: [pending.callsign, pending.salt] })
+          : encodeFunctionData({ abi: ABI, functionName: 'register', args: [pending.callsign, pending.salt] })
       await sendCalls([{ target: registryAddress, data }])
       clearPending(chainId, account)
       rememberOwned(chainId, account, pending.callsign)
@@ -377,11 +404,11 @@ export default function CallsignPanel() {
       })
       await loadCallsign()
     } catch (e) {
-      setNotice({ kind: 'error', text: describeError(e, iface) })
+      setNotice({ kind: 'error', text: describeError(e, REGISTRY_ERRORS) })
     } finally {
       setBusy(false)
     }
-  }, [pending, registryAddress, account, sendCalls, chainId, iface, loadCallsign])
+  }, [pending, registryAddress, account, sendCalls, chainId, loadCallsign])
 
   const discardPending = useCallback(() => {
     clearPending(chainId, account)
@@ -397,7 +424,7 @@ export default function CallsignPanel() {
     setNotice(null)
     setBusy(true)
     try {
-      await sendCalls([{ target: registryAddress, data: iface.encodeFunctionData('release', []) }])
+      await sendCalls([{ target: registryAddress, data: encodeFunctionData({ abi: ABI, functionName: 'release', args: [] }) }])
       clearOwned(chainId, account)
       setOpenAction(null)
       setNotice({
@@ -406,15 +433,15 @@ export default function CallsignPanel() {
       })
       await loadCallsign()
     } catch (e) {
-      setNotice({ kind: 'error', text: describeError(e, iface) })
+      setNotice({ kind: 'error', text: describeError(e, REGISTRY_ERRORS) })
     } finally {
       setBusy(false)
     }
-  }, [registryAddress, account, sendCalls, chainId, iface, loadCallsign])
+  }, [registryAddress, account, sendCalls, chainId, loadCallsign])
 
   const requestRepoint = useCallback(async () => {
     const to = repointAddress.trim()
-    if (!ethers.isAddress(to)) {
+    if (!isAddress(to)) {
       setNotice({ kind: 'error', text: 'Enter a valid wallet address.' })
       return
     }
@@ -427,7 +454,7 @@ export default function CallsignPanel() {
     setBusy(true)
     try {
       await sendCalls([
-        { target: registryAddress, data: iface.encodeFunctionData('requestRepoint', [to]) },
+        { target: registryAddress, data: encodeFunctionData({ abi: ABI, functionName: 'requestRepoint', args: [to] }) },
       ])
       setOpenAction(null)
       setRepointAddress('')
@@ -437,11 +464,11 @@ export default function CallsignPanel() {
       })
       await loadCallsign()
     } catch (e) {
-      setNotice({ kind: 'error', text: describeError(e, iface) })
+      setNotice({ kind: 'error', text: describeError(e, REGISTRY_ERRORS) })
     } finally {
       setBusy(false)
     }
-  }, [repointAddress, account, registryAddress, sendCalls, iface, loadCallsign])
+  }, [repointAddress, account, registryAddress, sendCalls, loadCallsign])
 
   const cancelRepoint = useCallback(async () => {
     if (!registryAddress || !account) return
@@ -449,16 +476,16 @@ export default function CallsignPanel() {
     setBusy(true)
     try {
       await sendCalls([
-        { target: registryAddress, data: iface.encodeFunctionData('cancelRepoint', []) },
+        { target: registryAddress, data: encodeFunctionData({ abi: ABI, functionName: 'cancelRepoint', args: [] }) },
       ])
       setNotice({ kind: 'success', text: 'Address change cancelled. Your callsign stays put.' })
       await loadCallsign()
     } catch (e) {
-      setNotice({ kind: 'error', text: describeError(e, iface) })
+      setNotice({ kind: 'error', text: describeError(e, REGISTRY_ERRORS) })
     } finally {
       setBusy(false)
     }
-  }, [registryAddress, account, sendCalls, iface, loadCallsign])
+  }, [registryAddress, account, sendCalls, loadCallsign])
 
   // ------------------------------------------------------------- derived UI
   const canonical = safeNormalize(desiredCallsign)
@@ -478,7 +505,7 @@ export default function CallsignPanel() {
   const revealReady = pending ? remainingMs <= 0 : false
 
   const repointValid =
-    ethers.isAddress(repointAddress.trim()) &&
+    isAddress(repointAddress.trim()) &&
     (!account || repointAddress.trim().toLowerCase() !== account.toLowerCase())
 
   // Shared callsign-entry chooser (register + change reuse it).

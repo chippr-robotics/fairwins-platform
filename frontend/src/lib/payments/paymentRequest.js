@@ -1,5 +1,5 @@
-import { ethers } from 'ethers'
-
+import { getAddress, isAddress } from 'viem'
+import { parseUnits } from '../evm/units'
 /**
  * Payment-request URIs (spec 058 US2) — build and parse the EIP-681 subset
  * FairWins uses for its Request QR codes:
@@ -38,17 +38,17 @@ const RAW_ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
  * @returns {string} the URI
  */
 export function buildPaymentRequestUri({ chainId, to, kind, tokenAddress, decimals, amount, note }) {
-  if (!ethers.isAddress(to)) throw new Error('A valid receiving address is required.')
+  if (!isAddress(to)) throw new Error('A valid receiving address is required.')
   if (!Number.isInteger(Number(chainId)) || Number(chainId) <= 0) {
     throw new Error('A valid chain id is required.')
   }
-  if (kind === 'stable' && !ethers.isAddress(tokenAddress || '')) {
+  if (kind === 'stable' && !isAddress(tokenAddress || '')) {
     throw new Error('A token address is required for a stablecoin request.')
   }
 
   let units
   try {
-    units = ethers.parseUnits(String(amount), decimals)
+    units = parseUnits(String(amount), decimals)
   } catch {
     throw new Error('Enter a valid amount.')
   }
@@ -84,7 +84,7 @@ function parseUnitsParam(raw) {
 function normalizeAddress(raw) {
   if (!raw || !RAW_ADDRESS_RE.test(raw)) return null
   try {
-    return ethers.getAddress(raw.toLowerCase())
+    return getAddress(raw.toLowerCase())
   } catch {
     return null
   }

@@ -11,6 +11,11 @@ export const HW_ERROR_CODES = Object.freeze({
   DEVICE_LOCKED: 'device-locked',
   WRONG_APP: 'wrong-app',
   USER_CANCELLED: 'user-cancelled',
+  // The Ethereum app refusing a payload it will not review on screen. Distinct from UNKNOWN
+  // because the remedy is the MEMBER'S and it is a settings toggle on the device — telling them
+  // to "reconnect and try again" is advice that can never work (found on the emulator: a typed-data
+  // signature answers 0x6a80 with "Blind signing must be enabled in settings" on the screen).
+  BLIND_SIGNING_REQUIRED: 'blind-signing-required',
   DISCONNECTED: 'disconnected',
   TIMEOUT: 'timeout',
   POPUP_BLOCKED: 'popup-blocked',
@@ -45,6 +50,8 @@ const DESCRIPTIONS = {
   [HW_ERROR_CODES.DEVICE_LOCKED]: 'The device is locked. Unlock it with your PIN and try again.',
   [HW_ERROR_CODES.WRONG_APP]: 'Open the Ethereum app on the device, then try again.',
   [HW_ERROR_CODES.USER_CANCELLED]: 'The request was cancelled on the device.',
+  [HW_ERROR_CODES.BLIND_SIGNING_REQUIRED]:
+    'The device would not review this request. On the device open the Ethereum app, go to Settings and turn on "Blind signing", then try again.',
   [HW_ERROR_CODES.DISCONNECTED]: 'The device was disconnected. Reconnect it and try again.',
   [HW_ERROR_CODES.TIMEOUT]: 'The device did not respond in time. Check the connection and try again.',
   [HW_ERROR_CODES.POPUP_BLOCKED]:

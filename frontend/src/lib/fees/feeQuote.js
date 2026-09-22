@@ -34,9 +34,13 @@
  *      was never read — so it is the helper that decides, and the helper
  *      throws where a zero would be a lie.
  */
-import { Contract, id as keccakId } from 'ethers'
+import { keccak256, stringToHex } from 'viem'
 import { FEE_ROUTER_ABI } from '../../abis/FeeRouter'
 import { getContractAddressForChain } from '../../config/contracts'
+import { readContract } from '../chains/readContract'
+
+// keccak256 over the UTF-8 label bytes — byte-identical to ethers v6 `id()`.
+const keccakId = (label) => keccak256(stringToHex(label))
 
 /** Launch wrapper service ids (bytes32 = keccak256 of the label). */
 export const FEE_SERVICES = {
@@ -128,8 +132,8 @@ export async function fetchFeeQuote({ serviceId, chainId, provider, routerAddres
   }
 
   // A configured router with nothing to read it over is an unread rate, not a zero
-  // one. Without this the call still fails, but deep inside ethers with a message
-  // about runners that says nothing about fees.
+  // one. Without this the call still fails, but deep inside the RPC client with a
+  // message that says nothing about fees.
   if (!provider) {
     throw new FeeQuoteUnavailable(
       `the platform fee rate could not be read: no connection to the network the FeeRouter at ${routerAddress} lives on`,
@@ -139,8 +143,12 @@ export async function fetchFeeQuote({ serviceId, chainId, provider, routerAddres
 
   let service
   try {
-    const router = new Contract(routerAddress, FEE_ROUTER_ABI, provider)
-    service = await router.getService(serviceId)
+    service = await readContract(chainId, {
+      address: routerAddress,
+      abi: FEE_ROUTER_ABI,
+      functionName: 'getService',
+      args: [serviceId],
+    })
   } catch (cause) {
     throw new FeeQuoteUnavailable(
       `the platform fee rate could not be read from the FeeRouter at ${routerAddress}: ${cause?.message || cause}`,

@@ -36,8 +36,7 @@
  *     permission question. This module sits on the exit path (it is what a member reads before
  *     closing) and is classified there in `test/perps/safetyInvariants.test.js`.
  */
-import { formatUnits } from 'ethers'
-
+import { formatUnits } from '../evm/units'
 import { findGmxPair } from './gmxMarkets'
 
 /** The fields this module may fill in. Nothing else on a position row is ever written here. */

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router-dom'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from './helpers/walletChain'
 import Dashboard from '../components/fairwins/Dashboard'
 import { UserPreferencesContext, WalletContext, FriendMarketsContext, UIContext, DexContext } from '../contexts'
 import { OPEN_RESOLUTION_TYPES } from '../hooks/useOpenChallengeCreate'
@@ -175,7 +175,7 @@ describe('Dashboard Component', () => {
     // Default the dashboard onto a Polymarket-enabled chain (Polygon) so the
     // oracle card + ticker render; individual tests override for the
     // no-on-chain-oracle case.
-    useChainId.mockReturnValue(137)
+    setWalletChain(137)
   })
 
   describe('QuickActions button flows', () => {
@@ -433,13 +433,13 @@ describe('Dashboard Component', () => {
   // crawler self-hides on the same capability (covered by its own test).
   describe('Networks without an on-chain oracle', () => {
     it('hides the Open Oracle Challenge card', () => {
-      useChainId.mockReturnValue(63) // Ethereum Classic Mordor — no Polymarket
+      setWalletChain(63) // Ethereum Classic Mordor — no Polymarket
       renderWithProviders(<Dashboard />)
       expect(screen.queryByText('Open Oracle Challenge')).toBeNull()
     })
 
     it('surfaces the plain Open Challenge card (the oracle card is hidden here)', () => {
-      useChainId.mockReturnValue(63)
+      setWalletChain(63)
       renderWithProviders(<Dashboard />)
       expect(screen.getByText('Open Challenge')).toBeInTheDocument()
       expect(screen.queryByText('Open Oracle Challenge')).toBeNull()

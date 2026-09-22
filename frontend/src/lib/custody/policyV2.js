@@ -6,11 +6,12 @@
 // v1 (`policy.js`) is untouched and keeps serving vaults that have not adopted V2; `getPolicyStatus`
 // here is the single router that tells the UI which engine a vault is on.
 
-import { Contract, Interface, ZeroAddress, getAddress, isAddress } from 'ethers'
+import { decodeErrorResult, decodeFunctionData, encodeFunctionData, zeroAddress } from 'viem'
 import { SAFE_POLICY_GUARD_V2_ABI } from '../../abis/SafePolicyGuardV2'
 import { POLICY_GUARD_SETUP_ABI } from '../../abis/SafePolicyGuard'
 import { getContractAddressForChain } from '../../config/contracts'
-import { getProvider } from '../../utils/blockchainService'
+import { normalizeAbi, readContract } from '../chains/readContract'
+import { getAddress, isAddress } from '../evm/address'
 import { GUARD_STORAGE_SLOT, NATIVE_ASSET, readVaultGuard } from './policy'
 
 export { GUARD_STORAGE_SLOT, NATIVE_ASSET }
@@ -24,10 +25,24 @@ export const MAX_APPROVERS = 8
 export const MAX_TARGETS = 16
 export const MAX_COOLDOWN = 365 * 24 * 60 * 60
 
-export const guardV2Iface = new Interface(SAFE_POLICY_GUARD_V2_ABI)
-export const setupIface = new Interface(POLICY_GUARD_SETUP_ABI)
+/** Parsed ABIs, exported in place of the ethers `Interface`s this module used to hand out. */
+export const GUARD_V2_ABI = normalizeAbi(SAFE_POLICY_GUARD_V2_ABI)
+export const SETUP_ABI = normalizeAbi(POLICY_GUARD_SETUP_ABI)
 
-const setGuardIface = new Interface(['function setGuard(address guard)'])
+const SET_GUARD_ABI = normalizeAbi(['function setGuard(address guard)'])
+
+/**
+ * Decode calldata and assert it is the function named.
+ *
+ * ethers' `decodeFunctionData(name, data)` threw when the selector belonged to another function;
+ * viem's derives the name FROM the selector, so without this the classifier below would decode
+ * some other guard call and hand its arguments to the rule mapper.
+ */
+function decodeAs(abi, functionName, data) {
+  const decoded = decodeFunctionData({ abi, data })
+  if (decoded.functionName !== functionName) throw new Error(`expected ${functionName} calldata`)
+  return decoded.args
+}
 
 /** V2 engine addresses for a chain; null when the ordered engine is not deployed there. */
 export function getPolicyEngineV2Addresses(chainId) {
@@ -50,12 +65,12 @@ export function isPolicyV2Supported(chainId) {
  *   'managed-v2'   — spec 068 ordered engine
  *   'foreign'      — some other guard entirely
  */
-export async function getPolicyStatus(vaultAddress, chainId, provider) {
+export async function getPolicyStatus(vaultAddress, chainId) {
   const v2 = getPolicyEngineV2Addresses(chainId)
   const v1Guard = getContractAddressForChain('safePolicyGuard', chainId)
   if (!v2 && !v1Guard) return 'unsupported'
-  const guardSet = await readVaultGuard(vaultAddress, chainId, provider).catch(() => ZeroAddress)
-  if (guardSet === ZeroAddress) return 'none'
+  const guardSet = await readVaultGuard(vaultAddress, chainId).catch(() => zeroAddress)
+  if (guardSet === zeroAddress) return 'none'
   if (v2 && guardSet === v2.guard) return 'managed-v2'
   if (v1Guard && guardSet === getAddress(v1Guard)) return 'managed'
   return 'foreign'
@@ -76,22 +91,26 @@ function toRule(raw, index) {
 }
 
 /** Read a vault's full ordered policy: rules in enforcement order + live window accounting. */
-export async function readPolicyV2(vaultAddress, chainId, provider) {
+export async function readPolicyV2(vaultAddress, chainId) {
   const engine = getPolicyEngineV2Addresses(chainId)
   if (!engine) return null
-  const reader = provider || getProvider(chainId)
-  const guard = new Contract(engine.guard, SAFE_POLICY_GUARD_V2_ABI, reader)
+  // Chain NAMED (spec 110). `getRules`/`getMeta`/`getRuleAccounting` are multi-output, which viem
+  // returns as bare arrays; `readContract` re-attaches the parameter names, so both the
+  // destructuring and the field reads below work unchanged. The uint32s (`cooldown`,
+  // `rulesVersion`) come back as NUMBERS rather than bigints and already go through `Number(...)`.
+  const guardRead = (functionName, args) =>
+    readContract(chainId, { address: engine.guard, abi: SAFE_POLICY_GUARD_V2_ABI, functionName, args })
   const safe = getAddress(vaultAddress)
 
   const [[rawRules, cooldown], meta, nextAllowed] = await Promise.all([
-    guard.getRules(safe),
-    guard.getMeta(safe),
-    guard.nextAllowedAt(safe),
+    guardRead('getRules', [safe]),
+    guardRead('getMeta', [safe]),
+    guardRead('nextAllowedAt', [safe]),
   ])
   const rules = [...rawRules].map(toRule)
   const accounting = await Promise.all(
     rules.map(async (rule) => {
-      const acc = await guard.getRuleAccounting(safe, rule.index)
+      const acc = await guardRead('getRuleAccounting', [safe, BigInt(rule.index)])
       return { spentInWindow: acc.spentInWindow, windowStart: acc.windowStart, remaining: acc.remaining }
     }),
   )
@@ -315,7 +334,7 @@ export function encodeSetRules(rules, cooldown) {
     r.approvers,
     r.targets,
   ])
-  return guardV2Iface.encodeFunctionData('setRules', [tuples, cooldown])
+  return encodeFunctionData({ abi: GUARD_V2_ABI, functionName: 'setRules', args: [tuples, cooldown] })
 }
 
 /** The threshold-approved self-transaction that changes a vault's ordered policy. */
@@ -332,7 +351,7 @@ export function buildSetGuardV2Tx(vaultAddress, chainId, { detach = false } = {}
   return {
     to: getAddress(vaultAddress),
     value: 0n,
-    data: setGuardIface.encodeFunctionData('setGuard', [detach ? ZeroAddress : engine.guard]),
+    data: encodeFunctionData({ abi: SET_GUARD_ABI, functionName: 'setGuard', args: [detach ? zeroAddress : engine.guard] }),
   }
 }
 
@@ -352,7 +371,7 @@ export function buildEnablePolicyV2Setup(chainId, rules, cooldown) {
   if (!engine) return undefined
   return {
     setupTo: engine.setup,
-    setupData: setupIface.encodeFunctionData('enablePolicy', [engine.guard, encodeSetRules(rules, cooldown)]),
+    setupData: encodeFunctionData({ abi: SETUP_ABI, functionName: 'enablePolicy', args: [engine.guard, encodeSetRules(rules, cooldown)] }),
   }
 }
 
@@ -365,19 +384,23 @@ export function buildEnablePolicyV2Setup(chainId, rules, cooldown) {
  * wants. Issue #1368 passes 1 to ask the guard directly whether it would deny a MultiSend
  * delegatecall from this vault — `_preCheck` answers that before any rule evaluation runs.
  */
-export async function previewPolicyV2(vaultAddress, chainId, payload, { executor, approvedTxHash, provider } = {}) {
+export async function previewPolicyV2(vaultAddress, chainId, payload, { executor, approvedTxHash } = {}) {
   const engine = getPolicyEngineV2Addresses(chainId)
   if (!engine) return { ok: true, reason: null }
-  const guard = new Contract(engine.guard, SAFE_POLICY_GUARD_V2_ABI, provider || getProvider(chainId))
-  const res = await guard.previewTransaction(
-    getAddress(vaultAddress),
-    getAddress(payload.to),
-    payload.value ?? 0n,
-    payload.data || '0x',
-    payload.operation ?? 0,
-    executor ? getAddress(executor) : ZeroAddress,
-    approvedTxHash || '0x' + '0'.repeat(64),
-  )
+  const res = await readContract(chainId, {
+    address: engine.guard,
+    abi: SAFE_POLICY_GUARD_V2_ABI,
+    functionName: 'previewTransaction',
+    args: [
+      getAddress(vaultAddress),
+      getAddress(payload.to),
+      payload.value ?? 0n,
+      payload.data || '0x',
+      payload.operation ?? 0,
+      executor ? getAddress(executor) : zeroAddress,
+      approvedTxHash || '0x' + '0'.repeat(64),
+    ],
+  })
   if (res.ok) return { ok: true, reason: null }
   return { ok: false, reason: decodePolicyErrorV2(res.revertData) }
 }
@@ -390,7 +413,10 @@ export function decodePolicyErrorV2(revertData) {
   if (!revertData || revertData === '0x') return null
   let parsed
   try {
-    parsed = guardV2Iface.parseError(revertData)
+    // viem names the field `errorName` where ethers used `name`, and throws on data it cannot
+    // match rather than returning null — both land on the honest null below.
+    const { errorName, args } = decodeErrorResult({ abi: GUARD_V2_ABI, data: revertData })
+    parsed = { name: errorName, args }
   } catch {
     return null
   }
@@ -437,21 +463,11 @@ export function classifyPolicyProposalV2(proposal, chainId, vaultAddress) {
   const to = getAddress(proposal.to)
   if (to === engine.guard) {
     try {
-      const decoded = guardV2Iface.decodeFunctionData('setRules', proposal.data)
-      const rules = decoded[0].map((raw, index) =>
-        toRule(
-          {
-            asset: raw[0],
-            perTxLimit: raw[1],
-            windowLimit: raw[2],
-            approvalsRequired: raw[3],
-            banded: raw[4],
-            approvers: raw[5],
-            targets: raw[6],
-          },
-          index,
-        ),
-      )
+      const decoded = decodeAs(GUARD_V2_ABI, 'setRules', proposal.data)
+      // viem decodes a NAMED tuple into an object, not an array — the positional remap this used
+      // to do (`raw[0]`…`raw[6]`) would hand `toRule` seven undefineds and build a rule list of
+      // nulls with no error anywhere. The decoded rule already has the field names `toRule` reads.
+      const rules = decoded[0].map((raw, index) => toRule(raw, index))
       return { kind: 'set-rules', rules, cooldown: Number(decoded[1]) }
     } catch {
       return null
@@ -459,9 +475,9 @@ export function classifyPolicyProposalV2(proposal, chainId, vaultAddress) {
   }
   if (vaultAddress && to === getAddress(vaultAddress)) {
     try {
-      const [guard] = setGuardIface.decodeFunctionData('setGuard', proposal.data)
+      const [guard] = decodeAs(SET_GUARD_ABI, 'setGuard', proposal.data)
       if (getAddress(guard) === engine.guard) return { kind: 'adopt-v2' }
-      if (getAddress(guard) === ZeroAddress) return { kind: 'remove-guard' }
+      if (getAddress(guard) === zeroAddress) return { kind: 'remove-guard' }
       return { kind: 'set-guard', guard: getAddress(guard) }
     } catch {
       return null

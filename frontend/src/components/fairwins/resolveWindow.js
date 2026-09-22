@@ -1,5 +1,4 @@
-import { ethers } from 'ethers'
-
+import { zeroAddress } from 'viem'
 // Statuses that end a wager's resolvability — no resolve control in any of them.
 const TERMINAL_FOR_RESOLVE = new Set([
   'resolved', 'disputed', 'cancelled', 'canceled', 'refunded', 'expired',
@@ -31,7 +30,7 @@ export function resolveControlState(market, account, now = Date.now()) {
   const isOpponent = market.participants?.length > 1 &&
     market.participants[1]?.toLowerCase() === userAddr
   const isArbitrator = market.arbitrator &&
-    market.arbitrator !== ethers.ZeroAddress &&
+    market.arbitrator !== zeroAddress &&
     market.arbitrator.toLowerCase() === userAddr
 
   const resType = market.resolutionType ?? 0

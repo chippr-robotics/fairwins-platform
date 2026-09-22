@@ -278,7 +278,7 @@ export default function ApiAccessPanel() {
           mcpServers: {
             fairwins: {
               command: 'node',
-              args: ['/path/to/prediction-dao-research/services/mcp-server/src/server.js'],
+              args: ['/path/to/fairwins-platform/services/mcp-server/src/server.js'],
               env: {
                 FAIRWINS_API_URL: gatewayConfigured ? gatewayBase : EXAMPLE_BASE_URL,
                 FAIRWINS_API_TOKEN: TOKEN_PLACEHOLDER,

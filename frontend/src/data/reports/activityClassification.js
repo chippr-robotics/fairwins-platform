@@ -31,7 +31,7 @@
  * nothing" and "we do not know what you were charged" are different claims and
  * a report may only make the one the data supports.
  */
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { getNetwork } from '../../config/networks'
 import { LEDGER_CLASS, LEDGER_DIRECTION, LEDGER_STATUS } from '../ledger/constants'
 

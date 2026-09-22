@@ -261,7 +261,8 @@ const GMX_GAS_CONFIG = {
   [GMX_DECREASE_ORDER_GAS_LIMIT_KEY]: 3_000_000n,
 }
 const gmxQuoteDeps = (over = {}) => ({
-  getProvider: () => ({ getFeeData: async () => ({ gasPrice: 20_000_000n }) }),
+  // A viem PublicClient's gas-price surface — `eth_gasPrice`, with the 1559 ceiling behind it.
+  getClient: () => ({ getGasPrice: async () => 20_000_000n, estimateFeesPerGas: async () => ({}) }),
   makeContract: () => ({ getUint: async (key) => GMX_GAS_CONFIG[key] ?? 0n }),
   ...over,
 })
@@ -557,15 +558,20 @@ describe('PerpsView management controls', () => {
     // This is the CI state and the state most members will see, so it is asserted rather than
     // assumed: no manage control on a venue this build CAN manage, and nothing that opens a sheet.
     renderView({ positions: withPositions([GAINS_POSITION]), wallet: { isConnected: true } })
-    await waitFor(() => expect(screen.getByText('Your positions')).toBeInTheDocument())
+    // Anchor on the ROW, not the section header: "Your positions" renders during the loading
+    // state too (fetchPositions is async), so asserting absences against the header alone
+    // passes vacuously on an empty list and loses the race on a slow worker — which it did,
+    // once, in the full-suite CI run. The never-stranded link is phase 0's own artifact.
+    const manageLink = await screen.findByRole('link', {
+      name: /Manage this position on Gains Network/i,
+    })
+    expect(manageLink).toBeInTheDocument()
 
     // …and it is the FLAG withholding it, not the capability: this build can build calldata for
     // this venue on this chain. Without this line the case would pass for the wrong reason.
     expect(perpsManageEnabled('gains', 137)).toBe(true)
     expect(screen.queryByRole('button', { name: /close or protect/i })).not.toBeInTheDocument()
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
-    // The never-stranded path is still there, exactly as phase 0 shipped it.
-    expect(screen.getByRole('link', { name: /Manage this position on Gains Network/i })).toBeInTheDocument()
     expect(screen.getByText(/positions are read-only in FairWins this release/i)).toBeInTheDocument()
   })
 

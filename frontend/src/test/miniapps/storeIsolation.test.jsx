@@ -296,10 +296,19 @@ describe('the shared module scope publishes only the SDK surface', () => {
     const { installHostScope, HOST_SCOPE_SYMBOL } = await import('../../lib/miniapps/hostScope')
     installHostScope()
     const scope = globalThis[HOST_SCOPE_SYMBOL]
-    // react/react-dom/jsx-runtime/ethers/@fairwins/miniapp-sdk (research R2) —
+    // react/react-dom/jsx-runtime/ethers/viem/@fairwins/miniapp-sdk (research R2) —
     // a host module added here would be granted to EVERY package, including
-    // third-party ones, forever.
-    const allowed = new Set(['react', 'react-dom', 'react/jsx-runtime', 'ethers', '@fairwins/miniapp-sdk'])
+    // third-party ones, forever. `viem` joined under spec 110 Phase 0 (#1591):
+    // a client LIBRARY like ethers, no ambient authority — every privileged
+    // capability still flows only through the `host` object.
+    const allowed = new Set([
+      'react',
+      'react-dom',
+      'react/jsx-runtime',
+      'ethers',
+      'viem',
+      '@fairwins/miniapp-sdk',
+    ])
     for (const key of Object.keys(scope)) {
       expect(allowed.has(key), `shared scope publishes "${key}" to every mini-app`).toBe(true)
     }

@@ -18,7 +18,9 @@
 
 import { useState, useCallback, useMemo, useEffect } from 'react'
 import PropTypes from 'prop-types'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { getAddress } from '../../lib/evm/address'
 import { useWallet } from '../../hooks/useWalletManagement'
 import { getNetwork } from '../../config/networks'
 import {
@@ -161,8 +163,12 @@ function RecoverAccountPanel({ deps = {}, defaultOpen = false }) {
           return
         }
       }
-      const account = new ethers.Contract(target, RECOVERY_ABI, prov)
-      const isOwner = await account.isOwnerAddress(walletAddress)
+      const isOwner = await readContract(chainId, {
+        address: target,
+        abi: RECOVERY_ABI,
+        functionName: 'isOwnerAddress',
+        args: [getAddress(String(walletAddress))],
+      })
       if (!isOwner) {
         setPhase('idle')
         setNotice({
@@ -176,7 +182,17 @@ function RecoverAccountPanel({ deps = {}, defaultOpen = false }) {
       setStep('confirm')
     } catch (e) {
       setPhase('idle')
-      const badData = e?.code === 'BAD_DATA' || /BAD_DATA|could not decode/i.test(e?.message || '')
+      // "The address answered, but not like a passkey account." ethers said `BAD_DATA` /
+      // "could not decode result data"; viem raises `ContractFunctionZeroDataError` and says the
+      // function "returned no data". Both spellings are matched, because this branch is the
+      // difference between a sentence a member can act on and the read library's diagnostic —
+      // which is the member-facing defect this PR already had to fix once, on the screening list.
+      const zeroData =
+        e?.name === 'ContractFunctionZeroDataError' ||
+        e?.cause?.name === 'ContractFunctionZeroDataError' ||
+        /returned no data/i.test(e?.shortMessage || e?.message || '')
+      const badData =
+        zeroData || e?.code === 'BAD_DATA' || /BAD_DATA|could not decode/i.test(e?.message || '')
       setNotice({
         kind: 'error',
         text: badData
@@ -184,7 +200,7 @@ function RecoverAccountPanel({ deps = {}, defaultOpen = false }) {
           : `Could not verify that account on ${networkName}: ${e.reason || e.shortMessage || e.message}`,
       })
     }
-  }, [target, walletAddress, provider, deps.provider, networkName])
+  }, [target, walletAddress, provider, deps.provider, networkName, chainId])
 
   const recover = useCallback(async () => {
     setNotice(null)
@@ -206,8 +222,14 @@ function RecoverAccountPanel({ deps = {}, defaultOpen = false }) {
     }
     try {
       setPhase('submitting')
-      const account = new ethers.Contract(target, RECOVERY_ABI, deps.signer ?? signer)
-      const tx = await account.addOwnerPublicKey(credential.publicKey.x, credential.publicKey.y)
+      const tx = await (deps.signer ?? signer).sendTransaction({
+        to: target,
+        data: encodeFunctionData({
+          abi: normalizeAbi(RECOVERY_ABI),
+          functionName: 'addOwnerPublicKey',
+          args: [credential.publicKey.x, credential.publicKey.y],
+        }),
+      })
       const receipt = await tx.wait()
       if (receipt?.status !== 1) throw new Error('transaction reverted')
       // Only now is the credential a real controller — record it so passkey

@@ -10,7 +10,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useWallet } from '.'
 import { getProvider } from '../utils/blockchainService'
 import { getSafeContracts } from '../config/safeContracts'
-import { resolveWriteRail, RAILS } from '../lib/custody/writeRail'
+import { resolveWriteRail, RAILS } from '../lib/chains/writeRail'
+import { settleWalletOn } from '../lib/chains/submitOn'
 import { chainDisplayName } from '../lib/custody/chainName'
 import { buildCreateVaultCalldata } from '../lib/custody/safeVault'
 import {
@@ -25,9 +26,6 @@ import {
 import { saveCreationRecord, getCreationRecord } from '../lib/custody/vaultCreationRecords'
 import { upsertVaultReference } from '../lib/custody/vaultReferences'
 import { ensureVaultContact } from '../lib/custody/vaultAddressBook'
-
-const SETTLE_TIMEOUT_MS = 30_000
-const SETTLE_POLL_MS = 250
 
 export default function useVaultDeployment() {
   const wallet = useWallet()
@@ -56,32 +54,22 @@ export default function useVaultDeployment() {
     [loginMethod],
   )
 
-  /** Spec-102 switch-first settle loop (useActiveAccount precedent). */
+  /**
+   * Spec-102 switch-first settle loop — now the SHARED one (spec 110 T026,
+   * `lib/chains/submitOn.js#settleWalletOn`). This hook's copy waited 30s at a 250ms poll while
+   * the other two waited 20s at 150ms; nothing chose that, it is what happens when a loop is
+   * copied. The shared constants are the 20s/150ms pair, so a deployment now gets the same
+   * patience as every other write instead of ten seconds more.
+   */
   const settleOnChain = useCallback(
-    async (target) => {
-      const isPasskey = loginMethod === 'passkey'
-      if (Number(latestRef.current.chainId) === Number(target)) {
-        return { signer: latestRef.current.signer }
-      }
-      const refusal = `The wallet stayed on ${chainDisplayName(latestRef.current.chainId)} instead of switching to ${chainDisplayName(target)}, so nothing was signed there.`
-      if (typeof switchNetwork !== 'function') throw new Error(refusal)
-      try {
-        await switchNetwork(Number(target))
-      } catch (cause) {
-        throw new Error(refusal, { cause })
-      }
-      const deadline = Date.now() + SETTLE_TIMEOUT_MS
-      while (
-        Number(latestRef.current.chainId) !== Number(target) ||
-        (!isPasskey && !latestRef.current.signer)
-      ) {
-        if (Date.now() > deadline) {
-          throw new Error(`The switch to ${chainDisplayName(target)} did not complete, so nothing was signed there.`)
-        }
-        await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS))
-      }
-      return { signer: latestRef.current.signer }
-    },
+    (target) =>
+      settleWalletOn(target, {
+        readWallet: () => latestRef.current,
+        switchNetwork,
+        chainName: chainDisplayName,
+        needsSigner: loginMethod !== 'passkey',
+        subject: 'This deployment',
+      }),
     [loginMethod, switchNetwork],
   )
 
