@@ -197,15 +197,24 @@ bucket with `Permission 'iam.serviceAccounts.getAccessToken' denied`, which read
 storage role and is not one.
 
 Use `add-iam-policy-binding`, never `set-iam-policy`: IAM here is **additive only** (see
-`check:iac` and `docs/developer-guide/infrastructure-as-code.md`), and the additive form also leaves
-the old binding in place, so a rollback of the rename does not lock everything out.
+`check:iac` and `docs/developer-guide/infrastructure-as-code.md`). That covers step 2, which leaves
+the old member in place. It does **not** cover step 1: `update-oidc --attribute-condition` is a
+single-valued REPLACE, so after it the old name is rejected even though its member still exists.
+If the rename might be rolled back, make step 1 accept both names until it is final, then narrow it:
+
+```bash
+  --attribute-condition="assertion.repository in [\"$NEW\", \"chippr-robotics/<old-name>\"]"
+```
 
 **Then remove the stale grant** once a plan has run green — the old `attribute.repository/<old-name>`
 member should not outlive the rename, and a repository name can be re-registered by someone else.
 
 **Finally**, confirm `var.github_repository` in `infra/terraform/bootstrap/variables.tf` matches the
 new name and that a plan comes back **zero-diff**. If the code still names the old repo, the next
-apply reverts the console fix and the outage returns.
+apply reverts the console fix and the outage returns. Bootstrap state is local and committed, and
+no CI job applies it, so the committed `terraform.tfstate` still records the old condition and
+member. Run `terraform apply -refresh-only` in `infra/terraform/bootstrap` and commit the state, or
+the zero-diff check fails for reasons that have nothing to do with the live estate.
 
 **Not only GCP.** A rename also detaches anything else keyed on `owner/repo`: verify the Cloud Build
 GitHub trigger (`gcloud builds triggers list`) still points at the repository, and that its
