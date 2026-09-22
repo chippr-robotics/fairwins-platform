@@ -151,9 +151,12 @@ the OIDC token's `repository` claim, so a rename invalidates two things at once:
 | Where | What it holds |
 |---|---|
 | `google_iam_workload_identity_pool_provider.github.attribute_condition` (`bootstrap/main.tf:96`) | `assertion.repository == "owner/name"` — rejects the token outright |
-| the `roles/iam.workloadIdentityUser` members (`bootstrap/main.tf:176`) | `principalSet://.../attribute.repository/owner/name` — would refuse the impersonation even if the token were issued |
+| `google_service_account_iam_member.tf_plan_wif` (`bootstrap/main.tf:173`) | `principalSet://.../attribute.repository/owner/name` — would refuse the impersonation even if the token were issued |
 
-Both come from `var.github_repository`.
+Both come from `var.github_repository`. **Only those two.** The apply and Android-signing bindings
+(`main.tf:180`, `main.tf:190`) are keyed on `attribute.ref/refs/heads/<default branch>`, which holds no
+repository name and survives a rename untouched — the provider condition is what bounds them to this
+repository.
 
 **Terraform cannot fix this.** Applying requires federating, and federating is what is being refused.
 The credential needed to repair the condition is the credential the condition rejects. The live pool
@@ -172,17 +175,26 @@ gcloud iam workload-identity-pools providers update-oidc "$PROVIDER" \
   --project=chippr-bots-site-wp --location=global --workload-identity-pool="$POOL" \
   --attribute-condition="assertion.repository == \"$NEW\""
 
-# 2. Grant the new principalSet, for each service account that federates
-#    (fairwins-tf-plan@ and the apply identity).
+# 2. Grant the new principalSet on the PLAN identity — and ONLY the plan identity.
 POOL_PATH="projects/$PROJECT_NUMBER/locations/global/workloadIdentityPools/$POOL"
-for SA in fairwins-tf-plan fairwins-tf-apply; do
-  gcloud iam service-accounts add-iam-policy-binding \
-    "$SA@chippr-bots-site-wp.iam.gserviceaccount.com" \
-    --project=chippr-bots-site-wp \
-    --role=roles/iam.workloadIdentityUser \
-    --member="principalSet://iam.googleapis.com/$POOL_PATH/attribute.repository/$NEW"
-done
+gcloud iam service-accounts add-iam-policy-binding \
+  "fairwins-tf-plan@chippr-bots-site-wp.iam.gserviceaccount.com" \
+  --project=chippr-bots-site-wp \
+  --role=roles/iam.workloadIdentityUser \
+  --member="principalSet://iam.googleapis.com/$POOL_PATH/attribute.repository/$NEW"
 ```
+
+**Never add an `attribute.repository` member to `fairwins-tf-apply@` or the Android signing account.**
+Their bindings are `attribute.ref/refs/heads/<default branch>` on purpose: that is what makes "only
+merged, reviewed code applies" an authentication fact rather than a workflow convention
+(`main.tf:180`). A repository-wide member would let any branch that can trigger a workflow
+impersonate the apply identity — a step taken while recovering an outage, granting strictly more
+than the outage removed. Those two accounts need no action here.
+
+**Step 1 alone is not recovery.** It gets the token issued; the impersonation is a separate check, and
+skipping step 2 moves the failure rather than fixing it — `terraform init` then dies at the state
+bucket with `Permission 'iam.serviceAccounts.getAccessToken' denied`, which reads like a missing
+storage role and is not one.
 
 Use `add-iam-policy-binding`, never `set-iam-policy`: IAM here is **additive only** (see
 `check:iac` and `docs/developer-guide/infrastructure-as-code.md`), and the additive form also leaves
