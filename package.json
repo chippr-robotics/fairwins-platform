@@ -103,7 +103,7 @@
     "finops:provision": "node scripts/finops/provision-grafana.js",
     "test:finops": "npm test --workspace fairwins-finops-exporter",
     "test:iac-guardrails": "node --test \"scripts/infra/__tests__/*.test.js\"",
-    "test:finops-gate": "node --test \"scripts/finops/__tests__/*.test.mjs\"",
+    "test:finops-gate": "node --test --test-concurrency=1 \"scripts/finops/__tests__/*.test.mjs\"",
     "test:mcp": "node --test \"services/mcp-server/test/*.test.js\"",
     "build:miniapps": "npm run build --workspace @fairwins/miniapp-token-mint && npm run build --workspace @fairwins/miniapp-clearpath && npm run build --workspace @fairwins/miniapp-api-access",
     "deps:reinstall": "bash scripts/deps/reinstall.sh",
