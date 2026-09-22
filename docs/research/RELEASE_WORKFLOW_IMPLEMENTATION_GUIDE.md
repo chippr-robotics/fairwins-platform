@@ -439,8 +439,8 @@ git push
 
 3. **Add badges to README**:
 ```markdown
-![Version](https://img.shields.io/github/v/release/chippr-robotics/prediction-dao-research)
-![Commits](https://img.shields.io/github/commit-activity/m/chippr-robotics/prediction-dao-research)
+![Version](https://img.shields.io/github/v/release/chippr-robotics/fairwins-platform)
+![Commits](https://img.shields.io/github/commit-activity/m/chippr-robotics/fairwins-platform)
 ```
 
 4. **Set up notifications** (optional):

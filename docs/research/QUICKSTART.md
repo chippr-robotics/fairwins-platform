@@ -10,7 +10,7 @@
 ```bash
 # Clone the repository
 git clone https://github.com/chippr-robotics/fairwins-platform.git
-cd prediction-dao-research
+cd fairwins-platform
 
 # Install dependencies
 npm install
@@ -77,7 +77,7 @@ npm run test:coverage
 ## Project Structure
 
 ```
-prediction-dao-research/
+fairwins-platform/
 ├── contracts/              # Solidity smart contracts
 │   ├── FutarchyGovernor.sol           # Main coordinator
 │   ├── WelfareMetricRegistry.sol      # Metrics management

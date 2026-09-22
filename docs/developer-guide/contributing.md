@@ -64,8 +64,8 @@ The full protocol — triage, sizing, sub-issues, reviewing delegated work — i
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/prediction-dao-research.git
-cd prediction-dao-research
+git clone https://github.com/YOUR_USERNAME/fairwins-platform.git
+cd fairwins-platform
 npm install
 # (spec 075) one root `npm install` covers frontend and every other workspace
 ```

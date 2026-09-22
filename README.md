@@ -22,11 +22,13 @@ architecture, contract reference, runbooks)
 > redirects the old path indefinitely, so existing clones, forks and links keep
 > working.
 >
-> The old name does still appear in **deployment identity that lives outside
-> this repository** — the Graph Studio subgraph slug, the Cloud Run service,
-> the Artifact Registry image path and the relayer service names. Each is a
-> migration with its own cutover rather than a string edit, and they are
-> tracked in **#1628**.
+> The old name is still the **name of live deployed resources** — the Graph
+> Studio subgraph slug, the Cloud Run services, the Artifact Registry image
+> path and the relayer service names — so it also still appears in the config
+> here that addresses them (`cloudbuild*.yaml`, `infra/terraform/`,
+> `services/oz-relayer/`, the `prediction-dao-research-subgraph` workspace
+> package). Each is a migration with its own cutover rather than a string
+> edit, and they are tracked in **#1628**.
 
 ## Platform capabilities
 
