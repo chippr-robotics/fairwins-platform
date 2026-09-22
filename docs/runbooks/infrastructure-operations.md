@@ -206,6 +206,12 @@ If the rename might be rolled back, make step 1 accept both names until it is fi
   --attribute-condition="assertion.repository in [\"$NEW\", \"chippr-robotics/<old-name>\"]"
 ```
 
+Run **step 2 before step 1**, despite the numbering. Step 2 is additive and inert on its own, so
+doing it first means the impersonation grant is already in place when the cutover starts issuing
+tokens under the new name. In the other order, every run in the gap between the two commands fails
+on the `getAccessToken` 403 above — auth succeeds and the job dies at the state bucket, which is the
+confusing failure rather than the obvious one, and is exactly what happened here.
+
 **Then remove the stale grant** once a plan has run green — the old `attribute.repository/<old-name>`
 member should not outlive the rename, and a repository name can be re-registered by someone else.
 
