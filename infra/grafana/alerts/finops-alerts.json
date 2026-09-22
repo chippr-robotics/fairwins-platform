@@ -67,7 +67,7 @@
           },
           "annotations": {
             "summary": "A prepaid gas pool will be exhausted in under 24 hours at the current burn rate. When it empties, sponsorship or relaying STOPS and members see failures.",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
             "description": "Observed: {{ $values.A }}. Rule: Prepaid pool runway under 24h."
           }
         },
@@ -132,7 +132,7 @@
           },
           "annotations": {
             "summary": "A prepaid gas pool will be exhausted in under 72 hours at the current burn rate. Top it up.",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
             "description": "Observed: {{ $values.A }}. Rule: Prepaid pool runway under 72h."
           }
         },
@@ -198,7 +198,7 @@
           },
           "annotations": {
             "summary": "Earn — lending fee is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Earn — lending fee."
           }
         },
@@ -264,7 +264,7 @@
           },
           "annotations": {
             "summary": "Predict — Polymarket taker (builder fee) is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Predict — Polymarket taker (builder fee)."
           }
         },
@@ -330,7 +330,7 @@
           },
           "annotations": {
             "summary": "Predict — Polymarket maker (builder fee) is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Predict — Polymarket maker (builder fee)."
           }
         },
@@ -396,7 +396,7 @@
           },
           "annotations": {
             "summary": "Stake — Lido liquid staking is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Stake — Lido liquid staking."
           }
         },
@@ -462,7 +462,7 @@
           },
           "annotations": {
             "summary": "Stake — Polygon liquid staking is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Stake — Polygon liquid staking."
           }
         },
@@ -528,7 +528,7 @@
           },
           "annotations": {
             "summary": "Bridge — transfer fee is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Bridge — transfer fee."
           }
         },
@@ -594,7 +594,7 @@
           },
           "annotations": {
             "summary": "Supply — liquidity deposit fee is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Supply — liquidity deposit fee."
           }
         },
@@ -660,7 +660,7 @@
           },
           "annotations": {
             "summary": "Perps — Hyperliquid builder fee is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fee-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Perps — Hyperliquid builder fee."
           }
         },
@@ -726,7 +726,7 @@
           },
           "annotations": {
             "summary": "Fees waived (no treasury configured) is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fees-waived",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fees-waived",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Fees waived (no treasury configured)."
           }
         },
@@ -792,7 +792,7 @@
           },
           "annotations": {
             "summary": "Membership — received by treasury is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#membership-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#membership-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Membership — received by treasury."
           }
         },
@@ -858,7 +858,7 @@
           },
           "annotations": {
             "summary": "Membership — accrued, not yet withdrawn is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#membership-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#membership-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Membership — accrued, not yet withdrawn."
           }
         },
@@ -924,7 +924,7 @@
           },
           "annotations": {
             "summary": "Collect — OpenSea referral is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Collect — OpenSea referral."
           }
         },
@@ -990,7 +990,7 @@
           },
           "annotations": {
             "summary": "Perps — Gains referral is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Perps — Gains referral."
           }
         },
@@ -1056,7 +1056,7 @@
           },
           "annotations": {
             "summary": "Perps — GMX referral is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Perps — GMX referral."
           }
         },
@@ -1122,7 +1122,7 @@
           },
           "annotations": {
             "summary": "Predict — Polymarket weekly builder rewards is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#referral-revenue",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Predict — Polymarket weekly builder rewards."
           }
         },
@@ -1188,7 +1188,7 @@
           },
           "annotations": {
             "summary": "Member API — x402 agent payments is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#x402-agent-payments",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#x402-agent-payments",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Member API — x402 agent payments."
           }
         },
@@ -1254,7 +1254,7 @@
           },
           "annotations": {
             "summary": "Paymaster — sponsored gas is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Paymaster — sponsored gas."
           }
         },
@@ -1320,7 +1320,7 @@
           },
           "annotations": {
             "summary": "Relayer gas — Polygon is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Relayer gas — Polygon."
           }
         },
@@ -1386,7 +1386,7 @@
           },
           "annotations": {
             "summary": "Relayer gas — Mordor is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Relayer gas — Mordor."
           }
         },
@@ -1452,7 +1452,7 @@
           },
           "annotations": {
             "summary": "Bundler gas — Polygon is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#prepaid-pools",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Bundler gas — Polygon."
           }
         },
@@ -1518,7 +1518,7 @@
           },
           "annotations": {
             "summary": "GCP is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#gcp-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#gcp-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: GCP."
           }
         },
@@ -1584,7 +1584,7 @@
           },
           "annotations": {
             "summary": "Cloudflare is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#cloudflare-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#cloudflare-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Cloudflare."
           }
         },
@@ -1650,7 +1650,7 @@
           },
           "annotations": {
             "summary": "QuickNode is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#quicknode-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#quicknode-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: QuickNode."
           }
         },
@@ -1716,7 +1716,7 @@
           },
           "annotations": {
             "summary": "Pinata (IPFS pinning) is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#pinata-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#pinata-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Pinata (IPFS pinning)."
           }
         },
@@ -1782,7 +1782,7 @@
           },
           "annotations": {
             "summary": "Alphaday news API is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#alphaday-news-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#alphaday-news-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Alphaday news API."
           }
         },
@@ -1848,7 +1848,7 @@
           },
           "annotations": {
             "summary": "Gateway upstream usage is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#gateway-upstream-usage",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#gateway-upstream-usage",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Gateway upstream usage."
           }
         },
@@ -1914,7 +1914,7 @@
           },
           "annotations": {
             "summary": "The Graph (subgraph queries) is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#thegraph-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#thegraph-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: The Graph (subgraph queries)."
           }
         },
@@ -1980,7 +1980,7 @@
           },
           "annotations": {
             "summary": "Grafana Cloud (this system) is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#self-cost",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#self-cost",
             "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Grafana Cloud (this system)."
           }
         },
@@ -2045,7 +2045,7 @@
           },
           "annotations": {
             "summary": "A revenue source that earned over the last 14 days has earned nothing for 24 hours. This is what a silently broken fee path looks like — it is indistinguishable from a quiet day without the baseline.",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#revenue-stall",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#revenue-stall",
             "description": "Observed: {{ $values.A }}. Rule: Revenue stalled on a source that normally earns."
           }
         },
@@ -2110,7 +2110,7 @@
           },
           "annotations": {
             "summary": "A cost source spent more than twice its trailing daily average in the last 24 hours.",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#cost-anomaly",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#cost-anomaly",
             "description": "Observed: {{ $values.A }}. Rule: Daily cost above 2x the trailing 7-day mean."
           }
         },
@@ -2175,7 +2175,7 @@
           },
           "annotations": {
             "summary": "FeeRouter emitted FeeSkippedNoTreasury: fees are being charged at 0 because no treasury is set. This is live revenue being forgone for a configuration reason, and it is invisible in every other view.",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fees-waived",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fees-waived",
             "description": "Observed: {{ $values.A }}. Rule: Platform fees are being waived (no treasury configured)."
           }
         },
@@ -2240,7 +2240,7 @@
           },
           "annotations": {
             "summary": "The price feed backing every USD conversion is stale. USD cost figures stop being produced rather than being converted at a rate we know is old; native-unit figures are unaffected.",
-            "runbook_url": "https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md#fx-rate",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#fx-rate",
             "description": "Observed: {{ $values.A }}. Rule: FX rate is stale — USD figures unavailable."
           }
         }

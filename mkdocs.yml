@@ -3,8 +3,8 @@ site_description: Self-custody digital asset infrastructure — embedded wallets
 site_author: Chippr Robotics
 site_url: https://docs.fairwins.app/
 
-repo_name: chippr-robotics/prediction-dao-research
-repo_url: https://github.com/chippr-robotics/prediction-dao-research
+repo_name: chippr-robotics/fairwins-platform
+repo_url: https://github.com/chippr-robotics/fairwins-platform
 edit_uri: edit/main/docs/
 
 theme:
@@ -323,7 +323,7 @@ not_in_nav: |
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/chippr-robotics/prediction-dao-research
+      link: https://github.com/chippr-robotics/fairwins-platform
 
 extra_css:
   - stylesheets/extra.css

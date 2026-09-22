@@ -100,11 +100,11 @@ Our Release Drafter configuration automatically adds labels based on:
 
 1. Merge approved PRs to `main` branch
 2. Release Drafter automatically updates the draft release
-3. Review the draft at: `https://github.com/chippr-robotics/prediction-dao-research/releases`
+3. Review the draft at: `https://github.com/chippr-robotics/fairwins-platform/releases`
 
 ### Step 3: Review Draft Release
 
-1. Go to [Releases](https://github.com/chippr-robotics/prediction-dao-research/releases)
+1. Go to [Releases](https://github.com/chippr-robotics/fairwins-platform/releases)
 2. Click "Edit" on the draft release
 3. Review generated content:
    - Version number (adjust if needed)

@@ -8,7 +8,7 @@
 set -euo pipefail
 exec > >(logger -t fairwins-startup) 2>&1
 
-REPO_URL="https://github.com/chippr-robotics/prediction-dao-research.git"
+REPO_URL="https://github.com/chippr-robotics/fairwins-platform.git"
 REPO_DIR=/opt/fairwins/repo
 ROLE="$(curl -fsS -H 'Metadata-Flavor: Google' \
   http://metadata.google.internal/computeMetadata/v1/instance/attributes/fairwins-role)"
@@ -54,6 +54,9 @@ fi
 # ---- repo + layout ----------------------------------------------------------------------------
 mkdir -p /opt/fairwins
 if [ -d "$REPO_DIR/.git" ]; then
+  # Re-point an existing clone too. Without this, REPO_URL only reaches fresh clones, and a VM
+  # provisioned before a repo rename keeps fetching the old path for as long as GitHub redirects it.
+  git -C "$REPO_DIR" remote set-url origin "$REPO_URL"
   git -C "$REPO_DIR" fetch --depth 1 origin main && git -C "$REPO_DIR" reset --hard origin/main
 else
   git clone --depth 1 "$REPO_URL" "$REPO_DIR"

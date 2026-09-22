@@ -23,7 +23,22 @@ variable "wif_pool_id" {
 variable "github_repository" {
   description = "owner/repo permitted to federate against the pool. Without this restriction any GitHub repository could exchange a token."
   type        = string
-  default     = "chippr-robotics/prediction-dao-research"
+
+  # Renamed from chippr-robotics/prediction-dao-research on 2026-09-21.
+  #
+  # This value is not documentation — it is an AUTH BOUNDARY, in two places: the provider's
+  # `attribute_condition` (main.tf:96) and the `workloadIdentityUser` principalSet (main.tf:176).
+  # GitHub puts the CURRENT repository name in the OIDC token's `repository` claim, so the moment
+  # the repo was renamed the live condition stopped matching and every federating workflow began
+  # failing with `unauthorized_client: The given credential is rejected by the attribute
+  # condition.`
+  #
+  # Changing it here does NOT repair the live pool, and Terraform cannot: applying requires
+  # federating, which is the thing being refused. The live provider and binding have to be updated
+  # out of band with an admin credential first (see docs/runbooks/infrastructure-operations.md);
+  # this default is what keeps state consistent once they are, and what stops the next apply
+  # reverting them to a repo that no longer exists.
+  default = "chippr-robotics/fairwins-platform"
 }
 
 variable "default_branch" {

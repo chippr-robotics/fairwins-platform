@@ -21,7 +21,7 @@ Phase 1 (Release Drafter) has been implemented. This guide covers future phases.
 **How to Use**:
 1. Label PRs with appropriate types (feature, fix, docs, etc.)
 2. Merge PRs to `main`
-3. Review draft at [Releases page](https://github.com/chippr-robotics/prediction-dao-research/releases)
+3. Review draft at [Releases page](https://github.com/chippr-robotics/fairwins-platform/releases)
 4. Edit and publish when ready
 
 **Documentation**: [RELEASE_PROCESS.md](./RELEASE_PROCESS.md)
@@ -439,8 +439,8 @@ git push
 
 3. **Add badges to README**:
 ```markdown
-![Version](https://img.shields.io/github/v/release/chippr-robotics/prediction-dao-research)
-![Commits](https://img.shields.io/github/commit-activity/m/chippr-robotics/prediction-dao-research)
+![Version](https://img.shields.io/github/v/release/chippr-robotics/fairwins-platform)
+![Commits](https://img.shields.io/github/commit-activity/m/chippr-robotics/fairwins-platform)
 ```
 
 4. **Set up notifications** (optional):

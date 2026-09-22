@@ -1,7 +1,7 @@
 # Platform-fee disclosure — actor-critic screenshot rounds
 
 Captured by `scripts/ui/capture-platform-fees.mjs` while writing the end-to-end fee coverage for
-[#1233](https://github.com/chippr-robotics/prediction-dao-research/issues/1233). The flow tests
+[#1233](https://github.com/chippr-robotics/fairwins-platform/issues/1233). The flow tests
 prove the *arithmetic* — that the amount taken on chain matches the rate that was rendered. These
 shots are the other half: that the rendered thing is legible, honest, and visibly different in each
 of the three states a member can meet.

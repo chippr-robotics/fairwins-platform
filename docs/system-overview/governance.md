@@ -87,7 +87,7 @@ This repository began as *prediction-dao-research*, an exploration of
 oracles, conditional-token prediction markets, proposal bonds, and
 ragequit). That governance design is **not deployed and not maintained** — it
 is preserved for reference under
-[`docs/archived/`](https://github.com/chippr-robotics/prediction-dao-research/tree/main/docs/archived)
+[`docs/archived/`](https://github.com/chippr-robotics/fairwins-platform/tree/main/docs/archived)
 and `contracts-archive/`. The live product is the peer-to-peer wager system
 these docs describe; its only "governance" is the bounded operator roles above.
 

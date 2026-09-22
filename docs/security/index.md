@@ -51,7 +51,7 @@ All security tests run automatically via GitHub Actions on:
 - Weekly scheduled runs (Mondays at 00:00 UTC)
 - Manual workflow dispatch
 
-**Workflow:** [`.github/workflows/security-testing.yml`](https://github.com/chippr-robotics/prediction-dao-research/blob/main/.github/workflows/security-testing.yml)
+**Workflow:** [`.github/workflows/security-testing.yml`](https://github.com/chippr-robotics/fairwins-platform/blob/main/.github/workflows/security-testing.yml)
 
 ## Test Results
 

@@ -15,7 +15,7 @@ import assert from 'node:assert'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 
 import {
   discoverMoneyPaths,
@@ -283,10 +283,15 @@ test('the schema rejects a basis that is not a basis, on a planned cost too', ()
 // ── the gate as a whole ──────────────────────────────────────────────────────────────────────
 
 test('npm run check:finops passes on this tree', () => {
-  const out = execFileSync('node', [join(ROOT, 'scripts/finops/check-finops-coverage.js'), '--json'], {
+  // spawnSync, not execFileSync: the gate exits non-zero on a violation, and a throwing call
+  // loses the --json payload it just printed. The failure then reads `Command failed: node
+  // .../check-finops-coverage.js --json` and names none of the violations, which is the one
+  // thing this assertion exists to tell you.
+  const run = spawnSync('node', [join(ROOT, 'scripts/finops/check-finops-coverage.js'), '--json'], {
     cwd: ROOT,
     encoding: 'utf8',
   })
-  const { ok, violations } = JSON.parse(out)
+  assert.ok(run.stdout, `the gate printed no JSON (status ${run.status}): ${run.stderr || run.error}`)
+  const { ok, violations } = JSON.parse(run.stdout)
   assert.strictEqual(ok, true, violations.map((v) => `[${v.check}] ${v.message}`).join('\n'))
 })

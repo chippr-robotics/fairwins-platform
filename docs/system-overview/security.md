@@ -146,7 +146,7 @@ futarchy/governance system and is **not** part of the deployed wager protocol.)
 - **Use a hardware wallet** for meaningful balances; browser-extension wallets
   are more exposed to phishing and malware.
 - **Verify contract addresses** against the records in
-  [`deployments/`](https://github.com/chippr-robotics/prediction-dao-research/tree/main/deployments)
+  [`deployments/`](https://github.com/chippr-robotics/fairwins-platform/tree/main/deployments)
   before interacting — phishing sites mimic the UI but point at malicious
   contracts.
 - **Never share** private keys, seed phrases, or keystore files. No legitimate
