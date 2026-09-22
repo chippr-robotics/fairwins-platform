@@ -1,0 +1,81 @@
+# Feature Specification: Sigil cold signer in Protect ▸ Off chain
+
+**Feature Branch**: `111-sigil-cold-signer`
+
+**Created**: 2026-09-22
+
+**Status**: Draft (reserved — see issue #1633; plan and tasks follow in the feature PR)
+
+**Input**: Issue #1633 — "Sigil was built for agentic control of keys; the same cold-storage
+protocol protects humans. Let a member use Sigil as a cold signer, with every action available on
+every supported network."
+
+## Problem statement
+
+Sigil (`chippr-robotics/sigil`) is a 2-of-2 MPC ECDSA signer. The cold half is a set of
+presignature shares on a floppy disk, consumed one per signature. The agent half lives on the
+member's machine behind `sigil-daemon`. Neither half can sign alone, and a signature can only exist
+while the disk is physically present. That property is exactly what spec 085 bought from a hardware
+wallet: the physical consent step leaves the browser. Sigil just gets it with different hardware.
+
+Two things stand between a member and that property today:
+
+1. **Nothing in FairWins can reach Sigil.** The daemon speaks newline-delimited JSON on a Unix
+   socket and nothing else. The Sigil constitution (Principle I, III) forbids an HTTP listener
+   inside its trusted computing base, and its SECURITY.md assigns the remote UI to FairWins, to be
+   built "out of TCB, against a deliberately chosen interface".
+2. **Nothing can name the account.** The daemon exposes no public key, so no address can be
+   derived. Sigil's own MCP `get_address` tool returns a hardcoded placeholder.
+
+## User Scenarios & Testing *(mandatory)*
+
+### User Story 1 — Add a Sigil disk as a cold account (Priority: P1)
+
+As a member with a Sigil agent machine, I pair FairWins with my local Sigil bridge, insert my
+floppy, and save the disk's account in Protect ▸ Off chain, next to my Ledger and Trezor accounts.
+
+**Independent Test**: With the bridge answering and a disk present, the add flow shows the disk's
+address and remaining presignatures, and saving stores public metadata only.
+
+### User Story 2 — Act as the Sigil account, everywhere (Priority: P1)
+
+As a member operating as my Sigil account, I can do anything I could do as any other acting
+account on any EVM network the build supports:
+
+- send native coins and tokens;
+- wrap and swap;
+- sign a message in Verify;
+- sign typed data;
+- approve and execute vault proposals where the account is an owner;
+- submit from a mini-app.
+
+Each signature needs the disk to be present.
+
+**Independent Test**: Operating as a Sigil account on a local chain, a native send settles, and the
+recovered signer of the broadcast transaction is the saved address.
+
+### User Story 3 — Honest failure (Priority: P1)
+
+When the bridge is unreachable or unpaired, when no disk is inserted, or when the disk's
+presignatures are spent or expired, the app says which one it is and what fixes it. It signs
+nothing and never offers a generic error.
+
+## Requirements *(draft — refined in plan)*
+
+- **FR-001** Sigil is reached only through a loopback bridge outside Sigil's TCB. The bridge
+  requires a pairing token, serves only listed origins, and never accepts or returns key material.
+- **FR-002** The browser computes every digest (unsigned transaction, EIP-191, EIP-712) and sends
+  only the 32-byte hash plus a human description. v is recovered against the disk's public key and
+  never trusted from the transport.
+- **FR-003** A Sigil account is a vendor behind the existing `connectHardware` seam. The saved
+  entry is public metadata only (spec 085). The pairing token is device-scoped and never enters the
+  backup.
+- **FR-004** Every signature is recovered and verified against the saved address before broadcast.
+  A reconnect whose disk names a different account is refused.
+- **FR-005** Each signature consumes one presignature. The remaining count is shown before the
+  member saves or signs, and an exhausted disk is a named state.
+
+## Out of scope
+
+- Bitcoin (spec 061 signs with raw keys only; no hardware BTC path exists).
+- FROST schemes (the Sigil daemon has no FROST sign operation today).

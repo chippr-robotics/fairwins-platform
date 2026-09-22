@@ -26,12 +26,12 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 114 |
-| With a member-facing flow | 90 |
-| Member-facing flows | 210 |
+| Spec directories | 115 |
+| With a member-facing flow | 91 |
+| Member-facing flows | 213 |
 | 🟢 covered | 189 |
 | 🟡 partial | 5 |
-| 🔴 absent | 7 |
+| 🔴 absent | 10 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -40,7 +40,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Custody — member funds are escrowed, moved, bridged, swept or sent
 
-86 flows — 🟢 69 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
+88 flows — 🟢 69 · 🟡 5 · 🔴 6 · ⚪ 8 · covered-but-not-proven 0
 
 ### `001-cypress-e2e-flows` — Core wager lifecycle (create → accept → resolve → claim/refund)
 
@@ -343,9 +343,16 @@ establish the outcome. They are listed in full at the end of this document.
 | `multichain.claim-on-action-chain` | With the wallet on network B, tapping Claim on a wager living on network A resolves the target chain from the wager, moves the wallet through the one switch-and-settle seam, and completes the claim as a real settled transaction — no in-app 'switch network' step | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
 | `multichain.intent-signs-without-switch` | A relayed EIP-712 intent targeting network A is signed while connected to network B with no network change requested at all — the chain lives in the signature domain | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
 
+### `111-sigil-cold-signer` — Sigil cold signer in Protect ▸ Off chain
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `sigil.pair-and-add` | Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only) | 🔴 absent | none | — (proposed: no-chain) | #1633 |  |
+| `sigil.operate-as-send` | Operating as the Sigil account, a native send settles on chain and the broadcast transaction recovers to the saved address | 🔴 absent | none | — (proposed: on-chain) | #1633 |  |
+
 ## Disclosure — a member consents to a cost
 
-19 flows — 🟢 18 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
+20 flows — 🟢 18 · 🟡 0 · 🔴 1 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -420,6 +427,12 @@ establish the outcome. They are listed in full at the end of this document.
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
 | `multichain.refused-switch-discloses` | A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface) | 🟢 covered | flow | `no-chain` | `50-multichain-write-seam.cy.js` (MCW-01, MCW-02, MCW-03) |  |
+
+### `111-sigil-cold-signer` — Sigil cold signer in Protect ▸ Off chain
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `sigil.failure-vocabulary` | An unreachable or unpaired bridge, a missing disk, and an exhausted or expired disk each render a named state and sign nothing | 🔴 absent | none | — (proposed: no-chain) | #1633 |  |
 
 ## Access — gating, identity and permission
 
