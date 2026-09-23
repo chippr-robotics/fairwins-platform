@@ -375,6 +375,33 @@ subagent's report is a claim — read the diff and run the gates before acceptin
   `window.__fwHardwareTestAdapter__` seam is `import.meta.env.DEV`-guarded and dead-code-eliminated
   from production bundles. See `docs/developer-guide/hardware-wallets.md` +
   `docs/runbooks/hardware-wallet-staging-validation.md` + `specs/085-hardware-wallet-protect/`.
+- **Sigil (spec 111) is a THIRD vendor behind the spec-085 seam, reached through a LOOPBACK BRIDGE.**
+  Sigil (chippr-robotics/sigil) is a 2-of-2 MPC ECDSA signer whose cold half is presignature shares on
+  a floppy. `sigil-daemon` speaks newline-JSON on a Unix socket and signs a raw 32-byte PREHASH,
+  returning low-S `r‖s` with NO `v`. Four rules:
+  (1) **Every digest is built in the browser**: tx keccak, EIP-191, and EIP-712 `0x1901‖domainSeparator‖hashStruct`
+  (`lib/hardware/sigilAdapter.js`). `v` is RECOVERED against the disk's public key and never taken from
+  the transport, and a signature recovering to neither parity is refused. This is what makes every EVM
+  action available on every EVM chain through the unchanged `HardwareSigner`.
+  (2) **The bridge is `services/sigil-bridge`**, dependency-free and NOT a workspace member (the
+  mcp-server precedent), outside Sigil's TCB because Sigil's constitution forbids HTTP inside it. Its
+  refusals are the feature:
+  - Origin allowlist (never a wildcard), bearer pairing token, Host check (DNS rebinding), JSON-only bodies;
+  - **no route and no daemon-client function that imports key material**;
+  - disk states refused BY NAME before a presignature is spent.
+
+  (3) **The pairing token is a device credential** under the spec-069 rules:
+  - held in `fw_global_prefs.sigil_bridge`;
+  - **deliberately absent from `syncedObjects.js`**;
+  - sent in the header only, never in a URL;
+  - redacted to `…` + 4 characters.
+
+  The spec-085 store keeps public metadata only, with `path` = `sigil:<child id>` (one account per disk).
+  (4) **Sigil's `proof_hash` is NOT a proof of execution today.** The daemon's proving is a stub, so the
+  bridge does not forward it and the app claims nothing about it until chippr-robotics/sigil#67 lands.
+  The e2e tiers run the REAL bridge in front of a stand-in daemon (`cypress/support/tasks/sigil.js`).
+  Keep it that way: do not replace it with the spec-085 adapter seam, which cannot sign. See
+  `docs/developer-guide/sigil-cold-signer.md` + `specs/111-sigil-cold-signer/`.
 - **Legacy account recovery (spec 062) is FRONTEND-ONLY** — the **Recovery** section (renamed from
   "Backup & Security"; tab id `security` + `backup` alias unchanged). Members import an old EOA
   **private key** or **BIP-39 word list**; the secret is encrypted at rest (AES-GCM under a

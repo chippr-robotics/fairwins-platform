@@ -74,6 +74,10 @@
   color: var(--hw-trezor-color);
 }
 
+.hw-vendor-badge--sigil {
+  color: var(--hw-sigil-color);
+}
+
 /* Same light-mode-chrome rule as .custody-actions button: these sit on the card surface. */
 .hw-list__remove,
 .hw-list__confirm button,
@@ -256,7 +260,9 @@
 
 .hw-account-row__path {
   font-size: 0.72rem;
-  opacity: 0.65;
+  /* A token, not opacity: 65% opacity over the card measured below AA (found by the spec-111
+     pick-step axe scan, which spec 085's own flow never ran). --text-muted clears AA on both themes. */
+  color: var(--text-muted);
 }
 
 .hw-account-row__meta {
@@ -327,4 +333,22 @@
     align-items: flex-start;
     flex-direction: column;
   }
+}
+
+/* Spec 111 — Sigil pairing fields and the disk-budget warning. Amber-toned TEXT uses
+   --warning-text (brand rule 2: --warning-color is a fill, 2.1:1 as text). */
+.hw-sigil-pairing {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.hw-account-row__budget {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.hw-account-row__warning {
+  font-size: 0.75rem;
+  color: var(--warning-text);
 }

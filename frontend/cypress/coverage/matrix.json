@@ -3428,35 +3428,54 @@
       "flows": [
         {
           "id": "sigil.pair-and-add",
-          "name": "Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only)",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "name": "Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only; the pairing token device-scoped)",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "custody",
-          "tests": [],
-          "issue": "#1633"
+          "tests": [
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-01",
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-04"
+          ],
+          "issue": "#1633",
+          "note": "No adapter seam: the real Sigil adapter talks to the REAL services/sigil-bridge, which talks to a stand-in daemon on a real Unix socket (cypress/support/tasks/sigil.js). SIG-01 asserts nothing was signed while adding."
         },
         {
           "id": "sigil.failure-vocabulary",
-          "name": "An unreachable or unpaired bridge, a missing disk, and an exhausted or expired disk each render a named state and sign nothing",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "name": "An unpaired bridge, a missing disk, no bridge at all, and an exhausted disk each render a named state and sign nothing",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "disclosure",
-          "tests": [],
+          "tests": [
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-02",
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-04"
+          ],
           "issue": "#1633"
         },
         {
-          "id": "sigil.operate-as-send",
-          "name": "Operating as the Sigil account, a native send settles on chain and the broadcast transaction recovers to the saved address",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "on-chain",
-          "depth": "none",
+          "id": "sigil.sign-message",
+          "name": "Acting as the Sigil account, Protect \u25b8 Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "settled",
           "risk": "custody",
-          "tests": [],
+          "tests": [
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-03"
+          ],
+          "issue": "#1633",
+          "note": "Found and fixed a spec-088 defect on the way: the deferred-signing dialog rendered UNDER the sheet that asked for it (ActionSheet ceremony tier)."
+        },
+        {
+          "id": "sigil.operate-as-send",
+          "name": "Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log",
+          "status": "covered",
+          "tier": "on-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/46-sigil-operate-as-send.cy.js::SGO-01"
+          ],
           "issue": "#1633"
         }
       ]

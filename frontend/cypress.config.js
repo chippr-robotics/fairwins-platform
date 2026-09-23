@@ -5,6 +5,7 @@ import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import clearpathTasks from './cypress/support/tasks/clearpath.js'
+import sigilTasks from './cypress/support/tasks/sigil.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -2837,6 +2838,7 @@ export default defineConfig({
          * chain. See frontend/cypress/support/tasks/clearpath.js.
          */
         ...clearpathTasks(config),
+        ...sigilTasks(config),
       })
 
       /*

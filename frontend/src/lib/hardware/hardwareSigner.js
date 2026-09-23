@@ -288,6 +288,14 @@ export class HardwareSigner {
     })
     const serialized = await this.signTransaction({ ...request, from: undefined })
     const hash = await this.client.sendRawTransaction({ serializedTransaction: serialized })
+    // Spec 111: a vendor that keeps its own signing log (Sigil's disk usage log) is told which
+    // transaction the signature became. Best-effort and not awaited: it can never delay or undo
+    // a broadcast that has already happened.
+    if (typeof this.session.noteBroadcast === 'function') {
+      Promise.resolve()
+        .then(() => this.session.noteBroadcast(hash))
+        .catch(() => {})
+    }
     const client = this.client
     return {
       hash,

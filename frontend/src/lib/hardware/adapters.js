@@ -5,13 +5,20 @@
 // Adapter interface — `connectHardware(vendor)` resolves to a session:
 //
 //   {
-//     vendor: 'ledger' | 'trezor',
+//     vendor: 'ledger' | 'trezor' | 'sigil',
 //     getAddress(path, { display = false }) → Promise<{ address: string }>,
 //     getAddresses(paths)                   → Promise<Array<{ path, address }>>,
 //     signPersonalMessage(path, messageBytes) → Promise<`0x…` 65-byte signature>,
 //     signTransaction(path, unsignedSerialized, txFields) → Promise<{ r, s, v }>,
+//     signTypedData?(path, { domain, types, primaryType, message, domainSeparator, hashStructMessage }),
+//     describeAccounts?() → Promise<Array<{ path, address, detail }>>   (fixed-account vendors),
+//     noteBroadcast?(txHash) → Promise<boolean>                        (best-effort audit hook),
 //     close() → Promise<void>,
 //   }
+//
+// Spec 111 adds `sigil`: an MPC signer reached through a loopback bridge rather than USB/BLE. It
+// has one account per disk (no derivation paths), so it offers `describeAccounts`, and it records
+// broadcast hashes into the disk's usage log through `noteBroadcast`.
 //
 // Vendor SDKs are loaded lazily (dynamic import) so members who never open the flow never download
 // them. Failures are normalized to HardwareWalletError before they leave this layer (FR-012).
@@ -23,8 +30,13 @@
 
 import { HardwareWalletError, HW_ERROR_CODES } from './errors'
 import { ensureNodeGlobals } from './nodeShims'
+import { isNativeRuntime } from '../native/runtime'
+import { loadSigilBridge } from './sigilBridgeStore'
 
-export const VENDOR_LABELS = Object.freeze({ ledger: 'Ledger', trezor: 'Trezor' })
+export const VENDOR_LABELS = Object.freeze({ ledger: 'Ledger', trezor: 'Trezor', sigil: 'Sigil' })
+
+/** Every vendor the add flow offers, in the order it offers them. */
+export const HARDWARE_VENDOR_ORDER = Object.freeze(['ledger', 'trezor', 'sigil'])
 
 /** The rails a Ledger can be reached over from a browser. */
 export const TRANSPORT_KINDS = Object.freeze({
@@ -38,6 +50,8 @@ export const TRANSPORT_KINDS = Object.freeze({
   // Capacitor plugin, since a native WebView has no Web Bluetooth. Selected
   // by runtime in ledgerAdapter.js, never by this browser-capability probe.
   NATIVEBLE: 'nativeble',
+  // Spec 111: Sigil's loopback HTTP bridge to sigil-daemon on this computer.
+  SIGIL_BRIDGE: 'sigil-bridge',
 })
 
 /** Which browser transports exist here. Pure capability read — no permission prompt. */
@@ -90,6 +104,21 @@ export function vendorAvailability(vendor, transports = detectTransports()) {
     }
     return { available: true, reason: null, transport: null }
   }
+  if (vendor === 'sigil') {
+    // Sigil is reached over fetch() to a bridge on this computer. The native shells run on a phone,
+    // where no Sigil daemon (and no floppy drive) can exist, so there it is a stated refusal.
+    if (typeof window === 'undefined' || typeof fetch !== 'function') {
+      return { available: false, reason: 'Sigil needs a browser on the computer that runs the Sigil daemon.', transport: null }
+    }
+    if (isNativeRuntime()) {
+      return {
+        available: false,
+        reason: 'Sigil runs on a computer with a floppy drive. Open FairWins in a browser on that computer.',
+        transport: null,
+      }
+    }
+    return { available: true, reason: null, transport: TRANSPORT_KINDS.SIGIL_BRIDGE }
+  }
   return { available: false, reason: 'Unknown device vendor.', transport: null }
 }
 
@@ -97,7 +126,7 @@ export function vendorAvailability(vendor, transports = detectTransports()) {
  * Open a session with the device. The caller owns the session and MUST `close()` it when the flow
  * ends (the sheet's teardown does), so the transport is released for other tabs/tools.
  */
-export async function connectHardware(vendor, { transport, speculosUrl } = {}) {
+export async function connectHardware(vendor, { transport, speculosUrl, sigilBridge } = {}) {
   if (import.meta.env.DEV && typeof window !== 'undefined' && typeof window.__fwHardwareTestAdapter__ === 'function') {
     return window.__fwHardwareTestAdapter__(vendor)
   }
@@ -121,6 +150,13 @@ export async function connectHardware(vendor, { transport, speculosUrl } = {}) {
   const availability = vendorAvailability(vendor)
   if (!availability.available) {
     throw new HardwareWalletError(HW_ERROR_CODES.TRANSPORT_UNSUPPORTED, availability.reason, { vendor })
+  }
+  if (vendor === 'sigil') {
+    // No vendor SDK and no Node globals: the bridge is plain fetch(). The pairing (bridge address +
+    // token) is device-scoped and read here, so the reconnect path needs nothing extra passed in.
+    const { connectSigil } = await import('./sigilAdapter')
+    const pairing = sigilBridge ?? loadSigilBridge()
+    return connectSigil(pairing ?? {})
   }
   // The vendor SDKs assume Node globals (Buffer); install the browser polyfill before any of
   // their code loads. See nodeShims.js for why this exists and why it is lazy.
