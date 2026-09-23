@@ -543,6 +543,34 @@ jobs:
       - name: Run tests
         run: node --test test/*.test.js
 
+  # Sigil bridge tests (spec 111). The bridge is the ONE path from a browser tab to a member's
+  # Sigil daemon, so its load-bearing cases are refusals: an unlisted Origin, a wrong pairing token,
+  # a rebinding Host header, a non-JSON body, no route that imports key material, and every
+  # refusable disk state refused BY NAME before a presignature is spent. A green e2e run proves the
+  # happy path; only this suite proves the doors that must stay shut.
+  #
+  # NO INSTALL STEP, for the same reason as mcp-server-tests: zero dependencies, deliberately not a
+  # workspace member (spec 075). Gating — no continue-on-error (Constitution IV).
+  sigil-bridge-tests:
+    name: Sigil Bridge Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/sigil-bridge
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: node --test test/*.test.js
+
   frontend-tests:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest

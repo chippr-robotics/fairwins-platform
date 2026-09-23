@@ -10,7 +10,8 @@ import { getUserPreference, saveUserPreference } from '../../utils/userStorage'
 // Per-account userStorage key (resolves to fw_user_<owner>_hardware_accounts).
 export const HARDWARE_ACCOUNTS_STORAGE_KEY = 'hardware_accounts'
 
-export const HARDWARE_VENDORS = Object.freeze(['ledger', 'trezor'])
+// Spec 111 added 'sigil' (MPC floppy signer). Its `path` is `sigil:<child id>` — one account per disk.
+export const HARDWARE_VENDORS = Object.freeze(['ledger', 'trezor', 'sigil'])
 
 const isEntry = (e) =>
   e &&

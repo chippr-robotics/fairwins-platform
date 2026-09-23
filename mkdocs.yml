@@ -131,6 +131,7 @@ nav:
     - Agentic Payments (spec 096): developer-guide/agentic-payments.md
     - Message Signing (Protect ▸ Verify): developer-guide/message-signing.md
     - Hardware Wallets (Protect ▸ Off chain): developer-guide/hardware-wallets.md
+    - Sigil Cold Signer (Protect ▸ Off chain): developer-guide/sigil-cold-signer.md
     - Account Cards & Identity (spec 086): developer-guide/account-cards.md
     - Infrastructure as Code (spec 087): developer-guide/infrastructure-as-code.md
     - Account Statements: developer-guide/account-statements.md
@@ -182,6 +183,7 @@ nav:
     - Batch Operations: runbooks/batch-operations.md
     - Passkey Account Recovery: runbooks/passkey-account-recovery.md
     - Hardware Wallet Staging Validation: runbooks/hardware-wallet-staging-validation.md
+    - Sigil Cold Signer Staging Validation: runbooks/sigil-cold-signer-staging-validation.md
   - Architecture Workbook:
     - Overview: architecture/workbook/README.md
     - Executive Summary: architecture/workbook/00-executive-summary.md

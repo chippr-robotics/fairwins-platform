@@ -23,6 +23,12 @@ const LEDGER_BLE_STEPS = Object.freeze([
   'Choose your Ledger in the Bluetooth pairing prompt.',
 ])
 
+const SIGIL_STEPS = Object.freeze([
+  'On this computer, start sigil-daemon and sigil-bridge with this site as an allowed origin.',
+  'Insert the Sigil floppy disk for the account.',
+  'Paste the pairing token from the bridge’s token file below.',
+])
+
 const TREZOR_STEPS = Object.freeze([
   'Plug the device into this computer.',
   'Unlock it with your PIN.',
@@ -40,7 +46,7 @@ const TREZOR_STEPS = Object.freeze([
  */
 
 /**
- * @param {'ledger'|'trezor'} vendor
+ * @param {'ledger'|'trezor'|'sigil'} vendor
  * @param {{ webhid: boolean, webusb: boolean, webble: boolean }} [transports]
  * @returns {ConnectGuidance}
  */
@@ -51,6 +57,19 @@ export function connectGuidance(vendor, transports = detectTransports()) {
       optionHint: 'Connect through the Trezor window',
       reconnectHint: 'Plug in the device and approve the connection in the Trezor window.',
       steps: [...TREZOR_STEPS],
+    }
+  }
+
+  if (vendor === 'sigil') {
+    const availability = vendorAvailability('sigil', transports)
+    if (!availability.available) {
+      return { transport: null, optionHint: availability.reason, reconnectHint: availability.reason, steps: [] }
+    }
+    return {
+      transport: TRANSPORT_KINDS.SIGIL_BRIDGE,
+      optionHint: 'MPC cold signer — floppy disk + your computer',
+      reconnectHint: 'Make sure sigil-daemon and sigil-bridge are running on this computer, and insert the Sigil disk for this account.',
+      steps: [...SIGIL_STEPS],
     }
   }
 
@@ -80,6 +99,21 @@ export function connectGuidance(vendor, transports = detectTransports()) {
 
   const reason = vendorAvailability(vendor, transports).reason
   return { transport: null, optionHint: reason, reconnectHint: reason, steps: [] }
+}
+
+/** "742 of 1000 signatures left · expires in 30 days" — every figure the disk reported, none invented. */
+export function describeSigilBudget(detail) {
+  if (!detail) return null
+  const parts = []
+  if (detail.presigsRemaining != null && detail.presigsTotal != null) {
+    parts.push(`${detail.presigsRemaining} of ${detail.presigsTotal} signatures left`)
+  } else if (detail.presigsRemaining != null) {
+    parts.push(`${detail.presigsRemaining} signatures left`)
+  }
+  if (detail.daysUntilExpiry != null) {
+    parts.push(detail.daysUntilExpiry === 1 ? 'disk expires in 1 day' : `disk expires in ${detail.daysUntilExpiry} days`)
+  }
+  return parts.length ? parts.join(' · ') : null
 }
 
 export default connectGuidance

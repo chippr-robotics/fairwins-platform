@@ -28,10 +28,10 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 |---|---|
 | Spec directories | 115 |
 | With a member-facing flow | 91 |
-| Member-facing flows | 213 |
-| 🟢 covered | 189 |
+| Member-facing flows | 214 |
+| 🟢 covered | 193 |
 | 🟡 partial | 5 |
-| 🔴 absent | 10 |
+| 🔴 absent | 7 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -40,7 +40,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Custody — member funds are escrowed, moved, bridged, swept or sent
 
-88 flows — 🟢 69 · 🟡 5 · 🔴 6 · ⚪ 8 · covered-but-not-proven 0
+89 flows — 🟢 72 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
 
 ### `001-cypress-e2e-flows` — Core wager lifecycle (create → accept → resolve → claim/refund)
 
@@ -347,12 +347,13 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `sigil.pair-and-add` | Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only) | 🔴 absent | none | — (proposed: no-chain) | #1633 |  |
-| `sigil.operate-as-send` | Operating as the Sigil account, a native send settles on chain and the broadcast transaction recovers to the saved address | 🔴 absent | none | — (proposed: on-chain) | #1633 |  |
+| `sigil.pair-and-add` | Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only; the pairing token device-scoped) | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-01, SIG-04) |  |
+| `sigil.sign-message` | Acting as the Sigil account, Protect ▸ Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address | 🟢 covered | settled | `no-chain` | `51-protect-sigil.cy.js` (SIG-03) |  |
+| `sigil.operate-as-send` | Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log | 🟢 covered | settled | `on-chain` | `46-sigil-operate-as-send.cy.js` (SGO-01) |  |
 
 ## Disclosure — a member consents to a cost
 
-20 flows — 🟢 18 · 🟡 0 · 🔴 1 · ⚪ 1 · covered-but-not-proven 0
+20 flows — 🟢 19 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -432,7 +433,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `sigil.failure-vocabulary` | An unreachable or unpaired bridge, a missing disk, and an exhausted or expired disk each render a named state and sign nothing | 🔴 absent | none | — (proposed: no-chain) | #1633 |  |
+| `sigil.failure-vocabulary` | An unpaired bridge, a missing disk, no bridge at all, and an exhausted disk each render a named state and sign nothing | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-02, SIG-04) |  |
 
 ## Access — gating, identity and permission
 
