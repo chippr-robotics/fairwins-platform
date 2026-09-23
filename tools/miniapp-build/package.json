@@ -1,6 +1,6 @@
 {
   "name": "@fairwins/miniapp-build",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "private": true,
   "description": "Shared Vite build preset that packages a FairWins mini-app (spec 073).",
   "type": "module",

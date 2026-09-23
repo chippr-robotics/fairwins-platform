@@ -22,5 +22,5 @@
     "  services/relay-gateway/test/assistantContract.test.js  (tool routes exist in contract.js ROUTES)",
     "  services/relay-gateway/test/mcpToolParity.test.js      (services/mcp-server/src/toolDefs.snapshot.json == this table)"
   ],
-  "version": "1.18.0"
+  "version": "1.19.0"
 }
