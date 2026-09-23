@@ -50,7 +50,7 @@ jobs:
       matrix:
         environment: [prod, staging]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # actions/checkout persists a credential as `http.https://github.com/.extraheader` in the
           # workspace's LOCAL git config. An explicit Authorization header OVERRIDES a URL-embedded
