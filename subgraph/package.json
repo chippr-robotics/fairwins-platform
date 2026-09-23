@@ -1,6 +1,6 @@
 {
   "name": "prediction-dao-research-subgraph",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "Subgraph for the v2 WagerRegistry — indexes wagers + per-transfer WagerTransfer records (txHash) that power the My Wagers view, site stats, and the RPC-light tax/activity report.",
   "private": true,
   "scripts": {

@@ -1,105 +1,217 @@
-previous: v1.17.0
-commits:  100
-  [unclassified] Merge pull request #1556 from chippr-robotics/staging
-  [unclassified] Merge pull request #1555 from chippr-robotics/ops/1378-android-signing-sa
-  [chore -> patch] create the Android upload-key reader identity
-  [unclassified] Merge pull request #1554 from chippr-robotics/main
-  [unclassified] Merge pull request #1553 from chippr-robotics/staging
-  [unclassified] Merge pull request #1547 from chippr-robotics/ops/1544-news-gateway-image
-  [unclassified] Merge pull request #1549 from chippr-robotics/feat/1378-android-signing-identity
-  [unclassified] Merge pull request #1551 from chippr-robotics/claude/address-scanning-risk-feature-ax6ota
-  [test -> patch] keep the real ethers around the Contract stub
-  [fix -> patch] make the estate screen readable on testnet, and the notice legible
-  [feat -> minor] declare the Android upload-key reader, scoped to exactly two secrets
-  [unclassified] Merge pull request #1546 from chippr-robotics/feat/1539-nonce-signal-wired
-  [chore -> patch] pin the gateway image that actually carries the news module
-  [feat -> minor] the nonce signal actually emits, and gains the demand to read it against
-  [fix -> patch] report the news module in /status so the pre-pin check can run
-  [unclassified] Merge pull request #1545 from chippr-robotics/claude/issue-1440-ux-6y2514
-  [fix -> patch] hold the market controls to the 36px floor the comment claims
-  [fix -> patch] collapse the market filters so the table gets the viewport
-  [unclassified] Merge pull request #1543 from chippr-robotics/claude/external-data-context-2cec94
-  [feat -> minor] enable token news on the gateway, and make the rollout order safe
-  [unclassified] Merge pull request #1541 from chippr-robotics/claude/external-data-context-2cec94
-  [unclassified] Merge staging into claude/external-data-context-2cec94
-  [docs -> patch] fix two spec comments left describing the replaced stub
-  [unclassified] Merge pull request #1542 from chippr-robotics/fix/1535-bundler-failover
-  [unclassified] Merge pull request #1540 from chippr-robotics/claude/issue-1441-p1hdsq
-  [docs -> patch] correct why the e2e spec stubs every provider host
-  [fix -> patch] make the token-news e2e spec actually run
-  [fix -> patch] the bundler list finally submits through more than its first entry
-  [fix -> patch] check news liveness before validation, and pin the order
-  [test -> patch] the MCP server serves nine tools, not eight
-  [feat -> minor] closers — FinOps entry, e2e coverage, docs (Phase 6)
-  [fix -> patch] withdraw the multi-recipient affordance from the send surfaces
-  [unclassified] Merge pull request #1528 from chippr-robotics/1521-dependency-alert-gate
-  [feat -> minor] assistant get_token_news tool (US3)
-  [feat -> minor] trade-pair news feed (US2)
-  [feat -> minor] portfolio token news card (US1)
-  [feat -> minor] gateway news read-proxy and curated asset-news mapping seam
-  [unclassified] Merge pull request #1524 from chippr-robotics/claude/external-data-context-2cec94
-  [ci -> patch] gate dependency vulnerabilities instead of only reporting them
-  [spec -> patch] tasks — dependency-ordered task list for token news
-  [unclassified] Merge pull request #1518 from chippr-robotics/claude/external-data-context-2cec94
-  [unclassified] Merge pull request #1517 from chippr-robotics/docs/1501-g11-multichain-rule
-  [spec -> patch] address review — concrete SC-005 bound, story-vs-issue priority note
-  [unclassified] plan(109): design artifacts — token news on the perps read-proxy template
-  [unclassified] Merge pull request #1516 from chippr-robotics/feat/1501-executor-nonce-accountability
-  [spec -> patch] specify — token news on portfolio and trade surfaces
-  [unclassified] Merge pull request #1512 from chippr-robotics/claude/external-data-context-2cec94
-  [docs -> patch] the rule was about a service name; the invariant is about a key
-  [unclassified] Merge pull request #1515 from chippr-robotics/fix/1501-gate-per-chain-key
-  [feat -> minor] observe the executor's NONCE, because balance cannot see a stall
-  [unclassified] Merge pull request #1511 from chippr-robotics/fix/1501-dangerous-bundler-docs
-  [fix -> patch] the single-alto gate enforced per-HOST a rule that is per-KEY
-  [unclassified] Merge pull request #1510 from chippr-robotics/fix/1501-build-arg-passthrough
-  [unclassified] Merge origin/staging into 109-token-news reservation
-  [fix -> patch] repoint spec-104 recovery rows at open tracker #1514
-  [unclassified] Merge pull request #1503 from chippr-robotics/claude/address-scanning-risk-feature-ax6ota
-  [spec -> patch] reserve — token-news
-  [unclassified] Merge pull request #1509 from chippr-robotics/fix/1505-scope-enforcing-disclosure
-  [unclassified] Merge pull request #1508 from chippr-robotics/claude/external-data-context-2cec94
-  [docs -> patch] three documents that would cause the incident they warn about
-  [fix -> patch] a build arg the Dockerfile never declares is silently dropped
-  [unclassified] Merge pull request #1506 from chippr-robotics/docs/keyed-rpc-access-runbook
-  [fix -> patch] `enforcing` is operator-only, and FR-015 moves to boot where it belongs
-  [docs -> patch] evaluate issue #1465 (token news + agent context) against the estate
-  [unclassified] Merge remote-tracking branch 'origin/staging' into claude/address-scanning-risk-feature-ax6ota
-  [fix -> patch] the Unscreened sentence names uncovered networks even when sources existed
-  [test -> patch] MS-06 scrolls the pill's details into view before asserting on them
-  [docs -> patch] the keyed RPC access runbook, written from the live-fire run
-  [unclassified] Merge pull request #1498 from chippr-robotics/claude/multichain-experience-improvements-7z3wti
-  [fix -> patch] repoint the spec-104 gap rows at open tracker #1504
-  [feat -> minor] screen an entered address against every list on every cohort chain (#1458)
-  [unclassified] Merge pull request #1502 from chippr-robotics/claude/issue-1432-discovery
-  [fix -> patch] make the local wrapper real, settle on a verified signer, and keep a typed amount
-  [unclassified] Merge pull request #1500 from chippr-robotics/chore/auto-backmerge-main-into-staging
-  [chore -> patch] sync the shells to v1.17.0 — ported base-branch fix
-  [fix -> patch] validate the address and topic before they reach a URL
-  [fix -> patch] stop building regexes from --contract (CodeQL, 2 high)
-  [feat -> minor] enumerate creation nonces so leg A can find a retried account
-  [fix -> patch] fast/48 tests the cohort the fast build actually resolves
-  [skipped] Merge pull request #1497 from chippr-robotics/release/v1.17.0-changelog
-  [skipped] chore(release): sync the native shells to v1.17.0 [skip release]
-  [docs -> patch] actor-critic screenshots (round 1 clean) + lint-clean return
-  [test -> patch] e2e for the multi-currency picker + cross-chain submit, docs
-  [feat -> minor] multi-currency wrap/unwrap — the asset is the entry point
-  [feat -> minor] measure deploy blocks from public sources, and record accountFactory
-  [docs -> patch] plan, research, data model, quickstart, tasks
-  [unclassified] Merge pull request #1493 from chippr-robotics/claude/multichain-experience-improvements-7z3wti
-  [skipped] chore(release): v1.17.0 [skip release]
-  [unclassified] Merge origin/staging: keep #1492's tracker for the 105 rows, re-add the 108 rows
-  [fix -> patch] spec-108 rows use the declared risk enum
-  [fix -> patch] repoint spec-105 partial rows at open tracker #1494
-  [spec -> patch] keep matrix.json's original unicode escaping
-  [spec -> patch] reserve — multi-currency-wrap
-  [revert -> patch] drop the superseded API-05 alias/wait delta — branch now matches staging
-  [unclassified] Merge remote-tracking branch 'origin/staging' into claude/multichain-experience-improvements-7z3wti
-  [unclassified] Merge origin/staging: keep #1489's form of the both-rails stub
-  [test -> patch] the unreachable arm must leave chain height readable, or nothing ever recovers
-  [unclassified] Merge origin/staging: the --comment-file fix landed there independently; keep its form
-  [test -> patch] stub BOTH provider rungs in API-05's unreachable arm
-  [fix -> patch] gh issue close has no --comment-file flag
+previous: v1.18.0
+commits:  212
+  [unclassified] Merge pull request #1631 from chippr-robotics/staging
+  [unclassified] Merge pull request #1630 from chippr-robotics/claude/rename-tier-b-urls
+  [chore -> patch] record bootstrap state after the WIF repoint
+  [fix -> patch] the FinOps gate suite races itself across test files
+  [fix -> patch] subgraph deploy scripts target the slugs that actually serve
+  [docs -> patch] run step 2 of the WIF recovery before step 1
+  [docs -> patch] the MCP config example shows the clone path under its current name
+  [docs -> patch] finish the Tier B sweep. Close the misses that change behaviour
+  [fix -> patch] step 1 of the WIF recovery is a replace, not an additive grant
+  [fix -> patch] the rename recovery must not widen the apply identity
+  [fix -> patch] the rename broke GCP Workload Identity Federation — repoint it and document recovery
+  [docs -> patch] follow the repo rename through — Tier B URLs, and correct the README pin
+  [unclassified] Merge pull request #1629 from chippr-robotics/claude/honest-naming-and-audit-claims
+  [docs -> patch] stop claiming these contracts are audited, and name the repo honestly
+  [unclassified] Merge pull request #1625 from chippr-robotics/claude/t040-estate-wide-wagers
+  [fix -> patch] the re-entry must be declared after the ref it reads, and read a live signer
+  [fix -> patch] settle on both paths, and arm the re-entry before the await
+  [fix -> patch] never broadcast with the pre-switch signer, and don't read a chain we can't reach
+  [fix -> patch] the modal was filtering the estate back down to the wallet's chain
+  [feat -> minor] the wager list is the estate, and the action goes to the wager's chain
+  [unclassified] Merge pull request #1624 from chippr-robotics/claude/t030-ambient-chain-ban
+  [refactor -> patch] ban the ambient chain — 17 useChainId call sites to 0
+  [unclassified] Merge pull request #1623 from chippr-robotics/claude/t029-multichain-e2e
+  [test -> patch] one refusal sentence, proven across surfaces — and a fifth private copy
+  [unclassified] Merge pull request #1620 from chippr-robotics/claude/t028-hardware-signer
+  [unclassified] Merge pull request #1621 from chippr-robotics/claude/t028-hardware-signer-viem
+  [feat -> minor] the hardware signer on viem, with the emulator as its oracle
+  [fix -> patch] argv arrays instead of shell strings, and drop a no-op replace
+  [ci -> patch] least-privilege token on the hardware-emulator workflow
+  [test -> patch] drive the hardware signer against real Ledger firmware, and fix what it found
+  [unclassified] Merge pull request #1619 from chippr-robotics/claude/t028-legacy-keys
+  [test -> patch] the nonce floor is per (account, CHAIN), asserted rather than read
+  [feat -> minor] the local-key rail — legacyKeys off ethers, and three divergences
+  [unclassified] Merge pull request #1618 from chippr-robotics/claude/t028-signer-endgame
+  [fix -> patch] the provider is handed to OTHER libraries, so its surface is theirs
+  [fix -> patch] the wallet signer must report the chain it was BUILT for
+  [refactor -> patch] WalletContext hands out the viem-backed signer
+  [feat -> minor] the ethers-shaped signer, on viem — built and proven, not yet wired
+  [refactor -> patch] the endgame is three files, and one of them was never mounted
+  [unclassified] Merge pull request #1607 from chippr-robotics/claude/multichain-ux-digital-assets-vw4h7v
+  [fix -> patch] the viem transport retried where ethers made one request
+  [docs -> patch] record what the T028 endgame actually owes, measured
+  [refactor -> patch] blockchainService off ethers, and four paths nobody calls
+  [refactor -> patch] My Wagers off ethers, and `toMatch(/^0x/)` is not an assertion
+  [refactor -> patch] the acting-account seam and account recovery, with the tests they lacked
+  [refactor -> patch] DexContext off ethers, and a spec-069 bypass on the cross-chain quote
+  [fix -> patch] StakingTab's pause and address forms were dead — write() became a function
+  [refactor -> patch] the accept modal off ethers, closing the loop on its own test
+  [fix -> patch] a focus assertion that pinned an instant, not an outcome
+  [chore -> patch] delete useTreasuryVault — dead code for an archived contract
+  [refactor -> patch] friend-market creation off ethers — 736 lines, five rails, no new divergence
+  [refactor -> patch] open challenges off ethers, and the divergence that costs nine sentences
+  [fix -> patch] a viem error hides the revert bytes behind `cause`
+  [refactor -> patch] transfers off ethers, on the first money path to use the new read routing
+  [refactor -> patch] vouchers off ethers, and the overload that viem will not name
+  [fix -> patch] parseUnits rounded what ethers refused — a silent amount change
+  [refactor -> patch] wager pools off ethers — the deferral's trigger, one batch later
+  [refactor -> patch] funding pools off ethers — the deferral's own trigger, fired
+  [refactor -> patch] useNullifierContracts, and the read seam finally gets a test
+  [refactor -> patch] useVaultProposals off ethers, and the custody writes get a test
+  [refactor -> patch] the last three admin tabs, and a history scan that failed silently
+  [refactor -> patch] ProtocolConfigTab + OracleAdaptersTab, and viem refuses Uint8Array for bytes
+  [refactor -> patch] CallsignRegistryAdmin off ethers, and give the read path a test
+  [refactor -> patch] MembershipRevenueApp off ethers, and two flaws in my own new tests
+  [refactor -> patch] AccessControlApp off ethers — the role grants
+  [refactor -> patch] the spec-067 router pair off ethers, and viem is stricter on bool
+  [fix -> patch] freeze the mnemonic fixtures — the test was flaky 1 run in 15
+  [refactor -> patch] three small admin files, and a spec-069 bypass on two pause dashboards
+  [refactor -> patch] take the FeeRouter cluster off ethers, and fix a two-chain read
+  [docs -> patch] record the clearpath connector deferral and why it is different
+  [refactor -> patch] lift getLogsRange out of the DAO connector it never belonged in
+  [docs -> patch] divergence 14 — an indexed log topic comes out in the wrong case
+  [fix -> patch] restore the mnemonic refusal, and retire a twice-wrong allowlist reason
+  [test -> patch] make the retired-mock class a gate instead of a discovery
+  [refactor -> patch] T028 batch 10 — SubmitAppPanel, and a mock pattern worth naming
+  [refactor -> patch] T028 batch 9 — CallsignPanel, with both read shapes measured first
+  [fix -> patch] divergence 13 — decoded error args lose their names on viem
+  [refactor -> patch] T028 batch 8 — MiniAppReviewTab, and a mock that had been retired
+  [docs -> patch] the no-chain E2E tier runs locally in ~90 seconds
+  [fix -> patch] T026a follow-up — the unified wrap refusal, pinned where it can fail early
+  [fix -> patch] T026b — sendCalls refuses a chain it cannot be pinned to
+  [fix -> patch] T026a — the fourth settle loop had the check the other three lacked
+  [docs -> patch] record why keyRegistryService is deferred, not converted
+  [refactor -> patch] T028 batch 7 — claim-code derivation, and fixtures that freeze it
+  [refactor -> patch] T028 batch 6 — a viem parseError, without touching revertError
+  [refactor -> patch] T028 batch 5 — the passkey envelope, and a primary type that is inferred
+  [refactor -> patch] T028 batch 4 — the other two EIP-3009 paths onto the shared split
+  [refactor -> patch] T028 batch 3 — one signature split, and the money path off ethers
+  [refactor -> patch] T028 batch 2 — proposalHub off ethers, one encoder per call
+  [refactor -> patch] T028 batch 1 — delete a dead crypto module, convert two more
+  [feat -> minor] T027 — the intent rail signs the chain it names
+  [refactor -> patch] T026 — one settle loop, and a personal send that names its chain
+  [refactor -> patch] T025 — the write rail is a chain question, not a custody one
+  [fix -> patch] give the fast E2E tier the Cypress binary guard the other tiers have
+  [feat -> minor] T024 — submitOn, the one place a write names its chain
+  [docs -> patch] record the mnemonic-validation trap before T022 is attempted
+  [docs -> patch] actually apply the BIP-39 correction to tasks.md
+  [feat -> minor] two BIP-39 files leave ethers, and the reason they could not was wrong
+  [feat -> minor] T020 — offline signature recovery leaves ethers, staying synchronous
+  [docs -> patch] close out Phase 1 and record what de-risks T020
+  [feat -> minor] the legacy v1 event source scans through logScan
+  [docs -> patch] record what blocks the last read-path conversion
+  [feat -> minor] both custody policy engines read on a named chain
+  [feat -> minor] the liquidity and quote fixtures decode with viem
+  [fix -> patch] a log scan's head must never come from viem's block cache
+  [feat -> minor] the Supply surface and the acceptance page read on a named chain
+  [feat -> minor] bridge status reads both chains through the chain seam
+  [fix -> patch] give FEE-01's deposit confirmation the 90s it was written to have
+  [feat -> minor] a vault's queue reads each network by name, not by connection
+  [feat -> minor] the Safe transaction encoders leave ethers
+  [feat -> minor] GMX calldata and the DataStore read leave ethers
+  [feat -> minor] the GMX stuck-order fold reads on a named chain
+  [feat -> minor] the perps entry and position sheets read on a named chain
+  [docs -> patch] record Phase 1 progress and the two decoder differences in tasks.md
+  [refactor -> patch] encode the group-pay transfers with viem
+  [feat -> minor] convert the Gains venue encoder and the Control Room pause sweep
+  [feat -> minor] the Predict approval check names its chain and keeps its injection seam
+  [feat -> minor] the bridge and supply routers' authority read names its chain
+  [feat -> minor] move the notification sources onto the chain seam
+  [feat -> minor] move the wager registry RPC source and the swap quote onto the seam
+  [feat -> minor] the sanctions pre-check reads a chain it was TOLD, not one it asked the wire for
+  [fix -> patch] the source list scrolls instead of outgrowing the modal it opens in
+  [refactor -> patch] hash the pool payout matrix with viem, and name what cannot be converted
+  [fix -> patch] an unreadable list gives a member a sentence, not a library's diagnostic
+  [fix -> patch] restore parameter names on multi-output reads — an empty list is not "you have none"
+  [fix -> patch] units seam emitted a decimal point at zero decimals, where ethers emits none
+  [feat -> minor] move the mini-app registry catalog reads onto the chain seam
+  [feat -> minor] move address screening, membership reads and tier prices onto the seam
+  [feat -> minor] move the Across LP client, curator authority and swap balances onto the seam
+  [feat -> minor] encode and decode the batched balance reads with viem
+  [feat -> minor] move the estate authority read and the stats hooks onto the chain seam
+  [feat -> minor] move staking, platform fees and the tax report onto the chain seam
+  [feat -> minor] convert the registry-metrics, treasury-stats and perps-positions hooks
+  [feat -> minor] convert the liquidity router and Uniswap position libs onto the seam
+  [feat -> minor] convert the bridge router lib onto the seam; normalizeAbi learns ethers tuple syntax
+  [feat -> minor] convert custody transfer building, proposal describing and vault proposal reads
+  [feat -> minor] eventScanHandle — the seam's twin of Contract for logScan callers
+  [test -> patch] re-point the co-located resolveCallsign harness at the read seam
+  [feat -> minor] convert the fee estate and earn notification reads onto the seam
+  [feat -> minor] convert perps venue status and portfolio prices onto the read seam
+  [feat -> minor] viem-side test seam + first read-path conversions (callsigns, perps fee units)
+  [feat -> minor] the viem read seam — getPublicClient(chainId) + readContract(chainId, …)
+  [unclassified] Merge pull request #1606 from chippr-robotics/claude/multichain-ux-digital-assets-vw4h7v
+  [test -> patch] widen the DSH-10 banner wait again — the role sweep it depends on tipped 30s
+  [test -> patch] anchor the phase-0 read-only assertion on the row, not the header
+  [feat -> minor] Phase 0 — pure-util codemod to viem, ethers import ratchet, viem as a host shared module
+  [unclassified] Merge pull request #1598 from chippr-robotics/claude/multichain-ux-digital-assets-vw4h7v
+  [unclassified] Merge pull request #1605 from chippr-robotics/chore/auto-backmerge-main-into-staging
+  [unclassified] Merge pull request #1603 from chippr-robotics/staging
+  [unclassified] Merge pull request #1602 from chippr-robotics/fix/docs-a11y-search-dialog-and-contrast
+  [fix -> patch] name the search dialog and adopt the contrast-safe token export
+  [unclassified] Merge pull request #1584 from chippr-robotics/chore/auto-backmerge-main-into-staging
+  [unclassified] Merge pull request #1601 from chippr-robotics/staging
+  [unclassified] Merge pull request #1600 from chippr-robotics/claude/blog-publishing-automation-uilxji
+  [docs -> patch] keep the dark toggle — the export now scopes the palette per scheme
+  [docs -> patch] adopt the Chippr brand tokens and self-hosted faces
+  [spec -> patch] plan and tasks — chain-abstracted writes on a single EVM seam
+  [unclassified] Merge pull request #1590 from chippr-robotics/claude/multichain-ux-digital-assets-vw4h7v
+  [spec -> patch] name the phase sub-issues in the delivery assumption
+  [spec -> patch] reserve — multichain-write-seam
+  [unclassified] Merge pull request #1589 from chippr-robotics/build/finops-pin-52fdb6e2
+  [build -> patch] pin finops-52fdb6e2 — the two fixes the working image exposed
+  [unclassified] Merge pull request #1586 from chippr-robotics/fix/quicknode-credit-shape
+  [fix -> patch] bound the boot fan-out, and pace outbound RPC
+  [unclassified] Merge pull request #1579 from chippr-robotics/claude/oz-alerts-1520-ttlkss
+  [fix -> patch] QuickNode reports data.credits_used, which we never asked for
+  [unclassified] Merge pull request #1580 from chippr-robotics/staging
+  [unclassified] Merge pull request #1577 from chippr-robotics/fix/finops-exporter-oom-crashloop
+  [fix -> patch] C6 matches a parsed HOST, not a substring of the file
+  [build -> patch] refresh the lockfile and re-record the mini-app byte baseline
+  [build -> patch] refresh the lockfile and re-record the mini-app byte baseline
+  [build -> patch] pin the first finops image that actually serves
+  [feat -> minor] catalogue The Graph, and split the modeller it exposed
+  [feat -> minor] catalogue Pinata, with a read-scoped key that is not the pinning JWT
+  [unclassified] Merge pull request #1576 from chippr-robotics/claude/oz-alerts-1520-ttlkss
+  [ci -> patch] smoke the exporter image, and require it to still be alive after
+  [fix -> patch] the exporter never listened, so every panel read "no data"
+  [fix -> patch] a green dry run is not a working credential (X-08)
+  [unclassified] Merge pull request #1575 from chippr-robotics/claude/oz-alerts-1520-ttlkss
+  [fix -> patch] only a plan merged on staging may be applied (X-07)
+  [fix -> patch] the #1520 dismissal reasoning was wrong about why
+  [unclassified] Merge pull request #1574 from chippr-robotics/claude/oz-alerts-1520-ttlkss
+  [test -> patch] keep a test title out of the import scanner's path
+  [chore -> patch] declare and execute the OpenZeppelin alert dismissals
+  [unclassified] Merge pull request #1572 from chippr-robotics/claude/fairwins-architecture-workbook-ez9zqo
+  [unclassified] Merge pull request #1570 from chippr-robotics/claude/address-book-import-export-gz4j8e
+  [docs -> patch] add the architecture workbook — three views and six annexes
+  [docs -> patch] scaffold the architecture workbook index
+  [docs -> patch] only ONE of the two saved-contact pickers was migrated in #1458
+  [docs -> patch] spec-021 FR-032 was never missing — it is spec 067's
+  [unclassified] Merge pull request #1568 from chippr-robotics/claude/address-book-import-export-gz4j8e
+  [fix -> patch] one book per panel, and a status role on the loading tag
+  [fix -> patch] export/import in plain text, on every account type
+  [unclassified] Merge pull request #1567 from chippr-robotics/dependabot/npm_and_yarn/staging/uniswap/sdk-core-7.19.2
+  [unclassified] Merge pull request #1566 from chippr-robotics/dependabot/npm_and_yarn/staging/viem-2.56.3
+  [unclassified] Merge pull request #1565 from chippr-robotics/dependabot/npm_and_yarn/staging/capacitor/core-8.5.1
+  [chore -> patch] Bump @uniswap/sdk-core from 7.19.1 to 7.19.2
+  [chore -> patch] Bump viem from 2.56.0 to 2.56.3
+  [chore -> patch] Bump @capacitor/core from 8.5.0 to 8.5.1
+  [unclassified] Merge pull request #1563 from chippr-robotics/claude/graph-api-quicknode-errors-s7g7ex
+  [unclassified] Merge pull request #1560 from chippr-robotics/claude/external-data-context-2cec94
+  [test -> patch] size DSH-10's wait to the sequential role sweep it actually waits on
+  [fix -> patch] point the Cypress ETC stubs at the endpoint the app now resolves
+  [fix -> patch] hoist the service worker's same-origin check out of the fetch handler
+  [fix -> patch] four production console defects — dead ETC RPC, SW undefined-Response, unmapped STAKING_ADMIN, aria-hidden over focus
+  [unclassified] Merge pull request #1558 from chippr-robotics/ops/1378-android-signing-sa
+  [unclassified] Merge remote-tracking branch 'origin/staging' into claude/external-data-context-2cec94
+  [fix -> patch] run the staging services as an account that can do nothing
+  [unclassified] Merge pull request #1559 from chippr-robotics/main
+  [feat -> minor] rank the token-news card instead of listing it
+  [unclassified] Merge pull request #1557 from chippr-robotics/release/v1.18.0-changelog
+  [skipped] chore(release): v1.18.0 [skip release]
 bump:     minor
 reason:   computed
-next:     v1.18.0
+next:     v1.19.0
