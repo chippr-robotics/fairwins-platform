@@ -3420,6 +3420,46 @@
           "note": "Blocked on T028/T041, not on a test. `useGaslessWrite` accepts `cfg.chainId` (T027) but ALL 22 production call sites omit it, so every intent is still signed against the ambient chain domain. Only the unit suite exercises the target-chain path today."
         }
       ]
+    },
+    {
+      "id": "111-sigil-cold-signer",
+      "title": "Sigil cold signer in Protect \u25b8 Off chain",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "sigil.pair-and-add",
+          "name": "Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only)",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1633"
+        },
+        {
+          "id": "sigil.failure-vocabulary",
+          "name": "An unreachable or unpaired bridge, a missing disk, and an exhausted or expired disk each render a named state and sign nothing",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "disclosure",
+          "tests": [],
+          "issue": "#1633"
+        },
+        {
+          "id": "sigil.operate-as-send",
+          "name": "Operating as the Sigil account, a native send settles on chain and the broadcast transaction recovers to the saved address",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "on-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1633"
+        }
+      ]
     }
   ]
 }
