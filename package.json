@@ -191,7 +191,8 @@
       "immutable": "^5.1.9",
       "js-yaml": "^4.3.1",
       "undici": "^7.29.0",
-      "yaml": "^2.9.0"
+      "yaml": "^2.9.0",
+      "decompress": "npm:@xhmikosr/decompress@^11.1.4"
     },
     "gluegun": {
       "cross-spawn": "^7.0.6",
