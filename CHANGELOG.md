@@ -14,6 +14,222 @@ production releases are.
 
 <!-- RELEASES:START -->
 
+## v1.19.0 — 2026-09-22
+
+Promoted from: v1.19.0-rc.33
+Previous release: v1.18.0 · Range: `v1.18.0..v1.19.0` (212 commits)
+
+### 🚀 Features
+
+- feat(110): the wager list is the estate, and the action goes to the wager's chain
+- feat(110): the hardware signer on viem, with the emulator as its oracle
+- feat(110): the local-key rail — legacyKeys off ethers, and three divergences
+- feat(110): the ethers-shaped signer, on viem — built and proven, not yet wired
+- feat(110): T027 — the intent rail signs the chain it names
+- feat(110): T024 — submitOn, the one place a write names its chain
+- feat(110): two BIP-39 files leave ethers, and the reason they could not was wrong
+- feat(110): T020 — offline signature recovery leaves ethers, staying synchronous
+- feat(110): the legacy v1 event source scans through logScan
+- feat(110): both custody policy engines read on a named chain
+- feat(110): the liquidity and quote fixtures decode with viem
+- feat(110): the Supply surface and the acceptance page read on a named chain
+- feat(110): bridge status reads both chains through the chain seam
+- feat(110): a vault's queue reads each network by name, not by connection
+- feat(110): the Safe transaction encoders leave ethers
+- feat(110): GMX calldata and the DataStore read leave ethers
+- feat(110): the GMX stuck-order fold reads on a named chain
+- feat(110): the perps entry and position sheets read on a named chain
+- feat(110): convert the Gains venue encoder and the Control Room pause sweep
+- feat(110): the Predict approval check names its chain and keeps its injection seam
+- feat(110): the bridge and supply routers' authority read names its chain
+- feat(110): move the notification sources onto the chain seam
+- feat(110): move the wager registry RPC source and the swap quote onto the seam
+- feat(110): the sanctions pre-check reads a chain it was TOLD, not one it asked the wire for
+- feat(110): move the mini-app registry catalog reads onto the chain seam
+- feat(110): move address screening, membership reads and tier prices onto the seam
+- feat(110): move the Across LP client, curator authority and swap balances onto the seam
+- feat(110): encode and decode the batched balance reads with viem
+- feat(110): move the estate authority read and the stats hooks onto the chain seam
+- feat(110): move staking, platform fees and the tax report onto the chain seam
+- feat(110): convert the registry-metrics, treasury-stats and perps-positions hooks
+- feat(110): convert the liquidity router and Uniswap position libs onto the seam
+- feat(110): convert the bridge router lib onto the seam; normalizeAbi learns ethers tuple syntax
+- feat(110): convert custody transfer building, proposal describing and vault proposal reads
+- feat(110): eventScanHandle — the seam's twin of Contract for logScan callers
+- feat(110): convert the fee estate and earn notification reads onto the seam
+- feat(110): convert perps venue status and portfolio prices onto the read seam
+- feat(110): viem-side test seam + first read-path conversions (callsigns, perps fee units)
+- feat(110): the viem read seam — getPublicClient(chainId) + readContract(chainId, …)
+- feat(110): Phase 0 — pure-util codemod to viem, ethers import ratchet, viem as a host shared module
+- feat(finops): catalogue The Graph, and split the modeller it exposed
+- feat(finops): catalogue Pinata, with a read-scoped key that is not the pinning JWT
+- feat(109): rank the token-news card instead of listing it
+
+### 🐛 Bug Fixes
+
+- fix(1628): the FinOps gate suite races itself across test files
+- fix(1628): subgraph deploy scripts target the slugs that actually serve
+- fix(1628): step 1 of the WIF recovery is a replace, not an additive grant
+- fix(1628): the rename recovery must not widen the apply identity
+- fix(1628): the rename broke GCP Workload Identity Federation — repoint it and document recovery
+- fix(110): the re-entry must be declared after the ref it reads, and read a live signer
+- fix(110): settle on both paths, and arm the re-entry before the await
+- fix(110): never broadcast with the pre-switch signer, and don't read a chain we can't reach
+- fix(110): the modal was filtering the estate back down to the wallet's chain
+- fix(085): argv arrays instead of shell strings, and drop a no-op replace
+- fix(110): the provider is handed to OTHER libraries, so its surface is theirs
+- fix(110): the wallet signer must report the chain it was BUILT for
+- fix(110): the viem transport retried where ethers made one request
+- fix(110): StakingTab's pause and address forms were dead — write() became a function
+- fix(110): a focus assertion that pinned an instant, not an outcome
+- fix(110): a viem error hides the revert bytes behind `cause`
+- fix(110): parseUnits rounded what ethers refused — a silent amount change
+- fix(110): freeze the mnemonic fixtures — the test was flaky 1 run in 15
+- fix(110): restore the mnemonic refusal, and retire a twice-wrong allowlist reason
+- fix(110): divergence 13 — decoded error args lose their names on viem
+- fix(110): T026a follow-up — the unified wrap refusal, pinned where it can fail early
+- fix(110): T026b — sendCalls refuses a chain it cannot be pinned to
+- fix(110): T026a — the fourth settle loop had the check the other three lacked
+- fix(ci): give the fast E2E tier the Cypress binary guard the other tiers have
+- fix(110): a log scan's head must never come from viem's block cache
+- fix(e2e): give FEE-01's deposit confirmation the 90s it was written to have
+- fix(screening): the source list scrolls instead of outgrowing the modal it opens in
+- fix(screening): an unreadable list gives a member a sentence, not a library's diagnostic
+- fix(110): restore parameter names on multi-output reads — an empty list is not "you have none"
+- fix(110): units seam emitted a decimal point at zero decimals, where ethers emits none
+- fix(docs): name the search dialog and adopt the contrast-safe token export
+- fix(finops): bound the boot fan-out, and pace outbound RPC
+- fix(finops): QuickNode reports data.credits_used, which we never asked for
+- fix(finops): C6 matches a parsed HOST, not a substring of the file
+- fix(finops): the exporter never listened, so every panel read "no data"
+- fix(security): a green dry run is not a working credential (X-08)
+- fix(security): only a plan merged on staging may be applied (X-07)
+- fix(security): the #1520 dismissal reasoning was wrong about why
+- fix(address-book): one book per panel, and a status role on the loading tag
+- fix(address-book): export/import in plain text, on every account type
+- fix(1562): point the Cypress ETC stubs at the endpoint the app now resolves
+- fix(1562): hoist the service worker's same-origin check out of the fetch handler
+- fix(1562): four production console defects — dead ETC RPC, SW undefined-Response, unmapped STAKING_ADMIN, aria-hidden over focus
+- fix(087): run the staging services as an account that can do nothing
+
+### ♻️ Refactoring
+
+- refactor(110): ban the ambient chain — 17 useChainId call sites to 0
+- refactor(110): WalletContext hands out the viem-backed signer
+- refactor(110): the endgame is three files, and one of them was never mounted
+- refactor(110): blockchainService off ethers, and four paths nobody calls
+- refactor(110): My Wagers off ethers, and `toMatch(/^0x/)` is not an assertion
+- refactor(110): the acting-account seam and account recovery, with the tests they lacked
+- refactor(110): DexContext off ethers, and a spec-069 bypass on the cross-chain quote
+- refactor(110): the accept modal off ethers, closing the loop on its own test
+- refactor(110): friend-market creation off ethers — 736 lines, five rails, no new divergence
+- refactor(110): open challenges off ethers, and the divergence that costs nine sentences
+- refactor(110): transfers off ethers, on the first money path to use the new read routing
+- refactor(110): vouchers off ethers, and the overload that viem will not name
+- refactor(110): wager pools off ethers — the deferral's trigger, one batch later
+- refactor(110): funding pools off ethers — the deferral's own trigger, fired
+- refactor(110): useNullifierContracts, and the read seam finally gets a test
+- refactor(110): useVaultProposals off ethers, and the custody writes get a test
+- refactor(110): the last three admin tabs, and a history scan that failed silently
+- refactor(110): ProtocolConfigTab + OracleAdaptersTab, and viem refuses Uint8Array for bytes
+- refactor(110): CallsignRegistryAdmin off ethers, and give the read path a test
+- refactor(110): MembershipRevenueApp off ethers, and two flaws in my own new tests
+- refactor(110): AccessControlApp off ethers — the role grants
+- refactor(110): the spec-067 router pair off ethers, and viem is stricter on bool
+- refactor(110): three small admin files, and a spec-069 bypass on two pause dashboards
+- refactor(110): take the FeeRouter cluster off ethers, and fix a two-chain read
+- refactor(110): lift getLogsRange out of the DAO connector it never belonged in
+- refactor(110): T028 batch 10 — SubmitAppPanel, and a mock pattern worth naming
+- refactor(110): T028 batch 9 — CallsignPanel, with both read shapes measured first
+- refactor(110): T028 batch 8 — MiniAppReviewTab, and a mock that had been retired
+- refactor(110): T028 batch 7 — claim-code derivation, and fixtures that freeze it
+- refactor(110): T028 batch 6 — a viem parseError, without touching revertError
+- refactor(110): T028 batch 5 — the passkey envelope, and a primary type that is inferred
+- refactor(110): T028 batch 4 — the other two EIP-3009 paths onto the shared split
+- refactor(110): T028 batch 3 — one signature split, and the money path off ethers
+- refactor(110): T028 batch 2 — proposalHub off ethers, one encoder per call
+- refactor(110): T028 batch 1 — delete a dead crypto module, convert two more
+- refactor(110): T026 — one settle loop, and a personal send that names its chain
+- refactor(110): T025 — the write rail is a chain question, not a custody one
+- refactor(110): encode the group-pay transfers with viem
+- refactor(110): hash the pool payout matrix with viem, and name what cannot be converted
+
+### 📚 Documentation
+
+- docs(1628): run step 2 of the WIF recovery before step 1
+- docs(1628): the MCP config example shows the clone path under its current name
+- docs(1628): finish the Tier B sweep. Close the misses that change behaviour
+- docs(1628): follow the repo rename through — Tier B URLs, and correct the README pin
+- docs(1613,1617): stop claiming these contracts are audited, and name the repo honestly
+- docs(110): record what the T028 endgame actually owes, measured
+- docs(110): record the clearpath connector deferral and why it is different
+- docs(110): divergence 14 — an indexed log topic comes out in the wrong case
+- docs(110): the no-chain E2E tier runs locally in ~90 seconds
+- docs(110): record why keyRegistryService is deferred, not converted
+- docs(110): record the mnemonic-validation trap before T022 is attempted
+- docs(110): actually apply the BIP-39 correction to tasks.md
+- docs(110): close out Phase 1 and record what de-risks T020
+- docs(110): record what blocks the last read-path conversion
+- docs(110): record Phase 1 progress and the two decoder differences in tasks.md
+- docs(site): keep the dark toggle — the export now scopes the palette per scheme
+- docs(site): adopt the Chippr brand tokens and self-hosted faces
+- spec(110): plan and tasks — chain-abstracted writes on a single EVM seam
+- spec(110): name the phase sub-issues in the delivery assumption
+- spec(110): reserve — multichain-write-seam
+- docs(architecture): add the architecture workbook — three views and six annexes
+- docs(architecture): scaffold the architecture workbook index
+- docs: only ONE of the two saved-contact pickers was migrated in #1458
+- docs: spec-021 FR-032 was never missing — it is spec 067's
+
+### 🧪 Tests
+
+- test(110): one refusal sentence, proven across surfaces — and a fifth private copy
+- test(085): drive the hardware signer against real Ledger firmware, and fix what it found
+- test(110): the nonce floor is per (account, CHAIN), asserted rather than read
+- test(110): make the retired-mock class a gate instead of a discovery
+- test(callsigns): re-point the co-located resolveCallsign harness at the read seam
+- test(e2e): widen the DSH-10 banner wait again — the role sweep it depends on tipped 30s
+- test(perps): anchor the phase-0 read-only assertion on the row, not the header
+- test(security): keep a test title out of the import scanner's path
+- test(1562): size DSH-10's wait to the sequential role sweep it actually waits on
+
+### 🏗️ Infrastructure
+
+- ci(085): least-privilege token on the hardware-emulator workflow
+- build(gateway): pin finops-52fdb6e2 — the two fixes the working image exposed
+- build(deps): refresh the lockfile and re-record the mini-app byte baseline
+- build(deps): refresh the lockfile and re-record the mini-app byte baseline
+- build(gateway): pin the first finops image that actually serves
+- ci(finops): smoke the exporter image, and require it to still be alive after
+
+### 🧹 Maintenance
+
+- chore(1628): record bootstrap state after the WIF repoint
+- chore(110): delete useTreasuryVault — dead code for an archived contract
+- chore(security): declare and execute the OpenZeppelin alert dismissals
+- chore(deps): Bump @uniswap/sdk-core from 7.19.1 to 7.19.2
+- chore(deps): Bump viem from 2.56.0 to 2.56.3
+- chore(deps): Bump @capacitor/core from 8.5.0 to 8.5.1
+
+### Artifacts
+
+Range: `v1.18.0..v1.19.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | moved | `api-access` v1.0.2<br>`clearpath` v1.2.1<br>`token-mint` v1.0.3 |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.19.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.19.0.aab` | `5a247ddf5d6a4009774ab967b2bad2b1c6bf7b5bf1c12a08fa1cafbdf3996db0` | yes |
+| ios | `FairWins-v1.19.0-ios.xcarchive.zip` | `5549052aea8ed6cd1c258562bd31d98bc600de32d63039a1b4e0cc4930a495ea` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
 ## v1.18.0 — 2026-09-08
 
 Promoted from: v1.18.0-rc.26

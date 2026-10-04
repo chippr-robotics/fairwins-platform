@@ -1,6 +1,6 @@
 {
   "name": "@fairwins/intent-types",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "private": true,
   "type": "module",
   "description": "The single definition of every FairWins EIP-712 intent struct and domain (spec 075). Zero runtime dependencies; resolvable by plain Node and by Vite.",

@@ -1,6 +1,6 @@
 {
   "name": "fairwins-platform",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "description": "FairWins — self-custody digital asset infrastructure: embedded wallets, policy-governed custody, payments, markets connectivity and compliance, available white-label",
   "private": true,
   "workspaces": [

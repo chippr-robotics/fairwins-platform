@@ -1,6 +1,6 @@
 {
   "name": "@fairwins/abi",
-  "version": "1.18.0",
+  "version": "1.19.0",
   "private": true,
   "type": "module",
   "description": "Contract ABIs GENERATED from compiled artifacts (spec 075). Never hand-edit; run `npm run codegen:abis`.",
