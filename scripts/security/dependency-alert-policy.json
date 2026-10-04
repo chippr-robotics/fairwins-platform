@@ -56,13 +56,6 @@
       "issue": 1519,
       "expires": "2026-10-15",
       "reason": "Same toml@3.0.0 copy as above via the Trezor SDK. Uncontrolled recursion is a denial of service against the parser, and the only documents it parses are ones the vendor SDK itself supplies. Fixed together with the sibling advisory in #1519."
-    },
-    {
-      "ghsa": "GHSA-mp2f-45pm-3cg9",
-      "package": "decompress",
-      "issue": 1522,
-      "expires": "2026-10-29",
-      "reason": "decompress@4.2.1 via @graphprotocol/graph-cli, development scope, and there is NO patched release — the package is unmaintained, so first_patched_version is null. It runs at subgraph build time against archives the toolchain fetches itself, not attacker input. Resolution is a graph-cli bump or a recorded dismissal; tracked in #1522 for Iteration 7."
     }
   ]
 }
