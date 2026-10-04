@@ -37,13 +37,6 @@
 
   "acceptances": [
     {
-      "ghsa": "GHSA-gcfj-64vw-6mp9",
-      "package": "axios",
-      "issue": 1519,
-      "expires": "2026-10-15",
-      "reason": "Nested axios@1.16.0 under @coinbase/cdp-sdk, reached via wagmi -> @wagmi/connectors -> @base-org/account. The root install is already 1.20.0 and outside every advisory range, so no direct bump clears it: the intermediate has to loosen its pin or we add an override. Tracked in #1519 for Iteration 6."
-    },
-    {
       "ghsa": "GHSA-v5mp-jgw5-2x6j",
       "package": "toml",
       "issue": 1519,
