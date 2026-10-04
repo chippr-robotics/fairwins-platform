@@ -43,8 +43,9 @@ component.
 
 - **Honest state**: three-state reads stay three-state to the pixel — `null`
   renders "—" or a named "could not be read", never `0`, never `|| 0`/`?? 0`.
-  Partial totals NAME what is missing. No mock data, placeholder numbers or
-  testnet shortcuts in shipped paths.
+  Partial totals NAME what is missing — a portfolio or estate total that
+  renders a missing chain as zero is YOUR bug even though `satchel` owns the
+  read. No mock data, placeholder numbers or testnet shortcuts in shipped paths.
 - **Honest finality**: challenge windows, oracle liveness, pending
   resolutions, "broadcast not final" stay visible. Never "won", "sent" or
   "approved" before the chain says so.

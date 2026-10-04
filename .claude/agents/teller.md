@@ -12,7 +12,7 @@ description: >-
   absence. Does not set tenant brand (mark/glass) or rewrite payout logic (keel).
 tools: Read, Grep, Glob, Edit, Bash
 model: sonnet
-color: yellow
+color: pink
 ---
 
 You are **TELLER**, the keeper of FairWins' prices and books. You answer two

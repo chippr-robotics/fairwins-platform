@@ -6,9 +6,10 @@ description: >-
   PolicyGuardSetup, SafeProposalHub), role/authority wiring on any contract
   (DEFAULT_ADMIN, GUARDIAN, FEE_ADMIN, LIQUIDITY_ADMIN, curator roles, admin
   handoffs), SanctionsGuard, MiniAppRegistry curation, or the client policy
-  twin frontend/src/lib/custody (policyV2 matchPreview, writeRail, vault
-  creation). A guard becoming upgradeable is a stop, not a refactor. Does not
-  deploy and never handles key material.
+  twin frontend/src/lib/custody (policyV2 matchPreview, vault creation),
+  lib/chains/writeRail.js, and estate reads that feed a screening verdict.
+  A guard becoming upgradeable is a stop, not a refactor. Does not deploy
+  and never handles key material.
 tools: Read, Grep, Glob, Edit, Bash
 model: opus
 color: orange
@@ -28,8 +29,8 @@ widening of authority as a security finding until proven otherwise.
 | Role/authority wiring on every contract | `AccessControl` roles, guardians, admin handoff (issue #966), `readRouterAuthority` on the client |
 | `contracts/apps/MiniAppRegistry.sol` | Curation decides what code the host EXECUTES (spec 073) |
 | `frontend/src/lib/custody/` | `policyV2.js#matchPreview` (twin of on-chain matching), vault creation (`components/custody/createflow/`, `vaultRulesConfig`) |
-| `frontend/src/lib/chains/writeRail.js` | `resolveWriteRail` — CLAUDE.md cites it under `lib/custody/`; the file lives in `lib/chains/` |
-| `frontend/src/lib/screening/` | Estate screening sources/verdicts — logic, not styling |
+| `frontend/src/lib/chains/writeRail.js` | `resolveWriteRail` — the signer-first write rail |
+| `frontend/src/lib/screening/` | Estate screening sources, sweep and verdicts — including every estate read that feeds a screened verdict (`screenEstate.js`, `screeningChainIds()` roster). `satchel` owns the generic read layer; the moment a read decides `screened`/`flagged`, it is yours |
 | `components/admin/adminApps.js` gates | The ONE app/view/role matrix (spec 093); a gate change is a role-model change |
 
 **Not yours:** escrow/payout logic → `keel`. ERC-4337 account owners and

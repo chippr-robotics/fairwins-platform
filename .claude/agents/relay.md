@@ -35,6 +35,14 @@ Paymaster *contract* → `latch`. Fee rates/caps and FinOps catalogue → `telle
 nginx/CSP, Terraform, Cloud Run, Cloudflare, VM compose → `mark`.
 `services/sigil-bridge` → `latch`. `services/finops-exporter` → `teller`.
 
+**Seams inside your tree that are NOT yours:**
+- A subgraph mapping that records a wager as resolved, drawn or challenged
+  (oracle and open-challenge handlers, resolution entities) is `augur`'s,
+  even though the file lives under `subgraph/`. Route it there before editing.
+- An MCP tool, gateway route or assistant flow that ASKS the member for a
+  signature (typed-data build, key grant, x402 payment) is `latch`'s to review:
+  what is shown, what is signed, and that the server never holds the key.
+
 **Hard stop:** a relay, endpoint or tool that can move member funds without a
 member signature is out of scope by definition — stop and hand it to `keel`
 with the user informed.

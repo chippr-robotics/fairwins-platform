@@ -33,6 +33,12 @@ and lets them believe their money is gone.
 | `frontend/src/lib/recovery/`, `backup/`, `applock/`, `verify/` | Legacy keys (spec 062), spec-032 backup, app-lock, message signing (spec 084) |
 | `frontend/src/lib/native/nativeCredentials.js`, `ledgerBleTransport.js` | Native passkey/BLE rungs — seam logic only; shell/release is `mark` |
 
+**Also yours, in other agents' trees:** any MCP tool, gateway route or
+assistant flow that asks the member for a signature (`build_intent`,
+`ApiKeyGrant`, x402 `TransferWithAuthorization`) — you review what is shown
+and what is signed; `relay` owns the plumbing. If the request could move funds
+without a member signature, it stops at `keel`.
+
 **Not yours:** the paymaster's ERC-7677 *endpoint*, quotas and bundler ops →
 `relay`. Vault (Safe) owners/policy → `custos`. Bitcoin/Solana key derivation
 → `satchel` (but you review any change to the passkey master seed they derive

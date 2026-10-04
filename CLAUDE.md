@@ -1074,7 +1074,7 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
   `docs/developer-guide/protect-policies.md` § "One vault, created everywhere" +
   `specs/105-multichain-vault-creation/`.
 - **A custody write's RAIL is a property of the SIGNER, not the login.**
-  `lib/custody/writeRail.js#resolveWriteRail` is the one answer to "can this session sign a vault
+  `lib/chains/writeRail.js#resolveWriteRail` is the one answer to "can this session sign a vault
   action on this chain?", and it checks for a signer FIRST. Branching on `loginMethod === 'passkey'`
   — which `WalletContext` itself documents as "INFORMATIONAL ONLY … no feature may branch on it" —
   refused members who could perfectly well act: **ETC 61 and Mordor 63 have no bundler**, so the
