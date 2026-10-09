@@ -200,3 +200,4 @@ outage.
 | Date | Changes | Author |
 |------|---------|--------|
 | 2026-10-09 | Initial version | FairWins engineering |
+| 2026-10-09 | Retired the Manticore job from `torture-test.yml` (#1656). Manticore was archived upstream and cannot install past Python 3.10, which reaches EOL on 2026-10-01, so the only options were an EOL runtime or a tool that no longer installs. Medusa (fuzzing) and Slither (static analysis) keep the coverage. The `python-manticore` hold is removed from the registry. Medusa, Slither, solc-select and crytic-compile are now exact pins. | FairWins engineering |

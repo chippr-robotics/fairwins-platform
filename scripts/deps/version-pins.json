@@ -362,54 +362,113 @@
       }
     },
     {
-      "id": "python-manticore",
-      "kind": "toolchain",
-      "owner": "keel",
-      "pinned": "3.10",
-      "status": "hold",
-      "locations": [
-        {
-          "path": ".github/workflows/torture-test.yml",
-          "contains": "python-version: '3.10'"
-        }
-      ],
-      "upstream": {
-        "type": "none",
-        "why": "Held on an EOL line on purpose; see hold. The report shows the EOL."
-      },
-      "eol": {
-        "product": "python",
-        "cycle": "3.10"
-      },
-      "hold": {
-        "reason": "Manticore is unmaintained upstream (Trail of Bits archived it) and its native extras plus the protobuf<=3.20.3 pin do not install on newer Pythons. Moving the line means replacing the tool, not bumping it, so it is decided together with the torture-test toolchain review.",
-        "ref": "#1656",
-        "watch": [
-          "#1656 (Manticore replacement, Medusa pin, Go line)"
-        ],
-        "reviewBy": "2027-01-09"
-      }
-    },
-    {
       "id": "go-medusa",
       "kind": "toolchain",
       "owner": "keel",
-      "pinned": "1.21",
+      "pinned": "1.26",
       "status": "track",
       "locations": [
         {
           "path": ".github/workflows/torture-test.yml",
-          "contains": "go-version: '1.21'"
+          "contains": "go-version: '1.26'"
         }
       ],
       "upstream": {
         "type": "none",
-        "why": "A language line is chosen, not followed; its EOL is the signal. Medusa itself is installed @latest, which is the floating pin the follow-up removes."
+        "why": "A language line is chosen, not followed; its EOL is the signal. Moved off 1.21 (EOL) on 2026-10-09 to the oldest line still supported; medusa's go.mod requires go >= 1.24.0."
       },
       "eol": {
         "product": "go",
-        "cycle": "1.21"
+        "cycle": "1.26"
       }
+    },
+    {
+      "id": "medusa",
+      "kind": "binary",
+      "owner": "keel",
+      "pinned": "v1.5.1",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "medusa@v1.5.1"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/medusa",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "Installed with `go install ...@v1.5.1`; was @latest. Fuzz-only (no value path): a bump needs one green weekly torture-test run, not a soak. Its go.mod requires go >= 1.24.0 (see go-medusa)."
+    },
+    {
+      "id": "slither-analyzer",
+      "kind": "toolchain",
+      "owner": "keel",
+      "pinned": "0.11.6",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "slither-analyzer==0.11.6"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "slither-analyzer==0.11.6"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/slither",
+        "tagPattern": "^\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "requires_python >=3.10 (PyPI). It gates merges through check-slither-findings.js, so a bump can add findings: run it and read the diff first. Bump together with solc-select and crytic-compile."
+    },
+    {
+      "id": "solc-select",
+      "kind": "toolchain",
+      "owner": "keel",
+      "pinned": "1.2.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "solc-select==1.2.0"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "solc-select==1.2.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/solc-select",
+        "tagPattern": "^v\\.?\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "requires_python >=3.8 (PyPI). Picks the compiler Slither runs against; that compiler (0.8.24) is pinned separately."
+    },
+    {
+      "id": "crytic-compile",
+      "kind": "toolchain",
+      "owner": "keel",
+      "pinned": "0.4.2",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "crytic-compile==0.4.2"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "crytic-compile==0.4.2"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/crytic-compile",
+        "tagPattern": "^\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "requires_python !=3.12.0,>=3.10 (PyPI): setup-python '3.12' resolves the newest 3.12.x, never 3.12.0. Slither, Medusa and the weekly job all go through it."
     },
     {
       "id": "java-native",
