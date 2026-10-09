@@ -31,7 +31,7 @@
       "file": "infra/vm/bundler/docker-compose.yml",
       "contains": "alto-bundler-nginx:latest",
       "reason": "First-party origin-lock image. Cloud Build pushes $SHORT_SHA alongside :latest, but the SHA actually running on the bundler VM is not recorded in the repo. Pinning a guessed SHA would be a fabricated fact; pin the deployed one once it has been read from Artifact Registry.",
-      "ref": "#1648",
+      "ref": "#1657",
       "reviewBy": "2026-11-30"
     }
   ],
@@ -48,7 +48,7 @@
       ],
       "upstream": { "type": "git", "repo": "https://github.com/OpenZeppelin/openzeppelin-relayer", "tagPattern": "^v\\d+\\.\\d+\\.\\d+$" },
       "hold": {
-        "reason": "1.5.0 introduced a receipt regression (upstream #817): a transient empty receipt from a load-balanced RPC finalizes a MINED tx as Failed and the confirmed webhook never fires. Our engine uses multi-endpoint public RPC failover, so we would hit it. 1.7.0's nonce-drift recovery jams when the drift region is full (#843). The cap-bound stuck lane (#808) affects 1.4.0 through 1.8.0 alike, so bumping does not fix it; it is mitigated by the probe and the runbook instead. NOTE: the production compose tag is `multichain-v1.5.0`, whose base engine version is not recorded in-repo; verifying it is the first step of the review.",
+        "reason": "1.5.0 introduced a receipt regression (upstream #817): a transient empty receipt from a load-balanced RPC finalizes a MINED tx as Failed and the confirmed webhook never fires. Our engine uses multi-endpoint public RPC failover, so we would hit it. 1.7.0's nonce-drift recovery jams when the drift region is full (#843). The cap-bound stuck lane (#808) affects 1.4.0 through 1.8.0 alike, so bumping does not fix it; it is mitigated by the probe and the runbook instead. NOTE: the production compose tag is `multichain-v1.5.0`, whose base engine version is not recorded in-repo; verifying it is #1650.",
         "ref": "#1648",
         "watch": [
           "OpenZeppelin/openzeppelin-relayer#817",
@@ -202,8 +202,8 @@
       "eol": { "product": "python", "cycle": "3.10" },
       "hold": {
         "reason": "Manticore is unmaintained upstream (Trail of Bits archived it) and its native extras plus the protobuf<=3.20.3 pin do not install on newer Pythons. Moving the line means replacing the tool, not bumping it, so it is decided together with the torture-test toolchain review.",
-        "ref": "docs/adr/006-dependency-version-policy.md",
-        "watch": ["torture-test toolchain follow-up (Manticore replacement, Medusa pin, Go line)"],
+        "ref": "#1656",
+        "watch": ["#1656 (Manticore replacement, Medusa pin, Go line)"],
         "reviewBy": "2027-01-09"
       }
     },
