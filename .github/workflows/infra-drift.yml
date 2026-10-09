@@ -55,7 +55,7 @@ jobs:
         with:
           node-version: 22
 
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.TF_PLAN_SERVICE_ACCOUNT }}
@@ -98,7 +98,7 @@ jobs:
         with:
           node-version: 22
 
-      - uses: google-github-actions/auth@v2
+      - uses: google-github-actions/auth@v3
         with:
           # The apply identity, not the plan identity: the prod root reads the origin-lock value
           # through a Secret Manager data source, which the read-only identity is deliberately not
