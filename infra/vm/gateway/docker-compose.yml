@@ -442,7 +442,7 @@ services:
   # ---- ephemeral redis, INSIDE the gateway's namespace ----
   redis:
     container_name: fairwins-gateway-redis
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine
     restart: unless-stopped
     pull_policy: missing
     network_mode: "service:gateway"
@@ -452,7 +452,7 @@ services:
     # Ephemeral by design, matching Cloud Run: no persistence, nothing to restore. The engine's
     # in-flight state is reconstructible from chain.
     command: ["redis-server", "--save", "", "--appendonly", "no"]
-    # NOTE: do NOT add `read_only: true` + `cap_drop: ALL` here. redis:7-alpine's entrypoint runs
+    # NOTE: do NOT add `read_only: true` + `cap_drop: ALL` here. redis:7.4.11-alpine's entrypoint runs
     # `find . \! -user redis -exec chown redis '{}' +` as root; with CAP_CHOWN dropped that returns
     # EPERM and the container never starts. This was a reproduced boot-fatal defect in an earlier draft.
     cpus: 0.15

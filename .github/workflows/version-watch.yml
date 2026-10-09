@@ -1,0 +1,72 @@
+# Version watch: the live half of the version-pin gate (ADR-006, issue #1648).
+#
+# Dependabot only sees what it can parse. The relay engine is BUILT from an upstream git tag, so no
+# bot ever told us OZ Relayer v1.5.0 existed. It was two months old on the day we pinned v1.4.0, and
+# nothing recorded why we stayed. This job asks upstream about every pin in
+# scripts/deps/version-pins.json (git tags, Docker Hub, endoflife.date) and rewrites ONE rolling
+# issue with the result. That issue is the agenda for the monthly review.
+#
+# WHY IT REPORTS INSTEAD OF FAILING. Being one minor behind is not a defect, and a check that is red
+# every Monday gets bypassed. What IS wrong now (an unknown or floating image, registry drift, an
+# expired hold) fails the offline half on every pull request, inside the `Dependency Hygiene` job.
+#
+# AN UNREADABLE UPSTREAM IS NAMED IN THE ISSUE, NEVER SHOWN AS "CURRENT" (spec 071 / 089 three-state rule).
+name: Version Watch
+
+on:
+  schedule:
+    # Mondays 08:00 UTC, an hour after Dependency Alerts, so the two weekly signals land together.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: version-watch
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    name: Version Watch
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fixtures first: a watcher that checks nothing prints the same table as one that checks
+      # everything. Dependency-free, so no npm ci.
+      - name: Test the gate's own rules
+        run: npm run test:version-pins
+
+      # Must fail loudly on a broken registry. Do NOT add continue-on-error (Constitution IV);
+      # V-06 fails the offline half if anyone does.
+      - name: Ask upstream about every pin
+        run: npm run check:version-pins:live -- --report "$RUNNER_TEMP/version-watch.md"
+
+      - name: Publish the report
+        if: always() && hashFiles(format('{0}/version-watch.md', runner.temp)) != ''
+        run: cat "$RUNNER_TEMP/version-watch.md" >> "$GITHUB_STEP_SUMMARY"
+
+      # ONE rolling issue, edited in place, so the review agenda is always a single link and
+      # nothing accumulates. It is found by label, which is why it is created with one.
+      - name: Update the rolling Version Watch issue
+        if: hashFiles(format('{0}/version-watch.md', runner.temp)) != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh label create version-watch --color 0E8A16 \
+            --description "Rolling upstream-version report (ADR-006)" 2>/dev/null || true
+          num="$(gh issue list --label version-watch --state open --limit 1 --json number --jq '.[0].number')"
+          if [ -n "$num" ]; then
+            gh issue edit "$num" --body-file "$RUNNER_TEMP/version-watch.md"
+          else
+            gh issue create --title "Version watch: upstream releases for pinned components" \
+              --label version-watch --body-file "$RUNNER_TEMP/version-watch.md"
+          fi

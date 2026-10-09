@@ -14,7 +14,7 @@
 # API it talks to has no write route. The member's own capability token arrives per request as an
 # Authorization header (or, for a single-member deployment, in FAIRWINS_API_TOKEN at runtime) and is
 # never baked in.
-FROM node:20-alpine AS runtime
+FROM node:22.23.3-alpine3.24 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
@@ -31,7 +31,7 @@ USER node
 ENV PORT=8790
 EXPOSE 8790
 
-# `wget` is not in node:20-alpine's default image; Node's own fetch is, and it is the same runtime
+# `wget` is not in node:22-alpine's default image; Node's own fetch is, and it is the same runtime
 # the service uses — so a healthcheck failing means the runtime is genuinely unhealthy.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD node -e "fetch('http://127.0.0.1:'+(process.env.PORT||8790)+'/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"

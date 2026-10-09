@@ -120,6 +120,18 @@ jobs:
       - name: Tenant manifest gate tests
         run: npm run test:tenants
 
+      # Gate (ADR-006, issue #1648): every version outside the lockfile is a recorded decision.
+      # The relay engine sat on OZ Relayer v1.4.0 with no recorded reason while upstream shipped four
+      # minors, and four base images used floating tags, which give no upgrade signal at all. This
+      # is the OFFLINE half: an unclaimed or floating image, registry drift, or an expired hold
+      # fails here. The live upstream comparison runs weekly in version-watch.yml. Dependency-free,
+      # like the rest of this job.
+      - name: Test the version-pin gate's own rules
+        run: npm run test:version-pins
+
+      - name: Check version pins
+        run: npm run check:version-pins
+
   # Gate (issue #1460): the spec namespace is shared, and four numbers on `main` are claimed twice
   # (017, 041, 050, 102) because nothing checked. `create-new-feature.sh` computes max+1, which is
   # correct exactly once per merge — two agents who ask before either has merged both get the same

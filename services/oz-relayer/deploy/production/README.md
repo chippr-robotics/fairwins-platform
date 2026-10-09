@@ -3,8 +3,10 @@
 This is the **live** 3-container Cloud Run relayer (`fairwins-relay-gateway`, us-central1),
 serving both chains from one service. It supersedes the single-chain snapshot in `../mordor/`.
 
-- **config.json** — OZ engine config baked into `fairwins-relay-engine:multichain-v1.4.0`
-  (`COPY config /app/config`). Two relayers (`mordor-63`, `polygon-137`), two KMS signers
+- **config.json** — OZ engine config (`COPY config /app/config` in the image build; the VM estate
+  instead mounts this file read-only from the repo checkout). The currently deployed engine tag is
+  `fairwins-relay-engine:multichain-v1.5.0`; the upstream engine version inside it is **unverified
+  in-repo** (the `Dockerfile` base is `v1.4.0`) — see `../../README.md` § Version pin. Two relayers (`mordor-63`, `polygon-137`), two KMS signers
   (`gas-key-mordor`, `gas-key-polygon`), two networks. Secrets arrive via env at runtime.
 - **service.yaml** — the Cloud Run service (gateway :8788 + engine :8080 + redis). Gateway
   `ENABLED_CHAIN_IDS=63,137`; per-chain `GAS_WALLET_*` / `RPC_URLS_*` / `ENGINE_RELAYER_ID_*`.

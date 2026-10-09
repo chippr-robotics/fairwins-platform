@@ -35,8 +35,10 @@ ETC-family specifics (research.md §2):
   mishandle batched JSON-RPC. The Rust engine issues sequential requests by default, but if a
   batch option is ever enabled, keep it at 1 for these chains (tagged `no-batch` in
   `config.json` as an operator reminder).
-- `gas_price_cap` is set high (2000 gwei) because the ETC legacy oracle suggests ~300 gwei
-  baseline; the cap bounds bump/replace escalation (FR-006).
+- `gas_price_cap` is set high (2000 gwei on `mordor-63`; `polygon-137` is 1500 gwei) because the
+  ETC legacy oracle suggests ~300 gwei baseline; the cap bounds bump/replace escalation (FR-006).
+  Measured headroom (2026-10-09: Mordor 1 gwei, Polygon 275.8 gwei) and the #808 stall threshold
+  (`cap / 1.1`) are in `docs/runbooks/relayer-operations.md` § Cap headroom.
 
 ## Key provisioning (FR-017 / FR-019a)
 
@@ -95,6 +97,69 @@ local dev.
    supports `{url, weight}` objects, weights may be added without other changes.
 5. `min_balance` doubles as the low-balance alert line (FR-018); `openzeppelin-monitor` is the
    intended alerting add-on (plan.md) and is not configured here.
+
+## Version pin
+
+**Decision (2026-10-09, issue #1648): the engine is held on the OZ Relayer v1.4.0 base. Do not bump
+yet.** This is a recorded *hold* under [ADR-006](../../docs/adr/006-dependency-version-policy.md). It
+is not an oversight.
+
+**Step 0: confirm what is actually running.** The repo does not state it unambiguously:
+
+| Where | Tag |
+|---|---|
+| `Dockerfile` `FROM` | `fairwins-relay-engine-base:v1.4.0` |
+| Live VM estate (`infra/vm/gateway/docker-compose.yml`) and the retained Cloud Run manifest (`deploy/production/service.yaml`) | `fairwins-relay-engine:multichain-v1.5.0` |
+| Old Mordor Cloud Run snapshot (`deploy/mordor/`) | `mordor-v1.4.0` |
+
+The repo cannot tell whether `multichain-v1.5.0` is a FairWins config-image revision on the v1.4.0
+base, or an image built on upstream v1.5.0. Read the engine's startup `service_version=` log line, or
+compare the image layers against `fairwins-relay-engine-base:v1.4.0`. Commands are in
+[relayer-operations.md § Which engine version is running](../../docs/runbooks/relayer-operations.md#which-engine-version-is-running).
+Record the answer here. **If it is ≥ 1.5.0, upstream #817 (below) is live in production now.**
+
+**Why hold.** Upstream has shipped v1.5.0 (2026-05-07), v1.6.0 (2026-07-08), v1.7.0 (2026-07-28) and
+v1.8.0 (2026-08-19). They carry real EVM fixes:
+
+- 1.5.0 handles nonce gaps before resubmission (#726).
+- 1.6.0 fixes cancel tracking (#809).
+- 1.7.0 rewinds a drifted nonce counter, skips resubmits blocked by a nonce gap (#831), and validates
+  intrinsic `gas_limit`.
+- 1.8.0 is dependency updates only.
+
+But 1.5.0 introduced **#817**: a transient empty receipt from a load-balanced RPC finalizes a mined
+transaction as `Failed`, and no confirmed webhook is sent. We run multi-endpoint RPC failover, so
+1.5+ exposes us to it directly. The result would be "failed" intents for actions that landed. 1.7.0
+adds **#843**: a fully occupied drift region disables the #831 recovery and jams the lane.
+
+The bug that most affects us, **#808**, is *not* fixed by any of them. A `gas_price_cap` leaves a
+relayer stuck forever after a spike, because a transaction priced above `cap / 1.1` is never repriced.
+That holds from v1.4.0 through v1.8.0. It is mitigated operationally, not by a bump: see the probe
+alert and the procedure in
+[relayer-operations.md § Stuck transactions](../../docs/runbooks/relayer-operations.md#stuck-transactions).
+
+**GCP KMS via ADC is still not available at v1.8.0.** The signer still needs
+`service_account.{private_key,…}` (upstream **#757** tracks workload identity). The exported-key
+follow-up therefore stays open and is not a reason to bump.
+
+**Watch list:** upstream #808, #817, #843, #757.
+**Re-evaluation trigger:** #817 fixed in a release. Re-check #843 and #808 at that point. Re-evaluate
+earlier if a security advisory lands against the running version.
+
+**Upgrade checklist (v1.4 → v1.8+), when the trigger fires:**
+
+1. Add the network fields newer releases require (`required_confirmations`, `symbol`, `features`,
+   `tags`) to the custom networks, especially **61 / 63**. Validate with the new engine's config
+   check.
+2. The Redis record schema and nonce-counter schema changed. **Drain every lane first** (cancel or
+   let everything confirm, then `latest == pending == engine nonce` on every chain), then start the
+   new engine on **clean** state.
+3. **Stop the old engine before starting the new one.** Overlapping instances share worker IDs.
+   Restart the whole `fairwins-stack@gateway` unit, and never run a rolling or blue/green overlap.
+4. Rebuild the base from the new upstream tag (`Dockerfile` header), re-tag so the image name states
+   the **upstream** version unambiguously, and update the `FROM`, this section, and the
+   `scripts/deps/version-pins.json` hold (ADR-006).
+5. Soak on the Mordor lane before Polygon (ADR-006: value-path pins ship alone).
 
 ## Fallback engine
 

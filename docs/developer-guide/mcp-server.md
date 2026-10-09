@@ -258,7 +258,7 @@ Client configuration examples (Claude Desktop / Claude Code JSON) live in
 
 ## Deployment
 
-`services/mcp-server/Dockerfile` builds from a standalone context on `node:20-alpine`, runs as
+`services/mcp-server/Dockerfile` builds from a standalone context on `node:22.23.3-alpine3.24`, runs as
 `USER node`, exposes **8790**, starts in HTTP mode, and health-checks `/healthz`. It is declared in
 Terraform as a Cloud Run service (`fairwins-mcp-server`, and `-staging`) with **no secret
 environment and no dedicated service account** — the service holds nothing, because the

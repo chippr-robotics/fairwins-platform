@@ -11,6 +11,9 @@
 #   gcloud builds submit ozr \
 #     --config <build using Dockerfile.production, DOCKER_BUILDKIT=1, machineType E2_HIGHCPU_8, timeout 3600s> \
 #     # -> <AR>/fairwins-relay-engine-base:v1.4.0
+# VERSION PIN: v1.4.0 is a deliberate, recorded HOLD (issue #1648), not a default. Before changing
+# it read services/oz-relayer/README.md "Version pin" (why, watch list, upgrade checklist) and
+# docs/adr/006-dependency-version-policy.md.
 FROM us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-relay-engine-base:v1.4.0
 
 # Config only (relayers/networks/signers/notifications). No secrets, no keys — those arrive at
