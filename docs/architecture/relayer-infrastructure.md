@@ -8,8 +8,8 @@ every covered action keeps a **self-submit fallback**. So the worst failure of e
 > **Deployed footprint (Polygon 137 + Mordor 63):** one GCE VM, `fairwins-gateway`
 > (us-central1-a), running a Docker Compose stack: the policy gateway, the OZ Relayer engine, a
 > persistent Redis, and the FinOps exporter and Alloy beside them. All containers share one network
-> namespace. The source of truth is [`infra/vm/gateway/docker-compose.yml`](../../infra/vm/gateway/docker-compose.yml)
-> and [`infra/vm/README.md`](../../infra/vm/README.md). The earlier Cloud Run service
+> namespace. The source of truth is `infra/vm/gateway/docker-compose.yml`
+> and `infra/vm/README.md`. The earlier Cloud Run service
 > (`fairwins-relay-gateway`) was decommissioned when the stack moved to GCE; its manifest is kept only
 > as a historical snapshot (`services/oz-relayer/deploy/production/service.yaml`). This is the sanctioned
 > exception to the platform's no-backend rule — see
@@ -260,6 +260,6 @@ reflected in the config/code:
 
 ## 7. Operate it
 
-- Deploy / redeploy: the update path in [`infra/vm/README.md`](../../infra/vm/README.md) and [../runbooks/vm-migration.md](../runbooks/vm-migration.md). [../runbooks/relayer-mordor-deploy.md](../runbooks/relayer-mordor-deploy.md) is the historical Cloud Run procedure
+- Deploy / redeploy: the update path in `infra/vm/README.md` and [../runbooks/vm-migration.md](../runbooks/vm-migration.md). [../runbooks/relayer-mordor-deploy.md](../runbooks/relayer-mordor-deploy.md) is the historical Cloud Run procedure
 - Incidents, kill switch, key rotation, funding: [../runbooks/relayer-operations.md](../runbooks/relayer-operations.md)
 - Protocol / intent semantics: [../developer-guide/gasless-intents.md](../developer-guide/gasless-intents.md)
