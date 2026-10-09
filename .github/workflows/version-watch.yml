@@ -50,14 +50,17 @@ jobs:
       - name: Ask upstream about every pin
         run: npm run check:version-pins:live -- --report "$RUNNER_TEMP/version-watch.md"
 
+      # Guarded in shell, not with `hashFiles()`: that only sees files under GITHUB_WORKSPACE, and
+      # RUNNER_TEMP is outside it, so a hashFiles guard would silently skip both steps every week.
       - name: Publish the report
-        if: always() && hashFiles(format('{0}/version-watch.md', runner.temp)) != ''
-        run: cat "$RUNNER_TEMP/version-watch.md" >> "$GITHUB_STEP_SUMMARY"
+        if: always()
+        run: |
+          [ -f "$RUNNER_TEMP/version-watch.md" ] || { echo "::error::no report was written"; exit 1; }
+          cat "$RUNNER_TEMP/version-watch.md" >> "$GITHUB_STEP_SUMMARY"
 
       # ONE rolling issue, edited in place, so the review agenda is always a single link and
       # nothing accumulates. It is found by label, which is why it is created with one.
       - name: Update the rolling Version Watch issue
-        if: hashFiles(format('{0}/version-watch.md', runner.temp)) != ''
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
