@@ -173,8 +173,10 @@ about any upstream issue.
 
 ### Detection
 
-1. **Probe FAIL line (pages).** The engine logs to the docker `json-file` driver, so its log lines do
-   **not** reach Cloud Logging on their own. Instead, `infra/vm/common/probe.sh` (gateway role) runs
+1. **Probe FAIL line (pages).** Since #1653 the engine's logs also reach Cloud Logging directly (see
+   [Engine logs](#engine-logs-cloud-logging-1653)). The paging path described here is unchanged and
+   stays as the backstop, because it does not depend on the log shipper:
+   `infra/vm/common/probe.sh` (gateway role) runs
    every 60 s from the `fairwins-probe@gateway` timer. It greps the engine's last 120 s of logs for
    `skipping resubmission`. On a hit it emits
    `fairwins-probe FAIL gateway relay lane STUCK at gas_price_cap — engine skipped resubmission Nx in 120s (runbook: relayer-operations.md#stuck-transactions)`.
@@ -491,6 +493,99 @@ kill switch, drain (R2), stop the unit, wipe the `redis-data` volume, converge, 
 Mordor, measured earlier the same day (2026-10-09T14:51Z): `eth_gasPrice` 1.00 gwei on both of its
 public endpoints (`0x3b9aca00`), nonce 4, `latest == pending`.
 
+### Engine logs (Cloud Logging, #1653)
+
+Only the `engine` service uses the `gcplogs` Docker log driver (`infra/vm/gateway/docker-compose.yml`).
+Every engine line is shipped to Cloud Logging as `logName="projects/chippr-bots-site-wp/logs/gcplogs-docker-driver"`
+on the VM's `gce_instance` resource. Nothing else changed: the gateway, finops, alloy and redis stay on
+`json-file`.
+
+- **`docker logs` still works.** `gcplogs` cannot be read back, so Docker's dual logging (Docker Engine
+  20.10+) keeps a local copy and serves `docker logs` from it. This is the documented Docker behaviour;
+  it was not exercised on the VM in this change (the sandbox has no Docker daemon), and `probe.sh`
+  fails closed if it ever breaks (`engine logs unreadable — cannot rule out a stuck lane`). The local
+  copy is sized to the old 3 × 10 MB by `cache-max-size` / `cache-max-file`.
+- **The engine never blocks on Cloud Logging.** `mode: non-blocking`, 4 MB buffer. If Logging is slow
+  or down, lines are dropped from the shipped stream once the buffer is full (the local copy keeps them).
+- **Check after the first start.** The exact field names are the driver's, so read one entry and adjust
+  the filters below if they differ:
+
+  ```bash
+  gcloud logging read 'logName="projects/chippr-bots-site-wp/logs/gcplogs-docker-driver"' --project chippr-bots-site-wp --limit 1 --format json
+  ```
+
+**Filter, all engine logs:**
+
+```
+resource.type="gce_instance"
+logName="projects/chippr-bots-site-wp/logs/gcplogs-docker-driver"
+jsonPayload.container.name=~"fairwins-gateway-engine$"
+```
+
+**Filter, the stuck-lane line (#808):** add `jsonPayload.message:"skipping resubmission"`. Other useful
+substrings: `Skipping config file processing` / `Processing config file` (which storage boot happened),
+`service_version=` (the running engine version, which answers [Which engine version is running](#which-engine-version-is-running)
+without SSH).
+
+**Proposed log metric and alert policy. NOT APPLIED.** The monitoring module lives in the private
+`chippr-robotics/chippr-tf-modules` repo (pinned by SHA in `infra/terraform/environments/prod/main.tf`),
+so this is a proposal to add there, followed by a SHA bump here. Nothing in this repo creates it. The
+existing `fairwins_probe_failures` policy (more than 2 probe FAIL lines in 300 s) keeps paging for the
+same event in the meantime. Expect both to fire on a real stall: one signal says "the probe saw it",
+the other "the engine said it", and they fail independently.
+
+```hcl
+resource "google_logging_metric" "engine_lane_stuck" {
+  project     = var.project_id
+  name        = "fairwins_engine_lane_stuck"
+  description = "Engine log lines 'skipping resubmission': a relay lane is stuck at gas_price_cap (upstream OpenZeppelin/openzeppelin-relayer#808)"
+  filter      = <<-EOT
+    resource.type="gce_instance"
+    logName="projects/${var.project_id}/logs/gcplogs-docker-driver"
+    jsonPayload.container.name=~"fairwins-gateway-engine$"
+    jsonPayload.message:"skipping resubmission"
+  EOT
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_monitoring_alert_policy" "engine_lane_stuck" {
+  project      = var.project_id
+  display_name = "FairWins: relay lane stuck at gas_price_cap (engine log)"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "engine skipped a resubmission"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.engine_lane_stuck.name}\" AND resource.type=\"gce_instance\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+      trigger { count = 1 }
+    }
+  }
+
+  notification_channels = var.notification_channels
+  alert_strategy { auto_close = "1800s" }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "The OZ Relayer engine logged `skipping resubmission`: a transaction is priced above gas_price_cap / 1.1 and can never be bumped again, so every later transaction on that chain queues behind it. Members are still served (self-submit fallback) but pay their own gas. Runbook: docs/runbooks/relayer-operations.md#stuck-transactions"
+  }
+}
+```
+
+A single hit is already actionable (the line is only logged when a bump was refused), hence
+`threshold_value = 0`. If it proves noisy in the soak after #1651, raise `duration` rather than
+muting it.
+
 ### Storage mode (Redis since #1652)
 
 Before #1652 the engine kept its relayer and transaction records in process memory
@@ -630,6 +725,10 @@ reset. Order matters:
    - `redis-cli dbsize` non-zero and `config get appendonly` is `yes` (Confirm the mode, above).
    - **Persistence proof:** `sudo systemctl restart fairwins-stack@gateway`. The log now says
      `Skipping config file processing`, and the relayer is still there.
+   - If #1653 (gcplogs) rides the same deploy: `sudo docker logs --tail 5 fairwins-gateway-engine`
+     still prints lines, and the [Engine logs](#engine-logs-cloud-logging-1653) filter returns the same
+     lines in Cloud Logging within a minute. If `docker logs` is empty or errors, roll the engine
+     `logging:` block back to `json-file`; the probe is already reporting it as `engine logs unreadable`.
    - Probe is green (`engine`, `engine-resubmission`); one fresh relayed Polygon intent reaches
      `confirmed`, and its receipt is `"type":"0x2"`.
 7. Lift the kill switch. Start the [soak](#soak-procedure-first-48-h-after-the-1559-rollout).

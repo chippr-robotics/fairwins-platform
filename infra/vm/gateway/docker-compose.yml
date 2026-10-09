@@ -297,9 +297,35 @@ services:
       - /opt/fairwins/repo/services/oz-relayer/deploy/production/config.json:/app/config/config.json:ro
     cpus: 0.35
     mem_limit: 320m
+    labels:
+      com.fairwins.service: "relay-engine"
+    # ENGINE LOGS GO TO CLOUD LOGGING (#1653); only this service. The engine's most important failure
+    # is silent: a lane stuck at gas_price_cap logs "skipping resubmission" and nothing else (upstream
+    # OpenZeppelin/openzeppelin-relayer#808), and under json-file that line never left the VM. The
+    # gcplogs driver ships every engine line to Cloud Logging as logName
+    # projects/chippr-bots-site-wp/logs/gcplogs-docker-driver, filterable by container name.
+    # Filter + proposed log metric / alert: docs/runbooks/relayer-operations.md "Engine logs".
+    #
+    # `docker logs` KEEPS WORKING: gcplogs cannot be read back, so Docker (20.10+, "dual logging")
+    # also writes a local copy and serves `docker logs` from it. probe.sh reads exactly that, so the
+    # on-VM stuck-lane check stays as the backstop. The cache-* options below size that local copy to
+    # the same 3 x 10 MB the json-file driver had, instead of the 5 x 20 MB default.
+    #
+    # mode non-blocking: the engine must never stall on its own stdout because Cloud Logging is slow
+    # or unreachable. The cost is dropped lines once the 4 MB buffer fills, which is acceptable: logs
+    # are the diagnosis, never the relay path (never-stranded). Dropped lines are still in the local copy.
+    #
+    # gcplogs authenticates as the VM's service account via the metadata server; that account already
+    # holds roles/logging.logWriter for the Ops Agent (infra/terraform/environments/prod/main.tf).
     logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      driver: gcplogs
+      options:
+        gcp-project: "chippr-bots-site-wp"
+        labels: "com.fairwins.service"
+        mode: "non-blocking"
+        max-buffer-size: "4m"
+        cache-max-size: "10m"
+        cache-max-file: "3"
 
   # ---- FinOps exporter (spec 089), INSIDE the gateway's namespace ----
   #
