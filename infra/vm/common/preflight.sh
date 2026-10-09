@@ -20,6 +20,11 @@ case "$ROLE" in
     for f in gateway.env engine.env; do
       [ -s "${RUN_DIR}/${f}" ] || die "${RUN_DIR}/${f} missing or empty — fairwins-secrets@gateway did not run"
     done
+    # #1652: the engine runs with REPOSITORY_STORAGE_TYPE=redis and refuses to boot without its
+    # at-rest key. Fail here, with the reason, rather than as an engine restart loop. And, like the KMS
+    # credential, that key must never reach the internet-facing container.
+    grep -q '^STORAGE_ENCRYPTION_KEY=' "${RUN_DIR}/engine.env" || die "STORAGE_ENCRYPTION_KEY absent from engine.env — the engine cannot boot in redis storage mode"
+    grep -q '^STORAGE_ENCRYPTION_KEY=' "${RUN_DIR}/gateway.env" && die "STORAGE_ENCRYPTION_KEY leaked into gateway.env — it belongs to the engine only"
     # The per-container split is the whole point of two env files. Assert it rather than trust it:
     # the internet-facing gateway container must never receive the exported SA key that holds
     # cloudkms.signerVerifier on BOTH hot gas keys.

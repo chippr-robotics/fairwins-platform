@@ -8,7 +8,7 @@ self-submit fallback, so the worst failure mode of everything below is "users pa
 | Component | Where | Owns |
 |-----------|-------|------|
 | `relay-gateway` | The `fairwins-gateway` GCE VM (`services/relay-gateway`; formerly Cloud Run — see `infra/vm/README.md`) | Policy: signer recovery, intent binding, fail-closed sanctions re-screen, dedup, quotas/spend caps, back-pressure, kill switch, audit log |
-| `oz-relayer` | Container next to the gateway (`services/oz-relayer`) | Mechanics: per-chain nonce lanes, gas pricing/bumping (legacy type-0 on 61/63), inclusion tracking, RPC failover, the KMS-held gas key |
+| `oz-relayer` | Container next to the gateway (`services/oz-relayer`) | Mechanics: per-chain nonce lanes, gas pricing/bumping (EIP-1559 on Polygon 137 since #1651; legacy type-0 on 61/63), inclusion tracking, RPC failover, the KMS-held gas key |
 | Frontend probe | `frontend/src/lib/relay` | `VITE_RELAYER_URL` + health probe → self-submit routing |
 
 ## Local bring-up (validation)
@@ -17,6 +17,8 @@ self-submit fallback, so the worst failure mode of everything below is "users pa
 cd services/relay-gateway
 cp .env.example .env        # set ORIGIN_AUTH_SECRET + WEBHOOK secrets; never commit .env
 docker compose up --build   # gateway :8788, engine :8080, redis :6379
+# FIRST build the local engine base once (upstream publishes no pullable image):
+# see the comment on the oz-relayer service in services/relay-gateway/docker-compose.yml (#1660)
 curl -s localhost:8788/healthz | jq
 ```
 
@@ -128,7 +130,7 @@ signer and Polymarket's protocol settles. A total outage never touches any value
 |---------|-------|--------|
 | 503 `screening_unavailable` spike | Sanctions RPC health (gateway logs `sanctions` errors) | Fail-closed is BY DESIGN — fix RPC (rotate `RPC_URLS_<id>`); do NOT bypass screening |
 | 503 `chain_unavailable` | Both RPC endpoints down | Rotate/add endpoints (env), restart |
-| Stuck transactions | Probe FAIL `relay lane STUCK at gas_price_cap`; engine log `skipping resubmission`; lane nonce vs `eth_getTransactionCount` | Follow [Stuck transactions](#stuck-transactions). The engine is in-memory, so **cancel/drain (R2) BEFORE any restart (R1)**: a restart forgets pending records and their webhooks |
+| Stuck transactions | Probe FAIL `relay lane STUCK at gas_price_cap`; engine log `skipping resubmission`; lane nonce vs `eth_getTransactionCount` | Follow [Stuck transactions](#stuck-transactions). Engine state is in Redis since #1652 ([Storage mode](#storage-mode-redis-since-1652)), so a restart no longer forgets pending transactions. **Cap-only fix: `PATCH` the relayer, no restart (R1).** A `config.json` edit alone does nothing on a populated Redis |
 | 429 storms | Quota counters (`SIGNER_QUOTA_PER_MIN`, `GLOBAL_QUOTA_PER_MIN`, `MAX_QUEUE_DEPTH`) | Raise deliberately or let back-pressure shed to self-submit |
 | Gas runway low | `/healthz` `gasWalletRunwayHrs` | Fund the chain's gas wallet |
 | Webhook auth failures | `WEBHOOK_SHARED_SECRET` mismatch gateway↔engine | Re-sync the secret; webhooks are rejected (fail closed) until then |
@@ -173,8 +175,10 @@ about any upstream issue.
 
 ### Detection
 
-1. **Probe FAIL line (pages).** The engine logs to the docker `json-file` driver, so its log lines do
-   **not** reach Cloud Logging on their own. Instead, `infra/vm/common/probe.sh` (gateway role) runs
+1. **Probe FAIL line (pages).** Since #1653 the engine's logs also reach Cloud Logging directly (see
+   [Engine logs](#engine-logs-cloud-logging-1653)). The paging path described here is unchanged and
+   stays as the backstop, because it does not depend on the log shipper:
+   `infra/vm/common/probe.sh` (gateway role) runs
    every 60 s from the `fairwins-probe@gateway` timer. It greps the engine's last 120 s of logs for
    `skipping resubmission`. On a hit it emits
    `fairwins-probe FAIL gateway relay lane STUCK at gas_price_cap — engine skipped resubmission Nx in 120s (runbook: relayer-operations.md#stuck-transactions)`.
@@ -233,7 +237,7 @@ about any upstream issue.
 
 | Evidence | Cause | Go to |
 |---|---|---|
-| `skipping resubmission` hits; the tx's last price (`price_params`, or the tx via `eng GET /relayers/<id>/transactions/<tx_id>`) is above `gas_price_cap / 1.1`; `eth_gasPrice` (×1.5 for the default `fast` speed) is at or above that tx price | **Cap-bound (#808)**: the market outran the cap | R1, then R2 |
+| `skipping resubmission` hits; the tx's last price (`price_params`, or the tx via `eng GET /relayers/<id>/transactions/<tx_id>`) is above `gas_price_cap / 1.1` (Polygon, EIP-1559: its `max_fee_per_gas`; Mordor, legacy: its `gas_price`); the market (`baseFee × 10 + tip` on Polygon, `eth_gasPrice × 1.5` on Mordor) is at or above that tx price | **Cap-bound (#808)**: the market outran the cap | R1, then R2 |
 | No `skipping resubmission`; engine `nonce` > chain `pending`; the oldest stuck nonce has no tx in the mempool | **Nonce gap**: a lower nonce was never broadcast or was dropped, so everything above it waits | R2 (cancelling the gap's tx at that nonce fills it) |
 | `pending > latest`, no skip lines, price well under the cap | Ordinary congestion. The engine is still bumping | Watch for 10 min. Escalate if it does not clear |
 | Gas wallet balance near `min_balance` | Insufficient funds, not a pricing problem | Fund it (see **Gas runway low**) |
@@ -254,20 +258,49 @@ Thresholds for today's caps are in [Cap headroom](#cap-headroom-measured-2026-10
 Before any restart, **capture the evidence**: the `tx_id`s, nonces, hashes and `price_params` from
 the logs, plus `eng GET /relayers/<id>/transactions/<tx_id>` for each.
 
-> **Storage mode decides the order.** At v1.4.0, the engine keeps its relayer/transaction records in
-> **memory** unless `REPOSITORY_STORAGE_TYPE=redis` is set (`src/config/server_config.rs`,
-> `get_repository_storage_type`). Neither `infra/vm/gateway/docker-compose.yml` nor
-> `services/oz-relayer/deploy/production/service.yaml` sets it, so per the repo the engine is
-> in-memory and `REDIS_URL` backs only its job queue. Confirm against the running image. If the
-> engine is in-memory, a restart **forgets** every pending transaction. It re-reads `config.json`
-> (which is what makes R1 take effect), re-syncs its nonce from the chain, and never sends the
-> forgotten transactions' webhooks, so their intents stay `submitted`. **So if a cap-bound
-> transaction must be cleared rather than left for the market to fall, do R2 for it first, then R1.**
-> (With Redis storage, a populated Redis makes the engine skip `config.json` on boot unless
-> `RESET_STORAGE_ON_START=true`. In that case a cap change needs `PATCH /api/v1/relayers/{id}`,
-> confirmed against the v1.4.0 API, instead of a file edit.)
+> **Storage mode decides the order, and since #1652 the engine runs in Redis mode** (details, source
+> citations and the reset procedure: [Storage mode](#storage-mode-redis-since-1652)). The old rule
+> "the engine is in-memory, so R2 BEFORE R1" described the pre-#1652 estate. Now:
+>
+> - a **restart keeps** pending transactions, nonce counters and their webhooks (Redis AOF on the
+>   named volume `redis-data`). R2 is no longer needed to *protect* them from a restart. It is still
+>   how you *clear* a cap-bound transaction, because a restart does not reprice anything;
+> - a **`config.json` edit is NOT applied** on a restart while Redis holds data (the engine skips the
+>   file). A cap change is a `PATCH`, not a file edit plus a restart.
+>
+> If you are ever on an in-memory engine again (a `REPOSITORY_STORAGE_TYPE` regression, or a rollback
+> of #1652), the old rule applies in full: a restart forgets every pending transaction and never sends
+> their webhooks, so their intents stay `submitted`. Do R2 for anything that must be cleared, then R1.
+> Confirm which mode is running before choosing (see [Storage mode](#storage-mode-redis-since-1652),
+> "Confirm the mode").
 
-**R1 — Raise `gas_price_cap` and restart the single engine.**
+**R1 — Raise `gas_price_cap`.**
+
+*Runtime change (preferred in Redis mode: no restart).* The stored relayer record is the live source
+of the cap:
+
+```bash
+eng() {  # usage: eng METHOD /path [json-body]
+  sudo docker exec -e M="$1" -e P="$2" -e B="${3:-}" fairwins-gateway-gateway node -e '
+    fetch("http://localhost:8080/api/v1" + process.env.P, { method: process.env.M,
+      headers: { authorization: "Bearer " + process.env.ENGINE_API_KEY, "content-type": "application/json" },
+      body: process.env.B || undefined })
+      .then(async r => console.log(r.status, await r.text()))'
+}
+eng PATCH /relayers/polygon-137 '{"policies":{"gas_price_cap":"12000000000000"}}'   # 12,000 gwei, a decimal STRING of wei
+eng GET /relayers/polygon-137                                                      # read it back
+```
+
+`PATCH /api/v1/relayers/{relayer_id}` applies a JSON merge patch to the stored relayer
+(`update_relayer`, `src/api/controllers/relayer.rs`; request type `UpdateRelayerRequest`,
+`src/models/relayer/request.rs`; `RelayerEvmPolicy.gas_price_cap` is a `u128` read from a string or a
+number). Omitted fields are left alone and `null` clears one, so send only `gas_price_cap`. **Make the
+same change in the repo** (`deploy/production/config.json` and `config/config.json`) in a PR that
+explains why. Otherwise the next deliberate reset silently reverts it. Whether a pricing job already in
+flight sees the new cap at once or on its next run was not verified live: read the relayer back and
+watch the next `price_params` in the logs.
+
+*File edit + restart (what applies on an EMPTY Redis, i.e. the first boot or after a reset).*
 
 1. Edit the relayer's `policies.gas_price_cap` (wei) in
    `services/oz-relayer/deploy/production/config.json`. The VM mounts that file read-only from its
@@ -282,7 +315,8 @@ the logs, plus `eng GET /relayers/<id>/transactions/<tx_id>` for each.
    engine container.** The containers share one network namespace, and the unit restart is what
    guarantees that **exactly one engine instance runs**. Two engines must never overlap on one
    wallet, because they share worker IDs and nonce lanes. The same rule rules out a rolling
-   replacement anywhere this engine runs.
+   replacement anywhere this engine runs. **In Redis mode this step changes nothing by itself**: the
+   engine skips the file. It only matters together with a reset (see Storage mode).
 3. Re-run Detection steps 2–4.
 
 **R2 — Cancel and drain the lane.** v1.4.0 routes, confirmed in `src/api/routes/relayer.rs` at the
@@ -329,40 +363,382 @@ healthy.
 
 ### Cap headroom (measured 2026-10-09)
 
-| Relayer | `gas_price_cap` | Pricing path | Initial price clamps at the cap when `eth_gasPrice` ≥ | A tx can no longer be bumped once its price > | Measured `eth_gasPrice` | Headroom |
-|---|---|---|---|---|---|---|
-| `polygon-137` | 1500 gwei (`1500000000000`) | **legacy** (see note) | 1000 gwei (cap ÷ 1.5) | 1363.6 gwei (cap ÷ 1.1) | **275.84 gwei** | first bump fails at `eth_gasPrice` ≈ 909 gwei (cap ÷ 1.65): **3.3×** |
-| `mordor-63` | 2000 gwei (`2000000000000`) | legacy | 1333 gwei | 1818 gwei | **1.00 gwei** | ≈ 1212 gwei: **~1200×** |
+Polygon moved from legacy to **EIP-1559** pricing in #1651, and its cap was re-derived from the
+engine's EIP-1559 arithmetic. Mordor stays legacy. All source paths below are at the upstream
+`v1.4.0` tag. The running image's real version is still unverified (see
+[Which engine version is running](#which-engine-version-is-running)), so re-check the citations if it
+turns out to be 1.5+.
 
-Polygon `eth_feeHistory` over 1024 blocks (95,233,830–95,234,853): base fee min 241.7 / median 248.3
-/ max 258.9 gwei. 50th-percentile tip median 87.6. 99th-percentile tip median 473.8 and max
-10,845 gwei. Base + 99th-percentile tip median 720.9, p95 1,704, max 11,090 gwei. The base fee is the
-inclusion floor, and it sits **~5.6×** under the 1363.6 gwei no-bump line. The 99th-percentile
-column is the most aggressive payer per block, not what we must pay. A few blocks clearing above the
-cap is competition at the top, not a stall. **Verdict: headroom is adequate today. Caps unchanged.**
-Revisit if the Polygon base fee holds above ~600 gwei.
+**Read this first: `gas_price_cap` is a ceiling, not the spend.** What a transaction pays is
+`min(maxFeePerGas, baseFee + tip) × gas used`. Raising the cap from 1,500 to 10,500 gwei does not
+make a single transaction cost more while the market is calm: at the measured base fee the engine
+pays ~384 gwei per gas, whatever the ceiling. The cap changes three things, and only three:
 
-**Polygon is priced as LEGACY, not EIP-1559, in the shipped config.** The engine picks EIP-1559 only
-when the *network's* `features` contains `"eip1559"` (`EvmNetwork::is_legacy`,
-`src/models/network/evm/network.rs`, plus `fetch_speed_price_params`). Our `polygon` network entry has
-`"features": []`. The `eip1559` string sits in `tags`, which do not drive pricing, so
-`eip1559_pricing: true` on the relayer has no effect. A `fast` transaction is therefore a type-0
-`gasPrice` of 1.5 × `eth_gasPrice` (`Speed::multiplier`, `src/services/gas/evm_gas_price.rs`).
-`specs/036-relayer-infrastructure/contracts/engine-integration.md` expected `["eip1559"]` for 137.
-Changing it changes live pricing and is a separate, deliberate change. Under EIP-1559 the engine sets
-`maxFee = baseFee × min(1.125^(90 s ÷ blocktime), 10) + tip`, which is 10 × base on Polygon's 2 s
-blocks. At today's ~245 gwei base fee that would reach the 1500 gwei cap almost immediately.
+1. Whether the engine can *keep repricing* a stuck transaction (#808, below).
+2. The worst-case price in a tip spike. The tip is market-derived and clamped only by the cap, so in
+   a spike the cap IS the bound on what one transaction can pay: `cap × gas used`.
+3. The balance pre-check. The engine requires `balance − maxFee × gas_limit ≥ min_balance` before it
+   signs (`calculate_total_cost` + `validate_sufficient_relayer_balance`). `maxFee` there is the
+   computed (capped) ceiling, so the requirement rises with the market and reaches `cap × gas_limit`
+   only when the market is at the cap.
 
-Measured with the engine's own public RPCs, 2026-10-09T14:51:33Z:
+#### How the engine prices an EIP-1559 transaction (v1.4.0)
+
+| Quantity | Rule | Source |
+|---|---|---|
+| Network is 1559 | Only if the **network** `features` contains `"eip1559"`. `tags` and `policies.eip1559_pricing: true` do not turn it on. `eip1559_pricing: false` forces legacy | `EvmNetwork::is_legacy`, `src/models/network/evm/network.rs`; `PriceCalculator::fetch_speed_price_params`, `src/domain/transaction/evm/price_calculator.rs` |
+| Default speed | `Fast`. The gateway sends `speed: 'fast'` (`services/relay-gateway/src/engine/client.js`) | `DEFAULT_TRANSACTION_SPEED`, `src/constants/evm_transaction.rs` |
+| `maxPriorityFeePerGas` | Mean of the **positive** per-block rewards at the speed's percentile over the last **4** blocks. Percentiles: SafeLow 30, Average 50, **Fast 85**, Fastest 99 | `SPEED_PERCENTILES`, `compute_max_priority_fees_from_history`, `src/services/gas/evm_gas_price.rs`; `HISTORICAL_BLOCKS = 4` |
+| `maxFeePerGas` | `baseFee × m + tip`, where `m = min(1.125^(90 000 ms ÷ blocktime), 10)`. Polygon's `average_blocktime_ms` is 2000, so 45 blocks and `m = 10` | `get_base_fee_multiplier`, `calculate_max_fee_per_gas`, `price_calculator.rs` |
+| Cap on a first submission | `maxFee = min(maxFee, cap)`, then `tip = min(tip, maxFee)`. The cap applies to **both** fee fields, as a per-gas wei ceiling | `apply_gas_price_cap_and_constraints`, `cap_gas_price`, same file |
+| Bump (replacement) | `tip' = max(market tip, 1.1 × tip)`; `maxFee' = max(max(baseFee, 1.1 × maxFee), 10 × baseFee + tip')`; **both then clamped to the cap**. The bump counts only if `tip' ≥ 1.1 × tip` AND `maxFee' ≥ 1.1 × maxFee` after clamping. Otherwise `is_min_bumped = false` and the engine logs `skipping resubmission` (#808) | `handle_eip1559_bump`, `calculate_min_bump` (`MIN_BUMP_FACTOR` 1.1); `resubmit_transaction`, `src/domain/transaction/evm/evm_transaction.rs` |
+| NOOP cancel | `force_bump` lifts the cap | `calculate_bumped_gas_price(…, force_bump)` |
+| Balance check | `maxFee × gas_limit + value` against `balance − min_balance` | `PriceParams::calculate_total_cost`; `validate_sufficient_relayer_balance`, `src/domain/relayer/evm/validations.rs` |
+| Legacy vs 1559 mixing | A legacy transaction in flight cannot be replaced by a 1559 one (and the reverse) | `check_transaction_compatibility`, `src/domain/transaction/evm/replacement.rs` |
+
+Two consequences. First, with a 10× multiplier the engine's own first-submission `maxFee` is
+**~10× the base fee**, so a cap of only a few multiples of the base fee clamps the first submission
+and the transaction starts life already short of headroom. The old 1,500 gwei cap was ~6× today's
+base fee. Second, after the first bump `maxFee'` is dominated by `1.1 × maxFee`, so a stuck
+transaction climbs geometrically until `maxFee > cap ÷ 1.1`. Then #808 stops it.
+
+#### Measurement (2026-10-09T18:15Z, the engine's own `rpc_urls`)
 
 ```bash
-curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_gasPrice","params":[]}' https://polygon-bor-rpc.publicnode.com   # also polygon.drpc.org: same 0x4039609db0
-curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_gasPrice","params":[]}' https://rpc.mordor.etccooperative.org     # also geth-mordor.etc-network.info: same 0x3b9aca00
-curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x400","latest",[50,99]]}' https://polygon-bor-rpc.publicnode.com
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_gasPrice","params":[]}' https://polygon-bor-rpc.publicnode.com   # 0x4108cbf1b5 = 279.3 gwei (drpc: 0x40c32a0b17 = 278.2)
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x400","latest",[30,50,85,99]]}' https://polygon-bor-rpc.publicnode.com
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x400","latest",[50,99]]}' https://polygon.drpc.org
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0x3BB28b184b8a748dE22aBD076634F85adADA82db","latest"]}' https://polygon-bor-rpc.publicnode.com   # 9.92 POL
 ```
 
-Both gas wallets read `latest == pending` (nonce 1 on Polygon, 4 on Mordor) at the same moment, so
-no lane was stuck.
+`eth_feeHistory` over 1,024 blocks (publicnode, from block 95,241,974). The `[50,99]` request on both
+providers agreed to within one block (base fee median 248.2 and 248.3 gwei). The `[30,50,85,99]`
+request is the engine's own percentile set, so the engine's tip is recomputed from it exactly: a
+sliding 4-block mean of the positive per-block reward, one value per window.
+
+| Series (gwei) | min | median | p95 | p99 | max |
+|---|---|---|---|---|---|
+| Base fee | 234.0 | 248.3 | – | – | 264.9 |
+| Tip, SafeLow (p30), 4-block mean | – | 100 | 179 | 202 | 236 |
+| Tip, Average (p50) | – | 112 | 186 | 218 | 237 |
+| **Tip, Fast (p85), the default** | – | **135** | **199** | **241** | **2,913** |
+| Tip, Fastest (p99) | – | 504 | 1,413 | 2,377 | 11,565 |
+| Fast first-submission `maxFee` (`10 × base + tip`) | – | 2,618 | 2,715 | 2,797 | 5,361 |
+| Fast price actually paid (`base + tip`) | – | **384** | 449 | 489 | 3,158 |
+
+For comparison, the legacy path paid `1.5 × eth_gasPrice` = **419 gwei** for a `fast` transaction. So
+EIP-1559 `Fast` is expected to cost about the same or slightly less in calm conditions (median 384 vs
+419), with a heavier tail (max 3,158). The Fastest tip is spikier (max 11,565). We do not use that
+speed.
+
+#### Derivation of the Polygon cap
+
+The cap must (a) leave the **first submission at the default speed unclamped** even if the base fee
+triples, and (b) leave room for **at least three minimum bumps** (1.1³ = 1.331) after that.
+
+```
+B  = 3 × 248.3 ≈ 744 gwei              (3× today's median base fee)
+T  = 241 gwei                          (Fast tip, p99 of the 4-block mean)
+first maxFee = 10 × 744 + 241 = 7,681 gwei
+cap ≥ 1.331 × 7,681 = 10,224 gwei  →  gas_price_cap = 10,500 gwei = 10500000000000 wei
+```
+
+| Check | Value |
+|---|---|
+| Today's first submission (`10 × 248.3 + 135`) | 2,618 gwei. The cap is **4.0×** above it, ~14.6 bumps of headroom |
+| First submission if the base fee triples, tip at p99 | 7,681 gwei: unclamped, 3.04 bumps of headroom (`10,500 ÷ 7,681 = 1.367 ≥ 1.331`) |
+| Same, tip at the window's observed max (2,913 gwei) | 10,353 gwei: still unclamped, under one bump of headroom |
+| A tx can no longer be bumped once `maxFee >` | 9,545 gwei (`cap ÷ 1.1`) |
+| Old cap, 1,500 gwei | Clamps a 1559 first submission once the base fee exceeds ~136 gwei (`(1,500 − 135) ÷ 10`). It would have clamped every first submission today |
+
+Balance pre-check at the computed ceiling, for a 500,000-gas transaction (an assumed upper bound for
+a relayed wager action; the gateway lets the engine estimate it): today 1.31 POL, base fee tripled
+3.84 POL, market at the cap 5.25 POL. Each is **plus** `min_balance` (0.5 POL). The gas wallet holds
+9.92 POL now. The gas-wallet runway alert (48 h) is a different number and does not know about this
+pre-check. If the wallet is ever below ~6 POL during a spike, large relayed transactions can fail
+`InsufficientBalance` although they would have cost far less. Top it up before it gets there.
+
+**Verdict:** `polygon-137` cap = 10,500 gwei. `mordor-63` is unchanged (legacy, 2,000 gwei,
+`eth_gasPrice` 1 gwei, the first bump fails only at `eth_gasPrice` ≈ 1,212 gwei: ~1,200× headroom).
+
+Revisit the Polygon cap if the base fee holds above ~700 gwei (the design point), or if the Fast tip's
+p99 moves past ~1,000 gwei.
+
+#### Soak procedure (first 48 h after the 1559 rollout)
+
+Polygon has exactly one lane (`polygon-137`, one gas wallet), so the soak is that lane at whatever
+volume members send. Start it in a low-traffic window. To limit exposure, lower `GLOBAL_QUOTA_PER_MIN`
+on the gateway for the first hours. The surplus then self-submits.
+
+Before the rollout, drain the lane (R2) and record `latest == pending == engine nonce`. A legacy
+transaction in flight cannot be repriced as 1559: the engine keeps bumping it as legacy.
+
+Watch at least hourly for the first 6 h, then daily:
+
+| Signal | How | Healthy |
+|---|---|---|
+| Lane stuck | Probe FAIL `relay lane STUCK at gas_price_cap`; `sudo docker logs --since 1h fairwins-gateway-engine 2>&1 \| grep -c 'skipping resubmission'` | Never fires |
+| Transaction type | Receipts of the first relayed transactions: `eth_getTransactionReceipt` → `"type":"0x2"`. A `0x0` means the network is still legacy (the `features` change did not load) | `0x2` |
+| Effective vs base | Receipt `effectiveGasPrice` minus that block's `baseFeePerGas` = the tip actually paid | `effectiveGasPrice` ≈ 300–650 gwei. No receipt above ~1,500 gwei without an explanation |
+| Cost | Gas-wallet balance delta ÷ transactions relayed, against the legacy ~419 gwei baseline | Same order of magnitude |
+| Resubmissions | Resubmit log lines per transaction | 0–1 typical. More than 3 means the market is outrunning the engine: check the cap |
+| Runway | `/status` `gasWalletRunwayHrs` | Unchanged trend |
+
+**Rollback.** Revert `features` to `[]` and the cap to `1500000000000` in
+`deploy/production/config.json` and `config/config.json` and ship the PR. **With Redis storage a file edit alone applies nothing**
+([Storage mode](#storage-mode-redis-since-1652)). The cap alone rolls back at runtime with
+`PATCH /api/v1/relayers/polygon-137` (`{"policies":{"gas_price_cap":"1500000000000"}}`). `features`
+has no API route (`PATCH /api/v1/networks/{id}` updates `rpc_urls` only,
+`src/api/controllers/network.rs`), so reverting it needs the drained-lane reset described there:
+kill switch, drain (R2), stop the unit, wipe the `redis-data` volume, converge, start.
+
+Mordor, measured earlier the same day (2026-10-09T14:51Z): `eth_gasPrice` 1.00 gwei on both of its
+public endpoints (`0x3b9aca00`), nonce 4, `latest == pending`.
+
+### Engine logs (Cloud Logging, #1653)
+
+Only the `engine` service uses the `gcplogs` Docker log driver (`infra/vm/gateway/docker-compose.yml`).
+Every engine line is shipped to Cloud Logging as `logName="projects/chippr-bots-site-wp/logs/gcplogs-docker-driver"`
+on the VM's `gce_instance` resource. Nothing else changed: the gateway, finops, alloy and redis stay on
+`json-file`.
+
+- **`docker logs` still works.** `gcplogs` cannot be read back, so Docker's dual logging (Docker Engine
+  20.10+) keeps a local copy and serves `docker logs` from it. This is the documented Docker behaviour;
+  it was not exercised on the VM in this change (the sandbox has no Docker daemon), and `probe.sh`
+  fails closed if it ever breaks (`engine logs unreadable — cannot rule out a stuck lane`). The local
+  copy is sized to the old 3 × 10 MB by `cache-max-size` / `cache-max-file`.
+- **The engine never blocks on Cloud Logging.** `mode: non-blocking`, 4 MB buffer. If Logging is slow
+  or down, lines are dropped from the shipped stream once the buffer is full (the local copy keeps them).
+- **Check after the first start.** The exact field names are the driver's, so read one entry and adjust
+  the filters below if they differ:
+
+  ```bash
+  gcloud logging read 'logName="projects/chippr-bots-site-wp/logs/gcplogs-docker-driver"' --project chippr-bots-site-wp --limit 1 --format json
+  ```
+
+**Filter, all engine logs:**
+
+```
+resource.type="gce_instance"
+logName="projects/chippr-bots-site-wp/logs/gcplogs-docker-driver"
+jsonPayload.container.name=~"fairwins-gateway-engine$"
+```
+
+**Filter, the stuck-lane line (#808):** add `jsonPayload.message:"skipping resubmission"`. Other useful
+substrings: `Skipping config file processing` / `Processing config file` (which storage boot happened),
+`service_version=` (the running engine version, which answers [Which engine version is running](#which-engine-version-is-running)
+without SSH).
+
+**Proposed log metric and alert policy. NOT APPLIED.** The monitoring module lives in the private
+`chippr-robotics/chippr-tf-modules` repo (pinned by SHA in `infra/terraform/environments/prod/main.tf`),
+so this is a proposal to add there, followed by a SHA bump here. Nothing in this repo creates it. The
+existing `fairwins_probe_failures` policy (more than 2 probe FAIL lines in 300 s) keeps paging for the
+same event in the meantime. Expect both to fire on a real stall: one signal says "the probe saw it",
+the other "the engine said it", and they fail independently.
+
+```hcl
+resource "google_logging_metric" "engine_lane_stuck" {
+  project     = var.project_id
+  name        = "fairwins_engine_lane_stuck"
+  description = "Engine log lines 'skipping resubmission': a relay lane is stuck at gas_price_cap (upstream OpenZeppelin/openzeppelin-relayer#808)"
+  filter      = <<-EOT
+    resource.type="gce_instance"
+    logName="projects/${var.project_id}/logs/gcplogs-docker-driver"
+    jsonPayload.container.name=~"fairwins-gateway-engine$"
+    jsonPayload.message:"skipping resubmission"
+  EOT
+  metric_descriptor {
+    metric_kind = "DELTA"
+    value_type  = "INT64"
+    unit        = "1"
+  }
+}
+
+resource "google_monitoring_alert_policy" "engine_lane_stuck" {
+  project      = var.project_id
+  display_name = "FairWins: relay lane stuck at gas_price_cap (engine log)"
+  combiner     = "OR"
+
+  conditions {
+    display_name = "engine skipped a resubmission"
+    condition_threshold {
+      filter          = "metric.type=\"logging.googleapis.com/user/${google_logging_metric.engine_lane_stuck.name}\" AND resource.type=\"gce_instance\""
+      comparison      = "COMPARISON_GT"
+      threshold_value = 0
+      duration        = "0s"
+      aggregations {
+        alignment_period   = "60s"
+        per_series_aligner = "ALIGN_SUM"
+      }
+      trigger { count = 1 }
+    }
+  }
+
+  notification_channels = var.notification_channels
+  alert_strategy { auto_close = "1800s" }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "The OZ Relayer engine logged `skipping resubmission`: a transaction is priced above gas_price_cap / 1.1 and can never be bumped again, so every later transaction on that chain queues behind it. Members are still served (self-submit fallback) but pay their own gas. Runbook: docs/runbooks/relayer-operations.md#stuck-transactions"
+  }
+}
+```
+
+A single hit is already actionable (the line is only logged when a bump was refused), hence
+`threshold_value = 0`. If it proves noisy in the soak after #1651, raise `duration` rather than
+muting it.
+
+### Storage mode (Redis since #1652)
+
+Before #1652 the engine kept its relayer and transaction records in process memory
+(`REPOSITORY_STORAGE_TYPE` unset, which defaults to `in_memory`) and Redis was an ephemeral job queue
+(`--save "" --appendonly no`). A restart forgot every pending transaction and never sent their
+webhooks. Since #1652 the engine stores its state in Redis, and Redis is persistent.
+
+All source paths are upstream `v1.4.0`. The running image's real version is unverified (see
+[Which engine version is running](#which-engine-version-is-running)).
+
+| Setting | Value in `infra/vm/gateway/docker-compose.yml` | Meaning / source |
+|---|---|---|
+| `REPOSITORY_STORAGE_TYPE` | `redis` | `get_repository_storage_type`, `src/config/server_config.rs`. **An unrecognised value silently falls back to `in_memory`** (`.parse().unwrap_or(InMemory)`), so a typo is a quiet regression, not an error |
+| `REDIS_URL` | `redis://localhost:6379` | shared network namespace; unchanged |
+| `REDIS_KEY_PREFIX` | `oz-relayer` | the upstream default, pinned so it cannot change under us. Encrypted records are bound to their storage key (AAD), so a different prefix orphans them |
+| `STORAGE_ENCRYPTION_KEY` | in `engine.env` from Secret Manager `relay-engine-storage-key` v1 | **Required**: `initialize_repositories` (`src/bootstrap/initialize_app_state.rs`) refuses to boot without it. Base64 of exactly 32 bytes (`src/utils/encryption.rs`, `FieldEncryption::load_key_from_env`; AES-256-GCM) |
+| `RESET_STORAGE_ON_START` | `false` | see below. Must stay `false` in git |
+| Redis | `--appendonly yes --appendfsync everysec --maxmemory 96mb --maxmemory-policy noeviction`, volume `redis-data`, `mem_limit 192m` | `noeviction` is mandatory: any LRU/LFU policy would silently drop transaction records. A full Redis fails writes loudly instead |
+
+**What is persisted.** Eight repositories (`initialize_repositories`): relayers, **transactions**,
+signers, notifications, networks, the **transaction (nonce) counter**, plugins and API keys. The job
+queue (Apalis, `QUEUE_BACKEND` default `redis`) is in the same Redis. Signer and notification
+records are encrypted with `STORAGE_ENCRYPTION_KEY` (`signer_redis.rs`, `notification_redis.rs`);
+relayer and transaction records are not (no encryption call in `relayer_redis.rs` /
+`transaction_redis.rs`). **The KMS service-account private key and the webhook signing key are
+resolved from the environment when `config.json` is loaded and then stored in the signer and
+notification records** (`GoogleCloudKmsSignerFileConfig` → `get_value()`, `src/models/signer/config.rs`;
+`get_signing_key`, `src/models/notification/config.rs`). Transaction records of a final status expire
+after `TRANSACTION_EXPIRATION_HOURS` (default 4; `src/models/transaction/repository.rs`). The API key
+is the exception: requests are checked against `API_KEY` from the environment each boot
+(`src/main.rs`, `check_authorization_header`), so rotating it still just needs a restart.
+
+**Boot semantics.** `process_config_file` (`src/bootstrap/config_processor.rs`):
+
+- Redis **empty** (first boot, or after the volume is wiped): the engine loads `config.json` into Redis.
+- Redis **populated** (any of relayers, transactions, signers, notifications, networks, plugins
+  has entries): the engine logs `Skipping config file processing` and uses what Redis holds.
+  **Editing `config.json` and restarting changes nothing.**
+- `RESET_STORAGE_ON_START=true`: the engine first runs `drop_all_entries` on relayers,
+  **transactions**, signers, notifications, networks, plugins and API keys, then loads `config.json`.
+  (The nonce counter and the job queue are not in that list.)
+
+**Why `RESET_STORAGE_ON_START` stays `false`.** `true` would keep `config.json` authoritative, but it
+drops the transaction records on EVERY boot (the unit's handlers restart the stack on any change), which
+is the amnesia #1652 removes. The trade-off is accepted knowingly: with `false`, **config changes no
+longer apply by themselves.** What can be changed, and how:
+
+| Change | How | Reset needed? |
+|---|---|---|
+| Relayer policy: `gas_price_cap`, `min_balance`, `whitelist_receivers`, `eip1559_pricing`, `paused` | `PATCH /api/v1/relayers/{id}` (merge patch, see R1) | No |
+| Network `rpc_urls` | `PATCH /api/v1/networks/{id}` (only `rpc_urls` is updatable, `src/api/controllers/network.rs`) | No |
+| Network `features`, `average_blocktime_ms`, `required_confirmations`, `tags` | none: no API route | **Yes** |
+| Signer entry, or its secret (`GCP_PRIVATE_KEY`, e.g. on a service-account key rotation) | none | **Yes** |
+| Notification URL or `WEBHOOK_SIGNING_KEY` (webhook secret rotation) | none | **Yes** |
+| `STORAGE_ENCRYPTION_KEY` | none (old records become undecryptable) | **Yes** |
+| New or removed relayer | `POST` / `DELETE /api/v1/relayers` | No |
+| `API_KEY` | restart | No |
+
+**A reset, done safely (the volume wipe, not the flag).** Wiping the Redis volume reproduces exactly the
+first-boot state, so `config.json` is authoritative again, and it needs no `true` in git that someone
+could forget. It discards transactions, the nonce counter and the job queue, so it is only ever done on a
+**drained lane**:
+
+1. Land the `config.json` change in a PR. Do not apply it yet.
+2. [Kill switch](#kill-switch) on (clients self-submit). Drain every lane: let pending transactions
+   confirm, or R2. Finish only when each chain has `latest == pending == engine nonce` and
+   `pending_transactions_count` is 0 (Detection 3-4).
+3. Record the evidence you will want later: relayer status, nonces, the last transactions.
+4. `sudo systemctl stop fairwins-stack@gateway`, then converge the new `config.json` onto the VM
+   (`infra/vm/README.md` update path).
+5. `sudo docker volume ls | grep redis-data` (the compose project is `fairwins-gateway`, so the volume
+   is `fairwins-gateway_redis-data`), then `sudo docker volume rm fairwins-gateway_redis-data`.
+6. `sudo systemctl start fairwins-stack@gateway`. The engine logs `Processing config file`.
+7. Verify (below), then lift the kill switch.
+
+The flag route also works (a reviewed PR setting `RESET_STORAGE_ON_START: "true"`, one boot, a second PR
+back to `"false"`), but a leftover `true` wipes transactions on every restart, so prefer the volume wipe.
+
+**Confirm the mode** (before reasoning about restarts):
+
+```bash
+sudo docker inspect fairwins-gateway-engine --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -c '^REPOSITORY_STORAGE_TYPE=redis'   # 1
+sudo docker exec fairwins-gateway-redis redis-cli dbsize                                         # non-zero once loaded
+sudo docker exec fairwins-gateway-redis redis-cli config get appendonly                          # yes
+sudo docker exec fairwins-gateway-redis redis-cli config get maxmemory-policy                    # noeviction
+sudo docker logs fairwins-gateway-engine 2>&1 | grep -m1 -E 'Skipping config file processing|Processing config file'
+```
+
+**Failure modes.**
+
+- Key missing: `preflight.sh` refuses to start (`STORAGE_ENCRYPTION_KEY absent from engine.env`), and
+  `fetch-secrets.sh` aborts if the secret or its v1 is unreadable. The whole stack stays down, so create
+  the secret **before** deploying. Self-submit is the fallback for members meanwhile.
+- Key wrong or changed with a populated Redis: the engine cannot decrypt its signer records and will
+  not serve. Restore the right key, or do a reset.
+- Redis full (`OOM command not allowed`): writes fail loudly. Check the transaction backlog before
+  raising `--maxmemory`/`mem_limit` together.
+- The Redis volume is lost: the engine boots as a first boot. Pending transactions are forgotten (as
+  before #1652) and their intents stay `submitted`. Reconcile against
+  the chain with Detection 3-4.
+
+#### Rollout: Redis storage + Polygon EIP-1559, in ONE deploy (#1651 + #1652)
+
+Ship both config changes in the **same rollout**. The first Redis-backed boot is the only time
+`config.json` is read for free, so it must already carry `features: ["eip1559"]` and the new cap. Doing
+#1652 first would freeze the legacy Polygon entry into Redis, and fixing it later would then cost a
+reset. Order matters:
+
+1. **Create the secret container, then its value, before anything deploys.** Merge the PR carrying the
+   Terraform lists (`managed_secret_ids` and `gateway_secret_ids` in `infra/terraform/environments/prod/terraform.tfvars`,
+   `managed_secret_ids` in `infra/terraform/bootstrap/terraform.tfvars`) and let the apply create the
+   container and the node's accessor grant. The bootstrap root runs once by a human with owner rights
+   to widen the CI apply identity. Then add the payload (never declare a version in Terraform, G-04; the
+   key never touches argv or a file):
+
+   ```bash
+   openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add relay-engine-storage-key --project chippr-bots-site-wp --data-file=-
+   gcloud secrets versions access 1 --secret=relay-engine-storage-key --project chippr-bots-site-wp | wc -c   # 44, and nothing else printed
+   ```
+
+   Back it up like the other engine credentials: losing it means a reset.
+2. **Drain.** Kill switch on. Every lane to `latest == pending == engine nonce` and
+   `pending_transactions_count` 0 on both chains (R2 for anything stuck). Legacy transactions must not
+   be in flight when the network flips to 1559. Record the nonces.
+3. `sudo systemctl stop fairwins-stack@gateway`.
+4. **Deploy.** Converge the VM to the merged commit (`infra/vm/README.md` update path or the Ansible
+   handler, which restarts the unit itself: if it does, treat 3-5 as one step). It carries compose,
+   `fetch-secrets.sh`, `preflight.sh` and both `config.json` files. The old Redis was ephemeral: there is
+   nothing in it to keep, and no volume to wipe yet.
+5. `sudo systemctl start fairwins-stack@gateway`. Redis comes up with AOF, the engine waits for it to be
+   healthy, finds it empty and loads `config.json`.
+6. **Verify.**
+   - Engine log: `Processing config file` (first boot), no errors from the signer or notification load.
+   - `eng GET /relayers/polygon-137` shows `gas_price_cap` `"10500000000000"`.
+   - `curl` the engine's `/api/v1/networks` from inside the gateway namespace (same `eng` helper) and
+     confirm the polygon entry's `features` contains `eip1559`.
+   - `redis-cli dbsize` non-zero and `config get appendonly` is `yes` (Confirm the mode, above).
+   - **Persistence proof:** `sudo systemctl restart fairwins-stack@gateway`. The log now says
+     `Skipping config file processing`, and the relayer is still there.
+   - If #1653 (gcplogs) rides the same deploy: `sudo docker logs --tail 5 fairwins-gateway-engine`
+     still prints lines, and the [Engine logs](#engine-logs-cloud-logging-1653) filter returns the same
+     lines in Cloud Logging within a minute. If `docker logs` is empty or errors, roll the engine
+     `logging:` block back to `json-file`; the probe is already reporting it as `engine logs unreadable`.
+   - Probe is green (`engine`, `engine-resubmission`); one fresh relayed Polygon intent reaches
+     `confirmed`, and its receipt is `"type":"0x2"`.
+7. Lift the kill switch. Start the [soak](#soak-procedure-first-48-h-after-the-1559-rollout).
+
+**Rollback** of #1652 alone: set `REPOSITORY_STORAGE_TYPE` back to in-memory by removing it from compose
+(and `STORAGE_ENCRYPTION_KEY` becomes unused), drained lane first. The engine is then in-memory again and
+the old R2-before-R1 rule applies. Rollback of #1651 alone needs a reset (see the table: `features` has no
+API route).
 
 ### Which engine version is running
 

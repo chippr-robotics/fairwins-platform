@@ -43,7 +43,7 @@ files 0600), mirroring Cloud Run's per-container scoping:
 | VM | file | contents |
 |---|---|---|
 | gateway | `gateway.env` | the 8 gateway secrets |
-| gateway | `engine.env` | `API_KEY`, `WEBHOOK_SIGNING_KEY`, `GCP_PRIVATE_KEY` |
+| gateway | `engine.env` | `API_KEY`, `WEBHOOK_SIGNING_KEY`, `STORAGE_ENCRYPTION_KEY` (#1652), `GCP_PRIVATE_KEY` |
 | bundler | `nginx.env` | `ORIGIN_LOCK_SECRET` only |
 | bundler | `alto.env` | the executor key only |
 

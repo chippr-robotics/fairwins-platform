@@ -134,8 +134,11 @@ sys.exit(1 if bad else 0)" >/tmp/.probe_runway 2>/dev/null \
     # above `gas_price_cap`, the engine logs "bumped gas price does not meet minimum requirement,
     # skipping resubmission" and returns without repricing. The tx stays `submitted`, /api/v1/health
     # stays green, and every later tx on that lane queues behind the stuck nonce. That log line is the
-    # ONLY signal. The engine logs to the json-file driver, so the line never reaches Cloud Logging on
-    # its own. Re-emitting it here puts it on the probe's FAIL path, which already pages.
+    # ONLY signal. Until #1653 the engine logged to the json-file driver, so the line never reached
+    # Cloud Logging on its own; it now also ships via gcplogs (docker logs keeps working through
+    # Docker's dual-logging cache, which is what this reads). This check stays as the BACKSTOP: it does
+    # not depend on the log shipper or on a log-based metric, and re-emitting the line here puts it on
+    # the probe's FAIL path, which already pages.
     #
     # --since 120s overlaps the 60s timer on purpose: a minute lost to a slow `docker exec` above
     # must not hide a hit. Double-counting is harmless; the alert counts FAIL lines, not hits.

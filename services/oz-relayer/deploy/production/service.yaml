@@ -1,11 +1,19 @@
-# ⚠ THIS SERVICE IS DECOMMISSIONED. `fairwins-relay-gateway` was deleted from Cloud Run when the
-# gasless stack moved to GCE (~$202 → ~$32/mo); verified absent from `gcloud run services list`
-# 2026-08-23. The LIVE gateway configuration is infra/vm/gateway/docker-compose.yml.
+# RETAINED HISTORICAL SNAPSHOT — NOT THE PRODUCTION RECORD (#1660), like deploy/mordor/service.yaml.
 #
-# This manifest is kept as the reconciliation record and as the recovery path, which is exactly why
-# it must not be allowed to drift: `gcloud run services replace` from a stale copy would recreate
-# the service pointing at endpoints that no longer work. Keep the env here in step with the compose
-# file, or delete the file — do not leave it half-true.
+# `fairwins-relay-gateway` was deleted from Cloud Run when the gasless stack moved to GCE (~$202 ->
+# ~$32/mo; verified absent from `gcloud run services list` 2026-08-23). PRODUCTION IS
+# infra/vm/gateway/docker-compose.yml, and this file is NOT kept in step with it: values below
+# (images, env, resource limits, redis settings, engine storage mode) are as of the cutover and WILL
+# differ from what runs. Concretely, this manifest has no REPOSITORY_STORAGE_TYPE, no redis
+# persistence and no gcplogs, and it names RPC endpoints that no longer work.
+#
+# It is kept as an audit record of the Cloud Run shape. Do NOT `gcloud run services replace` from it:
+# that would recreate a second, stale gateway + engine pointing at a wallet the VM already serves
+# (two engines on one gas wallet collide on nonces). Its image strings are still scanned by the
+# version-pin gate (scripts/deps/version-pins.json), so do not edit them without that registry.
+#
+# config.json in THIS directory is the exception: it is LIVE. The VM mounts it read-only into the
+# engine container (infra/vm/gateway/docker-compose.yml).
 apiVersion: serving.knative.dev/v1
 kind: Service
 metadata:
