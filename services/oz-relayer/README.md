@@ -174,10 +174,46 @@ earlier if a security advisory lands against the running version.
    [relayer-operations.md § Storage mode](../../docs/runbooks/relayer-operations.md#storage-mode-redis-since-1652).
 3. **Stop the old engine before starting the new one.** Overlapping instances share worker IDs.
    Restart the whole `fairwins-stack@gateway` unit, and never run a rolling or blue/green overlap.
-4. Rebuild the base from the new upstream tag (`Dockerfile` header), re-tag so the image name states
-   the **upstream** version unambiguously, and update the `FROM`, this section, and the
+4. Rebuild the base from the new upstream tag (`Dockerfile` header), tag it per
+   [Image naming and provenance](#image-naming-and-provenance-1650) so the image name states
+   the **upstream** version unambiguously, and update the `FROM`, the `Dockerfile` `LABEL`s
+   (`base.name`, `upstream-version`), this section, and the
    `scripts/deps/version-pins.json` hold (ADR-006).
 5. Soak on the Mordor lane before Polygon (ADR-006: value-path pins ship alone).
+
+## Image naming and provenance (#1650)
+
+Two images, two tag grammars. Both put the **upstream OZ Relayer release** in the tag, exactly as
+upstream spells it, so that nobody has to guess which engine a container runs:
+
+| Image | Tag | Example | Meaning |
+|---|---|---|---|
+| `fairwins-relay-engine-base` | `vX.Y.Z` | `v1.4.0` | Upstream tag `vX.Y.Z` built from source, unmodified. Never reuse or retag a version for a different upstream release |
+| `fairwins-relay-engine` | `vX.Y.Z-fw<N>` | `v1.4.0-fw1` | That base plus FairWins config revision `N`. `N` starts at 1 per upstream version and increments on every config-only rebuild |
+
+**Forbidden:** tags that carry a version number which is not the upstream release (`multichain-v1.5.0`
+is the cautionary example: it does not say whether `1.5.0` is upstream or a FairWins revision), and
+floating tags such as `latest` for the engine. A free-form prefix before the version is the same
+mistake in a different place: keep it to `vX.Y.Z-fw<N>`.
+
+Provenance is also written **on the image** (`Dockerfile` `LABEL`s):
+
+```bash
+docker inspect --format '{{ index .Config.Labels "com.fairwins.engine.upstream-version" }}' <image>   # v1.4.0
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.base.name" }}'  <image>   # …/fairwins-relay-engine-base:v1.4.0
+```
+
+The labels say what the base was built *from*. The binary's own `service_version=` startup line (also in
+Cloud Logging since #1653) says what is *running*. They should agree. If they ever differ, the log
+line is right and the image is mislabelled.
+
+**Not done by this change, and still open on #1650: verifying the LIVE image.** The deployed
+`fairwins-relay-engine:multichain-v1.5.0` was built before the labels existed, so it carries none, and
+this repo still cannot say what upstream version is inside it. An operator has to read the running
+engine's `service_version=` line (or compare layers against the `v1.4.0` base) and record the answer in
+the "Version pin" section above. The retag to the convention happens at the next engine rebuild, which
+is also when it gets the labels. Do not rename the deployed tag in place: the version-pin gate matches
+the compose and `service.yaml` image strings exactly.
 
 ## Engine storage (Redis, since #1652)
 
