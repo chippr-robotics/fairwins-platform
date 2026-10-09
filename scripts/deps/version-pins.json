@@ -84,7 +84,7 @@
       }
     },
     {
-      "id": "alto-bundler",
+      "id": "alto-bundler-vm",
       "kind": "git-built-image",
       "owner": "relay",
       "pinned": "v1.2.7",
@@ -93,10 +93,6 @@
         {
           "path": "infra/vm/bundler/docker-compose.yml",
           "contains": "alto:v1.2.7"
-        },
-        {
-          "path": "scripts/e2e/passkey-stack/start-alto.sh",
-          "contains": "alto:v1.2.7@sha256:"
         },
         {
           "path": "services/alto-bundler/deploy/service.yaml",
@@ -108,7 +104,26 @@
         "repo": "https://github.com/pimlicolabs/alto",
         "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
       },
-      "notes": "Value path (sponsored UserOps). A bump soaks on the e2e passkey stack first, then on one chain's VM. Respect G-11: at most one alto per (chain, executor EOA)."
+      "notes": "Deployed bundler (value path, sponsored UserOps), live on Polygon. It trails alto-bundler-e2e on purpose: a bump soaks on the e2e passkey stack first (#1654), then moves here after an Artifact Registry mirror of the new tag exists. Respect G-11: at most one alto per (chain, executor EOA)."
+    },
+    {
+      "id": "alto-bundler-e2e",
+      "kind": "git-built-image",
+      "owner": "relay",
+      "pinned": "v1.2.8",
+      "status": "track",
+      "locations": [
+        {
+          "path": "scripts/e2e/passkey-stack/start-alto.sh",
+          "contains": "alto:v1.2.8@sha256:f2661042aadefc6a4fc9c5826a14404f574c7ef2de76bdf83fe6a0829137b3c5"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/pimlicolabs/alto",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "CI soak step only: the Passkey Full Stack Cypress tier. Pinned by digest (index digest read from ghcr.io on 2026-10-09; the same method reproduces the v1.2.7 digest this file used to carry). Green here is the evidence for moving alto-bundler-vm to v1.2.8."
     },
     {
       "id": "node-runtime-image",
