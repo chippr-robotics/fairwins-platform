@@ -254,20 +254,20 @@
       "id": "terraform-core",
       "kind": "terraform",
       "owner": "mark",
-      "pinned": "1.15.8",
+      "pinned": "1.15.9",
       "status": "track",
       "locations": [
         {
           "path": ".github/workflows/infra-plan.yml",
-          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+          "contains": "TERRAFORM_VERSION: \"1.15.9\""
         },
         {
           "path": ".github/workflows/infra-apply.yml",
-          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+          "contains": "TERRAFORM_VERSION: \"1.15.9\""
         },
         {
           "path": ".github/workflows/infra-drift.yml",
-          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+          "contains": "TERRAFORM_VERSION: \"1.15.9\""
         }
       ],
       "upstream": {
@@ -304,12 +304,12 @@
       "id": "ansible-google-cloud",
       "kind": "binary",
       "owner": "mark",
-      "pinned": "1.14.0",
+      "pinned": "1.15.0",
       "status": "track",
       "locations": [
         {
           "path": "infra/ansible/requirements.yml",
-          "contains": "version: \"1.14.0\""
+          "contains": "version: \"1.15.0\""
         }
       ],
       "upstream": {
@@ -322,12 +322,12 @@
       "id": "ansible-community-docker",
       "kind": "binary",
       "owner": "mark",
-      "pinned": "5.2.2",
+      "pinned": "5.4.0",
       "status": "track",
       "locations": [
         {
           "path": "infra/ansible/requirements.yml",
-          "contains": "version: \"5.2.2\""
+          "contains": "version: \"5.4.0\""
         }
       ],
       "upstream": {

@@ -21,7 +21,7 @@ permissions:
   pull-requests: write
 
 env:
-  TERRAFORM_VERSION: "1.15.8"
+  TERRAFORM_VERSION: "1.15.9"
 
 concurrency:
   group: infra-plan-${{ github.ref }}
