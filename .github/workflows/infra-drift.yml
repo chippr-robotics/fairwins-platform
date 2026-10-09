@@ -37,7 +37,7 @@ jobs:
     # Nothing to check against before the trust root exists.
     if: vars.WIF_PROVIDER != '' && vars.TF_PLAN_SERVICE_ACCOUNT != ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # actions/checkout persists a credential as `http.https://github.com/.extraheader` in the
           # workspace's LOCAL git config. An explicit Authorization header OVERRIDES a URL-embedded
@@ -80,7 +80,7 @@ jobs:
       matrix:
         environment: [prod, staging]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # actions/checkout persists a credential as `http.https://github.com/.extraheader` in the
           # workspace's LOCAL git config. An explicit Authorization header OVERRIDES a URL-embedded
