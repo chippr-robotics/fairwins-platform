@@ -183,11 +183,30 @@ case "$ROLE" in
     #
     # The payload must carry NO trailing newline (create it with printf / tr -d '\n'): emit() writes
     # it verbatim between quotes, and a newline inside the base64 is a different, invalid key.
-    emit "$EN" STORAGE_ENCRYPTION_KEY    relay-engine-storage-key    1      optional \
-      "engine stays on IN-MEMORY storage; create relay-engine-storage-key version 1 to switch to redis (runbook: Storage mode)"
+    #
+    # ONE-WAY ONCE ARMED. Optional is right only BEFORE the cutover. After it, a transient gcloud/IAM
+    # failure would otherwise boot the engine in-memory, ignoring everything in redis, with nothing but
+    # a journal line to say so. So the first successful arm writes a marker on PERSISTENT disk (RUN_DIR
+    # is tmpfs), and from then on the key is required like every other engine credential. A deliberate
+    # rollback removes the marker (runbook: Storage mode, Rollback).
+    STATE_DIR="${FW_STATE_DIR:-/var/lib/fairwins}"
+    ARMED="${STATE_DIR}/engine-storage-armed"
+    if [ -f "$ARMED" ]; then
+      emit "$EN" STORAGE_ENCRYPTION_KEY  relay-engine-storage-key    1      required
+    else
+      emit "$EN" STORAGE_ENCRYPTION_KEY  relay-engine-storage-key    1      optional \
+        "engine stays on IN-MEMORY storage; create relay-engine-storage-key version 1 to switch to redis (runbook: Storage mode)"
+    fi
     if grep -q '^STORAGE_ENCRYPTION_KEY=' "$EN"; then
+      # The engine needs base64 of exactly 32 bytes (v1.4.0 src/utils/encryption.rs). An empty or
+      # newline-terminated payload would arm redis and then crash-loop the engine; refuse it here, by name.
+      key="$(sed -n "s/^STORAGE_ENCRYPTION_KEY='\(.*\)'$/\1/p" "$EN")"
+      [ "$(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ] \
+        || die "relay-engine-storage-key:1 is not base64 of 32 bytes (empty, or a trailing newline?) — recreate it per the runbook"
+      unset key
       printf "REPOSITORY_STORAGE_TYPE='redis'\n" >>"$EN"
-      log "  REPOSITORY_STORAGE_TYPE <- redis (storage key present)"
+      mkdir -p "$STATE_DIR" && : >"$ARMED"
+      log "  REPOSITORY_STORAGE_TYPE <- redis (storage key present; armed marker ${ARMED})"
     fi
 
     # server.js:48-61 prefers PM_SIGNER_PRIVATE_KEY over PM_SIGNER_KMS_KEY with NO guard and NO

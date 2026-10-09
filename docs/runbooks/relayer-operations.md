@@ -601,7 +601,9 @@ not set it (`environment:` would override `env_file`). Every boot resets the VM 
 `origin/main` (`infra/vm/startup.sh`), so this change reaches the node at the first reboot after
 promotion whether or not anyone has created the key. A hard dependency would take the whole stack
 down then. Instead, no key means the engine stays in-memory and the journal and `preflight.sh` say so
-(`engine on IN-MEMORY storage`). Check the live mode with
+(`engine on IN-MEMORY storage`). The fall-back is one-way: the first successful arm writes
+`/var/lib/fairwins/engine-storage-armed`, after which the key is **required** (a transient Secret
+Manager failure then stops the boot instead of quietly ignoring Redis). Check the live mode with
 `sudo grep -c "^REPOSITORY_STORAGE_TYPE='redis'" /run/fairwins/engine.env` (1 = Redis, 0 = in-memory).
 
 All source paths are upstream `v1.4.0`. The running image's real version is unverified (see
@@ -749,8 +751,11 @@ reset. Order matters:
 7. Lift the kill switch. Start the [soak](#soak-procedure-first-48-h-after-the-1559-rollout).
 
 **Rollback** of #1652 alone: drain, then `gcloud secrets versions disable 1 --secret=relay-engine-storage-key`
-and restart the unit. `fetch-secrets.sh` then writes neither the key nor the storage type, and the
-engine boots in-memory (the Redis volume keeps its data for a later re-enable with the same key). The engine is then in-memory again and
+**and** `sudo rm /var/lib/fairwins/engine-storage-armed`, then restart the unit. `fetch-secrets.sh` then
+writes neither the key nor the storage type, and the engine boots in-memory (the Redis volume keeps its
+data for a later re-enable with the same key). Without removing the marker the boot refuses: once a
+node has run on Redis, a missing key is treated as an outage, never as a silent fall-back to in-memory
+storage that would ignore everything in Redis. The engine is then in-memory again and
 the old R2-before-R1 rule applies. Rollback of #1651 alone needs a reset (see the table: `features` has no
 API route).
 
