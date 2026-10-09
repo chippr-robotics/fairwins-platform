@@ -269,12 +269,20 @@ services:
       # encrypts the signer and notification records at rest, bound to the key prefix, so the prefix
       # below is pinned here rather than left to an upstream default that could change under us.
       #
+      # THE SWITCH IS ARMED BY THE SECRET, NOT BY THIS FILE. REPOSITORY_STORAGE_TYPE is deliberately
+      # NOT set here: fetch-secrets.sh writes REPOSITORY_STORAGE_TYPE=redis into engine.env only when
+      # relay-engine-storage-key has a version, and `environment:` would override env_file if it were
+      # set below. Every boot pulls origin/main (startup.sh), so a hard dependency on a secret an
+      # operator has not created yet would take the WHOLE stack — gateway and paymaster included —
+      # down at the first reboot after promotion. Absent key => the engine keeps today's in-memory
+      # behaviour and the journal says why; adding the secret version during the drained rollout
+      # window is the deliberate act that switches storage (runbook "Storage mode").
+      #
       # THE CONSEQUENCE: once redis holds data the engine SKIPS config.json on boot
       # (src/bootstrap/config_processor.rs process_config_file). A config.json edit no longer takes
       # effect on restart. Cap changes use PATCH /api/v1/relayers/<id>; network changes (features,
       # blocktime, confirmations) and signer/notification changes need a deliberate one-shot reset.
       # See docs/runbooks/relayer-operations.md "Storage mode".
-      REPOSITORY_STORAGE_TYPE: "redis"
       REDIS_KEY_PREFIX: "oz-relayer"
       # MUST stay "false" in git. true drops relayers, TRANSACTIONS, signers, notifications, networks,
       # plugins and API keys on EVERY boot (config_processor.rs, drop_all_entries), which forgets every

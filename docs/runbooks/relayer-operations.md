@@ -130,7 +130,7 @@ signer and Polymarket's protocol settles. A total outage never touches any value
 |---------|-------|--------|
 | 503 `screening_unavailable` spike | Sanctions RPC health (gateway logs `sanctions` errors) | Fail-closed is BY DESIGN — fix RPC (rotate `RPC_URLS_<id>`); do NOT bypass screening |
 | 503 `chain_unavailable` | Both RPC endpoints down | Rotate/add endpoints (env), restart |
-| Stuck transactions | Probe FAIL `relay lane STUCK at gas_price_cap`; engine log `skipping resubmission`; lane nonce vs `eth_getTransactionCount` | Follow [Stuck transactions](#stuck-transactions). Engine state is in Redis since #1652 ([Storage mode](#storage-mode-redis-since-1652)), so a restart no longer forgets pending transactions. **Cap-only fix: `PATCH` the relayer, no restart (R1).** A `config.json` edit alone does nothing on a populated Redis |
+| Stuck transactions | Probe FAIL `relay lane STUCK at gas_price_cap`; engine log `skipping resubmission`; lane nonce vs `eth_getTransactionCount` | Follow [Stuck transactions](#stuck-transactions). **Check the storage mode first** ([Storage mode](#storage-mode-redis-since-1652)): on Redis a restart keeps pending transactions and a cap fix is a `PATCH`, no restart (R1); on in-memory, cancel/drain (R2) BEFORE any restart. A `config.json` edit alone does nothing on a populated Redis |
 | 429 storms | Quota counters (`SIGNER_QUOTA_PER_MIN`, `GLOBAL_QUOTA_PER_MIN`, `MAX_QUEUE_DEPTH`) | Raise deliberately or let back-pressure shed to self-submit |
 | Gas runway low | `/healthz` `gasWalletRunwayHrs` | Fund the chain's gas wallet |
 | Webhook auth failures | `WEBHOOK_SHARED_SECRET` mismatch gateway↔engine | Re-sync the secret; webhooks are rejected (fail closed) until then |
@@ -258,9 +258,9 @@ Thresholds for today's caps are in [Cap headroom](#cap-headroom-measured-2026-10
 Before any restart, **capture the evidence**: the `tx_id`s, nonces, hashes and `price_params` from
 the logs, plus `eng GET /relayers/<id>/transactions/<tx_id>` for each.
 
-> **Storage mode decides the order, and since #1652 the engine runs in Redis mode** (details, source
-> citations and the reset procedure: [Storage mode](#storage-mode-redis-since-1652)). The old rule
-> "the engine is in-memory, so R2 BEFORE R1" described the pre-#1652 estate. Now:
+> **Storage mode decides the order. CHECK IT FIRST**: `sudo grep -c "^REPOSITORY_STORAGE_TYPE='redis'"
+> /run/fairwins/engine.env` (1 = Redis, 0 = in-memory; Redis is armed only once
+> `relay-engine-storage-key` has a version, see [Storage mode](#storage-mode-redis-since-1652)). On Redis:
 >
 > - a **restart keeps** pending transactions, nonce counters and their webhooks (Redis AOF on the
 >   named volume `redis-data`). R2 is no longer needed to *protect* them from a restart. It is still
@@ -268,7 +268,7 @@ the logs, plus `eng GET /relayers/<id>/transactions/<tx_id>` for each.
 > - a **`config.json` edit is NOT applied** on a restart while Redis holds data (the engine skips the
 >   file). A cap change is a `PATCH`, not a file edit plus a restart.
 >
-> If you are ever on an in-memory engine again (a `REPOSITORY_STORAGE_TYPE` regression, or a rollback
+> On an in-memory engine (key not yet created, a `REPOSITORY_STORAGE_TYPE` regression, or a rollback
 > of #1652), the old rule applies in full: a restart forgets every pending transaction and never sends
 > their webhooks, so their intents stay `submitted`. Do R2 for anything that must be cleared, then R1.
 > Confirm which mode is running before choosing (see [Storage mode](#storage-mode-redis-since-1652),
@@ -593,14 +593,23 @@ muting it.
 Before #1652 the engine kept its relayer and transaction records in process memory
 (`REPOSITORY_STORAGE_TYPE` unset, which defaults to `in_memory`) and Redis was an ephemeral job queue
 (`--save "" --appendonly no`). A restart forgot every pending transaction and never sent their
-webhooks. Since #1652 the engine stores its state in Redis, and Redis is persistent.
+webhooks. Since #1652 the engine CAN store its state in Redis, and Redis is persistent.
+
+**The switch is the secret, not a file.** `fetch-secrets.sh` writes `REPOSITORY_STORAGE_TYPE='redis'`
+into `engine.env` only when `relay-engine-storage-key` version 1 exists, and compose deliberately does
+not set it (`environment:` would override `env_file`). Every boot resets the VM checkout to
+`origin/main` (`infra/vm/startup.sh`), so this change reaches the node at the first reboot after
+promotion whether or not anyone has created the key. A hard dependency would take the whole stack
+down then. Instead, no key means the engine stays in-memory and the journal and `preflight.sh` say so
+(`engine on IN-MEMORY storage`). Check the live mode with
+`sudo grep -c "^REPOSITORY_STORAGE_TYPE='redis'" /run/fairwins/engine.env` (1 = Redis, 0 = in-memory).
 
 All source paths are upstream `v1.4.0`. The running image's real version is unverified (see
 [Which engine version is running](#which-engine-version-is-running)).
 
 | Setting | Value in `infra/vm/gateway/docker-compose.yml` | Meaning / source |
 |---|---|---|
-| `REPOSITORY_STORAGE_TYPE` | `redis` | `get_repository_storage_type`, `src/config/server_config.rs`. **An unrecognised value silently falls back to `in_memory`** (`.parse().unwrap_or(InMemory)`), so a typo is a quiet regression, not an error |
+| `REPOSITORY_STORAGE_TYPE` | `redis`, written to `engine.env` by `fetch-secrets.sh` only when the storage key exists (absent = `in_memory`) | `get_repository_storage_type`, `src/config/server_config.rs`. **An unrecognised value silently falls back to `in_memory`** (`.parse().unwrap_or(InMemory)`), so a typo is a quiet regression, not an error |
 | `REDIS_URL` | `redis://localhost:6379` | shared network namespace; unchanged |
 | `REDIS_KEY_PREFIX` | `oz-relayer` | the upstream default, pinned so it cannot change under us. Encrypted records are bound to their storage key (AAD), so a different prefix orphans them |
 | `STORAGE_ENCRYPTION_KEY` | in `engine.env` from Secret Manager `relay-engine-storage-key` v1 | **Required**: `initialize_repositories` (`src/bootstrap/initialize_app_state.rs`) refuses to boot without it. Base64 of exactly 32 bytes (`src/utils/encryption.rs`, `FieldEncryption::load_key_from_env`; AES-256-GCM) |
@@ -696,12 +705,16 @@ Ship both config changes in the **same rollout**. The first Redis-backed boot is
 #1652 first would freeze the legacy Polygon entry into Redis, and fixing it later would then cost a
 reset. Order matters:
 
-1. **Create the secret container, then its value, before anything deploys.** Merge the PR carrying the
-   Terraform lists (`managed_secret_ids` and `gateway_secret_ids` in `infra/terraform/environments/prod/terraform.tfvars`,
-   `managed_secret_ids` in `infra/terraform/bootstrap/terraform.tfvars`) and let the apply create the
-   container and the node's accessor grant. The bootstrap root runs once by a human with owner rights
-   to widen the CI apply identity. Then add the payload (never declare a version in Terraform, G-04; the
-   key never touches argv or a file):
+0. **Merge and promote; nothing switches yet.** The apply creates the secret CONTAINER and the
+   node's accessor grant from the Terraform lists (`managed_secret_ids` and `gateway_secret_ids` in
+   `infra/terraform/environments/prod/terraform.tfvars`, `managed_secret_ids` in
+   `infra/terraform/bootstrap/terraform.tfvars`; the bootstrap root runs once by a human with owner
+   rights to widen the CI apply identity). Do **not** add a version yet: with no version the engine
+   stays in-memory on any reboot. Note that `config.json` is re-read on every in-memory boot, so the
+   first reboot after promotion already prices Polygon as 1559 (in-memory semantics, as today: that
+   restart forgets pending transactions). Drain first if you reboot deliberately.
+1. **Kill switch on, then drain (step 2), THEN create the key: this is the switch.** Add the payload
+   (never declare a version in Terraform, G-04; the key never touches argv or a file):
 
    ```bash
    openssl rand -base64 32 | tr -d '\n' | gcloud secrets versions add relay-engine-storage-key --project chippr-bots-site-wp --data-file=-
@@ -709,7 +722,7 @@ reset. Order matters:
    ```
 
    Back it up like the other engine credentials: losing it means a reset.
-2. **Drain.** Kill switch on. Every lane to `latest == pending == engine nonce` and
+2. **Drain** (do this before step 1's `versions add`). Kill switch on. Every lane to `latest == pending == engine nonce` and
    `pending_transactions_count` 0 on both chains (R2 for anything stuck). Legacy transactions must not
    be in flight when the network flips to 1559. Record the nonces.
 3. `sudo systemctl stop fairwins-stack@gateway`.
@@ -735,8 +748,9 @@ reset. Order matters:
      `confirmed`, and its receipt is `"type":"0x2"`.
 7. Lift the kill switch. Start the [soak](#soak-procedure-first-48-h-after-the-1559-rollout).
 
-**Rollback** of #1652 alone: set `REPOSITORY_STORAGE_TYPE` back to in-memory by removing it from compose
-(and `STORAGE_ENCRYPTION_KEY` becomes unused), drained lane first. The engine is then in-memory again and
+**Rollback** of #1652 alone: drain, then `gcloud secrets versions disable 1 --secret=relay-engine-storage-key`
+and restart the unit. `fetch-secrets.sh` then writes neither the key nor the storage type, and the
+engine boots in-memory (the Redis volume keeps its data for a later re-enable with the same key). The engine is then in-memory again and
 the old R2-before-R1 rule applies. Rollback of #1651 alone needs a reset (see the table: `features` has no
 API route).
 

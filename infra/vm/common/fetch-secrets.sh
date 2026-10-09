@@ -167,18 +167,28 @@ case "$ROLE" in
     emit "$EN" WEBHOOK_SIGNING_KEY       relay-webhook-secret        2      required
     emit "$EN" GCP_PRIVATE_KEY           relay-engine-gcp-private-key latest required
     # #1652: the key the engine encrypts its signer + notification records with at rest in redis
-    # (OZ Relayer v1.4.0 src/utils/encryption.rs: base64 of exactly 32 bytes). REQUIRED because the
-    # engine refuses to boot in redis storage mode without it (initialize_repositories), so an
-    # optional-and-absent key would be a crash-loop with a less direct diagnosis than this die.
+    # (OZ Relayer v1.4.0 src/utils/encryption.rs: base64 of exactly 32 bytes).
     #
-    # PINNED TO VERSION 1, not latest, for the opposite reason from most secrets: a ROTATION of this
-    # key makes every encrypted record already in redis undecryptable, so adding a version must never
-    # silently change what a restart reads. Rotating means a reviewed edit of this pin PLUS a one-shot
-    # storage reset on a drained lane (docs/runbooks/relayer-operations.md "Storage mode").
+    # OPTIONAL, AND IT IS THE SWITCH. Every boot resets the checkout to origin/main (startup.sh), so
+    # this file reaches the VM at the first reboot after promotion, whether or not an operator has
+    # created the secret version. `required` would turn that into a die() here and the WHOLE stack
+    # down — gateway, paymaster and engine — for a storage-mode upgrade. Instead, redis storage is
+    # enabled only when the key exists: absent => no REPOSITORY_STORAGE_TYPE line, the engine keeps
+    # today's in-memory behaviour, and this journal line names why. Creating version 1 during the
+    # drained rollout window (runbook "Storage mode") is the deliberate act that switches storage.
+    #
+    # PINNED TO VERSION 1, not latest: a ROTATION of this key makes every encrypted record already in
+    # redis undecryptable, so adding a version must never silently change what a restart reads.
+    # Rotating means a reviewed edit of this pin PLUS a one-shot storage reset on a drained lane.
     #
     # The payload must carry NO trailing newline (create it with printf / tr -d '\n'): emit() writes
     # it verbatim between quotes, and a newline inside the base64 is a different, invalid key.
-    emit "$EN" STORAGE_ENCRYPTION_KEY    relay-engine-storage-key    1      required
+    emit "$EN" STORAGE_ENCRYPTION_KEY    relay-engine-storage-key    1      optional \
+      "engine stays on IN-MEMORY storage; create relay-engine-storage-key version 1 to switch to redis (runbook: Storage mode)"
+    if grep -q '^STORAGE_ENCRYPTION_KEY=' "$EN"; then
+      printf "REPOSITORY_STORAGE_TYPE='redis'\n" >>"$EN"
+      log "  REPOSITORY_STORAGE_TYPE <- redis (storage key present)"
+    fi
 
     # server.js:48-61 prefers PM_SIGNER_PRIVATE_KEY over PM_SIGNER_KMS_KEY with NO guard and NO
     # warning. A raw key present anywhere in the gateway's environment silently downgrades paymaster
