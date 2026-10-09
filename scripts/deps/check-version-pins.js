@@ -209,7 +209,8 @@ function checkDrift(registry, { root = ROOT } = {}) {
 
 /* ------------------------------------------------------------------ V-04 / V-05 */
 
-const IMAGE_FILE = /(^|\/)(Dockerfile[^/]*|[^/]*compose[^/]*\.ya?ml)$/;
+// Dockerfiles (incl. `x.Dockerfile`), compose files, and Cloud Run `service.yaml` manifests.
+const IMAGE_FILE = /(^|\/)(Dockerfile[^/]*|[^/]+\.Dockerfile|[^/]*compose[^/]*\.ya?ml|service\.ya?ml)$/;
 
 function trackedImageFiles(root = ROOT) {
   let files;
@@ -236,18 +237,38 @@ function discoverImages(root = ROOT) {
   const refs = [];
   for (const file of trackedImageFiles(root)) {
     const lines = fs.readFileSync(path.join(root, file), 'utf8').split('\n');
-    const stages = new Set();
+    // Docker stage names are case-insensitive; `scratch` is the empty image, not a pull.
+    const stages = new Set(['scratch']);
+    const isStage = (r) => stages.has(r.toLowerCase());
     lines.forEach((line, i) => {
       let m = line.match(/^\s*FROM\s+(?:--platform=\S+\s+)?(\S+)(?:\s+AS\s+(\S+))?/i);
       if (m) {
-        const ref = m[1];
         // `FROM build` refers to an earlier stage, not an image.
-        if (!stages.has(ref)) refs.push({ file, line: i + 1, ref });
-        if (m[2]) stages.add(m[2]);
+        if (!isStage(m[1])) refs.push({ file, line: i + 1, ref: m[1] });
+        if (m[2]) stages.add(m[2].toLowerCase());
         return;
       }
-      m = line.match(/^\s*image:\s*["']?([^"'\s#]+)/);
-      if (m) refs.push({ file, line: i + 1, ref: m[1] });
+      // `COPY --from=<image>` and `RUN --mount=…,from=<image>` pull images too. A stage name cannot
+      // contain ':' or '/', so anything that does is an image.
+      for (const f of line.matchAll(/(?:--from=|[,\s]from=)([^\s,]+)/g)) {
+        if (/[:/]/.test(f[1]) && !isStage(f[1])) refs.push({ file, line: i + 1, ref: f[1] });
+      }
+      // Compose / Cloud Run: `image: x`, `- image: x`, a value on the next line, and YAML tags or
+      // anchors (`!!str`, `&a`) in front of the value.
+      m = line.match(/^\s*(?:-\s+)?image:\s*(.*)$/);
+      if (m) {
+        let raw = m[1].replace(/\s+#.*$/, '').trim();
+        let at = i + 1;
+        if (!raw) {
+          const next = lines.slice(i + 1).findIndex((l) => l.trim() && !l.trim().startsWith('#'));
+          if (next >= 0) {
+            raw = lines[i + 1 + next].trim();
+            at = i + 2 + next;
+          }
+        }
+        raw = raw.replace(/^(?:(?:!!?\S*|&\S+)\s+)+/, '').replace(/^["']|["']$/g, '');
+        if (raw && !raw.startsWith('*')) refs.push({ file, line: at, ref: raw });
+      }
     });
   }
   return refs;
@@ -449,6 +470,10 @@ async function main(argv) {
   const json = argv.includes('--json');
   const reportIdx = argv.indexOf('--report');
   const reportPath = reportIdx >= 0 ? argv[reportIdx + 1] : null;
+  if (reportIdx >= 0 && (!reportPath || reportPath.startsWith('--'))) {
+    console.error('--report needs a file path.');
+    return 2;
+  }
   const today = new Date().toISOString().slice(0, 10);
   const registry = loadRegistry();
 

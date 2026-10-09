@@ -177,6 +177,29 @@ test('discovery finds FROM and image:, and skips build-stage references', () => 
   assert.deepStrictEqual(refs, ['Dockerfile:nginx:1.30.5-alpine', 'Dockerfile:node:22.23.3-alpine3.24', 'infra/docker-compose.yml:redis:7-alpine']);
 });
 
+test('discovery sees the forms a regex-on-one-line misses', () => {
+  const root = tree({
+    'subgraph/api.Dockerfile': 'FROM Ubuntu:22.04 AS Build\nFROM build\nFROM scratch\nCOPY --from=nginx:1.30.5-alpine /x /y\nRUN --mount=type=cache,from=redis:latest,target=/z true\nCOPY --from=Build /a /b\n',
+    'deploy/service.yaml': 'spec:\n  containers:\n    - image: redis:7-alpine\n    - name: x\n      image:\n        busybox:latest\n    - image: !!str alpine:3\n',
+  });
+  const refs = discoverImages(root).map((r) => `${r.file}:${r.line}:${r.ref}`).sort();
+  assert.deepStrictEqual(refs, [
+    'deploy/service.yaml:3:redis:7-alpine',
+    'deploy/service.yaml:6:busybox:latest',
+    'deploy/service.yaml:7:alpine:3',
+    'subgraph/api.Dockerfile:1:Ubuntu:22.04',
+    'subgraph/api.Dockerfile:4:nginx:1.30.5-alpine',
+    'subgraph/api.Dockerfile:5:redis:latest',
+  ]);
+});
+
+test('V-04/V-05: a Docker Hub namespace that merely LOOKS first-party is not exempt', () => {
+  const reg = registry({ firstPartyPrefixes: ['registry.example/ours/', 'fairwins-relay-gateway:local'] });
+  const vs = checkImages(reg, [ref('fairwins-evil/foo:1')]);
+  assert.ok(rules(vs).includes('V-04') && rules(vs).includes('V-05'), JSON.stringify(vs));
+  assert.deepStrictEqual(checkImages(reg, [ref('fairwins-relay-gateway:local')]), []);
+});
+
 test('splitRef handles registries with ports, digests and no tag', () => {
   assert.deepStrictEqual(splitRef('host:5000/a/b:1.2.3'), { name: 'host:5000/a/b', tag: '1.2.3', digest: null });
   assert.deepStrictEqual(splitRef('a/b@sha256:abc'), { name: 'a/b', tag: null, digest: 'sha256:abc' });

@@ -66,7 +66,7 @@ jobs:
         run: |
           gh label create version-watch --color 0E8A16 \
             --description "Rolling upstream-version report (ADR-006)" 2>/dev/null || true
-          num="$(gh issue list --label version-watch --state open --limit 1 --json number --jq '.[0].number')"
+          num="$(gh issue list --label version-watch --state open --limit 1 --json number --jq '.[0].number // empty')"
           if [ -n "$num" ]; then
             gh issue edit "$num" --body-file "$RUNNER_TEMP/version-watch.md"
           else

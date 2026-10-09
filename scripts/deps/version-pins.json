@@ -24,7 +24,7 @@
   "reviewWindowDays": 180,
   "firstPartyPrefixes": [
     "us-central1-docker.pkg.dev/chippr-bots-site-wp/",
-    "fairwins-"
+    "fairwins-relay-gateway:local"
   ],
   "exemptions": [
     {
@@ -33,6 +33,20 @@
       "reason": "First-party origin-lock image. Cloud Build pushes $SHORT_SHA alongside :latest, but the SHA actually running on the bundler VM is not recorded in the repo. Pinning a guessed SHA would be a fabricated fact; pin the deployed one once it has been read from Artifact Registry.",
       "ref": "#1657",
       "reviewBy": "2026-11-30"
+    },
+    {
+      "file": "services/alto-bundler/deploy/service.yaml",
+      "contains": "alto-bundler-nginx:latest",
+      "reason": "Same first-party origin-lock image as the VM compose entry, in the retained Cloud Run manifest. Pin it to the same deployed SHA in the same change.",
+      "ref": "#1657",
+      "reviewBy": "2026-11-30"
+    },
+    {
+      "file": "subgraph/matchstick.Dockerfile",
+      "contains": "ubuntu:22.04",
+      "reason": "Dev-only matchstick test image. Ubuntu's 22.04 tag moves with point releases and this image also curl-installs EOL Node 18; both are replaced together in the Node line migration rather than pinned in place.",
+      "ref": "#1658",
+      "reviewBy": "2027-01-30"
     }
   ],
   "pins": [
@@ -43,10 +57,20 @@
       "pinned": "v1.4.0",
       "status": "hold",
       "locations": [
-        { "path": "services/oz-relayer/Dockerfile", "contains": "fairwins-relay-engine-base:v1.4.0" },
-        { "path": "services/relay-gateway/docker-compose.yml", "contains": "openzeppelin-relayer:v1.4.0" }
+        {
+          "path": "services/oz-relayer/Dockerfile",
+          "contains": "fairwins-relay-engine-base:v1.4.0"
+        },
+        {
+          "path": "services/relay-gateway/docker-compose.yml",
+          "contains": "openzeppelin-relayer:v1.4.0"
+        }
       ],
-      "upstream": { "type": "git", "repo": "https://github.com/OpenZeppelin/openzeppelin-relayer", "tagPattern": "^v\\d+\\.\\d+\\.\\d+$" },
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/OpenZeppelin/openzeppelin-relayer",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
       "hold": {
         "reason": "1.5.0 introduced a receipt regression (upstream #817): a transient empty receipt from a load-balanced RPC finalizes a MINED tx as Failed and the confirmed webhook never fires. Our engine uses multi-endpoint public RPC failover, so we would hit it. 1.7.0's nonce-drift recovery jams when the drift region is full (#843). The cap-bound stuck lane (#808) affects 1.4.0 through 1.8.0 alike, so bumping does not fix it; it is mitigated by the probe and the runbook instead. NOTE: the production compose tag is `multichain-v1.5.0`, whose base engine version is not recorded in-repo; verifying it is #1650.",
         "ref": "#1648",
@@ -66,10 +90,24 @@
       "pinned": "v1.2.7",
       "status": "track",
       "locations": [
-        { "path": "infra/vm/bundler/docker-compose.yml", "contains": "alto:v1.2.7" },
-        { "path": "scripts/e2e/passkey-stack/start-alto.sh", "contains": "alto:v1.2.7@sha256:" }
+        {
+          "path": "infra/vm/bundler/docker-compose.yml",
+          "contains": "alto:v1.2.7"
+        },
+        {
+          "path": "scripts/e2e/passkey-stack/start-alto.sh",
+          "contains": "alto:v1.2.7@sha256:"
+        },
+        {
+          "path": "services/alto-bundler/deploy/service.yaml",
+          "contains": "alto:v1.2.7"
+        }
       ],
-      "upstream": { "type": "git", "repo": "https://github.com/pimlicolabs/alto", "tagPattern": "^v\\d+\\.\\d+\\.\\d+$" },
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/pimlicolabs/alto",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
       "notes": "Value path (sponsored UserOps). A bump soaks on the e2e passkey stack first, then on one chain's VM. Respect G-11: at most one alto per (chain, executor EOA)."
     },
     {
@@ -79,13 +117,32 @@
       "pinned": "22.23.3",
       "status": "track",
       "locations": [
-        { "path": "Dockerfile", "contains": "node:22.23.3-alpine3.24" },
-        { "path": "services/relay-gateway/Dockerfile", "contains": "node:22.23.3-alpine3.24" },
-        { "path": "services/finops-exporter/Dockerfile", "contains": "node:22.23.3-alpine3.24" },
-        { "path": "services/mcp-server/Dockerfile", "contains": "node:22.23.3-alpine3.24" }
+        {
+          "path": "Dockerfile",
+          "contains": "node:22.23.3-alpine3.24"
+        },
+        {
+          "path": "services/relay-gateway/Dockerfile",
+          "contains": "node:22.23.3-alpine3.24"
+        },
+        {
+          "path": "services/finops-exporter/Dockerfile",
+          "contains": "node:22.23.3-alpine3.24"
+        },
+        {
+          "path": "services/mcp-server/Dockerfile",
+          "contains": "node:22.23.3-alpine3.24"
+        }
       ],
-      "upstream": { "type": "dockerhub", "image": "library/node", "tagPattern": "^22\\.\\d+\\.\\d+-alpine$" },
-      "eol": { "product": "nodejs", "cycle": "22" },
+      "upstream": {
+        "type": "dockerhub",
+        "image": "library/node",
+        "tagPattern": "^22\\.\\d+\\.\\d+-alpine$"
+      },
+      "eol": {
+        "product": "nodejs",
+        "cycle": "22"
+      },
       "notes": "One Node line across every image and CI. Node 22 reaches EOL 2027-04-30, so the 24 migration must be planned by 2027-01-30 (ADR-006: 90 days ahead)."
     },
     {
@@ -94,9 +151,20 @@
       "owner": "mark",
       "pinned": "22",
       "status": "track",
-      "locations": [{ "path": ".github/workflows/dependency-alerts.yml", "contains": "node-version: '22'" }],
-      "upstream": { "type": "none", "why": "setup-node resolves the newest 22.x at run time; the line, not the patch, is the decision. Its EOL is what the report watches." },
-      "eol": { "product": "nodejs", "cycle": "22" }
+      "locations": [
+        {
+          "path": ".github/workflows/dependency-alerts.yml",
+          "contains": "node-version: '22'"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "setup-node resolves the newest 22.x at run time; the line, not the patch, is the decision. Its EOL is what the report watches."
+      },
+      "eol": {
+        "product": "nodejs",
+        "cycle": "22"
+      }
     },
     {
       "id": "nginx-image",
@@ -105,11 +173,24 @@
       "pinned": "1.30.5",
       "status": "track",
       "locations": [
-        { "path": "Dockerfile", "contains": "nginx:1.30.5-alpine" },
-        { "path": "services/alto-bundler/nginx/Dockerfile", "contains": "nginx:1.30.5-alpine" }
+        {
+          "path": "Dockerfile",
+          "contains": "nginx:1.30.5-alpine"
+        },
+        {
+          "path": "services/alto-bundler/nginx/Dockerfile",
+          "contains": "nginx:1.30.5-alpine"
+        }
       ],
-      "upstream": { "type": "dockerhub", "image": "library/nginx", "tagPattern": "^1\\.30\\.\\d+-alpine$" },
-      "eol": { "product": "nginx", "cycle": "1.30" },
+      "upstream": {
+        "type": "dockerhub",
+        "image": "library/nginx",
+        "tagPattern": "^1\\.30\\.\\d+-alpine$"
+      },
+      "eol": {
+        "product": "nginx",
+        "cycle": "1.30"
+      },
       "notes": "Stable line. Moved off `nginx:alpine` (SPA, floating mainline) and `1.27-alpine` (origin lock, EOL 2025-06-24) on 2026-10-09."
     },
     {
@@ -119,11 +200,32 @@
       "pinned": "7.4.11",
       "status": "track",
       "locations": [
-        { "path": "infra/vm/gateway/docker-compose.yml", "contains": "redis:7.4.11-alpine" },
-        { "path": "services/relay-gateway/docker-compose.yml", "contains": "redis:7.4.11-alpine" }
+        {
+          "path": "infra/vm/gateway/docker-compose.yml",
+          "contains": "redis:7.4.11-alpine"
+        },
+        {
+          "path": "services/relay-gateway/docker-compose.yml",
+          "contains": "redis:7.4.11-alpine"
+        },
+        {
+          "path": "services/oz-relayer/deploy/production/service.yaml",
+          "contains": "redis:7.4.11-alpine"
+        },
+        {
+          "path": "services/oz-relayer/deploy/mordor/service.yaml",
+          "contains": "redis:7.4.11-alpine"
+        }
       ],
-      "upstream": { "type": "dockerhub", "image": "library/redis", "tagPattern": "^7\\.4\\.\\d+-alpine$" },
-      "eol": { "product": "redis", "cycle": "7.4" },
+      "upstream": {
+        "type": "dockerhub",
+        "image": "library/redis",
+        "tagPattern": "^7\\.4\\.\\d+-alpine$"
+      },
+      "eol": {
+        "product": "redis",
+        "cycle": "7.4"
+      },
       "notes": "Holds the relay engine's nonce lanes (ephemeral). 8.x is a major and a license change (AGPL/RSAL/SSPL tri-license); it is a separate decision, not a routine bump."
     },
     {
@@ -132,8 +234,17 @@
       "owner": "teller",
       "pinned": "v1.10.2",
       "status": "track",
-      "locations": [{ "path": "infra/vm/gateway/docker-compose.yml", "contains": "grafana/alloy:v1.10.2" }],
-      "upstream": { "type": "dockerhub", "image": "grafana/alloy", "tagPattern": "^v\\d+\\.\\d+\\.\\d+$" }
+      "locations": [
+        {
+          "path": "infra/vm/gateway/docker-compose.yml",
+          "contains": "grafana/alloy:v1.10.2"
+        }
+      ],
+      "upstream": {
+        "type": "dockerhub",
+        "image": "grafana/alloy",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      }
     },
     {
       "id": "terraform-core",
@@ -142,12 +253,28 @@
       "pinned": "1.15.8",
       "status": "track",
       "locations": [
-        { "path": ".github/workflows/infra-plan.yml", "contains": "TERRAFORM_VERSION: \"1.15.8\"" },
-        { "path": ".github/workflows/infra-apply.yml", "contains": "TERRAFORM_VERSION: \"1.15.8\"" },
-        { "path": ".github/workflows/infra-drift.yml", "contains": "TERRAFORM_VERSION: \"1.15.8\"" }
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+        },
+        {
+          "path": ".github/workflows/infra-apply.yml",
+          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+        },
+        {
+          "path": ".github/workflows/infra-drift.yml",
+          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+        }
       ],
-      "upstream": { "type": "git", "repo": "https://github.com/hashicorp/terraform", "tagPattern": "^v\\d+\\.\\d+\\.\\d+$" },
-      "eol": { "product": "terraform", "cycle": "1.15" },
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/hashicorp/terraform",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "eol": {
+        "product": "terraform",
+        "cycle": "1.15"
+      },
       "notes": "Plan and apply must use the SAME version (apply executes the reviewed plan). Bump all three together."
     },
     {
@@ -156,8 +283,17 @@
       "owner": "mark",
       "pinned": "29.7.1",
       "status": "track",
-      "locations": [{ "path": "infra/ansible/group_vars/all.yml", "contains": "5:29.7.1-1~debian.12~bookworm" }],
-      "upstream": { "type": "git", "repo": "https://github.com/docker/cli", "tagPattern": "^v\\d+\\.\\d+\\.\\d+$" },
+      "locations": [
+        {
+          "path": "infra/ansible/group_vars/all.yml",
+          "contains": "5:29.7.1-1~debian.12~bookworm"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/docker/cli",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
       "notes": "Tracks what the nodes already run (see the comment at the pin). Converge restarts containers; bump in a maintenance window."
     },
     {
@@ -166,8 +302,17 @@
       "owner": "mark",
       "pinned": "1.14.0",
       "status": "track",
-      "locations": [{ "path": "infra/ansible/requirements.yml", "contains": "version: \"1.14.0\"" }],
-      "upstream": { "type": "git", "repo": "https://github.com/ansible-collections/google.cloud", "tagPattern": "^v?\\d+\\.\\d+\\.\\d+$" }
+      "locations": [
+        {
+          "path": "infra/ansible/requirements.yml",
+          "contains": "version: \"1.14.0\""
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/ansible-collections/google.cloud",
+        "tagPattern": "^v?\\d+\\.\\d+\\.\\d+$"
+      }
     },
     {
       "id": "ansible-community-docker",
@@ -175,8 +320,17 @@
       "owner": "mark",
       "pinned": "5.2.2",
       "status": "track",
-      "locations": [{ "path": "infra/ansible/requirements.yml", "contains": "version: \"5.2.2\"" }],
-      "upstream": { "type": "git", "repo": "https://github.com/ansible-collections/community.docker", "tagPattern": "^\\d+\\.\\d+\\.\\d+$" }
+      "locations": [
+        {
+          "path": "infra/ansible/requirements.yml",
+          "contains": "version: \"5.2.2\""
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/ansible-collections/community.docker",
+        "tagPattern": "^\\d+\\.\\d+\\.\\d+$"
+      }
     },
     {
       "id": "python-slither",
@@ -185,11 +339,23 @@
       "pinned": "3.12",
       "status": "track",
       "locations": [
-        { "path": ".github/workflows/security-testing.yml", "contains": "python-version: '3.12'" },
-        { "path": ".github/workflows/torture-test.yml", "contains": "python-version: '3.12'" }
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "python-version: '3.12'"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "python-version: '3.12'"
+        }
       ],
-      "upstream": { "type": "none", "why": "A language line is chosen, not followed; its EOL is the signal. Moved off 3.10 (EOL 2026-10-01) on 2026-10-09." },
-      "eol": { "product": "python", "cycle": "3.12" }
+      "upstream": {
+        "type": "none",
+        "why": "A language line is chosen, not followed; its EOL is the signal. Moved off 3.10 (EOL 2026-10-01) on 2026-10-09."
+      },
+      "eol": {
+        "product": "python",
+        "cycle": "3.12"
+      }
     },
     {
       "id": "python-manticore",
@@ -197,13 +363,26 @@
       "owner": "keel",
       "pinned": "3.10",
       "status": "hold",
-      "locations": [{ "path": ".github/workflows/torture-test.yml", "contains": "python-version: '3.10'" }],
-      "upstream": { "type": "none", "why": "Held on an EOL line on purpose; see hold. The report shows the EOL." },
-      "eol": { "product": "python", "cycle": "3.10" },
+      "locations": [
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "python-version: '3.10'"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "Held on an EOL line on purpose; see hold. The report shows the EOL."
+      },
+      "eol": {
+        "product": "python",
+        "cycle": "3.10"
+      },
       "hold": {
         "reason": "Manticore is unmaintained upstream (Trail of Bits archived it) and its native extras plus the protobuf<=3.20.3 pin do not install on newer Pythons. Moving the line means replacing the tool, not bumping it, so it is decided together with the torture-test toolchain review.",
         "ref": "#1656",
-        "watch": ["#1656 (Manticore replacement, Medusa pin, Go line)"],
+        "watch": [
+          "#1656 (Manticore replacement, Medusa pin, Go line)"
+        ],
         "reviewBy": "2027-01-09"
       }
     },
@@ -213,9 +392,20 @@
       "owner": "keel",
       "pinned": "1.21",
       "status": "track",
-      "locations": [{ "path": ".github/workflows/torture-test.yml", "contains": "go-version: '1.21'" }],
-      "upstream": { "type": "none", "why": "A language line is chosen, not followed; its EOL is the signal. Medusa itself is installed @latest, which is the floating pin the follow-up removes." },
-      "eol": { "product": "go", "cycle": "1.21" }
+      "locations": [
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "go-version: '1.21'"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "A language line is chosen, not followed; its EOL is the signal. Medusa itself is installed @latest, which is the floating pin the follow-up removes."
+      },
+      "eol": {
+        "product": "go",
+        "cycle": "1.21"
+      }
     },
     {
       "id": "java-native",
@@ -224,11 +414,44 @@
       "pinned": "21",
       "status": "track",
       "locations": [
-        { "path": ".github/workflows/native-build.yml", "contains": "java-version: '21'" },
-        { "path": ".github/workflows/release.yml", "contains": "java-version: '21'" }
+        {
+          "path": ".github/workflows/native-build.yml",
+          "contains": "java-version: '21'"
+        },
+        {
+          "path": ".github/workflows/release.yml",
+          "contains": "java-version: '21'"
+        }
       ],
-      "upstream": { "type": "none", "why": "capacitor-android compiles at Java 21 (CLAUDE.md, spec 102). The line follows Capacitor, not Java releases." },
-      "eol": { "product": "eclipse-temurin", "cycle": "21" }
+      "upstream": {
+        "type": "none",
+        "why": "capacitor-android compiles at Java 21 (CLAUDE.md, spec 102). The line follows Capacitor, not Java releases."
+      },
+      "eol": {
+        "product": "eclipse-temurin",
+        "cycle": "21"
+      }
+    },
+    {
+      "id": "ubuntu-matchstick",
+      "kind": "container-image",
+      "owner": "mark",
+      "pinned": "22.04",
+      "status": "track",
+      "locations": [
+        {
+          "path": "subgraph/matchstick.Dockerfile",
+          "contains": "ubuntu:22.04"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "An OS line is chosen, not followed; its EOL is the signal. Floating within the line under a time-boxed exemption (#1658)."
+      },
+      "eol": {
+        "product": "ubuntu",
+        "cycle": "22.04"
+      }
     }
   ]
 }
