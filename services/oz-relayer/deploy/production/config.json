@@ -29,7 +29,7 @@
       "notification_id": "relay-gateway-webhook",
       "policies": {
         "eip1559_pricing": true,
-        "gas_price_cap": 1500000000000,
+        "gas_price_cap": 10500000000000,
         "min_balance": 500000000000000000,
         "whitelist_receivers": [
           "0xE878b62887fC8A5F739B8Ce61bC19546A280Ef89",
@@ -112,7 +112,7 @@
       "required_confirmations": 5,
       "average_blocktime_ms": 2000,
       "is_testnet": false,
-      "features": [],
+      "features": ["eip1559"],
       "rpc_urls": [
         "https://polygon-bor-rpc.publicnode.com",
         "https://polygon.drpc.org"

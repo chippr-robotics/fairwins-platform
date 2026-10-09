@@ -2,7 +2,7 @@ steps:
   # Build the Docker image
   # Note: VITE_PINATA_JWT is NOT passed as a build arg - it's injected at runtime
   # via Cloud Run environment variable from Secret Manager
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     args:
       - 'build'
       # Tenant selection (spec 072): this pipeline builds the DEFAULT (fairwins)
@@ -94,7 +94,7 @@ steps:
       - '.'
 
   # Push the image to Artifact Registry
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     args: ['push', '--all-tags', 'us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/prediction-dao-research']
 
   # Deploy to Cloud Run
@@ -106,7 +106,7 @@ steps:
   # created, it can be wired declaratively with:
   #   - '--update-secrets'
   #   - 'ORIGIN_LOCK_SECRET=origin-lock-secret:latest'
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:588.0.0'
     entrypoint: gcloud
     args:
       - 'run'

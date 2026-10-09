@@ -156,8 +156,9 @@ jobs:
 
       - name: Install Slither
         run: |
-          pip install slither-analyzer
-          pip install solc-select
+          pip install slither-analyzer==0.11.6
+          pip install solc-select==1.2.0
+          pip install crytic-compile==0.4.2
           # Retry solc-select's compiler download (a second, GitHub-hosted fetch
           # path distinct from Hardhat's) so a stalled download can't hang the job.
           for attempt in 1 2 3 4 5; do
@@ -274,4 +275,4 @@ jobs:
 
           echo "---" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Note:** Manticore symbolic execution and Medusa fuzz testing run in the Weekly Torture Test workflow." >> $GITHUB_STEP_SUMMARY
+          echo "**Note:** Medusa fuzz testing runs in the Weekly Torture Test workflow." >> $GITHUB_STEP_SUMMARY

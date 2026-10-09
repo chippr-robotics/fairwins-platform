@@ -246,7 +246,10 @@ services:
     network_mode: "service:gateway"
     depends_on:
       redis:
-        condition: service_started
+        # service_healthy, not service_started (#1652): the engine now reads its whole state from
+        # redis at boot, and redis replays its AOF first. Booting against a redis that is still
+        # loading answers LOADING errors, which would crash-loop the engine until it is ready.
+        condition: service_healthy
     env_file:
       - /run/fairwins/engine.env    # API_KEY, WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY — engine ONLY
     environment:
@@ -255,6 +258,37 @@ services:
       METRICS_ENABLED: "false"
       LOG_LEVEL: "info"
       REDIS_URL: "redis://localhost:6379"     # correct verbatim — shared namespace
+      # ---- Persistent engine state (#1652) ----
+      # The engine's repositories (relayers, TRANSACTIONS, signers, notifications, networks, the nonce
+      # counter) live in redis instead of process memory, so a restart no longer forgets pending
+      # transactions or their webhooks (OZ Relayer v1.4.0 src/config/server_config.rs
+      # get_repository_storage_type; src/bootstrap/initialize_app_state.rs initialize_repositories).
+      #
+      # STORAGE_ENCRYPTION_KEY is REQUIRED in this mode — initialize_repositories refuses to boot
+      # without it — and arrives via engine.env (fetch-secrets.sh: relay-engine-storage-key). It
+      # encrypts the signer and notification records at rest, bound to the key prefix, so the prefix
+      # below is pinned here rather than left to an upstream default that could change under us.
+      #
+      # THE SWITCH IS ARMED BY THE SECRET, NOT BY THIS FILE. REPOSITORY_STORAGE_TYPE is deliberately
+      # NOT set here: fetch-secrets.sh writes REPOSITORY_STORAGE_TYPE=redis into engine.env only when
+      # relay-engine-storage-key has a version, and `environment:` would override env_file if it were
+      # set below. Every boot pulls origin/main (startup.sh), so a hard dependency on a secret an
+      # operator has not created yet would take the WHOLE stack — gateway and paymaster included —
+      # down at the first reboot after promotion. Absent key => the engine keeps today's in-memory
+      # behaviour and the journal says why; adding the secret version during the drained rollout
+      # window is the deliberate act that switches storage (runbook "Storage mode").
+      #
+      # THE CONSEQUENCE: once redis holds data the engine SKIPS config.json on boot
+      # (src/bootstrap/config_processor.rs process_config_file). A config.json edit no longer takes
+      # effect on restart. Cap changes use PATCH /api/v1/relayers/<id>; network changes (features,
+      # blocktime, confirmations) and signer/notification changes need a deliberate one-shot reset.
+      # See docs/runbooks/relayer-operations.md "Storage mode".
+      REDIS_KEY_PREFIX: "oz-relayer"
+      # MUST stay "false" in git. true drops relayers, TRANSACTIONS, signers, notifications, networks,
+      # plugins and API keys on EVERY boot (config_processor.rs, drop_all_entries), which forgets every
+      # pending transaction — the exact thing redis storage exists to prevent. A reset is a one-shot,
+      # reviewed, drained-lane operation described in the runbook, never a standing setting.
+      RESET_STORAGE_ON_START: "false"
       GCP_PRIVATE_KEY_ID: "4f206bc79b3f42976c9c49a30d485e3b304b750f"
       GCP_CLIENT_EMAIL: "fairwins-relay-engine@chippr-bots-site-wp.iam.gserviceaccount.com"
     volumes:
@@ -271,9 +305,35 @@ services:
       - /opt/fairwins/repo/services/oz-relayer/deploy/production/config.json:/app/config/config.json:ro
     cpus: 0.35
     mem_limit: 320m
+    labels:
+      com.fairwins.service: "relay-engine"
+    # ENGINE LOGS GO TO CLOUD LOGGING (#1653); only this service. The engine's most important failure
+    # is silent: a lane stuck at gas_price_cap logs "skipping resubmission" and nothing else (upstream
+    # OpenZeppelin/openzeppelin-relayer#808), and under json-file that line never left the VM. The
+    # gcplogs driver ships every engine line to Cloud Logging as logName
+    # projects/chippr-bots-site-wp/logs/gcplogs-docker-driver, filterable by container name.
+    # Filter + proposed log metric / alert: docs/runbooks/relayer-operations.md "Engine logs".
+    #
+    # `docker logs` KEEPS WORKING: gcplogs cannot be read back, so Docker (20.10+, "dual logging")
+    # also writes a local copy and serves `docker logs` from it. probe.sh reads exactly that, so the
+    # on-VM stuck-lane check stays as the backstop. The cache-* options below size that local copy to
+    # the same 3 x 10 MB the json-file driver had, instead of the 5 x 20 MB default.
+    #
+    # mode non-blocking: the engine must never stall on its own stdout because Cloud Logging is slow
+    # or unreachable. The cost is dropped lines once the 4 MB buffer fills, which is acceptable: logs
+    # are the diagnosis, never the relay path (never-stranded). Dropped lines are still in the local copy.
+    #
+    # gcplogs authenticates as the VM's service account via the metadata server; that account already
+    # holds roles/logging.logWriter for the Ops Agent (infra/terraform/environments/prod/main.tf).
     logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      driver: gcplogs
+      options:
+        gcp-project: "chippr-bots-site-wp"
+        labels: "com.fairwins.service"
+        mode: "non-blocking"
+        max-buffer-size: "4m"
+        cache-max-size: "10m"
+        cache-max-file: "3"
 
   # ---- FinOps exporter (spec 089), INSIDE the gateway's namespace ----
   #
@@ -439,7 +499,22 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
-  # ---- ephemeral redis, INSIDE the gateway's namespace ----
+  # ---- persistent redis, INSIDE the gateway's namespace ----
+  #
+  # The engine's state store since #1652 (it was ephemeral before: --save "" --appendonly no, with the
+  # engine holding its records in memory and redis carrying only the job queue). Now it carries
+  # transaction records and the nonce counter, so:
+  #   * AOF is ON (appendfsync everysec: at most ~1 s of writes lost on a hard crash) and the data
+  #     lives on the named volume redis-data. "docker compose down" (the unit's ExecStop) keeps named
+  #     volumes; only "down -v" would delete it — never add -v to the unit.
+  #   * noeviction is MANDATORY. Any LRU/LFU policy would silently evict transaction records or
+  #     queue jobs under memory pressure. With noeviction a full redis fails writes LOUDLY instead.
+  #     (It is also redis's default; it is stated so a future edit has to remove it on purpose.)
+  #   * maxmemory 96mb sits under mem_limit 192m: the gap is for the AOF-rewrite fork and buffers,
+  #     so hitting the limit is a redis error (visible) rather than a cgroup OOM-kill (a restart that
+  #     looks like a crash). Records for final-state transactions expire after
+  #     TRANSACTION_EXPIRATION_HOURS (default 4), so the working set is small.
+  # Do NOT change this image string without the version-pin gate (scripts/deps/version-pins.json).
   redis:
     container_name: fairwins-gateway-redis
     image: redis:7.4.11-alpine
@@ -449,14 +524,32 @@ services:
     depends_on:
       gateway:
         condition: service_started
-    # Ephemeral by design, matching Cloud Run: no persistence, nothing to restore. The engine's
-    # in-flight state is reconstructible from chain.
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
-    # NOTE: do NOT add `read_only: true` + `cap_drop: ALL` here. redis:7.4.11-alpine's entrypoint runs
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 96mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      # redis-cli ping answers LOADING (non-zero) while the AOF replays, PONG once it can serve.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
+    # NOTE: do NOT add `read_only: true` + `cap_drop: ALL` here. redis:7-alpine's entrypoint runs
     # `find . \! -user redis -exec chown redis '{}' +` as root; with CAP_CHOWN dropped that returns
     # EPERM and the container never starts. This was a reproduced boot-fatal defect in an earlier draft.
     cpus: 0.15
-    mem_limit: 128m
+    mem_limit: 192m
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -468,3 +561,8 @@ services:
 # data collected during the incident somebody later wants to look at.
 volumes:
   alloy-data:
+  # The engine's state (#1652): relayers, transactions, signers, nonce counter, job queue. This volume
+  # IS the record of what is in flight, so unlike the old ephemeral redis it must survive a stack
+  # restart. The chain remains the source of truth for settlement; losing this volume forgets pending
+  # transactions and their webhooks (their intents stay "submitted"), exactly as pre-#1652 did.
+  redis-data:

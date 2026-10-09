@@ -7,7 +7,7 @@
 # Run from the REPO ROOT (context needs services/alto-bundler/deploy/service.yaml + nginx/). Applied via
 # `gcloud run services replace` — a single-container `gcloud run deploy` would drop the alto sidecar.
 steps:
-  - name: gcr.io/cloud-builders/docker
+  - name: gcr.io/cloud-builders/docker:20.10.24
     args:
       - build
       - -t
@@ -15,9 +15,9 @@ steps:
       - -t
       - us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/alto-bundler-nginx:latest
       - services/alto-bundler/nginx
-  - name: gcr.io/cloud-builders/docker
+  - name: gcr.io/cloud-builders/docker:20.10.24
     args: [push, --all-tags, us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/alto-bundler-nginx]
-  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:588.0.0
     entrypoint: bash
     args:
       - -c

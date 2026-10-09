@@ -10,15 +10,17 @@
 #
 # WHY PINNED BY DIGEST. A tag can be repointed; a digest cannot. The bundler decides whether a
 # member's UserOp lands, so "the version CI proved" and "the version CI ran" have to be the same
-# thing. v1.2.7 is the version live on Polygon today (infra/vm/bundler/docker-compose.yml) — keep
-# the two in step, and when you move one, move the other and re-measure.
+# thing. SOAK STEP (ADR-006, #1654): this stack runs v1.2.8 AHEAD of the VM, which is still on v1.2.7
+# (infra/vm/bundler/docker-compose.yml; registry ids alto-bundler-e2e / alto-bundler-vm). A bump
+# soaks here first, then moves to one chain's VM. Do not read the gap as drift: the VM moves only
+# after the Passkey Full Stack tier is green on this digest.
 #
 # WHY --network host. alto has to reach the hardhat node on 127.0.0.1:8545 and Cypress has to reach
 # alto on 127.0.0.1:$ALTO_HOST_PORT. Sharing the runner's namespace is the least machinery; there is
 # no origin-lock sidecar here because there is no internet-facing edge in a CI job.
 set -euo pipefail
 
-ALTO_IMAGE="${ALTO_IMAGE:-ghcr.io/pimlicolabs/alto:v1.2.7@sha256:8420c602c1b4618d4e244e693f8d4cfd28fc86fd5808b74fdd185730f934e29e}"
+ALTO_IMAGE="${ALTO_IMAGE:-ghcr.io/pimlicolabs/alto:v1.2.8@sha256:f2661042aadefc6a4fc9c5826a14404f574c7ef2de76bdf83fe6a0829137b3c5}"
 # alto itself listens on 4338; the SPA-facing :4337 is the CORS proxy started below (alto 404s the
 # browser's OPTIONS preflight and emits no CORS headers — production has nginx for this, CI has
 # cors-proxy.js). wait-for-stack.js addresses :4337 on purpose: it proves the path the SPA uses.

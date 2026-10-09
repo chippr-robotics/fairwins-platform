@@ -128,8 +128,9 @@ jobs:
 
       - name: Install Slither
         run: |
-          pip install slither-analyzer
-          pip install solc-select
+          pip install slither-analyzer==0.11.6
+          pip install solc-select==1.2.0
+          pip install crytic-compile==0.4.2
           solc-select install 0.8.24
           solc-select use 0.8.24
 
@@ -156,117 +157,6 @@ jobs:
             slither-report.md
           retention-days: 30
 
-  manticore-analysis:
-    name: Manticore Symbolic Execution
-    runs-on: ubuntu-latest
-    # Manticore is a best-effort weekly tool with a fragile install (protobuf /
-    # wasm / Python compat). Its analysis steps are already continue-on-error;
-    # mark the whole job non-blocking so an install failure doesn't fail the
-    # weekly torture test. Results are still uploaded as artifacts when it runs.
-    continue-on-error: true
-    timeout-minutes: 180
-    
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v7
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v7
-        with:
-          node-version: '22'
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Compile contracts
-        uses: ./.github/actions/setup-hardhat-solc  # seeds + caches BOTH pinned solc versions (spec 075, T026)
-
-      - name: Setup Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.10'
-
-      - name: Install system dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y build-essential python3-dev
-
-      - name: Install Manticore
-        run: |
-          python -m pip install --upgrade pip
-          pip install 'protobuf<=3.20.3'
-          pip install manticore[native]
-          pip install solc-select
-          solc-select install 0.8.24
-          solc-select use 0.8.24
-
-      - name: Patch wasm package for Python 3.10+ compatibility
-        run: python scripts/utils/patch-wasm-types.py
-
-      - name: Run Manticore on WagerRegistry
-        run: |
-          echo "Running Manticore on WagerRegistry..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/wagers/WagerRegistry.sol \
-            --contract WagerRegistry --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Run Manticore on MembershipManager
-        run: |
-          echo "Running Manticore on MembershipManager..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/access/MembershipManager.sol \
-            --contract MembershipManager --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Run Manticore on KeyRegistry
-        run: |
-          echo "Running Manticore on KeyRegistry..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/privacy/KeyRegistry.sol \
-            --contract KeyRegistry --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Run Manticore on PolymarketOracleAdapter
-        run: |
-          echo "Running Manticore on PolymarketOracleAdapter..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/oracles/PolymarketOracleAdapter.sol \
-            --contract PolymarketOracleAdapter --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Run Manticore on ChainlinkDataFeedOracleAdapter
-        run: |
-          echo "Running Manticore on ChainlinkDataFeedOracleAdapter..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/oracles/ChainlinkDataFeedOracleAdapter.sol \
-            --contract ChainlinkDataFeedOracleAdapter --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Run Manticore on ChainlinkFunctionsOracleAdapter
-        run: |
-          echo "Running Manticore on ChainlinkFunctionsOracleAdapter..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/oracles/ChainlinkFunctionsOracleAdapter.sol \
-            --contract ChainlinkFunctionsOracleAdapter --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Run Manticore on UMAOptimisticOracleV3Adapter
-        run: |
-          echo "Running Manticore on UMAOptimisticOracleV3Adapter..."
-          timeout 600 python scripts/utils/run-manticore.py contracts/oracles/UMAOptimisticOracleV3Adapter.sol \
-            --contract UMAOptimisticOracleV3Adapter --timeout 600 || echo "Manticore analysis completed with warnings/errors"
-        continue-on-error: true
-
-      - name: Collect Manticore results
-        if: always()
-        run: |
-          mkdir -p manticore-results
-          find . -type d -name "mcore_*" -exec cp -r {} manticore-results/ \; || true
-
-      - name: Upload Manticore results
-        uses: actions/upload-artifact@v7
-        if: always()
-        with:
-          name: manticore-results
-          path: manticore-results/
-          retention-days: 30
-
   medusa-fuzzing:
     name: Medusa Fuzz Testing
     runs-on: ubuntu-latest
@@ -288,16 +178,16 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v7
         with:
-          go-version: '1.21'
+          go-version: '1.26'
 
       - name: Install Medusa
         run: |
-          go install github.com/crytic/medusa@latest
+          go install github.com/crytic/medusa@v1.5.1
           echo "$HOME/go/bin" >> $GITHUB_PATH
 
       - name: Install crytic-compile
         run: |
-          pip install crytic-compile
+          pip install crytic-compile==0.4.2
 
       - name: Compile contracts
         uses: ./.github/actions/setup-hardhat-solc  # seeds + caches BOTH pinned solc versions (spec 075, T026)
@@ -551,7 +441,7 @@ jobs:
   summary:
     name: Generate Test Summary
     runs-on: ubuntu-latest
-    needs: [hardhat-tests, coverage-report, slither-analysis, manticore-analysis, medusa-fuzzing, cypress-e2e]
+    needs: [hardhat-tests, coverage-report, slither-analysis, medusa-fuzzing, cypress-e2e]
     if: always()
 
     steps:
@@ -574,12 +464,11 @@ jobs:
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
 
-          for JOB in hardhat-tests coverage-report slither-analysis manticore-analysis medusa-fuzzing cypress-e2e; do
+          for JOB in hardhat-tests coverage-report slither-analysis medusa-fuzzing cypress-e2e; do
             RESULT="${{ needs.hardhat-tests.result }}"
             case "$JOB" in
               coverage-report) RESULT="${{ needs.coverage-report.result }}" ;;
               slither-analysis) RESULT="${{ needs.slither-analysis.result }}" ;;
-              manticore-analysis) RESULT="${{ needs.manticore-analysis.result }}" ;;
               medusa-fuzzing) RESULT="${{ needs.medusa-fuzzing.result }}" ;;
               cypress-e2e) RESULT="${{ needs.cypress-e2e.result }}" ;;
             esac
@@ -643,18 +532,6 @@ jobs:
           fi
           echo "" >> $GITHUB_STEP_SUMMARY
 
-          # ---- Manticore ----
-          echo "## Manticore Symbolic Execution" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "Contracts analyzed: WagerRegistry, MembershipManager, KeyRegistry, PolymarketOracleAdapter, ChainlinkDataFeedOracleAdapter, ChainlinkFunctionsOracleAdapter, UMAOptimisticOracleV3Adapter" >> $GITHUB_STEP_SUMMARY
-          if [ -d "artifacts/manticore-results" ]; then
-            DIRS=$(find artifacts/manticore-results -type d -name "mcore_*" 2>/dev/null | wc -l || echo "0")
-            echo "Result directories: $DIRS" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "Results: see uploaded artifacts" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "" >> $GITHUB_STEP_SUMMARY
-
           # ---- Artifacts Index ----
           echo "## Artifacts" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -667,7 +544,6 @@ jobs:
           echo "| gas-report | 30 days |" >> $GITHUB_STEP_SUMMARY
           echo "| coverage-report | 30 days |" >> $GITHUB_STEP_SUMMARY
           echo "| slither-reports | 30 days |" >> $GITHUB_STEP_SUMMARY
-          echo "| manticore-results | 30 days |" >> $GITHUB_STEP_SUMMARY
           echo "| medusa-results | 30 days |" >> $GITHUB_STEP_SUMMARY
           echo "| cypress-e2e-results | 30 days |" >> $GITHUB_STEP_SUMMARY
           echo "| cypress-videos (failing specs only) | 30 days |" >> $GITHUB_STEP_SUMMARY

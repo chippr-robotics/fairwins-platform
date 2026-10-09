@@ -84,7 +84,7 @@
       }
     },
     {
-      "id": "alto-bundler",
+      "id": "alto-bundler-vm",
       "kind": "git-built-image",
       "owner": "relay",
       "pinned": "v1.2.7",
@@ -93,10 +93,6 @@
         {
           "path": "infra/vm/bundler/docker-compose.yml",
           "contains": "alto:v1.2.7"
-        },
-        {
-          "path": "scripts/e2e/passkey-stack/start-alto.sh",
-          "contains": "alto:v1.2.7@sha256:"
         },
         {
           "path": "services/alto-bundler/deploy/service.yaml",
@@ -108,7 +104,26 @@
         "repo": "https://github.com/pimlicolabs/alto",
         "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
       },
-      "notes": "Value path (sponsored UserOps). A bump soaks on the e2e passkey stack first, then on one chain's VM. Respect G-11: at most one alto per (chain, executor EOA)."
+      "notes": "Deployed bundler (value path, sponsored UserOps), live on Polygon. It trails alto-bundler-e2e on purpose: a bump soaks on the e2e passkey stack first (#1654), then moves here after an Artifact Registry mirror of the new tag exists. Respect G-11: at most one alto per (chain, executor EOA)."
+    },
+    {
+      "id": "alto-bundler-e2e",
+      "kind": "git-built-image",
+      "owner": "relay",
+      "pinned": "v1.2.8",
+      "status": "track",
+      "locations": [
+        {
+          "path": "scripts/e2e/passkey-stack/start-alto.sh",
+          "contains": "alto:v1.2.8@sha256:f2661042aadefc6a4fc9c5826a14404f574c7ef2de76bdf83fe6a0829137b3c5"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/pimlicolabs/alto",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "CI soak step only: the Passkey Full Stack Cypress tier. Pinned by digest (index digest read from ghcr.io on 2026-10-09; the same method reproduces the v1.2.7 digest this file used to carry). Green here is the evidence for moving alto-bundler-vm to v1.2.8."
     },
     {
       "id": "node-runtime-image",
@@ -254,20 +269,20 @@
       "id": "terraform-core",
       "kind": "terraform",
       "owner": "mark",
-      "pinned": "1.15.8",
+      "pinned": "1.15.9",
       "status": "track",
       "locations": [
         {
           "path": ".github/workflows/infra-plan.yml",
-          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+          "contains": "TERRAFORM_VERSION: \"1.15.9\""
         },
         {
           "path": ".github/workflows/infra-apply.yml",
-          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+          "contains": "TERRAFORM_VERSION: \"1.15.9\""
         },
         {
           "path": ".github/workflows/infra-drift.yml",
-          "contains": "TERRAFORM_VERSION: \"1.15.8\""
+          "contains": "TERRAFORM_VERSION: \"1.15.9\""
         }
       ],
       "upstream": {
@@ -304,12 +319,12 @@
       "id": "ansible-google-cloud",
       "kind": "binary",
       "owner": "mark",
-      "pinned": "1.14.0",
+      "pinned": "1.15.0",
       "status": "track",
       "locations": [
         {
           "path": "infra/ansible/requirements.yml",
-          "contains": "version: \"1.14.0\""
+          "contains": "version: \"1.15.0\""
         }
       ],
       "upstream": {
@@ -322,12 +337,12 @@
       "id": "ansible-community-docker",
       "kind": "binary",
       "owner": "mark",
-      "pinned": "5.2.2",
+      "pinned": "5.4.0",
       "status": "track",
       "locations": [
         {
           "path": "infra/ansible/requirements.yml",
-          "contains": "version: \"5.2.2\""
+          "contains": "version: \"5.4.0\""
         }
       ],
       "upstream": {
@@ -362,53 +377,251 @@
       }
     },
     {
-      "id": "python-manticore",
-      "kind": "toolchain",
-      "owner": "keel",
-      "pinned": "3.10",
-      "status": "hold",
-      "locations": [
-        {
-          "path": ".github/workflows/torture-test.yml",
-          "contains": "python-version: '3.10'"
-        }
-      ],
-      "upstream": {
-        "type": "none",
-        "why": "Held on an EOL line on purpose; see hold. The report shows the EOL."
-      },
-      "eol": {
-        "product": "python",
-        "cycle": "3.10"
-      },
-      "hold": {
-        "reason": "Manticore is unmaintained upstream (Trail of Bits archived it) and its native extras plus the protobuf<=3.20.3 pin do not install on newer Pythons. Moving the line means replacing the tool, not bumping it, so it is decided together with the torture-test toolchain review.",
-        "ref": "#1656",
-        "watch": [
-          "#1656 (Manticore replacement, Medusa pin, Go line)"
-        ],
-        "reviewBy": "2027-01-09"
-      }
-    },
-    {
       "id": "go-medusa",
       "kind": "toolchain",
       "owner": "keel",
-      "pinned": "1.21",
+      "pinned": "1.26",
       "status": "track",
       "locations": [
         {
           "path": ".github/workflows/torture-test.yml",
-          "contains": "go-version: '1.21'"
+          "contains": "go-version: '1.26'"
         }
       ],
       "upstream": {
         "type": "none",
-        "why": "A language line is chosen, not followed; its EOL is the signal. Medusa itself is installed @latest, which is the floating pin the follow-up removes."
+        "why": "A language line is chosen, not followed; its EOL is the signal. Moved off 1.21 (EOL) on 2026-10-09 to the oldest line still supported; medusa's go.mod requires go >= 1.24.0."
       },
       "eol": {
         "product": "go",
-        "cycle": "1.21"
+        "cycle": "1.26"
+      }
+    },
+    {
+      "id": "medusa",
+      "kind": "binary",
+      "owner": "keel",
+      "pinned": "v1.5.1",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "medusa@v1.5.1"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/medusa",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "Installed with `go install ...@v1.5.1`; was @latest. Fuzz-only (no value path): a bump needs one green weekly torture-test run, not a soak. Its go.mod requires go >= 1.24.0 (see go-medusa)."
+    },
+    {
+      "id": "slither-analyzer",
+      "kind": "toolchain",
+      "owner": "keel",
+      "pinned": "0.11.6",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "slither-analyzer==0.11.6"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "slither-analyzer==0.11.6"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/slither",
+        "tagPattern": "^\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "requires_python >=3.10 (PyPI). It gates merges through check-slither-findings.js, so a bump can add findings: run it and read the diff first. Bump together with solc-select and crytic-compile."
+    },
+    {
+      "id": "solc-select",
+      "kind": "toolchain",
+      "owner": "keel",
+      "pinned": "1.2.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "solc-select==1.2.0"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "solc-select==1.2.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/solc-select",
+        "tagPattern": "^v\\.?\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "requires_python >=3.8 (PyPI). Picks the compiler Slither runs against; that compiler (0.8.24) is pinned separately."
+    },
+    {
+      "id": "crytic-compile",
+      "kind": "toolchain",
+      "owner": "keel",
+      "pinned": "0.4.2",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/security-testing.yml",
+          "contains": "crytic-compile==0.4.2"
+        },
+        {
+          "path": ".github/workflows/torture-test.yml",
+          "contains": "crytic-compile==0.4.2"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/crytic/crytic-compile",
+        "tagPattern": "^\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "requires_python !=3.12.0,>=3.10 (PyPI): setup-python '3.12' resolves the newest 3.12.x, never 3.12.0. Slither, Medusa and the weekly job all go through it."
+    },
+    {
+      "id": "cloudbuild-docker-builder",
+      "kind": "container-image",
+      "owner": "mark",
+      "pinned": "20.10.24",
+      "status": "track",
+      "locations": [
+        {
+          "path": "cloudbuild.yaml",
+          "contains": "cloud-builders/docker:20.10.24"
+        },
+        {
+          "path": "cloudbuild.staging.yaml",
+          "contains": "cloud-builders/docker:20.10.24"
+        },
+        {
+          "path": "services/alto-bundler/cloudbuild.yaml",
+          "contains": "cloud-builders/docker:20.10.24"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "gcr.io/cloud-builders is Google's registry; its tag list is readable (gcr.io/v2/cloud-builders/docker/tags/list) but Google labels every tag deprecated or no-new-use, so there is no release feed to follow."
+      },
+      "notes": "Pinned 2026-10-09 to the tag whose digest (sha256:f772ab45...) is what `latest` resolved to that day, so the pin changes no bytes. Google marks this image `no-new-use-public-image`: moving to the `29` tag (Docker 29) or off the Google builder is a build-path decision, not a sweep."
+    },
+    {
+      "id": "cloudbuild-cloud-sdk",
+      "kind": "container-image",
+      "owner": "mark",
+      "pinned": "588.0.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": "cloudbuild.yaml",
+          "contains": "cloud-sdk:588.0.0"
+        },
+        {
+          "path": "cloudbuild.staging.yaml",
+          "contains": "cloud-sdk:588.0.0"
+        },
+        {
+          "path": "services/alto-bundler/cloudbuild.yaml",
+          "contains": "cloud-sdk:588.0.0"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "gcr.io/google.com/cloudsdktool/cloud-sdk publishes a readable tag list but no release feed; the weekly report cannot compare versions."
+      },
+      "notes": "Pinned 2026-10-09 to the tag sharing the digest `latest` resolved to (sha256:f36908a9...), so it changes no bytes. Runs `gcloud run deploy`; the Cloud Run shape belongs to Terraform, the image to Cloud Build."
+    },
+    {
+      "id": "tflint",
+      "kind": "toolchain",
+      "owner": "mark",
+      "pinned": "v0.64.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "tflint_version: v0.64.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/terraform-linters/tflint",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "Advisory lint on infra PRs. v0.64.0 was the newest tag on 2026-10-09 (it replaces `latest`)."
+    },
+    {
+      "id": "ansible-core",
+      "kind": "toolchain",
+      "owner": "mark",
+      "pinned": "2.21.5",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "ansible-core==2.21.5"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/ansible/ansible",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "eol": {
+        "product": "ansible-core",
+        "cycle": "2.21"
+      },
+      "notes": "CI lint/syntax-check only; the operator's venv (infra/ansible/README.md) is separate. requires_python >=3.12 (PyPI), matches the job's setup-python 3.12. Installs with ansible-lint 26.9.0, checked together."
+    },
+    {
+      "id": "ansible-lint",
+      "kind": "toolchain",
+      "owner": "mark",
+      "pinned": "26.9.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "ansible-lint==26.9.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/ansible/ansible-lint",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "A new release can add rules that fail infra PRs that did not change; bump it in its own PR and read the lint diff."
+    },
+    {
+      "id": "lhci-cli",
+      "kind": "toolchain",
+      "owner": "glass",
+      "pinned": "0.13.0",
+      "status": "hold",
+      "locations": [
+        {
+          "path": ".github/workflows/frontend-testing.yml",
+          "contains": "@lhci/cli@0.13.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/GoogleChrome/lighthouse-ci",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "hold": {
+        "reason": "0.13.0 bundles Lighthouse 11.4.0; 0.14.0 moves to Lighthouse 12.1.0 and 0.15.x to 12.6.1 (npm dependency metadata, checked 2026-10-09). A Lighthouse major changes the audit set and scoring, and the performance budgets in lighthouserc.desktop.json / lighthouserc.mobile.json were set against 11. The pin was `0.13.x`, and 0.13.0 is the only 0.13 release, so this preserves what CI already ran.",
+        "ref": "#1657",
+        "watch": [
+          "re-baseline the lighthouserc budgets against Lighthouse 12, then bump to 0.15.1"
+        ],
+        "reviewBy": "2027-01-09"
       }
     },
     {
@@ -435,6 +648,112 @@
         "product": "eclipse-temurin",
         "cycle": "21"
       }
+    },
+    {
+      "id": "gradle-wrapper",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "8.14.5",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/android/gradle/wrapper/gradle-wrapper.properties",
+          "contains": "gradle-8.14.5-all.zip"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/gradle/gradle",
+        "tagPattern": "^v8\\.14\\.\\d+$"
+      },
+      "notes": "Follows the 8.14 patch line only: the Gradle/AGP pair is coupled to the Capacitor 8 Android template (spec 102), so a Gradle 9 move is a template migration together with AGP 9, not a patch bump. 8.14.6 was released 2026-10-08 and is left out of its first patch window. No distributionSha256Sum is set today. Neither sync-native-config.js nor check-native-versions.js owns this file (they own appId/versionCode/versionName)."
+    },
+    {
+      "id": "android-gradle-plugin",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "8.13.0",
+      "status": "hold",
+      "locations": [
+        {
+          "path": "frontend/android/build.gradle",
+          "contains": "com.android.tools.build:gradle:8.13.0"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "AGP is published to Google Maven, not as a git tag feed this watcher reads; the hold's reviewBy is the forcing function."
+      },
+      "hold": {
+        "reason": "AGP 9 is a major tied to the Capacitor template: Google Maven now lists AGP 9.x (up to 9.4.1) and it needs Gradle 9, while the shell's build.gradle/variables.gradle follow the Capacitor 8 Android template and capacitor-android is compiled against it. Moving AGP alone breaks the plugin build; the move is a Capacitor template migration (spec 102) with Gradle 9, Java and the SDK levels together.",
+        "ref": "#1659",
+        "watch": [
+          "the Capacitor release whose Android template moves to AGP 9"
+        ],
+        "reviewBy": "2027-03-31"
+      }
+    },
+    {
+      "id": "android-sdk-levels",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "36",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/android/variables.gradle",
+          "contains": "compileSdkVersion = 36"
+        },
+        {
+          "path": "frontend/android/variables.gradle",
+          "contains": "targetSdkVersion = 36"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "An SDK level is chosen, not followed. The Capacitor 8 template sets compileSdk/targetSdk and its plugins compile against them; moving them is a template step with AGP, not a bot bump."
+      },
+      "notes": "compileSdk and targetSdk move together with the Capacitor Android template (variables.gradle is the template's variable file)."
+    },
+    {
+      "id": "android-min-sdk",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "24",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/android/variables.gradle",
+          "contains": "minSdkVersion = 24"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "A support floor is a product decision, not a release to follow."
+      },
+      "notes": "Capacitor 8 template floor. Raising it drops devices from the Android channel; lowering it is not possible without the template's plugins agreeing."
+    },
+    {
+      "id": "ios-deployment-target",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "15",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/ios/App/App.xcodeproj/project.pbxproj",
+          "contains": "IPHONEOS_DEPLOYMENT_TARGET = 15.0;"
+        },
+        {
+          "path": "frontend/ios/App/CapApp-SPM/Package.swift",
+          "contains": "platforms: [.iOS(.v15)]"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "A support floor is a product decision, not a release to follow; the Capacitor 8 iOS template sets it and its SPM plugins declare the same floor."
+      },
+      "notes": "Must agree in the Xcode project (four build configurations) and the CapApp-SPM Package.swift. Moving one without the other fails the iOS build or silently narrows the plugins."
     },
     {
       "id": "ubuntu-matchstick",

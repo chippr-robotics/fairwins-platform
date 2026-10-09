@@ -35,10 +35,21 @@ ETC-family specifics (research.md §2):
   mishandle batched JSON-RPC. The Rust engine issues sequential requests by default, but if a
   batch option is ever enabled, keep it at 1 for these chains (tagged `no-batch` in
   `config.json` as an operator reminder).
-- `gas_price_cap` is set high (2000 gwei on `mordor-63`; `polygon-137` is 1500 gwei) because the
-  ETC legacy oracle suggests ~300 gwei baseline; the cap bounds bump/replace escalation (FR-006).
-  Measured headroom (2026-10-09: Mordor 1 gwei, Polygon 275.8 gwei) and the #808 stall threshold
-  (`cap / 1.1`) are in `docs/runbooks/relayer-operations.md` § Cap headroom.
+- `gas_price_cap` is set high (2000 gwei on `mordor-63`, **10,500 gwei on `polygon-137`**) because
+  the ETC legacy oracle suggests ~300 gwei baseline; the cap bounds bump/replace escalation (FR-006).
+  **It is a ceiling, not the spend**: a transaction pays `min(maxFee, baseFee + tip) × gas used`, so a
+  higher cap does not make a calm-market transaction cost more (Polygon `Fast` pays ~384 gwei per gas
+  at today's base fee, under any of these caps). Do not read a bigger number as a bigger bill. What the
+  cap does change is (1) how long the engine can keep repricing a stuck tx before upstream #808 stops
+  it, (2) the worst case in a tip spike, and (3) the balance the engine demands before signing
+  (`maxFee × gas_limit + min_balance`). The Polygon value was derived from the engine's EIP-1559
+  arithmetic (first `maxFee` ≈ 10× base fee on 2 s blocks, 3 minimum bumps of headroom at 3× today's
+  base fee). Derivation, measured numbers and the soak procedure are in
+  `docs/runbooks/relayer-operations.md` § Cap headroom.
+- **Polygon is EIP-1559 only because the network entry says so.** The engine selects 1559 solely from
+  the *network's* `features: ["eip1559"]` (`EvmNetwork::is_legacy`). A `tags` entry or the relayer's
+  `eip1559_pricing: true` does nothing. Until #1651 the entry had `"features": []` and Polygon was
+  silently legacy. Mordor stays `"features": []` on purpose.
 
 ## Key provisioning (FR-017 / FR-019a)
 
@@ -73,11 +84,20 @@ docker run --rm -p 8080:8080 \
   -e WEBHOOK_SIGNING_KEY=... \
   -e API_KEY=... \
   -e REDIS_URL=redis://redis:6379 \
-  ghcr.io/openzeppelin/openzeppelin-relayer:v1.4.0   # PIN an exact 1.x tag
+  openzeppelin-relayer:v1.4.0   # a LOCAL build of upstream v1.4.0 (below); upstream publishes no pullable image
 ```
 
-Or use `services/relay-gateway/docker-compose.yml`, which wires gateway + engine + Redis for
-local dev.
+OpenZeppelin publishes no pullable image (ghcr answers 403 on every tag; the `ghcr.io/openzeppelin/…`
+reference this section used to show never worked). Build the base once from the pinned tag:
+
+```bash
+git clone --depth 1 --branch v1.4.0 https://github.com/OpenZeppelin/openzeppelin-relayer ozr
+DOCKER_BUILDKIT=1 docker build -f ozr/Dockerfile.production -t openzeppelin-relayer:v1.4.0 ozr
+```
+
+Or use `services/relay-gateway/docker-compose.yml`, which wires gateway + engine + Redis for local dev
+and builds the config-baked engine image on top of that local base (`docker compose up --build`; see the
+comment on its `oz-relayer` service). Local dev runs the engine in-memory, unlike production (#1652).
 
 ## Assumptions made in `config.json` (verify against the pinned 1.x release at integration)
 
@@ -151,15 +171,74 @@ earlier if a security advisory lands against the running version.
 1. Add the network fields newer releases require (`required_confirmations`, `symbol`, `features`,
    `tags`) to the custom networks, especially **61 / 63**. Validate with the new engine's config
    check.
-2. The Redis record schema and nonce-counter schema changed. **Drain every lane first** (cancel or
-   let everything confirm, then `latest == pending == engine nonce` on every chain), then start the
-   new engine on **clean** state.
+2. **The Redis record schema and nonce-counter schema changed between 1.4 and 1.8, and since #1652
+   the production engine really does keep that state in Redis** (`REPOSITORY_STORAGE_TYPE=redis`,
+   volume `redis-data`). Before #1652 this item was theoretical for production, because the engine was
+   in-memory and a restart gave clean state for free. Now it is a deliberate step. **Drain every lane
+   first** (cancel or let everything confirm, then `latest == pending == engine nonce` on every
+   chain), stop the unit, **wipe the `redis-data` volume**, then start the new engine on clean state
+   so it loads `config.json` itself. Never point a new engine at Redis written by the old one.
+   `STORAGE_ENCRYPTION_KEY` can be kept (it is only the cipher key), but check the new release's
+   `src/utils/encryption.rs` for a changed record format before assuming that. Procedure:
+   [relayer-operations.md § Storage mode](../../docs/runbooks/relayer-operations.md#storage-mode-redis-since-1652).
 3. **Stop the old engine before starting the new one.** Overlapping instances share worker IDs.
    Restart the whole `fairwins-stack@gateway` unit, and never run a rolling or blue/green overlap.
-4. Rebuild the base from the new upstream tag (`Dockerfile` header), re-tag so the image name states
-   the **upstream** version unambiguously, and update the `FROM`, this section, and the
+4. Rebuild the base from the new upstream tag (`Dockerfile` header), tag it per
+   [Image naming and provenance](#image-naming-and-provenance-1650) so the image name states
+   the **upstream** version unambiguously, and update the `FROM`, the `Dockerfile` `LABEL`s
+   (`base.name`, `upstream-version`), this section, and the
    `scripts/deps/version-pins.json` hold (ADR-006).
 5. Soak on the Mordor lane before Polygon (ADR-006: value-path pins ship alone).
+
+## Image naming and provenance (#1650)
+
+Two images, two tag grammars. Both put the **upstream OZ Relayer release** in the tag, exactly as
+upstream spells it, so that nobody has to guess which engine a container runs:
+
+| Image | Tag | Example | Meaning |
+|---|---|---|---|
+| `fairwins-relay-engine-base` | `vX.Y.Z` | `v1.4.0` | Upstream tag `vX.Y.Z` built from source, unmodified. Never reuse or retag a version for a different upstream release |
+| `fairwins-relay-engine` | `vX.Y.Z-fw<N>` | `v1.4.0-fw1` | That base plus FairWins config revision `N`. `N` starts at 1 per upstream version and increments on every config-only rebuild |
+
+**Forbidden:** tags that carry a version number which is not the upstream release (`multichain-v1.5.0`
+is the cautionary example: it does not say whether `1.5.0` is upstream or a FairWins revision), and
+floating tags such as `latest` for the engine. A free-form prefix before the version is the same
+mistake in a different place: keep it to `vX.Y.Z-fw<N>`.
+
+Provenance is also written **on the image** (`Dockerfile` `LABEL`s):
+
+```bash
+docker inspect --format '{{ index .Config.Labels "com.fairwins.engine.upstream-version" }}' <image>   # v1.4.0
+docker inspect --format '{{ index .Config.Labels "org.opencontainers.image.base.name" }}'  <image>   # …/fairwins-relay-engine-base:v1.4.0
+```
+
+The labels say what the base was built *from*. The binary's own `service_version=` startup line (also in
+Cloud Logging since #1653) says what is *running*. They should agree. If they ever differ, the log
+line is right and the image is mislabelled.
+
+**Not done by this change, and still open on #1650: verifying the LIVE image.** The deployed
+`fairwins-relay-engine:multichain-v1.5.0` was built before the labels existed, so it carries none, and
+this repo still cannot say what upstream version is inside it. An operator has to read the running
+engine's `service_version=` line (or compare layers against the `v1.4.0` base) and record the answer in
+the "Version pin" section above. The retag to the convention happens at the next engine rebuild, which
+is also when it gets the labels. Do not rename the deployed tag in place: the version-pin gate matches
+the compose and `service.yaml` image strings exactly.
+
+## Engine storage (Redis, since #1652)
+
+Production runs `REPOSITORY_STORAGE_TYPE=redis` against a persistent Redis (AOF, `noeviction`, named
+volume `redis-data`). Two consequences for anyone editing this directory:
+
+- **`config.json` is read only on an EMPTY Redis.** Editing it and restarting changes nothing on a
+  populated one (OZ Relayer v1.4.0 `process_config_file`). Relayer policy (the cap) is changed with
+  `PATCH /api/v1/relayers/{id}`; network `features`/blocktime, signers and notifications need a
+  drained-lane volume wipe. Keep the repo copy in step with whatever you patched live.
+- **`STORAGE_ENCRYPTION_KEY` is required** (Secret Manager `relay-engine-storage-key`, pinned v1,
+  engine-only). The KMS service-account key and webhook signing key are stored, encrypted, in Redis,
+  so rotating either also needs the reset.
+
+Full table of what changes how, the reset procedure and the rollout:
+[relayer-operations.md § Storage mode](../../docs/runbooks/relayer-operations.md#storage-mode-redis-since-1652).
 
 ## Fallback engine
 
