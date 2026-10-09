@@ -95,6 +95,9 @@ checks:
   file, i.e. the registry has drifted from the files. It matches on strings rather than line
   numbers, so unrelated edits don't trip it.
 - It fails on any floating tag.
+- It fails if a toolchain line declared in many files (for example `node-version:` across every
+  workflow) disagrees anywhere with its pin (V-07). One registered location would let every other
+  job drift silently.
 
 ### 4. Review schedule
 

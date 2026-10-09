@@ -128,7 +128,7 @@ signer and Polymarket's protocol settles. A total outage never touches any value
 |---------|-------|--------|
 | 503 `screening_unavailable` spike | Sanctions RPC health (gateway logs `sanctions` errors) | Fail-closed is BY DESIGN — fix RPC (rotate `RPC_URLS_<id>`); do NOT bypass screening |
 | 503 `chain_unavailable` | Both RPC endpoints down | Rotate/add endpoints (env), restart |
-| Stuck transactions | Probe FAIL `relay lane STUCK at gas_price_cap`; engine log `skipping resubmission`; lane nonce vs `eth_getTransactionCount` | Follow [Stuck transactions](#stuck-transactions): raise `gas_price_cap` + restart the stack, else cancel + drain the lane |
+| Stuck transactions | Probe FAIL `relay lane STUCK at gas_price_cap`; engine log `skipping resubmission`; lane nonce vs `eth_getTransactionCount` | Follow [Stuck transactions](#stuck-transactions). The engine is in-memory, so **cancel/drain (R2) BEFORE any restart (R1)**: a restart forgets pending records and their webhooks |
 | 429 storms | Quota counters (`SIGNER_QUOTA_PER_MIN`, `GLOBAL_QUOTA_PER_MIN`, `MAX_QUEUE_DEPTH`) | Raise deliberately or let back-pressure shed to self-submit |
 | Gas runway low | `/healthz` `gasWalletRunwayHrs` | Fund the chain's gas wallet |
 | Webhook auth failures | `WEBHOOK_SHARED_SECRET` mismatch gateway↔engine | Re-sync the secret; webhooks are rejected (fail closed) until then |
@@ -313,8 +313,11 @@ healthy.
 
 ### Verification
 
-- `docker logs --since 10m fairwins-gateway-engine 2>&1 | grep -c 'skipping resubmission'` → `0`,
-  and the probe FAIL lines stop, so the alert auto-resolves.
+- The logs were READ and are clean. An unreadable log is not a recovery, so check the read before
+  counting:
+  `logs="$(sudo docker logs --since 10m fairwins-gateway-engine 2>&1)" && printf '%s' "$logs" | grep -c 'skipping resubmission'`
+  → prints `0` (a failed `docker logs` prints nothing and exits non-zero). The probe FAIL lines also
+  stop, so the alert auto-resolves.
 - Chain `latest == pending`, and the engine `nonce` equals them (Detection 3–4).
 - `pending_transactions_count` returns to `0` (or is draining), and `last_confirmed_transaction_timestamp`
   advances.

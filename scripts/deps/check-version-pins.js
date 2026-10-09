@@ -26,6 +26,7 @@
  *           image may be `latest` or untagged. A floating tag is not reproducible, and it gives no
  *           upgrade signal because the version moves under you without telling you.
  *     V-06  the live half's workflow is wired (scheduled, runs --live, no continue-on-error).
+ *     V-07  a toolchain line declared in many files (a pin's `scan`) is the same everywhere.
  *
  *   --live               Asks upstream for each pin (git tags, Docker Hub, endoflife.date) and
  *                        writes a markdown report. It REPORTS rather than fails, because being
@@ -193,7 +194,14 @@ function checkDrift(registry, { root = ROOT } = {}) {
         out.push(v('V-03', `${p.id}: ${l.path} does not exist. Move the location, or retire the pin.`));
         continue;
       }
-      if (!fs.readFileSync(file, 'utf8').includes(l.contains)) {
+      // Comments do not count: a pin repeated in a comment (build notes, a "was vX" line) would
+      // otherwise keep V-03 green after the live reference itself moved.
+      const live = fs
+        .readFileSync(file, 'utf8')
+        .split('\n')
+        .filter((line) => !/^\s*(#|\/\/)/.test(line))
+        .join('\n');
+      if (!live.includes(l.contains)) {
         out.push(
           v(
             'V-03',
@@ -305,6 +313,20 @@ function checkImages(registry, refs) {
       );
     }
 
+    // A registered image must carry its registered pin, first-party or not. Without this, moving a
+    // first-party FROM (e.g. the held OZ Relayer base) to another tag passes as long as the old
+    // string survives anywhere else in the file.
+    const { name } = splitRef(ref);
+    for (const p of registry.pins || []) {
+      for (const l of p.locations || []) {
+        if (l.path !== file || !l.contains.includes(':')) continue;
+        const pinnedName = splitRef(l.contains).name;
+        if ((name === pinnedName || name.endsWith(`/${pinnedName}`)) && !ref.includes(l.contains)) {
+          out.push(v('V-03', `${where} is registered as \`${l.contains}\` (${p.id}). Bump the registry with the file.`));
+        }
+      }
+    }
+
     if (firstParty) continue;
     const claimed = (registry.pins || []).some((p) => (p.locations || []).some((l) => l.path === file && ref.includes(l.contains)));
     if (!claimed) {
@@ -319,6 +341,48 @@ function checkImages(registry, refs) {
     }
   }
   return out;
+}
+
+/* ------------------------------------------------------------------ V-07 */
+
+/**
+ * A toolchain LINE declared in many places (e.g. `node-version:` across every workflow) is one pin.
+ * Listing a single location would let any other job drift to another line with the gate green, so
+ * a pin may declare `scan: { files, pattern }`: every capture of `pattern` in every tracked file
+ * matching `files` must equal `pinned`, and at least one must exist.
+ */
+function checkScans(registry, files, read) {
+  const out = [];
+  for (const p of registry.pins || []) {
+    if (!p.scan) continue;
+    let fileRe;
+    let re;
+    try {
+      fileRe = new RegExp(p.scan.files);
+      re = new RegExp(p.scan.pattern, 'g');
+    } catch (e) {
+      out.push(v('V-01', `${p.id}.scan has an invalid regex: ${e.message}`));
+      continue;
+    }
+    let seen = 0;
+    for (const f of files.filter((x) => fileRe.test(x))) {
+      read(f)
+        .split('\n')
+        .forEach((line, i) => {
+          if (/^\s*#/.test(line)) return;
+          for (const m of line.matchAll(re)) {
+            seen++;
+            if (m[1] !== p.pinned) out.push(v('V-07', `${f}:${i + 1} declares ${m[1]}, but ${p.id} pins ${p.pinned}. Move every declaration together.`));
+          }
+        });
+    }
+    if (!seen) out.push(v('V-07', `${p.id}.scan matched nothing. The pattern is wrong, or the pin is stale.`));
+  }
+  return out;
+}
+
+function trackedFiles(root = ROOT) {
+  return execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' }).split('\n').filter(Boolean);
 }
 
 /* ------------------------------------------------------------------ V-06 */
@@ -429,6 +493,7 @@ async function readUpstream(pin, { today, fetchImpl, exec } = {}) {
 }
 
 function eolSoon(eol, today) {
+  if (typeof eol === 'string' && eol.startsWith('ended')) return true; // ended, date unpublished
   if (!eol || !ISO_DATE.test(eol)) return false;
   return eol <= addDays(today, 90);
 }
@@ -481,6 +546,7 @@ async function main(argv) {
     ...checkRegistryShape(registry, today),
     ...checkDrift(registry),
     ...checkImages(registry, discoverImages()),
+    ...checkScans(registry, trackedFiles(), (f) => fs.readFileSync(path.join(ROOT, f), 'utf8')),
     ...checkWorkflowWiring(),
   ];
 
@@ -510,6 +576,8 @@ module.exports = {
   checkDrift,
   checkImages,
   checkWorkflowWiring,
+  checkScans,
+  trackedFiles,
   discoverImages,
   splitRef,
   latestStable,

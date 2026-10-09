@@ -21,6 +21,7 @@ const {
   checkDrift,
   checkImages,
   checkWorkflowWiring,
+  checkScans,
   discoverImages,
   splitRef,
   latestStable,
@@ -153,6 +154,30 @@ test('V-03: `contains` must carry the pinned version', () => {
   p.locations = [{ path: 'Dockerfile', contains: 'node:22-alpine' }];
   const root = tree({ 'Dockerfile': 'FROM node:22-alpine\n' });
   assert.ok(rules(checkDrift(registry({ pins: [p] }), { root })).includes('V-03'));
+});
+
+test('V-03: a pin surviving only in a COMMENT is drift (review: FROM moved, comment kept)', () => {
+  const root = tree({
+    'Dockerfile': 'FROM node:22.23.3-alpine3.24\n',
+    'svc/Dockerfile': '# -> <AR>/engine-base:v1.4.0\nFROM r/engine-base:v1.5.0\n',
+  });
+  assert.deepStrictEqual(rules(checkDrift(registry(), { root })), ['V-03']);
+});
+
+test('V-03: a registered FIRST-PARTY image moved off its pin is caught by name', () => {
+  const reg = registry({ firstPartyPrefixes: ['r/'] });
+  const vs = checkImages(reg, [ref('r/engine-base:v1.5.0', 'svc/Dockerfile')]);
+  assert.deepStrictEqual(rules(vs), ['V-03']);
+  assert.deepStrictEqual(checkImages(reg, [ref('r/engine-base:v1.4.0', 'svc/Dockerfile')]), []);
+});
+
+test('V-07: a scanned toolchain line must match in every file, and must match somewhere', () => {
+  const p = { ...trackPin(), id: 'node-ci', pinned: '22', scan: { files: '^wf/', pattern: "node-version:\\s*['\"]?([^'\"\\s]+)" } };
+  const files = { 'wf/a.yml': "node-version: '22'\n", 'wf/b.yml': 'node-version: 22\n# node-version: 18\n', 'wf/c.yml': 'node-version: "24"\n', 'x.yml': 'node-version: 18\n' };
+  const vs = checkScans(registry({ pins: [p] }), Object.keys(files), (f) => files[f]);
+  assert.deepStrictEqual(vs.map((x) => x.message.split(' ')[0]), ['wf/c.yml:1']);
+  const none = checkScans(registry({ pins: [p] }), ['x.yml'], (f) => files[f]);
+  assert.match(none[0].message, /matched nothing/);
 });
 
 test('V-03: a vanished file is drift', () => {
@@ -317,6 +342,13 @@ test('readUpstream: a past-EOL unwatched toolchain is still flagged', async () =
   assert.strictEqual(r.state, 'unwatched');
   assert.strictEqual(r.eolSoon, true);
   assert.match(renderReport([r], registry(), TODAY), /\*\*2024-08-13\*\* ⚠/);
+});
+
+test('eol: an upstream "ended, no date" line is actionable', async () => {
+  const fetchImpl = async (url) => (url.includes('endoflife') ? jsonRes([{ cycle: '22', eol: true }]) : jsonRes({ results: [{ name: '22.23.3-alpine' }], next: null }));
+  const r = await readUpstream(trackPin(), { today: TODAY, fetchImpl });
+  assert.strictEqual(r.eolSoon, true);
+  assert.match(renderReport([r], registry(), TODAY), /Needs a decision:\*\* 1/);
 });
 
 test('readUpstream: a supported line with no published EOL reads "supported", not a blank', async () => {

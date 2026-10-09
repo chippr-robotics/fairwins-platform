@@ -164,6 +164,10 @@
       "eol": {
         "product": "nodejs",
         "cycle": "22"
+      },
+      "scan": {
+        "files": "^\\.github/(workflows|actions)/.+\\.ya?ml$",
+        "pattern": "node-version:\\s*['\"]?([^'\"\\s]+)"
       }
     },
     {
