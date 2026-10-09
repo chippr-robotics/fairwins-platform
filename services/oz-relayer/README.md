@@ -162,15 +162,38 @@ earlier if a security advisory lands against the running version.
 1. Add the network fields newer releases require (`required_confirmations`, `symbol`, `features`,
    `tags`) to the custom networks, especially **61 / 63**. Validate with the new engine's config
    check.
-2. The Redis record schema and nonce-counter schema changed. **Drain every lane first** (cancel or
-   let everything confirm, then `latest == pending == engine nonce` on every chain), then start the
-   new engine on **clean** state.
+2. **The Redis record schema and nonce-counter schema changed between 1.4 and 1.8, and since #1652
+   the production engine really does keep that state in Redis** (`REPOSITORY_STORAGE_TYPE=redis`,
+   volume `redis-data`). Before #1652 this item was theoretical for production, because the engine was
+   in-memory and a restart gave clean state for free. Now it is a deliberate step. **Drain every lane
+   first** (cancel or let everything confirm, then `latest == pending == engine nonce` on every
+   chain), stop the unit, **wipe the `redis-data` volume**, then start the new engine on clean state
+   so it loads `config.json` itself. Never point a new engine at Redis written by the old one.
+   `STORAGE_ENCRYPTION_KEY` can be kept (it is only the cipher key), but check the new release's
+   `src/utils/encryption.rs` for a changed record format before assuming that. Procedure:
+   [relayer-operations.md § Storage mode](../../docs/runbooks/relayer-operations.md#storage-mode-redis-since-1652).
 3. **Stop the old engine before starting the new one.** Overlapping instances share worker IDs.
    Restart the whole `fairwins-stack@gateway` unit, and never run a rolling or blue/green overlap.
 4. Rebuild the base from the new upstream tag (`Dockerfile` header), re-tag so the image name states
    the **upstream** version unambiguously, and update the `FROM`, this section, and the
    `scripts/deps/version-pins.json` hold (ADR-006).
 5. Soak on the Mordor lane before Polygon (ADR-006: value-path pins ship alone).
+
+## Engine storage (Redis, since #1652)
+
+Production runs `REPOSITORY_STORAGE_TYPE=redis` against a persistent Redis (AOF, `noeviction`, named
+volume `redis-data`). Two consequences for anyone editing this directory:
+
+- **`config.json` is read only on an EMPTY Redis.** Editing it and restarting changes nothing on a
+  populated one (OZ Relayer v1.4.0 `process_config_file`). Relayer policy (the cap) is changed with
+  `PATCH /api/v1/relayers/{id}`; network `features`/blocktime, signers and notifications need a
+  drained-lane volume wipe. Keep the repo copy in step with whatever you patched live.
+- **`STORAGE_ENCRYPTION_KEY` is required** (Secret Manager `relay-engine-storage-key`, pinned v1,
+  engine-only). The KMS service-account key and webhook signing key are stored, encrypted, in Redis,
+  so rotating either also needs the reset.
+
+Full table of what changes how, the reset procedure and the rollout:
+[relayer-operations.md § Storage mode](../../docs/runbooks/relayer-operations.md#storage-mode-redis-since-1652).
 
 ## Fallback engine
 

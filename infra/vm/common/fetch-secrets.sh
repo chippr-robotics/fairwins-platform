@@ -7,7 +7,7 @@
 #   1. PER-CONTAINER SCOPING. Cloud Run scoped each secret to exactly one container. The VM must not
 #      widen that. The internet-facing container never receives the other container's credential:
 #        gateway VM: gateway.env (the gateway's own credentials)   engine.env (API_KEY,
-#                    WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY — the exported SA key holding
+#                    WEBHOOK_SIGNING_KEY, STORAGE_ENCRYPTION_KEY, GCP_PRIVATE_KEY — the exported SA key holding
 #                    cloudkms.signerVerifier on BOTH hot gas keys; the public-facing gateway
 #                    container MUST NOT see it)   finops.env / alloy.env (vendor READ tokens)
 #        bundler VM: nginx.env (ORIGIN_LOCK_SECRET only)   alto.env (the executor key + alto's
@@ -166,6 +166,19 @@ case "$ROLE" in
     emit "$EN" API_KEY                   relay-engine-api-key        2      required
     emit "$EN" WEBHOOK_SIGNING_KEY       relay-webhook-secret        2      required
     emit "$EN" GCP_PRIVATE_KEY           relay-engine-gcp-private-key latest required
+    # #1652: the key the engine encrypts its signer + notification records with at rest in redis
+    # (OZ Relayer v1.4.0 src/utils/encryption.rs: base64 of exactly 32 bytes). REQUIRED because the
+    # engine refuses to boot in redis storage mode without it (initialize_repositories), so an
+    # optional-and-absent key would be a crash-loop with a less direct diagnosis than this die.
+    #
+    # PINNED TO VERSION 1, not latest, for the opposite reason from most secrets: a ROTATION of this
+    # key makes every encrypted record already in redis undecryptable, so adding a version must never
+    # silently change what a restart reads. Rotating means a reviewed edit of this pin PLUS a one-shot
+    # storage reset on a drained lane (docs/runbooks/relayer-operations.md "Storage mode").
+    #
+    # The payload must carry NO trailing newline (create it with printf / tr -d '\n'): emit() writes
+    # it verbatim between quotes, and a newline inside the base64 is a different, invalid key.
+    emit "$EN" STORAGE_ENCRYPTION_KEY    relay-engine-storage-key    1      required
 
     # server.js:48-61 prefers PM_SIGNER_PRIVATE_KEY over PM_SIGNER_KMS_KEY with NO guard and NO
     # warning. A raw key present anywhere in the gateway's environment silently downgrades paymaster
