@@ -31,8 +31,28 @@ services:
       - /tmp
 
   oz-relayer:
-    # PIN an exact 1.x tag before relying on this (see ../oz-relayer/README.md).
-    image: ghcr.io/openzeppelin/openzeppelin-relayer:v1.4.0
+    # LOCAL BUILD (#1660). OpenZeppelin publishes NO pullable image (ghcr answers 403 on every tag), so
+    # the old `ghcr.io/openzeppelin/openzeppelin-relayer:v1.4.0` here never worked. This builds the
+    # config-baked FairWins engine image from ../oz-relayer/Dockerfile, whose FROM names our private
+    # Artifact Registry base. The additional_contexts entry below swaps that FROM for a LOCAL image
+    # tagged openzeppelin-relayer:v1.4.0, so you build the base once from upstream and need no
+    # registry access (the Dockerfile itself is untouched, so production builds are unaffected):
+    #
+    #   git clone --depth 1 --branch v1.4.0 https://github.com/OpenZeppelin/openzeppelin-relayer ozr
+    #   DOCKER_BUILDKIT=1 docker build -f ozr/Dockerfile.production -t openzeppelin-relayer:v1.4.0 ozr
+    #   docker compose up --build
+    #
+    # The first build is a Rust compile (slow, a few GB of cache). Keep the tag at v1.4.0 while the engine
+    # is held there (ADR-006, issue #1648); changing it is a version bump and goes through
+    # services/oz-relayer/README.md "Version pin". Not exercised in CI: the sandbox that wrote this had
+    # no Docker daemon, so the first real build is the verification.
+    build:
+      context: ../oz-relayer
+      dockerfile: Dockerfile
+      additional_contexts:
+        us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-relay-engine-base:v1.4.0: docker-image://openzeppelin-relayer:v1.4.0
+    # No `image:` key on purpose: compose names the build `<project>-oz-relayer`, and the version-pin
+    # gate (scripts/deps/check-version-pins.js) would otherwise demand a registry entry for a local tag.
     restart: unless-stopped
     volumes:
       - ../oz-relayer/config:/app/config:ro

@@ -84,11 +84,20 @@ docker run --rm -p 8080:8080 \
   -e WEBHOOK_SIGNING_KEY=... \
   -e API_KEY=... \
   -e REDIS_URL=redis://redis:6379 \
-  ghcr.io/openzeppelin/openzeppelin-relayer:v1.4.0   # PIN an exact 1.x tag
+  openzeppelin-relayer:v1.4.0   # a LOCAL build of upstream v1.4.0 (below); upstream publishes no pullable image
 ```
 
-Or use `services/relay-gateway/docker-compose.yml`, which wires gateway + engine + Redis for
-local dev.
+OpenZeppelin publishes no pullable image (ghcr answers 403 on every tag; the `ghcr.io/openzeppelin/…`
+reference this section used to show never worked). Build the base once from the pinned tag:
+
+```bash
+git clone --depth 1 --branch v1.4.0 https://github.com/OpenZeppelin/openzeppelin-relayer ozr
+DOCKER_BUILDKIT=1 docker build -f ozr/Dockerfile.production -t openzeppelin-relayer:v1.4.0 ozr
+```
+
+Or use `services/relay-gateway/docker-compose.yml`, which wires gateway + engine + Redis for local dev
+and builds the config-baked engine image on top of that local base (`docker compose up --build`; see the
+comment on its `oz-relayer` service). Local dev runs the engine in-memory, unlike production (#1652).
 
 ## Assumptions made in `config.json` (verify against the pinned 1.x release at integration)
 

@@ -17,6 +17,8 @@ self-submit fallback, so the worst failure mode of everything below is "users pa
 cd services/relay-gateway
 cp .env.example .env        # set ORIGIN_AUTH_SECRET + WEBHOOK secrets; never commit .env
 docker compose up --build   # gateway :8788, engine :8080, redis :6379
+# FIRST build the local engine base once (upstream publishes no pullable image):
+# see the comment on the oz-relayer service in services/relay-gateway/docker-compose.yml (#1660)
 curl -s localhost:8788/healthz | jq
 ```
 
