@@ -12,6 +12,6 @@
     "./package.json": "./package.json"
   },
   "peerDependencies": {
-    "vite": "^8.2.1"
+    "vite": "^8.3.2"
   }
 }
