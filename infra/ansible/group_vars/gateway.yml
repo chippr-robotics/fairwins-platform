@@ -11,7 +11,7 @@ fairwins_namespace_owner: gateway
 
 fairwins_secret_env_files:
   - { file: gateway.env, description: "the gateway secrets" }
-  - { file: engine.env, description: "API_KEY, WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY, and STORAGE_ENCRYPTION_KEY + REPOSITORY_STORAGE_TYPE once relay-engine-storage-key has a version" }
+  - { file: engine.env, description: "API_KEY, WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY (+ STORAGE_ENCRYPTION_KEY once armed)" }
 
 # GCP_PRIVATE_KEY is the exported SA key holding cloudkms.signerVerifier on BOTH hot gas keys. Cloud
 # Run scoped it to the engine alone, and preflight.sh asserts that separation at every start rather
