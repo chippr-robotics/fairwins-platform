@@ -471,6 +471,145 @@
       "notes": "requires_python !=3.12.0,>=3.10 (PyPI): setup-python '3.12' resolves the newest 3.12.x, never 3.12.0. Slither, Medusa and the weekly job all go through it."
     },
     {
+      "id": "cloudbuild-docker-builder",
+      "kind": "container-image",
+      "owner": "mark",
+      "pinned": "20.10.24",
+      "status": "track",
+      "locations": [
+        {
+          "path": "cloudbuild.yaml",
+          "contains": "cloud-builders/docker:20.10.24"
+        },
+        {
+          "path": "cloudbuild.staging.yaml",
+          "contains": "cloud-builders/docker:20.10.24"
+        },
+        {
+          "path": "services/alto-bundler/cloudbuild.yaml",
+          "contains": "cloud-builders/docker:20.10.24"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "gcr.io/cloud-builders is Google's registry; its tag list is readable (gcr.io/v2/cloud-builders/docker/tags/list) but Google labels every tag deprecated or no-new-use, so there is no release feed to follow."
+      },
+      "notes": "Pinned 2026-10-09 to the tag whose digest (sha256:f772ab45...) is what `latest` resolved to that day, so the pin changes no bytes. Google marks this image `no-new-use-public-image`: moving to the `29` tag (Docker 29) or off the Google builder is a build-path decision, not a sweep."
+    },
+    {
+      "id": "cloudbuild-cloud-sdk",
+      "kind": "container-image",
+      "owner": "mark",
+      "pinned": "588.0.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": "cloudbuild.yaml",
+          "contains": "cloud-sdk:588.0.0"
+        },
+        {
+          "path": "cloudbuild.staging.yaml",
+          "contains": "cloud-sdk:588.0.0"
+        },
+        {
+          "path": "services/alto-bundler/cloudbuild.yaml",
+          "contains": "cloud-sdk:588.0.0"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "gcr.io/google.com/cloudsdktool/cloud-sdk publishes a readable tag list but no release feed; the weekly report cannot compare versions."
+      },
+      "notes": "Pinned 2026-10-09 to the tag sharing the digest `latest` resolved to (sha256:f36908a9...), so it changes no bytes. Runs `gcloud run deploy`; the Cloud Run shape belongs to Terraform, the image to Cloud Build."
+    },
+    {
+      "id": "tflint",
+      "kind": "toolchain",
+      "owner": "mark",
+      "pinned": "v0.64.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "tflint_version: v0.64.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/terraform-linters/tflint",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "Advisory lint on infra PRs. v0.64.0 was the newest tag on 2026-10-09 (it replaces `latest`)."
+    },
+    {
+      "id": "ansible-core",
+      "kind": "toolchain",
+      "owner": "mark",
+      "pinned": "2.21.5",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "ansible-core==2.21.5"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/ansible/ansible",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "eol": {
+        "product": "ansible-core",
+        "cycle": "2.21"
+      },
+      "notes": "CI lint/syntax-check only; the operator's venv (infra/ansible/README.md) is separate. requires_python >=3.12 (PyPI), matches the job's setup-python 3.12. Installs with ansible-lint 26.9.0, checked together."
+    },
+    {
+      "id": "ansible-lint",
+      "kind": "toolchain",
+      "owner": "mark",
+      "pinned": "26.9.0",
+      "status": "track",
+      "locations": [
+        {
+          "path": ".github/workflows/infra-plan.yml",
+          "contains": "ansible-lint==26.9.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/ansible/ansible-lint",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "notes": "A new release can add rules that fail infra PRs that did not change; bump it in its own PR and read the lint diff."
+    },
+    {
+      "id": "lhci-cli",
+      "kind": "toolchain",
+      "owner": "glass",
+      "pinned": "0.13.0",
+      "status": "hold",
+      "locations": [
+        {
+          "path": ".github/workflows/frontend-testing.yml",
+          "contains": "@lhci/cli@0.13.0"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/GoogleChrome/lighthouse-ci",
+        "tagPattern": "^v\\d+\\.\\d+\\.\\d+$"
+      },
+      "hold": {
+        "reason": "0.13.0 bundles Lighthouse 11.4.0; 0.14.0 moves to Lighthouse 12.1.0 and 0.15.x to 12.6.1 (npm dependency metadata, checked 2026-10-09). A Lighthouse major changes the audit set and scoring, and the performance budgets in lighthouserc.desktop.json / lighthouserc.mobile.json were set against 11. The pin was `0.13.x`, and 0.13.0 is the only 0.13 release, so this preserves what CI already ran.",
+        "ref": "#1657",
+        "watch": [
+          "re-baseline the lighthouserc budgets against Lighthouse 12, then bump to 0.15.1"
+        ],
+        "reviewBy": "2027-01-09"
+      }
+    },
+    {
       "id": "java-native",
       "kind": "mobile",
       "owner": "mark",

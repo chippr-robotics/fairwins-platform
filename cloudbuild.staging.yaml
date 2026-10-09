@@ -24,7 +24,7 @@
 
 steps:
   # ---- 1. Mainnet-cohort staging image (the promotion mirror) -----------------------------------
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     id: build-mainnet
     args:
       - 'build'
@@ -98,7 +98,7 @@ steps:
       - '.'
 
   # ---- 2. Testnet-cohort staging image ----------------------------------------------------------
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     id: build-testnet
     args:
       - 'build'
@@ -133,16 +133,16 @@ steps:
       - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/prediction-dao-research/staging-testnet:$COMMIT_SHA'
       - '.'
 
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/prediction-dao-research/staging:$COMMIT_SHA']
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     args: ['push', 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/prediction-dao-research/staging-testnet:$COMMIT_SHA']
 
   # ---- 3. Deploy both ---------------------------------------------------------------------------
   # Separate services with separate secrets (FR-027). A failed deploy fails loudly and leaves the
   # previous revision serving, which correctly keeps reporting the version it is actually running
   # rather than the one that was intended (FR-028).
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:588.0.0'
     entrypoint: gcloud
     args:
       - 'run'
@@ -156,7 +156,7 @@ steps:
       - 'managed'
       - '--allow-unauthenticated'
 
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:588.0.0'
     entrypoint: gcloud
     args:
       - 'run'
