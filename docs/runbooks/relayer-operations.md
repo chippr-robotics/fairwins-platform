@@ -8,7 +8,7 @@ self-submit fallback, so the worst failure mode of everything below is "users pa
 | Component | Where | Owns |
 |-----------|-------|------|
 | `relay-gateway` | The `fairwins-gateway` GCE VM (`services/relay-gateway`; formerly Cloud Run — see `infra/vm/README.md`) | Policy: signer recovery, intent binding, fail-closed sanctions re-screen, dedup, quotas/spend caps, back-pressure, kill switch, audit log |
-| `oz-relayer` | Container next to the gateway (`services/oz-relayer`) | Mechanics: per-chain nonce lanes, gas pricing/bumping (legacy type-0 on 61/63), inclusion tracking, RPC failover, the KMS-held gas key |
+| `oz-relayer` | Container next to the gateway (`services/oz-relayer`) | Mechanics: per-chain nonce lanes, gas pricing/bumping (EIP-1559 on Polygon 137 since #1651; legacy type-0 on 61/63), inclusion tracking, RPC failover, the KMS-held gas key |
 | Frontend probe | `frontend/src/lib/relay` | `VITE_RELAYER_URL` + health probe → self-submit routing |
 
 ## Local bring-up (validation)
@@ -233,7 +233,7 @@ about any upstream issue.
 
 | Evidence | Cause | Go to |
 |---|---|---|
-| `skipping resubmission` hits; the tx's last price (`price_params`, or the tx via `eng GET /relayers/<id>/transactions/<tx_id>`) is above `gas_price_cap / 1.1`; `eth_gasPrice` (×1.5 for the default `fast` speed) is at or above that tx price | **Cap-bound (#808)**: the market outran the cap | R1, then R2 |
+| `skipping resubmission` hits; the tx's last price (`price_params`, or the tx via `eng GET /relayers/<id>/transactions/<tx_id>`) is above `gas_price_cap / 1.1` (Polygon, EIP-1559: its `max_fee_per_gas`; Mordor, legacy: its `gas_price`); the market (`baseFee × 10 + tip` on Polygon, `eth_gasPrice × 1.5` on Mordor) is at or above that tx price | **Cap-bound (#808)**: the market outran the cap | R1, then R2 |
 | No `skipping resubmission`; engine `nonce` > chain `pending`; the oldest stuck nonce has no tx in the mempool | **Nonce gap**: a lower nonce was never broadcast or was dropped, so everything above it waits | R2 (cancelling the gap's tx at that nonce fills it) |
 | `pending > latest`, no skip lines, price well under the cap | Ordinary congestion. The engine is still bumping | Watch for 10 min. Escalate if it does not clear |
 | Gas wallet balance near `min_balance` | Insufficient funds, not a pricing problem | Fund it (see **Gas runway low**) |
@@ -329,40 +329,135 @@ healthy.
 
 ### Cap headroom (measured 2026-10-09)
 
-| Relayer | `gas_price_cap` | Pricing path | Initial price clamps at the cap when `eth_gasPrice` ≥ | A tx can no longer be bumped once its price > | Measured `eth_gasPrice` | Headroom |
-|---|---|---|---|---|---|---|
-| `polygon-137` | 1500 gwei (`1500000000000`) | **legacy** (see note) | 1000 gwei (cap ÷ 1.5) | 1363.6 gwei (cap ÷ 1.1) | **275.84 gwei** | first bump fails at `eth_gasPrice` ≈ 909 gwei (cap ÷ 1.65): **3.3×** |
-| `mordor-63` | 2000 gwei (`2000000000000`) | legacy | 1333 gwei | 1818 gwei | **1.00 gwei** | ≈ 1212 gwei: **~1200×** |
+Polygon moved from legacy to **EIP-1559** pricing in #1651, and its cap was re-derived from the
+engine's EIP-1559 arithmetic. Mordor stays legacy. All source paths below are at the upstream
+`v1.4.0` tag. The running image's real version is still unverified (see
+[Which engine version is running](#which-engine-version-is-running)), so re-check the citations if it
+turns out to be 1.5+.
 
-Polygon `eth_feeHistory` over 1024 blocks (95,233,830–95,234,853): base fee min 241.7 / median 248.3
-/ max 258.9 gwei. 50th-percentile tip median 87.6. 99th-percentile tip median 473.8 and max
-10,845 gwei. Base + 99th-percentile tip median 720.9, p95 1,704, max 11,090 gwei. The base fee is the
-inclusion floor, and it sits **~5.6×** under the 1363.6 gwei no-bump line. The 99th-percentile
-column is the most aggressive payer per block, not what we must pay. A few blocks clearing above the
-cap is competition at the top, not a stall. **Verdict: headroom is adequate today. Caps unchanged.**
-Revisit if the Polygon base fee holds above ~600 gwei.
+**Read this first: `gas_price_cap` is a ceiling, not the spend.** What a transaction pays is
+`min(maxFeePerGas, baseFee + tip) × gas used`. Raising the cap from 1,500 to 10,500 gwei does not
+make a single transaction cost more while the market is calm: at the measured base fee the engine
+pays ~384 gwei per gas, whatever the ceiling. The cap changes three things, and only three:
 
-**Polygon is priced as LEGACY, not EIP-1559, in the shipped config.** The engine picks EIP-1559 only
-when the *network's* `features` contains `"eip1559"` (`EvmNetwork::is_legacy`,
-`src/models/network/evm/network.rs`, plus `fetch_speed_price_params`). Our `polygon` network entry has
-`"features": []`. The `eip1559` string sits in `tags`, which do not drive pricing, so
-`eip1559_pricing: true` on the relayer has no effect. A `fast` transaction is therefore a type-0
-`gasPrice` of 1.5 × `eth_gasPrice` (`Speed::multiplier`, `src/services/gas/evm_gas_price.rs`).
-`specs/036-relayer-infrastructure/contracts/engine-integration.md` expected `["eip1559"]` for 137.
-Changing it changes live pricing and is a separate, deliberate change. Under EIP-1559 the engine sets
-`maxFee = baseFee × min(1.125^(90 s ÷ blocktime), 10) + tip`, which is 10 × base on Polygon's 2 s
-blocks. At today's ~245 gwei base fee that would reach the 1500 gwei cap almost immediately.
+1. Whether the engine can *keep repricing* a stuck transaction (#808, below).
+2. The worst-case price in a tip spike. The tip is market-derived and clamped only by the cap, so in
+   a spike the cap IS the bound on what one transaction can pay: `cap × gas used`.
+3. The balance pre-check. The engine requires `balance − maxFee × gas_limit ≥ min_balance` before it
+   signs (`calculate_total_cost` + `validate_sufficient_relayer_balance`). `maxFee` there is the
+   computed (capped) ceiling, so the requirement rises with the market and reaches `cap × gas_limit`
+   only when the market is at the cap.
 
-Measured with the engine's own public RPCs, 2026-10-09T14:51:33Z:
+#### How the engine prices an EIP-1559 transaction (v1.4.0)
+
+| Quantity | Rule | Source |
+|---|---|---|
+| Network is 1559 | Only if the **network** `features` contains `"eip1559"`. `tags` and `policies.eip1559_pricing: true` do not turn it on. `eip1559_pricing: false` forces legacy | `EvmNetwork::is_legacy`, `src/models/network/evm/network.rs`; `PriceCalculator::fetch_speed_price_params`, `src/domain/transaction/evm/price_calculator.rs` |
+| Default speed | `Fast`. The gateway sends `speed: 'fast'` (`services/relay-gateway/src/engine/client.js`) | `DEFAULT_TRANSACTION_SPEED`, `src/constants/evm_transaction.rs` |
+| `maxPriorityFeePerGas` | Mean of the **positive** per-block rewards at the speed's percentile over the last **4** blocks. Percentiles: SafeLow 30, Average 50, **Fast 85**, Fastest 99 | `SPEED_PERCENTILES`, `compute_max_priority_fees_from_history`, `src/services/gas/evm_gas_price.rs`; `HISTORICAL_BLOCKS = 4` |
+| `maxFeePerGas` | `baseFee × m + tip`, where `m = min(1.125^(90 000 ms ÷ blocktime), 10)`. Polygon's `average_blocktime_ms` is 2000, so 45 blocks and `m = 10` | `get_base_fee_multiplier`, `calculate_max_fee_per_gas`, `price_calculator.rs` |
+| Cap on a first submission | `maxFee = min(maxFee, cap)`, then `tip = min(tip, maxFee)`. The cap applies to **both** fee fields, as a per-gas wei ceiling | `apply_gas_price_cap_and_constraints`, `cap_gas_price`, same file |
+| Bump (replacement) | `tip' = max(market tip, 1.1 × tip)`; `maxFee' = max(max(baseFee, 1.1 × maxFee), 10 × baseFee + tip')`; **both then clamped to the cap**. The bump counts only if `tip' ≥ 1.1 × tip` AND `maxFee' ≥ 1.1 × maxFee` after clamping. Otherwise `is_min_bumped = false` and the engine logs `skipping resubmission` (#808) | `handle_eip1559_bump`, `calculate_min_bump` (`MIN_BUMP_FACTOR` 1.1); `resubmit_transaction`, `src/domain/transaction/evm/evm_transaction.rs` |
+| NOOP cancel | `force_bump` lifts the cap | `calculate_bumped_gas_price(…, force_bump)` |
+| Balance check | `maxFee × gas_limit + value` against `balance − min_balance` | `PriceParams::calculate_total_cost`; `validate_sufficient_relayer_balance`, `src/domain/relayer/evm/validations.rs` |
+| Legacy vs 1559 mixing | A legacy transaction in flight cannot be replaced by a 1559 one (and the reverse) | `check_transaction_compatibility`, `src/domain/transaction/evm/replacement.rs` |
+
+Two consequences. First, with a 10× multiplier the engine's own first-submission `maxFee` is
+**~10× the base fee**, so a cap of only a few multiples of the base fee clamps the first submission
+and the transaction starts life already short of headroom. The old 1,500 gwei cap was ~6× today's
+base fee. Second, after the first bump `maxFee'` is dominated by `1.1 × maxFee`, so a stuck
+transaction climbs geometrically until `maxFee > cap ÷ 1.1`. Then #808 stops it.
+
+#### Measurement (2026-10-09T18:15Z, the engine's own `rpc_urls`)
 
 ```bash
-curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_gasPrice","params":[]}' https://polygon-bor-rpc.publicnode.com   # also polygon.drpc.org: same 0x4039609db0
-curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_gasPrice","params":[]}' https://rpc.mordor.etccooperative.org     # also geth-mordor.etc-network.info: same 0x3b9aca00
-curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x400","latest",[50,99]]}' https://polygon-bor-rpc.publicnode.com
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_gasPrice","params":[]}' https://polygon-bor-rpc.publicnode.com   # 0x4108cbf1b5 = 279.3 gwei (drpc: 0x40c32a0b17 = 278.2)
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x400","latest",[30,50,85,99]]}' https://polygon-bor-rpc.publicnode.com
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_feeHistory","params":["0x400","latest",[50,99]]}' https://polygon.drpc.org
+curl -sS -H 'content-type: application/json' -d '{"jsonrpc":"2.0","id":1,"method":"eth_getBalance","params":["0x3BB28b184b8a748dE22aBD076634F85adADA82db","latest"]}' https://polygon-bor-rpc.publicnode.com   # 9.92 POL
 ```
 
-Both gas wallets read `latest == pending` (nonce 1 on Polygon, 4 on Mordor) at the same moment, so
-no lane was stuck.
+`eth_feeHistory` over 1,024 blocks (publicnode, from block 95,241,974). The `[50,99]` request on both
+providers agreed to within one block (base fee median 248.2 and 248.3 gwei). The `[30,50,85,99]`
+request is the engine's own percentile set, so the engine's tip is recomputed from it exactly: a
+sliding 4-block mean of the positive per-block reward, one value per window.
+
+| Series (gwei) | min | median | p95 | p99 | max |
+|---|---|---|---|---|---|
+| Base fee | 234.0 | 248.3 | – | – | 264.9 |
+| Tip, SafeLow (p30), 4-block mean | – | 100 | 179 | 202 | 236 |
+| Tip, Average (p50) | – | 112 | 186 | 218 | 237 |
+| **Tip, Fast (p85), the default** | – | **135** | **199** | **241** | **2,913** |
+| Tip, Fastest (p99) | – | 504 | 1,413 | 2,377 | 11,565 |
+| Fast first-submission `maxFee` (`10 × base + tip`) | – | 2,618 | 2,715 | 2,797 | 5,361 |
+| Fast price actually paid (`base + tip`) | – | **384** | 449 | 489 | 3,158 |
+
+For comparison, the legacy path paid `1.5 × eth_gasPrice` = **419 gwei** for a `fast` transaction. So
+EIP-1559 `Fast` is expected to cost about the same or slightly less in calm conditions (median 384 vs
+419), with a heavier tail (max 3,158). The Fastest tip is spikier (max 11,565). We do not use that
+speed.
+
+#### Derivation of the Polygon cap
+
+The cap must (a) leave the **first submission at the default speed unclamped** even if the base fee
+triples, and (b) leave room for **at least three minimum bumps** (1.1³ = 1.331) after that.
+
+```
+B  = 3 × 248.3 ≈ 744 gwei              (3× today's median base fee)
+T  = 241 gwei                          (Fast tip, p99 of the 4-block mean)
+first maxFee = 10 × 744 + 241 = 7,681 gwei
+cap ≥ 1.331 × 7,681 = 10,224 gwei  →  gas_price_cap = 10,500 gwei = 10500000000000 wei
+```
+
+| Check | Value |
+|---|---|
+| Today's first submission (`10 × 248.3 + 135`) | 2,618 gwei. The cap is **4.0×** above it, ~14.6 bumps of headroom |
+| First submission if the base fee triples, tip at p99 | 7,681 gwei: unclamped, 3.04 bumps of headroom (`10,500 ÷ 7,681 = 1.367 ≥ 1.331`) |
+| Same, tip at the window's observed max (2,913 gwei) | 10,353 gwei: still unclamped, under one bump of headroom |
+| A tx can no longer be bumped once `maxFee >` | 9,545 gwei (`cap ÷ 1.1`) |
+| Old cap, 1,500 gwei | Clamps a 1559 first submission once the base fee exceeds ~136 gwei (`(1,500 − 135) ÷ 10`). It would have clamped every first submission today |
+
+Balance pre-check at the computed ceiling, for a 500,000-gas transaction (an assumed upper bound for
+a relayed wager action; the gateway lets the engine estimate it): today 1.31 POL, base fee tripled
+3.84 POL, market at the cap 5.25 POL. Each is **plus** `min_balance` (0.5 POL). The gas wallet holds
+9.92 POL now. The gas-wallet runway alert (48 h) is a different number and does not know about this
+pre-check. If the wallet is ever below ~6 POL during a spike, large relayed transactions can fail
+`InsufficientBalance` although they would have cost far less. Top it up before it gets there.
+
+**Verdict:** `polygon-137` cap = 10,500 gwei. `mordor-63` is unchanged (legacy, 2,000 gwei,
+`eth_gasPrice` 1 gwei, the first bump fails only at `eth_gasPrice` ≈ 1,212 gwei: ~1,200× headroom).
+
+Revisit the Polygon cap if the base fee holds above ~700 gwei (the design point), or if the Fast tip's
+p99 moves past ~1,000 gwei.
+
+#### Soak procedure (first 48 h after the 1559 rollout)
+
+Polygon has exactly one lane (`polygon-137`, one gas wallet), so the soak is that lane at whatever
+volume members send. Start it in a low-traffic window. To limit exposure, lower `GLOBAL_QUOTA_PER_MIN`
+on the gateway for the first hours. The surplus then self-submits.
+
+Before the rollout, drain the lane (R2) and record `latest == pending == engine nonce`. A legacy
+transaction in flight cannot be repriced as 1559: the engine keeps bumping it as legacy.
+
+Watch at least hourly for the first 6 h, then daily:
+
+| Signal | How | Healthy |
+|---|---|---|
+| Lane stuck | Probe FAIL `relay lane STUCK at gas_price_cap`; `sudo docker logs --since 1h fairwins-gateway-engine 2>&1 \| grep -c 'skipping resubmission'` | Never fires |
+| Transaction type | Receipts of the first relayed transactions: `eth_getTransactionReceipt` → `"type":"0x2"`. A `0x0` means the network is still legacy (the `features` change did not load) | `0x2` |
+| Effective vs base | Receipt `effectiveGasPrice` minus that block's `baseFeePerGas` = the tip actually paid | `effectiveGasPrice` ≈ 300–650 gwei. No receipt above ~1,500 gwei without an explanation |
+| Cost | Gas-wallet balance delta ÷ transactions relayed, against the legacy ~419 gwei baseline | Same order of magnitude |
+| Resubmissions | Resubmit log lines per transaction | 0–1 typical. More than 3 means the market is outrunning the engine: check the cap |
+| Runway | `/status` `gasWalletRunwayHrs` | Unchanged trend |
+
+**Rollback.** Revert `features` to `[]` and the cap to `1500000000000` in
+`deploy/production/config.json` and `config/config.json`, ship the PR, drain the lane (R2), then
+restart the unit. The cap alone can be rolled back at runtime with
+`PATCH /api/v1/relayers/polygon-137` (`{"policies":{"gas_price_cap":"1500000000000"}}`). `features`
+cannot (`PATCH /api/v1/networks/{id}` updates `rpc_urls` only, `src/api/controllers/network.rs`).
+
+Mordor, measured earlier the same day (2026-10-09T14:51Z): `eth_gasPrice` 1.00 gwei on both of its
+public endpoints (`0x3b9aca00`), nonce 4, `latest == pending`.
 
 ### Which engine version is running
 

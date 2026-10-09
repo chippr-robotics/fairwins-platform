@@ -35,10 +35,21 @@ ETC-family specifics (research.md §2):
   mishandle batched JSON-RPC. The Rust engine issues sequential requests by default, but if a
   batch option is ever enabled, keep it at 1 for these chains (tagged `no-batch` in
   `config.json` as an operator reminder).
-- `gas_price_cap` is set high (2000 gwei on `mordor-63`; `polygon-137` is 1500 gwei) because the
-  ETC legacy oracle suggests ~300 gwei baseline; the cap bounds bump/replace escalation (FR-006).
-  Measured headroom (2026-10-09: Mordor 1 gwei, Polygon 275.8 gwei) and the #808 stall threshold
-  (`cap / 1.1`) are in `docs/runbooks/relayer-operations.md` § Cap headroom.
+- `gas_price_cap` is set high (2000 gwei on `mordor-63`, **10,500 gwei on `polygon-137`**) because
+  the ETC legacy oracle suggests ~300 gwei baseline; the cap bounds bump/replace escalation (FR-006).
+  **It is a ceiling, not the spend**: a transaction pays `min(maxFee, baseFee + tip) × gas used`, so a
+  higher cap does not make a calm-market transaction cost more (Polygon `Fast` pays ~384 gwei per gas
+  at today's base fee, under any of these caps). Do not read a bigger number as a bigger bill. What the
+  cap does change is (1) how long the engine can keep repricing a stuck tx before upstream #808 stops
+  it, (2) the worst case in a tip spike, and (3) the balance the engine demands before signing
+  (`maxFee × gas_limit + min_balance`). The Polygon value was derived from the engine's EIP-1559
+  arithmetic (first `maxFee` ≈ 10× base fee on 2 s blocks, 3 minimum bumps of headroom at 3× today's
+  base fee). Derivation, measured numbers and the soak procedure are in
+  `docs/runbooks/relayer-operations.md` § Cap headroom.
+- **Polygon is EIP-1559 only because the network entry says so.** The engine selects 1559 solely from
+  the *network's* `features: ["eip1559"]` (`EvmNetwork::is_legacy`). A `tags` entry or the relayer's
+  `eip1559_pricing: true` does nothing. Until #1651 the entry had `"features": []` and Polygon was
+  silently legacy. Mordor stays `"features": []` on purpose.
 
 ## Key provisioning (FR-017 / FR-019a)
 
