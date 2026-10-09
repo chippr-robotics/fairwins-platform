@@ -635,6 +635,112 @@
       }
     },
     {
+      "id": "gradle-wrapper",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "8.14.5",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/android/gradle/wrapper/gradle-wrapper.properties",
+          "contains": "gradle-8.14.5-all.zip"
+        }
+      ],
+      "upstream": {
+        "type": "git",
+        "repo": "https://github.com/gradle/gradle",
+        "tagPattern": "^v8\\.14\\.\\d+$"
+      },
+      "notes": "Follows the 8.14 patch line only: the Gradle/AGP pair is coupled to the Capacitor 8 Android template (spec 102), so a Gradle 9 move is a template migration together with AGP 9, not a patch bump. 8.14.6 was released 2026-10-08 and is left out of its first patch window. No distributionSha256Sum is set today. Neither sync-native-config.js nor check-native-versions.js owns this file (they own appId/versionCode/versionName)."
+    },
+    {
+      "id": "android-gradle-plugin",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "8.13.0",
+      "status": "hold",
+      "locations": [
+        {
+          "path": "frontend/android/build.gradle",
+          "contains": "com.android.tools.build:gradle:8.13.0"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "AGP is published to Google Maven, not as a git tag feed this watcher reads; the hold's reviewBy is the forcing function."
+      },
+      "hold": {
+        "reason": "AGP 9 is a major tied to the Capacitor template: Google Maven now lists AGP 9.x (up to 9.4.1) and it needs Gradle 9, while the shell's build.gradle/variables.gradle follow the Capacitor 8 Android template and capacitor-android is compiled against it. Moving AGP alone breaks the plugin build; the move is a Capacitor template migration (spec 102) with Gradle 9, Java and the SDK levels together.",
+        "ref": "#1659",
+        "watch": [
+          "the Capacitor release whose Android template moves to AGP 9"
+        ],
+        "reviewBy": "2027-03-31"
+      }
+    },
+    {
+      "id": "android-sdk-levels",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "36",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/android/variables.gradle",
+          "contains": "compileSdkVersion = 36"
+        },
+        {
+          "path": "frontend/android/variables.gradle",
+          "contains": "targetSdkVersion = 36"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "An SDK level is chosen, not followed. The Capacitor 8 template sets compileSdk/targetSdk and its plugins compile against them; moving them is a template step with AGP, not a bot bump."
+      },
+      "notes": "compileSdk and targetSdk move together with the Capacitor Android template (variables.gradle is the template's variable file)."
+    },
+    {
+      "id": "android-min-sdk",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "24",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/android/variables.gradle",
+          "contains": "minSdkVersion = 24"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "A support floor is a product decision, not a release to follow."
+      },
+      "notes": "Capacitor 8 template floor. Raising it drops devices from the Android channel; lowering it is not possible without the template's plugins agreeing."
+    },
+    {
+      "id": "ios-deployment-target",
+      "kind": "mobile",
+      "owner": "mark",
+      "pinned": "15",
+      "status": "track",
+      "locations": [
+        {
+          "path": "frontend/ios/App/App.xcodeproj/project.pbxproj",
+          "contains": "IPHONEOS_DEPLOYMENT_TARGET = 15.0;"
+        },
+        {
+          "path": "frontend/ios/App/CapApp-SPM/Package.swift",
+          "contains": "platforms: [.iOS(.v15)]"
+        }
+      ],
+      "upstream": {
+        "type": "none",
+        "why": "A support floor is a product decision, not a release to follow; the Capacitor 8 iOS template sets it and its SPM plugins declare the same floor."
+      },
+      "notes": "Must agree in the Xcode project (four build configurations) and the CapApp-SPM Package.swift. Moving one without the other fails the iOS build or silently narrows the plugins."
+    },
+    {
       "id": "ubuntu-matchstick",
       "kind": "container-image",
       "owner": "mark",
