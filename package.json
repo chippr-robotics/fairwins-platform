@@ -120,6 +120,9 @@
     "check:env-hygiene": "node scripts/secrets/check-env-hygiene.js",
     "check:dep-alerts": "node scripts/security/check-dependency-alerts.js",
     "check:dep-alerts:live": "node scripts/security/check-dependency-alerts.js --live",
+    "check:version-pins": "node scripts/deps/check-version-pins.js",
+    "check:version-pins:live": "node scripts/deps/check-version-pins.js --live",
+    "test:version-pins": "node --test \"scripts/deps/__tests__/*.test.js\"",
     "test:dep-alerts": "node --test \"scripts/security/__tests__/*.test.js\"",
     "test:secrets": "node --test \"scripts/secrets/__tests__/*.test.js\""
   },

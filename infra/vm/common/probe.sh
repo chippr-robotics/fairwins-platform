@@ -128,6 +128,29 @@ sys.exit(1 if bad else 0)" >/tmp/.probe_runway 2>/dev/null \
     else
       bad "OZ relayer engine not answering — relaying is down (intents will self-submit)"
     fi
+
+    # A LIVE engine can still be STUCK (issue #1648, upstream OpenZeppelin/openzeppelin-relayer#808,
+    # present from v1.4.0 through v1.8.0). Once a gas spike pushes the minimum replacement price
+    # above `gas_price_cap`, the engine logs "bumped gas price does not meet minimum requirement,
+    # skipping resubmission" and returns without repricing. The tx stays `submitted`, /api/v1/health
+    # stays green, and every later tx on that lane queues behind the stuck nonce. That log line is the
+    # ONLY signal. The engine logs to the json-file driver, so the line never reaches Cloud Logging on
+    # its own. Re-emitting it here puts it on the probe's FAIL path, which already pages.
+    #
+    # --since 120s overlaps the 60s timer on purpose: a minute lost to a slow `docker exec` above
+    # must not hide a hit. Double-counting is harmless; the alert counts FAIL lines, not hits.
+    # An unreadable log is its own failure, never a pass. Runbook:
+    # docs/runbooks/relayer-operations.md#stuck-transactions
+    if engine_logs="$(docker logs --since 120s fairwins-gateway-engine 2>&1)"; then
+      stuck="$(printf '%s' "$engine_logs" | grep -c 'skipping resubmission' || true)"
+      if [ "${stuck:-0}" -gt 0 ]; then
+        bad "relay lane STUCK at gas_price_cap — engine skipped resubmission ${stuck}x in 120s (runbook: relayer-operations.md#stuck-transactions)"
+      else
+        ok engine-resubmission
+      fi
+    else
+      bad "engine logs unreadable — cannot rule out a stuck lane"
+    fi
     ;;
   *) bad "unknown role"; ;;
 esac

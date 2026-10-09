@@ -18,7 +18,7 @@ browser ─▶ bundler.fairwins.app ─▶ Cloudflare (Transform Rule: +X-Origin
 |---|---|
 | `nginx/bundler.conf.template` | origin-lock map (`$origin_denied`, `map_hash_bucket_size 128`) + **CORS allow-list** (`$cors_allow_origin`) + `/healthz` exempt + proxy to `127.0.0.1:3000` |
 | `nginx/docker-entrypoint.sh` | derives `ORIGIN_LOCK_ENABLED` from whether `ORIGIN_LOCK_SECRET` is set (fail-open, never a 403-brick); trims the secret |
-| `nginx/Dockerfile` | `nginx:1.27-alpine` + `envsubst` |
+| `nginx/Dockerfile` | `nginx:1.30.5-alpine` + `envsubst` |
 | `cloudbuild.yaml` | manual/isolated rollout — build the nginx image + `gcloud run services replace` the full 2-container spec |
 | `deploy/service.yaml` | multi-container Cloud Run (nginx ingress + alto sidecar) — **alto env reconciled to live `alto:v1.2.7` / Polygon 137 (2026-07-06)** |
 

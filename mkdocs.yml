@@ -203,6 +203,7 @@ nav:
     - ADR-003 X-Wing Post-Quantum Encryption: adr/003-xwing-post-quantum-encryption.md
     - ADR-004 Upgradeable Registry (UUPS): adr/004-upgradeable-registry-uups.md
     - ADR-005 Remove Unused X3DH Messaging Layer: adr/005-remove-unused-x3dh-messaging-layer.md
+    - ADR-006 Dependency Version Policy: adr/006-dependency-version-policy.md
   - Research:
     - Dex v3 Integration Analysis: research/dex-v3-integration-analysis.md
     - Alternative Approaches (Appendix): research/dex-v3-alternative-approaches.md

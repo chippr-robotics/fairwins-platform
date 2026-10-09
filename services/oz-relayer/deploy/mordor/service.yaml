@@ -97,7 +97,7 @@ spec:
             limits: { cpu: 800m, memory: 512Mi }
         # ---- sidecar: ephemeral redis (localhost:6379) ----
         - name: redis
-          image: redis:7-alpine
+          image: redis:7.4.11-alpine
           args: ["redis-server", "--save", "", "--appendonly", "no"]
           startupProbe:
             tcpSocket: { port: 6379 }

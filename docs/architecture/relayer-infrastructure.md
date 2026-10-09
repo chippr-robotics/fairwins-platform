@@ -120,8 +120,12 @@ key never leaves KMS; its **public** key derives the funded address `0xf505…`.
 > `relay-engine-gcp-private-key` secret) — it does **not** support keyless ADC / Workload Identity, even
 > though the pod already runs *as* that same SA. So we mint one exported key for the least-privilege
 > engine SA (it can only `signerVerifier` + `secretAccessor` — no data access), keep it only in Secret
-> Manager, and never bake it into the image. **Follow-up:** drop the key and switch to ADC once the
-> engine supports it (evaluate on the next engine bump); rotate the key on any SA change.
+> Manager, and never bake it into the image. **Follow-up (still open):** drop the key and switch to
+> ADC once the engine supports it; rotate the key on any SA change. A newer engine does **not** close
+> this: re-evaluated 2026-10-09 (#1648), the Cloud-KMS signer still requires
+> `service_account.{private_key,…}` at upstream **v1.8.0** — keyless workload identity is tracked
+> upstream as OpenZeppelin/openzeppelin-relayer **#757**. Revisit when #757 ships, not on a routine
+> bump (see `services/oz-relayer/README.md` § Version pin).
 
 ---
 
@@ -202,7 +206,8 @@ tag (`v1.4.0`) and hosted in our Artifact Registry; we layer only our config (AG
 upstream, never forked into the repo). Things the spec assumed that turned out otherwise, all now
 reflected in the config/code:
 
-- **KMS signer needs an explicit service-account key** (no ADC/attached-SA path in v1.4.0).
+- **KMS signer needs an explicit service-account key** (no ADC/attached-SA path in v1.4.0, nor yet
+  in v1.8.0 — upstream #757).
 - The engine **does not expand `${VAR}`** in `config.json` → RPC + webhook URLs are literal.
 - Webhook auth is **`X-Signature: base64(HMAC-SHA256(body, signing_key))`**, verified by the gateway
   over the raw body (`services/relay-gateway/src/server.js`).

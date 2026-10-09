@@ -228,7 +228,7 @@ alto config: `ALTO_ENTRYPOINTS=0x5FF137D4…2789` (EntryPoint v0.6), `ALTO_PORT=
 | `fairwins-gateway-engine` (OZ Relayer) | `…/fairwins-relay-engine:multichain-v1.5.0` | joiner | none | 0.35 / 320m |
 | `fairwins-gateway-finops` | `…/fairwins-finops-exporter:spec107-1ac148bf` | joiner | none; binds `127.0.0.1:9464` | 0.2 / 192m |
 | `fairwins-gateway-alloy` | `grafana/alloy:v1.10.2` | joiner | none; own UI pinned to `127.0.0.1:12345` | 0.15 / 192m |
-| `fairwins-gateway-redis` | `redis:7-alpine` | joiner | none; `--save "" --appendonly no` (ephemeral) | 0.15 / 128m |
+| `fairwins-gateway-redis` | `redis:7.4.11-alpine` | joiner | none; `--save "" --appendonly no` (ephemeral) | 0.15 / 128m |
 
 Evidence: `infra/vm/gateway/docker-compose.yml:27-48,241-246,286-292,362-371,395-401`; volume `alloy-data` (persisted WAL) `…:416-422`.
 The four verbatim localhost couplings that the shared namespace makes correct: `ENGINE_URL=http://localhost:8080`, `REDIS_URL=redis://localhost:6379`, engine webhook `http://localhost:8788/v1/engine/webhook`, bundler nginx `upstream 127.0.0.1:3000` — `…:3-13`; webhook in `services/oz-relayer/deploy/production/config.json` (`notifications[0].url`).
