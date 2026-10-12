@@ -115,6 +115,7 @@ nav:
   - Developer Guide:
     - Setup: developer-guide/setup.md
     - Architecture: developer-guide/architecture.md
+    - Transaction Lifecycle (spec 110): developer-guide/transaction-lifecycle.md
     - Smart Contracts: developer-guide/smart-contracts.md
     - Frontend Development: developer-guide/frontend.md
     - ClearPath Multi-Network DAOs: developer-guide/clearpath-multi-network.md
