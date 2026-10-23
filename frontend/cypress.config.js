@@ -165,7 +165,7 @@ const POOL_ABI = [
   'function closeJoining()',
   'function cancel()',
   'function proposeOutcome((address winner,uint256 amount)[] entries)',
-  'function approve()',
+  'function approve(bytes32 proposalId)',
   'function claim((address winner,uint256 amount)[] entries, uint256 index, address recipient)',
   'function refund()',
   'function state() view returns (uint8)',
@@ -903,7 +903,8 @@ export default defineConfig({
             }
             case 'approvePoolOutcome': {
               const apw = new ethers.Wallet(ACCOUNT_KEYS[args.callerIndex ?? 0], provider)
-              tx = await new ethers.Contract(args.pool, POOL_ABI, apw).approve()
+              const apool = new ethers.Contract(args.pool, POOL_ABI, apw)
+              tx = await apool.approve(await apool.currentProposalId())
               break
             }
             case 'claimPool': {
