@@ -30,7 +30,7 @@
     {
       "check": "arbitrary-send-eth",
       "file": "contracts/bridge/BridgeRouter.sol",
-      "line": 380
+      "line": 383
     },
     {
       "check": "incorrect-exp",
@@ -55,7 +55,7 @@
     {
       "check": "reentrancy-balance",
       "file": "contracts/bridge/BridgeRouter.sol",
-      "line": 322
+      "line": 325
     },
     {
       "check": "reentrancy-balance",
