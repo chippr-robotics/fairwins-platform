@@ -172,15 +172,32 @@ function loadFloppyKeysSync(allowFallback = false) {
 // CREATE2. Contract addresses are deterministic and independent of who sends the transaction, so a
 // compromised deploy key can waste gas and deploy junk — it cannot touch a deployed contract.
 //
-// THAT MIGRATION IS NOT FINISHED. An earlier version of this comment stated it in the past tense,
-// which was wrong and made the blast radius of this key look smaller than it is. Measured: the
-// deploy key still holds DEFAULT_ADMIN/UPGRADER and equivalent authority on ~260 (contract, role)
-// pairs across eight chains, and is `owner()` on ten Ownable contracts. Granting the Safe was done
-// at deploy time on most chains; REVOKING the EOA was never done. Until `scripts/ops/transfer-roles.js`
-// has renounced on every chain, this key remains a full admin key — treat it as one.
+// THAT MIGRATION IS ALMOST FINISHED, AND THE REMAINING RISK IS NOT THIS KEY. This comment has now
+// been wrong in BOTH directions: it once claimed the migration was done (past tense, too small a
+// blast radius), and was then corrected to "~260 (contract, role) pairs across eight chains", which
+// overstated it by more than two orders of magnitude. Neither figure was measured against the
+// chain. Both are replaced by an audit that was (2026-09-01, live `hasRole` reads across the eight
+// managed contracts on every chain that hosts them):
 //
-// The superseded Safe 0x8cc564E3dF4003c2F0a33C679c8DfE6237c5c3fa still co-holds those roles and is
-// still `feeRouter.treasury()` on chains 1/10/8453/42161; see the `superseded` block in the record.
+//     deploy key 0x52502d04…F6e1     1 pair   — Mordor 63 feeRouter DEFAULT_ADMIN_ROLE
+//     superseded Safe 0x8cc564E3…   79 pairs  — chains 1, 10, 63, 137, 8453, 42161
+//
+// So the deploy key is, today, one renounce on a TESTNET away from holding nothing. The intended
+// model above is very nearly the real one.
+//
+// ⚠ THE EXPOSURE MOVED, IT DID NOT GO AWAY. The superseded Safe still co-holds 79 pairs, including
+// UPGRADER_ROLE on every UUPS proxy — upgrade authority over live contracts holding member funds —
+// and ITS owner set includes this deploy EOA. Removing it is a `revokeRole` executed from the
+// current Safe (which holds DEFAULT_ADMIN everywhere, so it needs no cooperation from the old
+// Safe's signers), not a renounce. `transfer-roles.js` cannot do that yet; see
+// docs/runbooks/admin-role-handoff.md §"Revoking the superseded Safe".
+//
+// The superseded Safe is also still `feeRouter.treasury()` on chains 1/10/8453/42161 — a
+// setTreasury call, not a role change. See the `superseded` block in deployments/admin-safe.json.
+//
+// NOT AUDITED, so do not read the numbers above as covering it: the `owner()` of Ownable contracts
+// outside transfer-roles.js's MANAGED list. The earlier "ten Ownable contracts" claim is unverified
+// either way.
 //
 // If the floppy is mounted it is still used, so an operator who wants the ceremony keeps it. If it
 // is not, PRIVATE_KEY is used without complaint. What is gone is the per-command warning noise for

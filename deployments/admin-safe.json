@@ -99,6 +99,16 @@
       "8453",
       "42161"
     ],
-    "stillHolds": "NOT decommissioned. Co-holds DEFAULT_ADMIN/UPGRADER and related roles on the fee/bridge/liquidity routers on chains 1/10/8453/42161 and on several Polygon 137 and Mordor 63 contracts, and is feeRouter.treasury() on chains 1/10/8453/42161. Do not delete this block until those are moved and verified."
+    "stillHolds": "NOT decommissioned. MEASURED 2026-09-01 by live hasRole reads across the eight contracts in scripts/ops/transfer-roles.js MANAGED, on every chain that hosts them: co-holds 79 (contract, role) pairs \u2014 chain 1: 11, chain 10: 11, chain 63: 12, chain 137: 23, chain 8453: 11, chain 42161: 11 \u2014 including UPGRADER_ROLE on every UUPS proxy. Also still feeRouter.treasury() on chains 1/10/8453/42161. REMOVAL IS A revokeRole EXECUTED FROM THE CURRENT SAFE, not a renounce: renounceRole is self-only, and executing it from this Safe would require assembling a 2-of-3 whose owner set includes the compromised deploy EOA. The current Safe holds DEFAULT_ADMIN_ROLE on all of them, so it can revoke unilaterally \u2014 revoke DEFAULT_ADMIN_ROLE LAST per contract, or the authority needed to revoke that contract's other roles is gone. Do not delete this block until those are moved and verified.",
+    "auditedAt": "2026-09-01",
+    "pairsHeld": {
+      "1": 11,
+      "10": 11,
+      "63": 12,
+      "137": 23,
+      "8453": 11,
+      "42161": 11,
+      "total": 79
+    }
   }
 }

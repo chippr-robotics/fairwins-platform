@@ -18,6 +18,22 @@
  *   - POOL_ENABLE_MEMBERSHIP=1 | POOL_MEMBERSHIP_MANAGER=0x…  membership gate (POOL_PARTICIPANT_ROLE), off by default
  *   - POOL_SCREENING_REQUIRED=1|0   defaults true on mainnets (137, 61), false on testnets/localhost
  *   - POOL_USDC_<chainId>            escrow token to allow-list (FR-024 analogue)
+ *   - POOL_ADMIN=0x… | deployer | safe   who gets DEFAULT_ADMIN_ROLE (default: the chain's admin Safe;
+ *                                        `deployer` on localhost/hardhat, which host no Safe)
+ *
+ * ADMIN IS THE SAFE BY DEFAULT, NOT THE DEPLOYER (issue #966). Every earlier factory was initialised
+ * with `deployer.address` and then handed over afterwards, which is how the estate accumulated 79
+ * (contract, role) pairs still held by a superseded Safe and a deploy key that is now DISABLED in
+ * Secret Manager. Initialising with the Safe skips the handoff entirely: there is no window in which
+ * a hot key is the admin, and nothing to renounce later.
+ *
+ * THE COST, STATED PLAINLY: `setAllowedToken` is onlyRole(DEFAULT_ADMIN_ROLE), so when the admin is
+ * the Safe THIS SCRIPT CANNOT ALLOW-LIST THE ESCROW TOKEN. It prints the exact call for the Safe to
+ * execute instead. Until that lands, `createPool` reverts `TokenNotAllowed` on a screened network —
+ * a closed, honest failure (the feature is simply not live yet), never a pool that takes funds it
+ * cannot handle. On localhost/hardhat the default is the deployer instead: the local E2E chain reports
+ * chainId 80002, so the admin-safe.json lookup would name Amoy's Safe — which has no bytecode there and
+ * would trip the guard below on every `setup:e2e`. POOL_ADMIN=safe forces the Safe path anyway.
  */
 const hre = require("hardhat");
 const { ethers } = require("hardhat");
@@ -56,6 +72,40 @@ async function main() {
     throw new Error(`Funding pools: invalid USDC address for chain ${chainId} in wagerPoolConfig.js: ${cfg.usdc}`);
   }
   console.log(`USDC (escrow token): ${cfg.usdc || "(unset — set POOL_USDC_" + chainId + ")"}`);
+
+  // ---- who will be DEFAULT_ADMIN_ROLE on the new factory ----------------------------------
+  let admin;
+  let adminIsDeployer = false;
+  const isLocalNetwork = networkName === "localhost" || networkName === "hardhat";
+  const adminSpec = process.env.POOL_ADMIN || (isLocalNetwork ? "deployer" : "safe");
+  if (adminSpec === "deployer") {
+    admin = deployer.address;
+    adminIsDeployer = true;
+  } else if (ethers.isAddress(adminSpec)) {
+    admin = ethers.getAddress(adminSpec);
+    adminIsDeployer = admin.toLowerCase() === deployer.address.toLowerCase();
+  } else {
+    const safeFile = path.join(process.cwd(), "deployments", "admin-safe.json");
+    if (!fs.existsSync(safeFile)) throw new Error("no deployments/admin-safe.json; pass POOL_ADMIN=0x… or =deployer");
+    const entry = JSON.parse(fs.readFileSync(safeFile, "utf8")).chains?.[String(chainId)];
+    if (!entry?.address) throw new Error(`admin-safe.json has no Safe for chain ${chainId}; pass POOL_ADMIN=0x…`);
+    admin = ethers.getAddress(entry.address);
+  }
+
+  // A Safe with no bytecode HERE can never act, and a UUPS factory whose only admin cannot act is
+  // permanently unadministrable and permanently un-upgradeable. Same guard as transfer-roles.js.
+  if (!adminIsDeployer) {
+    const code = await ethers.provider.getCode(admin);
+    if (code === "0x") {
+      throw new Error(
+        `admin ${admin} has NO BYTECODE on chain ${chainId}. Initialising the factory with it would ` +
+          `leave it permanently unadministrable. Deploy the Safe here first, or pass POOL_ADMIN=deployer.`,
+      );
+    }
+    console.log(`Admin:    ${admin} (Safe, ${(code.length - 2) / 2} bytes ✓)`);
+  } else {
+    console.log(`Admin:    ${admin} (DEPLOYER — this factory will need a later handoff, see #966)`);
+  }
 
   const filename = getDeploymentFilename(network, "v2");
   const filepath = path.join(process.cwd(), "deployments", filename);
@@ -114,11 +164,22 @@ async function main() {
   console.log("\nDeploying FundingPoolFactory behind a UUPS proxy...");
   const proxy = await deployProxy({
     name: "FundingPoolFactory",
-    initArgs: [deployer.address, poolImpl.address, sanctionsGuard, membershipManager, screeningRequired],
+    initArgs: [admin, poolImpl.address, sanctionsGuard, membershipManager, screeningRequired],
   });
 
   // 2b) Allow-list the escrow token. On value-bearing networks createPool is gated on this list.
-  if (cfg.usdc && ethers.isAddress(cfg.usdc)) {
+  //
+  // setAllowedToken is onlyRole(DEFAULT_ADMIN_ROLE). When the admin is the Safe, the deployer is not
+  // authorised and calling anyway would revert AFTER the proxy is already deployed — a half-finished
+  // deploy with a recorded address. So it is not attempted: the call is printed for the Safe.
+  if (cfg.usdc && ethers.isAddress(cfg.usdc) && !adminIsDeployer) {
+    const data = proxy.contract.interface.encodeFunctionData("setAllowedToken", [cfg.usdc, true]);
+    console.log(`\n⚠ ESCROW TOKEN NOT ALLOW-LISTED — the admin is the Safe, not this deployer.`);
+    console.log(`  Execute from ${admin}:`);
+    console.log(`    to:   ${proxy.proxy}`);
+    console.log(`    data: ${data}`);
+    console.log(`  Until then createPool reverts TokenNotAllowed. Nothing is broken; the feature is not live.`);
+  } else if (cfg.usdc && ethers.isAddress(cfg.usdc)) {
     console.log(`\nAllowlisting escrow token (USDC) ${cfg.usdc}...`);
     const tx = await proxy.contract.setAllowedToken(cfg.usdc, true);
     await tx.wait();
