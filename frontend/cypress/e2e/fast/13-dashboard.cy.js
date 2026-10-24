@@ -436,9 +436,7 @@ describe('Dashboard', () => {
 
   /**
    * Connect, then seed localStorage with the supplied friend-market list and
-   * reload so FriendMarketsContext picks them up from cache. The on-chain
-   * fetch fails (no Hardhat) and the catch path preserves localStorage,
-   * matching the wallet-disconnected-from-node scenario in production caches.
+   * reload so FriendMarketsContext picks them up from cache.
    *
    * The cache is CHAIN-SCOPED: FriendMarketsContext reads `friendMarkets:<chainId>`
    * and only falls back to the bare `friendMarkets` key when no chain is set —
@@ -448,12 +446,24 @@ describe('Dashboard', () => {
    * or are skipped. Seed both the connected chain and wagmi's default first
    * chain, because the provider re-reads the cache when the chain settles after
    * reconnect.
+   *
+   * The cache survives because `cy.refuseChainReads()` makes every chain
+   * UNREADABLE, and an unreadable chain keeps whatever was cached (spec 110 —
+   * an unreachable network is a named gap, never an empty list). What must NOT
+   * be relied on is a chain failing by accident. This helper used to say "the
+   * on-chain fetch fails (no Hardhat)", which held only while the list read one
+   * chain — the wallet's, 1337 at 127.0.0.1:8545. The list now spans the build's
+   * cohort, and a `dev:fast` build's cohort is the five mainnets, so live
+   * Polygon answered "this address has no wagers" and the estate read correctly
+   * replaced that chain's cache with the empty truth. The fix is to stop the
+   * tier reaching a real chain, not to stop the product believing one.
    */
   const WAGMI_DEFAULT_CHAIN_ID = 137 // polygon is first in `chains` (frontend/src/wagmi.js)
 
   function seedFriendMarketsAndOpen(markets) {
     // Phone viewport: My Wagers renders the same table here as on desktop.
     cy.viewport(390, 844)
+    cy.refuseChainReads()
     connectAndVisitDashboard()
     cy.window().then((win) => {
       const payload = JSON.stringify(markets)

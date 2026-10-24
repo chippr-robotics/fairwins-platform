@@ -99,8 +99,8 @@ frontend/src/
 │   ├── estate.js                  # read-side precedent (unchanged)
 │   ├── readContract.js            # NEW (Phase 1): readContract(chainId, {address, abi, fn, args})
 │   └── submitOn.js                # NEW (Phase 2): submitOn(chainId, payload) — identity × rail
-├── lib/custody/writeRail.js       # Phase 2: resolveWriteRail generalized out of custody,
-│                                  #          gains reachability verification
+│   └── writeRail.js               # Phase 2 (T025): resolveWriteRail generalized OUT of
+│                                  #          lib/custody/, gains reachability verification
 ├── lib/verify/verifyMessage.js    # Phase 2: rebuilt sync on @noble/curves (spec 084 invariant)
 ├── lib/relay/useGaslessWrite.js   # Phase 2: target-chain EIP-712 domain, no ambient resolution
 ├── lib/hardware/hardwareSigner.js # Phase 2: toAccount({ address, signMessage, ... })

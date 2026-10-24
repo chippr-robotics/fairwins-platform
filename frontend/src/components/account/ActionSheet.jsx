@@ -15,7 +15,10 @@ import { useEffect, useRef } from 'react'
 import PropTypes from 'prop-types'
 import './ActionSheet.css'
 
-export default function ActionSheet({ open, onClose, title, children, closeDisabled = false, className = '' }) {
+/** Open sheets, oldest first — module-level because sheets are independent components. */
+const OPEN_SHEETS = []
+
+export default function ActionSheet({ open, onClose, title, children, closeDisabled = false, className = '', tier = 'sheet' }) {
   const dialogRef = useRef(null)
   const onCloseRef = useRef(onClose)
   const closeDisabledRef = useRef(closeDisabled)
@@ -28,7 +31,13 @@ export default function ActionSheet({ open, onClose, title, children, closeDisab
 
   useEffect(() => {
     if (!open) return undefined
+    // Sheets can stack (a signing ceremony opens over the sheet that asked for it). Only the TOP
+    // sheet answers Escape and traps Tab; otherwise one Escape closes both, and the lower sheet
+    // drags focus out of the dialog the member is actually using.
+    const token = {}
+    OPEN_SHEETS.push(token)
     const onKey = (e) => {
+      if (OPEN_SHEETS[OPEN_SHEETS.length - 1] !== token) return
       if (e.key === 'Escape') {
         if (!closeDisabledRef.current) onCloseRef.current?.()
         return
@@ -56,6 +65,8 @@ export default function ActionSheet({ open, onClose, title, children, closeDisab
     document.body.style.overflow = 'hidden'
     dialogRef.current?.focus()
     return () => {
+      const at = OPEN_SHEETS.indexOf(token)
+      if (at !== -1) OPEN_SHEETS.splice(at, 1)
       document.removeEventListener('keydown', onKey)
       document.body.style.overflow = prevOverflow
     }
@@ -68,7 +79,11 @@ export default function ActionSheet({ open, onClose, title, children, closeDisab
   }
 
   return (
-    <div className="action-sheet__backdrop" role="presentation" onClick={handleBackdrop}>
+    <div
+      className={`action-sheet__backdrop${tier === 'ceremony' ? ' action-sheet__backdrop--ceremony' : ''}`}
+      role="presentation"
+      onClick={handleBackdrop}
+    >
       <div
         className={`action-sheet ${className}`.trim()}
         role="dialog"
@@ -106,4 +121,9 @@ ActionSheet.propTypes = {
   /** Extra class on the sheet, for callers whose content needs a scoped tweak (e.g. a long form
       that wants its header pinned). Additive only — the shell's own behaviour is unchanged. */
   className: PropTypes.string,
+  /** 'ceremony' lifts the sheet above every other sheet. For the deferred-signing dialogs only
+      (spec 088): they open FROM another sheet (Verify's "Sign a message", a confirm step) and are
+      mounted earlier in the DOM, so at the same tier they rendered UNDER the sheet that asked for
+      them — the member saw "Waiting for your signature…" and no way to give it (spec 111 SIG-03). */
+  tier: PropTypes.oneOf(['sheet', 'ceremony']),
 }

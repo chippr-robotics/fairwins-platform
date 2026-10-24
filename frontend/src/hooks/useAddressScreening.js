@@ -73,7 +73,10 @@ export function useAddressScreening() {
           status = 'uncertain'
         } else {
           try {
-            const res = await screenAddress(address, readProvider)
+            // The entry's own chain — the guard that will enforce it, never one inferred from
+            // whatever connection this happens to be (spec 110). The guard above already
+            // established that this IS the connected chain.
+            const res = await screenAddress(address, readProvider, chainId)
             status = res.available ? (res.allowed ? 'clear' : 'restricted') : 'uncertain'
           } catch {
             status = 'uncertain' // fail-closed (FR-011)

@@ -1,4 +1,5 @@
 import { ethers } from 'ethers'
+import { getLogsRange as scanLogsBisecting } from '../../chains/logRange'
 import {
   GOVERNOR_READ_ABI,
   VOTING_TOKEN_READ_ABI,
@@ -177,15 +178,7 @@ export function parseProposalLog(log) {
  * rejected, letting the caller decide partial-vs-fail. Exported for unit testing.
  */
 export async function getLogsRange(reader, governor, from, to, minSpan = 2000, topics = [PROPOSAL_CREATED_TOPIC]) {
-  try {
-    return await reader.getLogs({ address: governor, topics, fromBlock: from, toBlock: to })
-  } catch (e) {
-    if (to - from + 1 <= minSpan) throw e
-    const mid = Math.floor((from + to) / 2)
-    const left = await getLogsRange(reader, governor, from, mid, minSpan, topics)
-    const right = await getLogsRange(reader, governor, mid + 1, to, minSpan, topics)
-    return [...left, ...right]
-  }
+  return scanLogsBisecting(reader, governor, from, to, minSpan, topics)
 }
 
 const TREASURY_VAULT_ABI = ['function executor() view returns (address)']

@@ -5,39 +5,28 @@
  * never touches the router (FR-020/FR-021/FR-030/FR-054).
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Interface } from 'ethers'
+import { decodeFunctionData, toFunctionSelector } from 'viem'
+import { normalizeAbi } from '../../chains/readContract'
 
 const m = vi.hoisted(() => ({ methods: {}, calls: [] }))
 
-vi.mock('ethers', async (orig) => {
+// Spec 110 Phase 1: the module reads through the chain seam; the driveable registry keeps its
+// shape. A read carrying `account` is ethers' `collect.staticCall(..., { from })` — routed to
+// the same `<fn>.staticCall` key the suite already registers.
+vi.mock('../../chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          const key = String(prop)
-          const call = (...args) => {
-            m.calls.push([key, ...args])
-            const f = m.methods[key]
-            if (!f) throw new Error('unmocked method: ' + key)
-            return f(...args)
-          }
-          // ethers exposes `contract.fn.staticCall(...)` — the shape `readUncollectedFees` uses
-          // to SIMULATE a collect rather than guess at accrued fees.
-          call.staticCall = (...args) => {
-            m.calls.push([`${key}.staticCall`, ...args])
-            const f = m.methods[`${key}.staticCall`]
-            if (!f) throw new Error('unmocked staticCall: ' + key)
-            return f(...args)
-          }
-          return call
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [], account }) => {
+      const key = account !== undefined ? `${functionName}.staticCall` : functionName
+      // Record the caller the way the ethers harness did ({ from }) so assertions on the
+      // simulated collect's msg.sender keep reading naturally.
+      m.calls.push(account !== undefined ? [key, ...args, { from: account }] : [key, ...args])
+      const f = m.methods[key]
+      if (!f) throw new Error('unmocked method: ' + key)
+      return f(...args)
+    },
   }
-  return { ...actual, Contract: vi.fn(FakeContract) }
 })
 
 import {
@@ -64,7 +53,23 @@ import {
   buildExitCalls,
 } from '../uniswapPositions'
 
-const NFPM_IFACE = new Interface(NFPM_ABI)
+const NFPM_PARSED = normalizeAbi(NFPM_ABI)
+
+/**
+ * Decode one call's arguments, asserting it really is the function named (spec 110).
+ *
+ * ethers' `decodeFunctionData(name, data)` threw when the selector belonged to a different
+ * function; viem's derives the name FROM the selector, so it would happily decode the wrong call
+ * and hand back plausible arguments. The name check is what restores the guarantee — without it
+ * these assertions would stop distinguishing `decreaseLiquidity` from `collect`.
+ */
+function decodeCall(name, data) {
+  const { functionName, args } = decodeFunctionData({ abi: NFPM_PARSED, data })
+  expect(functionName, `expected calldata for ${name}`).toBe(name)
+  return args
+}
+
+const selectorOf = (name) => toFunctionSelector(NFPM_PARSED.find((f) => f.type === 'function' && f.name === name))
 
 const NFPM = '0xC36442b4a4522E871399CD717aBDD847Ab11FE88'
 const POOL = '0x8ad599c3A0ff1De082011EFDDc58f1908eb6e6D8'
@@ -498,11 +503,11 @@ describe('buildExitCalls — direct to Uniswap, the router nowhere in the path',
     expect(calls.every((c) => c.target === NFPM)).toBe(true)
     expect(calls.every((c) => c.value === 0n)).toBe(true)
 
-    const [decrease] = NFPM_IFACE.decodeFunctionData('decreaseLiquidity', calls[0].data)
+    const [decrease] = decodeCall('decreaseLiquidity', calls[0].data)
     expect(decrease.tokenId).toBe(42n)
     expect(decrease.liquidity).toBe(10n ** 18n)
 
-    const [collect] = NFPM_IFACE.decodeFunctionData('collect', calls[1].data)
+    const [collect] = decodeCall('collect', calls[1].data)
     expect(collect.tokenId).toBe(42n)
     expect(collect.recipient).toBe(MEMBER)
     expect(collect.amount0Max).toBe(2n ** 128n - 1n)
@@ -512,21 +517,21 @@ describe('buildExitCalls — direct to Uniswap, the router nowhere in the path',
     const { calls } = buildExitCalls(base)
     // The only two selectors in an exit are Uniswap's own.
     expect(calls.map((c) => c.data.slice(0, 10))).toEqual([
-      NFPM_IFACE.getFunction('decreaseLiquidity').selector,
-      NFPM_IFACE.getFunction('collect').selector,
+      selectorOf('decreaseLiquidity'),
+      selectorOf('collect'),
     ])
   })
 
   it('supports a partial withdrawal — the remainder stays in the position (FR-022)', () => {
     const { calls } = buildExitCalls({ ...base, liquidity: 4n * 10n ** 17n })
-    const [decrease] = NFPM_IFACE.decodeFunctionData('decreaseLiquidity', calls[0].data)
+    const [decrease] = decodeCall('decreaseLiquidity', calls[0].data)
     expect(decrease.liquidity).toBe(4n * 10n ** 17n)
   })
 
   it('a zero-liquidity exit is a fees-only sweep — collect alone', () => {
     const { calls } = buildExitCalls({ ...base, liquidity: 0n })
     expect(calls).toHaveLength(1)
-    expect(calls[0].data.slice(0, 10)).toBe(NFPM_IFACE.getFunction('collect').selector)
+    expect(calls[0].data.slice(0, 10)).toBe(selectorOf('collect'))
   })
 
   it('refuses to build an exit that cannot land where the member expects', () => {

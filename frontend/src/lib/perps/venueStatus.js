@@ -29,10 +29,10 @@
  * TOTALITY (the `lib/perps/format.js` convention): nothing in this module throws. These results
  * drive a disabled-with-a-reason control, and a throw would take the sheet down instead.
  */
-import { ethers } from 'ethers'
 import { GAINS_DIAMOND_ABI, GAINS_TRADING_ACTIVATED } from '../../abis/perps/gainsDiamond'
 import { PERP_VENUES, gainsDiamondFor, gmxAddressesFor, perpsManageEnabled } from '../../config/perps'
-import { getReadProvider } from '../../utils/rpcProvider'
+import { getPublicClient } from '../chains/publicClient'
+import { readContract } from '../chains/readContract'
 
 /**
  * The full status vocabulary. `open`/`close-only`/`paused` mirror `ITradingStorage.TradingActivated`;
@@ -77,11 +77,27 @@ function result(venue, chainId, status, extra = {}) {
  * failure paths (dead endpoint, reverting call, unmapped enum value) without a network.
  * ------------------------------------------------------------------------------------------- */
 
-function defaultMakeContract(address, abi, provider) {
-  return new ethers.Contract(address, abi, provider)
+// Spec 110 Phase 1: the DEFAULTS are viem-seam-backed while the injectable contracts the tests
+// drive stay byte-identical — `getProvider(chainId)` still yields a positional-`getCode` object
+// and `makeContract(address, abi, provider)` still yields the two Gains views.
+function defaultGetProvider(chainId) {
+  const client = getPublicClient(chainId)
+  if (!client) return null
+  return {
+    getCode: (address) => client.getCode({ address }).then((code) => code ?? '0x'),
+    readContract: (args) => readContract(chainId, args),
+  }
 }
 
-/** `getReadProvider` returns null for a chain with no endpoint; it may also throw. Neither escapes. */
+function defaultMakeContract(address, abi, provider) {
+  const view = (functionName) => provider.readContract({ address, abi, functionName })
+  return {
+    getTradingActivated: () => view('getTradingActivated'),
+    getMarketOrdersTimeoutBlocks: () => view('getMarketOrdersTimeoutBlocks'),
+  }
+}
+
+/** The factory returns null for a chain with no endpoint; it may also throw. Neither escapes. */
 function resolveProvider(chainId, getProvider) {
   try {
     return getProvider(chainId) || null
@@ -123,7 +139,7 @@ export async function readGainsStatus(chainId, deps) {
   // null would make this REJECT, breaking the "never rejects" contract in the JSDoc below.
   const {
     diamondFor = gainsDiamondFor,
-    getProvider = getReadProvider,
+    getProvider = defaultGetProvider,
     makeContract = defaultMakeContract,
   } = deps ?? {}
 
@@ -202,7 +218,7 @@ export async function readGainsStatus(chainId, deps) {
  * @returns {Promise<Readonly<{venue,chainId,status,timeoutBlocks,detail,raw}>>} never rejects
  */
 export async function readGmxStatus(chainId, deps) {
-  const { addressesFor = gmxAddressesFor, getProvider = getReadProvider } = deps ?? {}
+  const { addressesFor = gmxAddressesFor, getProvider = defaultGetProvider } = deps ?? {}
 
   let addresses
   try {

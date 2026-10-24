@@ -36,7 +36,7 @@
  */
 export const DATASOURCE_PLACEHOLDER = '__PROM_DATASOURCE_UID__'
 const DATASOURCE_UID = DATASOURCE_PLACEHOLDER
-const RUNBOOK_BASE = 'https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/runbooks/finops-operations.md'
+const RUNBOOK_BASE = 'https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md'
 
 /** A Grafana unified-alerting query stage. */
 function query(refId, expr) {

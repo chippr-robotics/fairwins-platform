@@ -396,7 +396,7 @@ async function main(argv) {
   let alerts;
   try {
     alerts = await fetchOpenAlerts({
-      repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/prediction-dao-research',
+      repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/fairwins-platform',
       token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
     });
   } catch (err) {
@@ -430,7 +430,7 @@ async function main(argv) {
     let reviewedText = null;
     try {
       reviewedText = await fetchReviewedPlan({
-        repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/prediction-dao-research',
+        repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/fairwins-platform',
         token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
       });
     } catch (err) {
@@ -461,7 +461,7 @@ async function main(argv) {
   if (apply && violations.length === 0) {
     try {
       capability = await probeWriteCapability({
-        repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/prediction-dao-research',
+        repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/fairwins-platform',
         token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
       });
     } catch {
@@ -481,7 +481,7 @@ async function main(argv) {
       for (const alert of eligible) {
         try {
           await dismissAlert({
-            repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/prediction-dao-research',
+            repo: process.env.GITHUB_REPOSITORY || 'chippr-robotics/fairwins-platform',
             token: process.env.GITHUB_TOKEN || process.env.GH_TOKEN,
             number: alert.number,
             entry,

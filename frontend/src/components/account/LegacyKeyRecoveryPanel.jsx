@@ -83,7 +83,7 @@ const STEP_TITLES = {
 }
 
 function LegacyKeyRecoveryPanel({ deps = {}, defaultOpen = false }) {
-  const { address: sessionAddress, provider, loginMethod, chainId, isConnected } = useWallet()
+  const { address: sessionAddress, loginMethod, chainId, isConnected } = useWallet()
   const { findByAddress, addContact, updateContact } = useAddressBook()
   // Stable module import ⇒ the memo is preservable and re-derives only when the
   // signed-in account changes. Tests inject a fake vault via the module mock.
@@ -297,14 +297,14 @@ function LegacyKeyRecoveryPanel({ deps = {}, defaultOpen = false }) {
     try {
       // Pass the destination so the native-leg fee is estimated against it (a
       // smart-account recipient needs more than the 21k EOA baseline).
-      const q = await quoteAllAssets({ kind: active.kind, secret: active.secret, chainId, provider: deps.provider ?? provider, to: destTarget || undefined })
+      const q = await quoteAllAssets({ kind: active.kind, secret: active.secret, chainId, client: deps.client, to: destTarget || undefined })
       setQuote(q)
       setPhase('idle')
     } catch (e) {
       setPhase('idle')
       setNotice({ kind: 'error', text: `Could not read balances on ${networkName}: ${e.reason || e.shortMessage || e.message}` })
     }
-  }, [active, chainId, provider, deps.provider, networkName, destTarget])
+  }, [active, chainId, deps.client, networkName, destTarget])
 
   const doSweep = useCallback(async () => {
     if (!active || !destTarget) return
@@ -317,7 +317,7 @@ function LegacyKeyRecoveryPanel({ deps = {}, defaultOpen = false }) {
         secret: active.secret,
         to: destTarget,
         chainId,
-        provider: deps.provider ?? provider,
+        client: deps.client,
         onProgress: (o) => setOutcomes((prev) => [...(prev || []), o]),
       })
       setOutcomes(results)
@@ -328,7 +328,7 @@ function LegacyKeyRecoveryPanel({ deps = {}, defaultOpen = false }) {
       setPhase('idle')
       setNotice({ kind: 'error', text: `The transfer could not start: ${e.reason || e.shortMessage || e.message}` })
     }
-  }, [active, destTarget, chainId, provider, deps.provider])
+  }, [active, destTarget, chainId, deps.client])
 
   const startTransferStored = useCallback((entry) => {
     resetWizard()

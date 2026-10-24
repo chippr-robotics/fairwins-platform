@@ -1,6 +1,6 @@
 # Multi-stage build for React frontend with Vite
 # Stage 1: Build the React application
-FROM node:22-alpine AS build
+FROM node:22.23.3-alpine3.24 AS build
 
 # Build from the REPO ROOT, not frontend/ (spec 075). There is one root lockfile now, so
 # `COPY frontend/package*.json` matched only package.json and `npm ci` failed outright with
@@ -150,7 +150,7 @@ ENV VITE_GIT_SHA=${VITE_GIT_SHA}
 RUN npm run build
 
 # Stage 2: Serve with nginx
-FROM nginx:alpine
+FROM nginx:1.30.5-alpine
 
 # Install envsubst for runtime environment variable substitution
 RUN apk add --no-cache gettext

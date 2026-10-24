@@ -22,7 +22,8 @@
  * Cached per lowercase address for `SCREENING_TTL_MS` (same TTL as the per-chain screen) with
  * in-flight de-duplication, so five fields showing the same address cost one sweep.
  */
-import { getAddress, isAddress } from 'viem'
+// Not viem's `isAddress`: neither of its settings reproduces ethers' (see the seam's table).
+import { getAddress, isAddress } from '../evm/address'
 import { readProviderFor } from '../chains/estate'
 import { SCREENING_TTL_MS } from '../addressBook/constants'
 import { screeningChainIds, screeningSourcesFor } from './sources'
@@ -61,7 +62,8 @@ function cacheKey(address, chainIds) {
  * @property {'read'|'unreadable'} status
  * @property {boolean} [flagged]  only on `read`
  * @property {string|null} [detail] only on `read`
- * @property {string} [reason]    only on `unreadable`
+ * @property {string} [reason]    only on `unreadable` — MEMBER-FACING copy, rendered verbatim
+ * @property {Error}  [error]     only on `unreadable` — the underlying failure, never rendered
  */
 
 /**
@@ -73,6 +75,32 @@ function cacheKey(address, chainIds) {
  * @property {string} verdict      one of VERDICTS
  * @property {number} readAt
  */
+
+/**
+ * Why a list gave no answer, in words a MEMBER can read.
+ *
+ * `reason` is rendered verbatim under an address field ("Could not read — …"), so it is copy, not
+ * a log line. A decode failure is the common case — a chain whose contract answers `0x`, which is
+ * what an address holding no contract returns — and the underlying libraries describe it in their
+ * own terms: ethers says "could not decode result data", viem says `The contract function
+ * "isAllowed" returned no data ("0x").`, naming a Solidity function a member has never heard of
+ * and, in its long form, printing a docs URL and a version. Neither belongs in this sentence.
+ *
+ * Anything we do not recognise still passes through, because a specific unknown failure is more
+ * useful to a member than a generic one — the mapping only replaces the messages we know are
+ * internal. The raw error is left on the reading for callers that want it.
+ */
+function memberReadableReason(error) {
+  const text = String(error?.shortMessage || error?.message || error || '')
+  if (/returned no data|could not decode result data|BAD_DATA|ZeroData/i.test(text)) {
+    return 'this network answered with nothing'
+  }
+  if (/no RPC endpoint is configured/i.test(text)) return 'no read connection to this network'
+  // Keep a short, single-line reason: a multi-line library dump renders as a wall of text in a
+  // row that is one line of a list.
+  const firstLine = text.split('\n')[0].trim()
+  return firstLine.length > 120 ? `${firstLine.slice(0, 117)}…` : firstLine || 'no answer'
+}
 
 async function readSource(source, provider, account, deadlineMs) {
   const base = {
@@ -91,7 +119,7 @@ async function readSource(source, provider, account, deadlineMs) {
     )
     return { ...base, status: READ, flagged: Boolean(flagged), detail: detail ?? null }
   } catch (e) {
-    return { ...base, status: UNREADABLE, reason: e?.shortMessage || e?.message || String(e) }
+    return { ...base, status: UNREADABLE, reason: memberReadableReason(e), error: e }
   }
 }
 

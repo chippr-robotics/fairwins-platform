@@ -24,10 +24,12 @@ import { useAddressBook } from '../../hooks/useAddressBook'
 // which would label another chain's balances with the wrong symbol (specs 068/071 guardrail).
 import { NETWORKS } from '../../config/networks'
 import { getReadProvider } from '../../utils/rpcProvider'
-import { connectHardware, vendorAvailability, VENDOR_LABELS } from '../../lib/hardware/adapters'
+import { connectHardware, vendorAvailability, VENDOR_LABELS, HARDWARE_VENDOR_ORDER } from '../../lib/hardware/adapters'
+// Spec 111 — Sigil's pairing (bridge address + token) is device-scoped, never in the account store.
+import { DEFAULT_SIGIL_BRIDGE_URL, loadSigilBridge, saveSigilBridge } from '../../lib/hardware/sigilBridgeStore'
 // Connect copy is DERIVED from the transport the adapter would open — a phone pairing over
 // Bluetooth must never be told to plug anything in (spec 085 follow-up).
-import { connectGuidance } from '../../lib/hardware/connectCopy'
+import { connectGuidance, describeSigilBudget } from '../../lib/hardware/connectCopy'
 import { reportHardwareError } from '../../lib/hardware/errors'
 import { defaultSchemeFor, pagePaths, PATH_SCHEMES } from '../../lib/hardware/derivations'
 import { hardwareWalletVault } from '../../lib/hardware/hardwareAccounts'
@@ -44,6 +46,10 @@ const STEP_TITLES = {
 }
 
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
+
+// Below this many presignatures the pick step warns: a disk that runs out mid-task cannot sign
+// until it is refilled at the mother device.
+const LOW_PRESIGS = 10
 
 /** Format a wei balance for a row: trimmed, honest "—" when unknown. */
 const fmtBalance = (wei, symbol) => {
@@ -68,6 +74,10 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
   const [selected, setSelected] = useState({}) // { [lowerAddress]: true }
   const [label, setLabel] = useState('')
   const [savedEntries, setSavedEntries] = useState([])
+  // A vendor with one account per device (Sigil: one per disk) has nothing to page or re-derive.
+  const [fixedAccounts, setFixedAccounts] = useState(false)
+  const [bridgeUrl, setBridgeUrl] = useState(DEFAULT_SIGIL_BRIDGE_URL)
+  const [bridgeToken, setBridgeToken] = useState('')
   const sessionRef = useRef(null)
 
   const network = chainId != null ? NETWORKS[chainId] : null
@@ -95,6 +105,8 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
     setSelected({})
     setLabel('')
     setSavedEntries([])
+    setFixedAccounts(false)
+    setBridgeToken('')
     onClose?.()
   }, [busy, releaseSession, onClose])
 
@@ -104,14 +116,23 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
     setVendor(v)
     setSchemeId(defaultSchemeFor(v))
     setError(null)
+    if (v === 'sigil') {
+      // Prefill a previous pairing on this device; the token field stays empty until the member
+      // pastes one (a saved token is used as-is when the field is left blank).
+      const saved = loadSigilBridge()
+      setBridgeUrl(saved?.url || DEFAULT_SIGIL_BRIDGE_URL)
+      setBridgeToken('')
+    }
     setStep('connect')
   }, [])
 
   /** Load one page of derived accounts (also the initial load after connect). */
   const loadAccounts = useCallback(
     async (session, sId, from) => {
-      const paths = pagePaths(sId, from, PAGE_SIZE).map((p) => p.path)
-      const derived = await session.getAddresses(paths)
+      const fixed = typeof session.describeAccounts === 'function'
+      const derived = fixed
+        ? await session.describeAccounts()
+        : await session.getAddresses(pagePaths(sId, from, PAGE_SIZE).map((p) => p.path))
       const vault = owner ? hardwareWalletVault(owner) : null
       const provider = deps.provider ?? (chainId != null ? getReadProvider(chainId) : null)
       const balances = await Promise.allSettled(
@@ -129,10 +150,23 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
 
   const doConnect = useCallback(async () => {
     setError(null)
+    let sigilBridge
+    if (vendor === 'sigil') {
+      // Validate and persist the pairing before any request leaves the page: a malformed address
+      // or token is a sentence under the field, not a network error.
+      try {
+        const token = bridgeToken.trim() || loadSigilBridge()?.token || ''
+        sigilBridge = saveSigilBridge({ url: bridgeUrl, token })
+      } catch (e) {
+        setError(e.message)
+        return
+      }
+    }
     setBusy(true)
     try {
-      const session = sessionRef.current ?? (await connectFn(vendor))
+      const session = sessionRef.current ?? (await connectFn(vendor, sigilBridge ? { sigilBridge } : undefined))
       sessionRef.current = session
+      setFixedAccounts(typeof session.describeAccounts === 'function')
       const page = await loadAccounts(session, schemeId, 0)
       setRows(page)
       setOffset(PAGE_SIZE)
@@ -142,7 +176,7 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
     } finally {
       setBusy(false)
     }
-  }, [connectFn, vendor, schemeId, loadAccounts])
+  }, [connectFn, vendor, schemeId, loadAccounts, bridgeUrl, bridgeToken])
 
   const loadMore = useCallback(async () => {
     if (!sessionRef.current) return
@@ -207,7 +241,16 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
           } else {
             addContact({
               nickname,
-              addresses: [{ address: row.address, chainId, notes: `${VENDOR_LABELS[vendor]} hardware wallet (${row.path})` }],
+              addresses: [
+                {
+                  address: row.address,
+                  chainId,
+                  notes:
+                    vendor === 'sigil'
+                      ? `Sigil cold signer (disk ${row.path.replace(/^sigil:/, '')})`
+                      : `${VENDOR_LABELS[vendor]} hardware wallet (${row.path})`,
+                },
+              ],
             })
           }
         } catch {
@@ -239,7 +282,7 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
     <div className="hw-step" data-testid="hw-step-vendor">
       <p className="hw-step__lead">Keep funds on a device whose keys never touch this browser.</p>
       <div className="hw-vendor-options">
-        {['ledger', 'trezor'].map((v) => {
+        {HARDWARE_VENDOR_ORDER.map((v) => {
           const a = availability(v)
           // The hint names the rail this browser would actually use — USB on a computer,
           // Bluetooth on a phone — or, when there is none, the reason it cannot.
@@ -275,6 +318,39 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
         // No rail at all: the stated reason stands in for a checklist that could not succeed.
         <p className="hw-step__lead">{vendor ? guidance(vendor).optionHint : ''}</p>
       )}
+      {vendor === 'sigil' && (
+        <div className="hw-sigil-pairing" data-testid="hw-sigil-pairing">
+          <label className="hw-field">
+            <span>Bridge address</span>
+            <input
+              type="url"
+              value={bridgeUrl}
+              onChange={(e) => setBridgeUrl(e.target.value)}
+              disabled={busy}
+              autoComplete="off"
+              spellCheck={false}
+              data-testid="hw-sigil-url"
+            />
+          </label>
+          <label className="hw-field">
+            <span>Pairing token</span>
+            <input
+              type="password"
+              value={bridgeToken}
+              onChange={(e) => setBridgeToken(e.target.value)}
+              disabled={busy}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={loadSigilBridge() ? 'Saved on this device — paste a new one to replace it' : 'Paste from the bridge’s token file'}
+              data-testid="hw-sigil-token"
+            />
+          </label>
+          <p className="hw-step__hint">
+            The token stays on this device and is never included in your backup. Your browser may ask to let this
+            site reach devices on your local network — allow it so the page can reach the bridge.
+          </p>
+        </div>
+      )}
       {error && (
         <p role="alert" className="hw-error">
           {error}
@@ -293,6 +369,13 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
 
   const pickStep = (
     <div className="hw-step" data-testid="hw-step-pick">
+      {fixedAccounts ? (
+        <p className="hw-step__lead">
+          {vendor === 'sigil'
+            ? 'This disk controls one account. Every signature uses one of the disk’s presignatures, and nothing can be signed while the disk is out of the drive.'
+            : 'This device controls the account below.'}
+        </p>
+      ) : (
       <div className="hw-scheme-toggle" role="radiogroup" aria-label="Derivation scheme">
         {PATH_SCHEMES.map((s) => (
           <button
@@ -308,6 +391,7 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
           </button>
         ))}
       </div>
+      )}
 
       <ul className="hw-account-list">
         {rows.map((row) => {
@@ -325,6 +409,23 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
                 <span className="hw-account-row__text">
                   <span className="hw-account-row__address">{short(row.address)}</span>
                   <span className="hw-account-row__path">{row.path}</span>
+                  {row.detail && describeSigilBudget(row.detail) && (
+                    <span className="hw-account-row__budget" data-testid="hw-sigil-budget">
+                      {describeSigilBudget(row.detail)}
+                    </span>
+                  )}
+                  {row.detail?.presigsRemaining != null && row.detail.presigsRemaining < LOW_PRESIGS && (
+                    <span className="hw-account-row__warning" role="note" data-testid="hw-sigil-low">
+                      {row.detail.presigsRemaining === 0
+                        ? 'This disk has no signatures left — refill it at your mother device before relying on it.'
+                        : 'This disk is nearly out of signatures — plan a refill at your mother device.'}
+                    </span>
+                  )}
+                  {row.detail?.valid === false && (
+                    <span className="hw-account-row__warning" role="note">
+                      This disk has expired or failed its check — it cannot sign until it is reconciled.
+                    </span>
+                  )}
                 </span>
               </label>
               <span className="hw-account-row__meta">
@@ -336,9 +437,11 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
         })}
       </ul>
 
-      <button type="button" className="hw-load-more" onClick={loadMore} disabled={busy} data-testid="hw-load-more">
-        {busy ? 'Reading the device…' : 'Show more accounts'}
-      </button>
+      {!fixedAccounts && (
+        <button type="button" className="hw-load-more" onClick={loadMore} disabled={busy} data-testid="hw-load-more">
+          {busy ? 'Reading the device…' : 'Show more accounts'}
+        </button>
+      )}
 
       <label className="hw-field">
         <span>Label (optional)</span>
@@ -388,7 +491,11 @@ export default function AddHardwareWalletSheet({ open, onClose, onSaved, deps = 
           </li>
         ))}
       </ul>
-      <p className="hw-step__hint">The device stays in charge: nothing can be sent from these accounts without confirming on it.</p>
+      <p className="hw-step__hint">
+        {savedEntries.some((e) => e.vendor === 'sigil')
+          ? 'The disk stays in charge: nothing can be signed from this account unless its Sigil disk is in the drive.'
+          : 'The device stays in charge: nothing can be sent from these accounts without confirming on it.'}
+      </p>
       <div className="hw-actions">
         <button type="button" className="btn btn-primary" onClick={close} data-testid="hw-done">
           Done

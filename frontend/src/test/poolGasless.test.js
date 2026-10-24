@@ -41,6 +41,11 @@ describe('pool gasless (client-side, no backend)', () => {
     )
     expect(recovered).toBe(wallet.address)
     expect(auth.to).toBe(to)
+    // Spec 110 divergence 10 — the authorization is JSON-serialized to a relayer, and viem's
+    // parseSignature would have made `v` a bigint, which JSON.stringify refuses. A recovery check
+    // cannot see this: ethers' Signature.from accepts a bigint v perfectly happily.
+    expect(typeof auth.v).toBe('number')
+    expect(() => JSON.stringify(auth, (k, x) => (typeof x === 'bigint' ? x.toString() : x))).not.toThrow()
   })
 
   it('relays an identity-free join through a configured relayer, and errors clearly without one', async () => {

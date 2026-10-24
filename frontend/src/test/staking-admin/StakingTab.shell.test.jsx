@@ -8,7 +8,7 @@ import { render, screen, waitFor } from '@testing-library/react'
 import { axe } from 'vitest-axe'
 import { cohortChainIds } from '../../config/networks'
 
-const m = vi.hoisted(() => ({ routerAddr: null, reads: {} }))
+const m = vi.hoisted(() => ({ routerAddr: null, reads: {}, qfEvents: [], scanCalls: [] }))
 
 vi.mock('../../config/contracts', () => ({
   getContractAddressForChain: vi.fn(() => m.routerAddr),
@@ -20,30 +20,11 @@ vi.mock('../../lib/fees/feeQuote', async (orig) => ({
   ...(await orig()),
   fetchFeeQuote: vi.fn(() => Promise.resolve({ available: false, bps: 0, capBps: 0 })),
 }))
-vi.mock('ethers', async (orig) => {
-  const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          if (prop === 'filters') return new Proxy({}, { get: () => () => ({}) })
-          const key = String(prop)
-          return (...args) => {
-            const f = m.reads[key]
-            return f ? f(...args) : Promise.resolve(undefined)
-          }
-        },
-      },
-    )
-  }
-  const FakeCtor = vi.fn(FakeContract)
-  // StakingTab reads capability through `ethers.Contract` (the namespace object) as well as the
-  // named export — override BOTH, or the authority read escapes to the real ethers and reports
-  // "unconfirmed", which keeps every control offered and makes a gating test vacuous.
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
-})
+/**
+ * The ethers fake that stood here is GONE: StakingTab reads through the chain seam now (spec
+ * 110), so it intercepted nothing — the retired-mock shape `src/test/lint/ethersMockRatchet.test.js`
+ * fails on. The `readContract` mock below already serves `m.reads`, so every seed is unchanged.
+ */
 
 
 // Spec 071: the tab scopes to a network the operator picks (seeded from the wallet's chain when
@@ -55,6 +36,50 @@ const WALLET_CHAIN = cohortChainIds()[0]
 const ACCOUNT = '0x2222222222222222222222222222222222222222'
 
 import { ethers } from 'ethers'
+// The estate AUTHORITY read (`hasRole` on the router that will enforce it) moved onto the
+// spec-110 chain seam; the tab's own router reads still go through the contract mock above.
+// Both serve `m.reads`, so what a test seeds is unchanged.
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    // Honours the address, so a scan pointed at nothing cannot quietly return seeded events —
+    // a mock that ignores its address cannot distinguish what the assertion claims it does.
+    if (!address) return null
+    m.scanCalls.push({ chainId, address })
+    return {
+    target: address,
+    provider: {
+      getBlockNumber: async () => 1_000_000,
+      // Seeded events, already decoded — the seam's own parseLog has its own suite.
+      getLogs: async () => (m.qfEvents || []).map((e, i) => ({ ...e, index: e.index ?? i })),
+    },
+    filters: new Proxy(
+      {},
+      { get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }) },
+    ),
+    interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: () => ({ getBlock: async () => ({ timestamp: 1_752_800_000n }) }),
+  }
+})
+
+vi.mock('../../lib/chains/readContract', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      const f = m.reads[functionName]
+      return f ? f(...args) : undefined
+    },
+  }
+})
+
 import StakingTab from '../../components/admin/StakingTab'
 // Capability now comes from the router's own AccessControl, so "a guardian" in these tests means
 // the router answers hasRole(GUARDIAN_ROLE) — not that an app-wide prop said so. The props stay

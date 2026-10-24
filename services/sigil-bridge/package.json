@@ -1,0 +1,17 @@
+{
+  "name": "fairwins-sigil-bridge",
+  "private": true,
+  "description": "Sigil bridge (spec 111): a loopback HTTP bridge from a FairWins browser tab to the local sigil-daemon IPC socket. Zero dependencies, node built-ins only. Outside Sigil's TCB; it never accepts or returns key material.",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "bin": {
+    "sigil-bridge": "src/main.js"
+  },
+  "main": "src/main.js",
+  "scripts": {
+    "start": "node src/main.js",
+    "test": "node --test test/*.test.js"
+  }
+}

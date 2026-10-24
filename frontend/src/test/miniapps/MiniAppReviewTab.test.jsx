@@ -45,26 +45,6 @@ const state = vi.hoisted(() => ({
   throwOn: {},
 }))
 
-vi.mock('ethers', async (importOriginal) => {
-  const actual = await importOriginal()
-  // A real function expression: `new ethers.Contract(...)` needs a constructor.
-  function FakeContract() {
-    const call = (method) => async (...args) => {
-      state.calls.push({ method, args })
-      const error = state.throwOn[method]
-      if (error) throw error
-      return { hash: `0xtx${method}`, wait: async () => ({ status: 1 }) }
-    }
-    return {
-      approveApp: call('approveApp'),
-      rejectProposal: call('rejectProposal'),
-      suspendApp: call('suspendApp'),
-      deprecateApp: call('deprecateApp'),
-    }
-  }
-  return { ...actual, ethers: { ...actual.ethers, Contract: FakeContract } }
-})
-
 vi.mock('../../lib/miniapps/registryClient', async (importOriginal) => {
   const actual = await importOriginal()
   return {
@@ -258,10 +238,38 @@ function makeRunTx() {
   })
 }
 
+/**
+ * The curator's signer, recording what would actually go on chain.
+ *
+ * Spec 110 T028 — this replaces a `vi.mock('ethers')` that faked `new ethers.Contract(...)`. The
+ * component no longer constructs one, so that mock had become a mock on a retired path: it would
+ * have gone on looking like protection while intercepting nothing. It fails loudly here only
+ * because the assertions read the calls it recorded.
+ *
+ * What replaces it is stronger than what it replaced. The fake decodes the CALLDATA the component
+ * built — with an ethers `Interface`, against the registry's real ABI, so it is also a live
+ * cross-library check on the viem encoder — and yields the same `{ method, args }` the assertions
+ * already used. A method name can be faked; these are the bytes.
+ */
+const registryIface = new ethers.Interface(MINI_APP_REGISTRY_ABI)
+function recordingSigner() {
+  return {
+    address: CURATOR,
+    async sendTransaction({ to, data }) {
+      const parsed = registryIface.parseTransaction({ data })
+      const method = parsed.name
+      state.calls.push({ method, args: parsed.args.map((a) => (typeof a === 'bigint' ? Number(a) : a)), to })
+      const error = state.throwOn[method]
+      if (error) throw error
+      return { hash: `0xtx${method}`, wait: async () => ({ status: 1 }) }
+    },
+  }
+}
+
 function renderTab(props = {}) {
   return render(
     <MiniAppReviewTab
-      signer={{ address: CURATOR }}
+      signer={recordingSigner()}
       account={CURATOR}
       chainId={CHAIN}
       runTx={makeRunTx()}
@@ -447,7 +455,11 @@ describe('lifecycle actions carry the hash the reviewer saw (FR-004a)', () => {
     const { user, card } = await verifyThen()
     await user.click(within(card).getByRole('button', { name: /^Approve v2/ }))
     await waitFor(() => expect(state.calls).toHaveLength(1))
-    expect(state.calls[0]).toEqual({ method: 'approveApp', args: [1, PROPOSED_HASH] })
+    expect(state.calls[0]).toMatchObject({ method: 'approveApp', args: [1, PROPOSED_HASH] })
+    // The registry address was invisible to the retired `new ethers.Contract(...)` fake, which
+    // ignored its first argument entirely. A curator write going to the wrong contract would have
+    // passed every assertion in this file.
+    expect(state.calls[0].to).toBe(REGISTRY)
   })
 
   it('reject names the PROPOSED hash and says the live version keeps serving (FR-004b)', async () => {
@@ -458,7 +470,7 @@ describe('lifecycle actions carry the hash the reviewer saw (FR-004a)', () => {
     // right move, so rejection must never be gated on a successful verification.
     await user.click(within(card).getByRole('button', { name: /Reject proposed v2/ }))
     await waitFor(() => expect(state.calls).toHaveLength(1))
-    expect(state.calls[0]).toEqual({ method: 'rejectProposal', args: [1, PROPOSED_HASH] })
+    expect(state.calls[0]).toMatchObject({ method: 'rejectProposal', args: [1, PROPOSED_HASH] })
     expect(within(card).getByText(/Any previously approved version keeps\s+serving/i)).toBeInTheDocument()
   })
 
@@ -482,7 +494,7 @@ describe('lifecycle actions carry the hash the reviewer saw (FR-004a)', () => {
 
     await user.click(within(card).getByRole('button', { name: /^Reinstate on/ }))
     await waitFor(() => expect(state.calls).toHaveLength(1))
-    expect(state.calls[0]).toEqual({ method: 'approveApp', args: [7, APPROVED_HASH] })
+    expect(state.calls[0]).toMatchObject({ method: 'approveApp', args: [7, APPROVED_HASH] })
   })
 
   it('suspend explains that it takes a live app offline immediately', async () => {
@@ -492,7 +504,7 @@ describe('lifecycle actions carry the hash the reviewer saw (FR-004a)', () => {
     expect(within(card).getByText(/takes this app offline immediately/i)).toBeInTheDocument()
     await user.click(within(card).getByRole('button', { name: 'Suspend' }))
     await waitFor(() => expect(state.calls).toHaveLength(1))
-    expect(state.calls[0]).toEqual({ method: 'suspendApp', args: [2] })
+    expect(state.calls[0]).toMatchObject({ method: 'suspendApp', args: [2] })
   })
 
   it('records an audit entry naming the decision, the package and the transaction', async () => {
@@ -535,7 +547,7 @@ describe('deprecation is terminal, so it takes two deliberate steps', () => {
     await user.click(within(card).getByRole('button', { name: /Retire permanently…/ }))
     await user.click(within(card).getByRole('button', { name: /Yes, retire Ledger Sync permanently/ }))
     await waitFor(() => expect(state.calls).toHaveLength(1))
-    expect(state.calls[0]).toEqual({ method: 'deprecateApp', args: [2] })
+    expect(state.calls[0]).toMatchObject({ method: 'deprecateApp', args: [2] })
   })
 
   it('carries focus into the warning and back out to the trigger (T047)', async () => {

@@ -10,13 +10,24 @@
  * never resolves to zeros.
  */
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, decodeEventLog } from 'viem'
+import { parseUnits } from '../lib/evm/units'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { getPublicClient } from '../lib/chains/publicClient'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { getLogsRange } from '../lib/chains/logRange'
+import { getAddress } from '../lib/evm/address'
 import { useWeb3 } from './useWeb3'
 import { getContractAddressForChain } from '../config/contracts'
 import {
   ERC20_ABI,
-  getFundingFactory,
-  getFundingPool,
+  readFundingFactory,
+  readFundingPool,
+  encodeFactoryCall,
+  encodePoolCall,
+  FUNDING_POOL_FACTORY_ABI,
+  FUNDING_POOL_ABI,
+  getFundingFactoryAddress,
   isFundingAvailable,
   fundingStateDisplay,
   REFUND_REASON,
@@ -29,6 +40,17 @@ import { recordFundingPool } from '../lib/funding/myFundingPools'
 import { progressPct, refundVotesNeeded, formatAmount, deadlinesFor } from '../lib/funding/progress'
 
 const MAX_FEED = 200
+
+/**
+ * The one method `resolvePool` (lib/pools/gateway.js) calls, backed by the chain seam.
+ *
+ * `resolvePool` is SHARED with the wager pools, whose contract module is still deferred, so its
+ * signature is left alone and this satisfies the duck type instead — the same move `getLogsRange`
+ * and `scanLogs` take with their readers.
+ */
+const factoryReaderFor = (chainId) => ({
+  poolByPhrase: (indices) => readFundingFactory(chainId, 'poolByPhrase', [indices]),
+})
 
 /** Fetch a receipt by hash, retrying briefly for RPC lag. */
 async function waitReceipt(runner, txHash, tries = 8, delayMs = 1500) {
@@ -48,11 +70,18 @@ async function waitReceipt(runner, txHash, tries = 8, delayMs = 1500) {
   return null
 }
 
-function parsePoolCreated(receipt, factory) {
+const FACTORY_ABI_PARSED = normalizeAbi(FUNDING_POOL_FACTORY_ABI)
+
+function parsePoolCreated(receipt) {
   const ev = (receipt?.logs || [])
     .map((l) => {
       try {
-        return factory.interface.parseLog(l)
+        const { eventName, args } = decodeEventLog({
+          abi: FACTORY_ABI_PARSED,
+          topics: l.topics,
+          data: l.data,
+        })
+        return { name: eventName, args }
       } catch {
         return null
       }
@@ -76,17 +105,18 @@ function safePhrase(wordIndices, lang = getWordListLang()) {
   }
 }
 
-async function readToken(tokenAddr, runner) {
-  const token = new ethers.Contract(tokenAddr, ERC20_ABI, runner)
+async function readToken(tokenAddr, chainId) {
   let decimals = 6
   let symbol = 'USDC'
   try {
-    decimals = Number(await token.decimals())
-    symbol = await token.symbol()
+    const ask = (functionName) =>
+      readContract(chainId, { address: tokenAddr, abi: ERC20_ABI, functionName })
+    decimals = Number(await ask('decimals'))
+    symbol = await ask('symbol')
   } catch {
     /* USDC defaults */
   }
-  return { token, decimals, symbol }
+  return { decimals, symbol }
 }
 
 /** Assemble the PoolSummary (data-model.md) from state reads. Throws if the pool cannot be read. */
@@ -95,14 +125,17 @@ async function readToken(tokenAddr, runner) {
  * are enforced by the contract against `block.timestamp`, so the UI judges them by the same clock
  * rather than the device's — a wrong device clock must not offer a "Start refunds" the contract
  * would revert, or hide a contribute window that is still open. Falls back to the device clock only
- * when the runner cannot answer (a mocked runner in tests, a provider without `getBlock`).
+ * when the chain cannot answer (no endpoint for it, or the read fails).
+ *
+ * Takes a CHAIN rather than a contract (spec 110): the clock is a property of the chain, and it
+ * used to be reached by digging `contract.runner.provider` out of an ethers Contract — which is
+ * the fusion of "where" with "who" this migration exists to remove.
  */
-export async function chainNow(contract) {
+export async function chainNow(chainId) {
   try {
-    const runner = contract?.runner
-    const provider = runner?.provider ?? runner
-    if (provider && typeof provider.getBlock === 'function') {
-      const block = await provider.getBlock('latest')
+    const client = getPublicClient(chainId)
+    if (client) {
+      const block = await client.getBlock({ blockTag: 'latest' })
       const ts = Number(block?.timestamp)
       if (Number.isFinite(ts) && ts > 0) return ts
     }
@@ -112,25 +145,35 @@ export async function chainNow(contract) {
   return Math.floor(Date.now() / 1000)
 }
 
-export async function summarizeFundingPool(pool, factory, account, chainId, nowOverride = null) {
-  const now = nowOverride ?? (await chainNow(pool))
+/**
+ * @param {object} args
+ * @param {number} args.chainId    the chain the pool lives on — an ARGUMENT now, not something
+ *   fished out of a Contract's runner (spec 110)
+ * @param {string} args.address    the pool clone
+ * @param {boolean} args.hasFactory whether the factory is deployed here (the phrase is the only
+ *   thing that needs it, and it is display-only)
+ */
+export async function summarizeFundingPool({ chainId, address, hasFactory, account, nowOverride = null }) {
+  const now = nowOverride ?? (await chainNow(chainId))
+  const ask = (functionName, args = []) => readFundingPool(chainId, address, functionName, args)
   const [
     stateNum, organizer, goal, purpose, tokenAddr, contributeDeadline, settleDeadline, createdBlock,
     totalRaised, contributorCount, refundVotes, refundedCount, refundReasonNum, closedAt,
   ] = await Promise.all([
-    pool.state(), pool.organizer(), pool.goal(), pool.purpose(), pool.token(), pool.contributeDeadline(),
-    pool.settleDeadline(), pool.createdBlock(), pool.totalRaised(), pool.contributorCount(),
-    pool.refundVotes(), pool.refundedCount(), pool.refundReason(), pool.closedAt(),
+    ask('state'), ask('organizer'), ask('goal'), ask('purpose'), ask('token'), ask('contributeDeadline'),
+    ask('settleDeadline'), ask('createdBlock'), ask('totalRaised'), ask('contributorCount'),
+    ask('refundVotes'), ask('refundedCount'), ask('refundReason'), ask('closedAt'),
   ])
-  const address = await pool.getAddress()
-  const { decimals, symbol } = await readToken(tokenAddr, pool.runner)
+  const { decimals, symbol } = await readToken(tokenAddr, chainId)
   const state = Number(stateNum)
   const raised = BigInt(totalRaised)
   const goalBn = BigInt(goal)
   const me = { contributed: 0n, contributedFormatted: '0', hasContributed: false, voted: false, refunded: false, canVote: false, canClaimRefund: false }
   if (account) {
     const [contributed, voted, refunded] = await Promise.all([
-      pool.contributed(account), pool.votedRefund(account), pool.refunded(account),
+      ask('contributed', [getAddress(account)]),
+      ask('votedRefund', [getAddress(account)]),
+      ask('refunded', [getAddress(account)]),
     ])
     me.contributed = BigInt(contributed)
     me.contributedFormatted = formatAmount(me.contributed, decimals)
@@ -142,9 +185,9 @@ export async function summarizeFundingPool(pool, factory, account, chainId, nowO
   }
   let wordIndices = null
   let phrase = null
-  if (factory) {
+  if (hasFactory) {
     try {
-      wordIndices = [...(await factory.phraseOfPool(address))].map((x) => Number(x))
+      wordIndices = [...(await readFundingFactory(chainId, 'phraseOfPool', [address]))].map((x) => Number(x))
       phrase = safePhrase(wordIndices)
     } catch {
       /* phrase is display-only */
@@ -196,9 +239,12 @@ export async function summarizeFundingPool(pool, factory, account, chainId, nowO
 export function decodeActivity(events, poolAddress) {
   const entries = []
   for (const e of events) {
-    if (!e || !e.fragment || !e.args) continue
+    // `name` rather than ethers' `fragment.name` (spec 110): the scan seam decodes a log to
+    // `{ name, args }`, and a shape this function accepted but the scan never produces would be a
+    // fixture answering a question the chain no longer answers.
+    if (!e || !e.name || !e.args) continue
     const base = { blockNumber: e.blockNumber, logIndex: e.index ?? e.logIndex ?? 0, txHash: e.transactionHash }
-    switch (e.fragment.name) {
+    switch (e.name) {
       case 'Contributed':
         entries.push({ ...base, kind: 'contribute', actor: e.args.contributor, amount: BigInt(e.args.amount) })
         break
@@ -296,23 +342,30 @@ export function useFundingPools() {
    */
   const createPool = useCallback(async (form) => wrap('creating', async () => {
     const { runner, chainId: activeChainId, account: activeAccount } = await requireContext()
-    const factory = getFundingFactory(runner, activeChainId)
+    const factoryAddress = getFundingFactoryAddress(activeChainId)
+    if (!factoryAddress) {
+      throw new Error(`Funding pools are not available on this network (chain ${activeChainId}).`)
+    }
     const tokenAddr = form.token || getContractAddressForChain('paymentToken', activeChainId)
     if (!tokenAddr) throw new Error('No escrow token configured for this network.')
-    const { decimals } = await readToken(tokenAddr, runner)
+    const { decimals } = await readToken(tokenAddr, activeChainId)
     const { contributeDeadline, settleDeadline } = deadlinesFor(form.windowId)
     const params = {
-      token: tokenAddr,
-      goal: ethers.parseUnits(String(form.goal), decimals),
+      // `getAddress` and the `String(...)` wrapper are both load-bearing (spec 110, divergences 16
+      // and 9): viem's encoder REFUSES an all-uppercase address that our validators accept, and it
+      // STRINGIFIES a non-string into a `string` parameter — and `purpose` is the pool's PUBLIC
+      // on-chain purpose, the sentence members read before deciding to contribute. A `null` would
+      // be committed as the four characters "null".
+      token: getAddress(String(tokenAddr).trim()),
+      goal: parseUnits(String(form.goal), decimals),
       purpose: String(form.purpose).trim(),
       contributeDeadline,
       settleDeadline,
     }
-    const factoryAddress = await factory.getAddress()
-    const data = factory.interface.encodeFunctionData('createPool', [params])
+    const data = encodeFactoryCall('createPool', [params])
     const txHash = await submit([{ target: factoryAddress, data }])
     const receipt = await waitReceipt(runner, txHash, 45, 2000)
-    const parsed = parsePoolCreated(receipt, factory)
+    const parsed = parsePoolCreated(receipt)
     if (parsed.pool && activeAccount) recordFundingPool(activeAccount, parsed.pool, 'organizer')
     return { ...parsed, txHash }
   }), [requireContext, submit, wrap])
@@ -321,15 +374,14 @@ export function useFundingPools() {
   const resolveRef = useCallback(async (ref) => {
     if (!ref) return null
     if (ref.address) return ref.address
-    const { runner, chainId: activeChainId } = await requireContext({ needAccount: false })
-    const factory = getFundingFactory(runner, activeChainId)
+    const { chainId: activeChainId } = await requireContext({ needAccount: false })
     const preferred = getWordListLang()
     const langs = [preferred, ...SUPPORTED_BIP39_LANGS.filter((l) => l !== preferred)].filter(isLangAvailable)
     const phrase = ref.words.join(' ')
     for (const lang of langs) {
       const indices = phraseToIndices(phrase, lang)
       if (!indices) continue
-      const addr = await resolvePool(factory, indices)
+      const addr = await resolvePool(factoryReaderFor(activeChainId), indices)
       if (addr) return addr
     }
     return null
@@ -337,42 +389,63 @@ export function useFundingPools() {
 
   /** Resolve four words to a pool summary for the unified lookup: { summary } | { notFound, reason }. */
   const resolvePhrase = useCallback(async (phrase, lang = getWordListLang()) => {
-    const { runner, chainId: activeChainId, account: activeAccount } = await requireContext({ needAccount: false })
+    const { chainId: activeChainId, account: activeAccount } = await requireContext({ needAccount: false })
     if (!isFundingAvailable(activeChainId)) return { notFound: true, reason: 'unavailable' }
     const indices = phraseToIndices(phrase, lang)
     if (!indices) return { notFound: true, reason: 'invalid' }
-    const factory = getFundingFactory(runner, activeChainId)
-    const addr = await resolvePool(factory, indices)
+    const addr = await resolvePool(factoryReaderFor(activeChainId), indices)
     if (!addr) return { notFound: true, reason: 'unknown' }
-    const summary = await summarizeFundingPool(getFundingPool(addr, runner), factory, activeAccount, activeChainId)
+    const summary = await summarizeFundingPool({
+      chainId: activeChainId,
+      address: addr,
+      hasFactory: true,
+      account: activeAccount,
+    })
     return { summary }
   }, [requireContext])
 
   const getSummary = useCallback(async (poolAddress) => {
-    const { runner, chainId: activeChainId, account: activeAccount } = await requireContext({ needAccount: false })
-    let factory
-    try {
-      factory = getFundingFactory(runner, activeChainId)
-    } catch {
-      factory = null // not deployed here — the summary still reads; only the phrase is unavailable
-    }
-    return summarizeFundingPool(getFundingPool(poolAddress, runner), factory, activeAccount, activeChainId)
+    const { chainId: activeChainId, account: activeAccount } = await requireContext({ needAccount: false })
+    // Not deployed here — the summary still reads; only the phrase is unavailable.
+    return summarizeFundingPool({
+      chainId: activeChainId,
+      address: poolAddress,
+      hasFactory: isFundingAvailable(activeChainId),
+      account: activeAccount,
+    })
   }, [requireContext])
 
   /** The pool's activity feed from its own event log (research R7). Throws if logs cannot be read. */
   const getActivity = useCallback(async (poolAddress, createdBlock) => {
-    const { runner } = await requireContext({ needAccount: false })
-    const pool = getFundingPool(poolAddress, runner)
+    const { chainId: activeChainId } = await requireContext({ needAccount: false })
+    const handle = eventScanHandle(activeChainId, { address: poolAddress, abi: FUNDING_POOL_ABI })
+    const client = getPublicClient(activeChainId)
+    if (!handle || !client) throw new Error('No read connection for this network.')
     const fromBlock = Number(createdBlock) > 0 ? Number(createdBlock) : 0
-    const events = await pool.queryFilter('*', fromBlock)
+    const latest = Number(await handle.provider.getBlockNumber())
+    // `queryFilter('*')` — EVERY event this clone emitted, so no topic filter. It bisects on
+    // refusal, which the single unbounded call it replaces did not: a range-capping RPC used to
+    // make the whole feed throw.
+    const logs = await getLogsRange(handle.provider, poolAddress, fromBlock, latest, 2000, [])
+    const events = logs
+      .map((log) => {
+        // An undecodable log is SKIPPED, exactly as ethers' queryFilter left it undecoded and
+        // `decodeActivity` dropped it — a clone can emit an event this ABI does not know.
+        try {
+          const { name, args } = handle.interface.parseLog(log)
+          return { ...log, name, args }
+        } catch {
+          return null
+        }
+      })
+      .filter(Boolean)
     const entries = decodeActivity(events, poolAddress)
     // Timestamps: one getBlock per distinct block, bounded by the feed cap.
-    const readerP = runner?.provider ?? runner
     const blocks = [...new Set(entries.map((e) => e.blockNumber))]
     const stamps = new Map()
     await Promise.all(blocks.map(async (bn) => {
       try {
-        const b = await readerP.getBlock(bn)
+        const b = await client.getBlock({ blockNumber: BigInt(bn) })
         if (b) stamps.set(bn, Number(b.timestamp))
       } catch {
         /* leave undefined */
@@ -383,26 +456,35 @@ export function useFundingPools() {
 
   /** Contribute `amountText` (decimal string) to a pool: approve if needed, then contribute. */
   const contribute = useCallback(async (poolAddress, amountText, summary) => wrap('contributing', async () => {
-    const { runner, account: activeAccount } = await requireContext()
-    const amount = ethers.parseUnits(String(amountText), summary.tokenDecimals)
+    const { chainId: activeChainId, account: activeAccount } = await requireContext()
+    const amount = parseUnits(String(amountText), summary.tokenDecimals)
     if (amount <= 0n) throw new Error('Enter an amount above zero.')
-    const token = new ethers.Contract(summary.tokenAddress, ERC20_ABI, runner)
     const calls = []
-    const allowance = await token.allowance(activeAccount, poolAddress)
-    if (allowance < amount) {
-      calls.push({ target: summary.tokenAddress, data: token.interface.encodeFunctionData('approve', [poolAddress, amount]) })
+    const allowance = await readContract(activeChainId, {
+      address: summary.tokenAddress,
+      abi: ERC20_ABI,
+      functionName: 'allowance',
+      args: [getAddress(activeAccount), getAddress(poolAddress)],
+    })
+    if (BigInt(allowance) < amount) {
+      calls.push({
+        target: summary.tokenAddress,
+        data: encodeFunctionData({
+          abi: normalizeAbi(ERC20_ABI),
+          functionName: 'approve',
+          args: [getAddress(poolAddress), amount],
+        }),
+      })
     }
-    const pool = getFundingPool(poolAddress, runner)
-    calls.push({ target: poolAddress, data: pool.interface.encodeFunctionData('contribute', [amount]) })
+    calls.push({ target: poolAddress, data: encodePoolCall('contribute', [amount]) })
     const txHash = await submit(calls)
     recordFundingPool(activeAccount, poolAddress, 'contributor')
     return { txHash, amount }
   }), [requireContext, submit, wrap])
 
   const runSimple = useCallback(async (label, fn, poolAddress) => wrap(label, async () => {
-    const { runner } = await requireContext()
-    const pool = getFundingPool(poolAddress, runner)
-    const txHash = await submit([{ target: poolAddress, data: pool.interface.encodeFunctionData(fn, []) }])
+    await requireContext()
+    const txHash = await submit([{ target: poolAddress, data: encodePoolCall(fn, []) }])
     return { txHash }
   }), [wrap, requireContext, submit])
 

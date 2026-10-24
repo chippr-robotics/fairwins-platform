@@ -125,5 +125,5 @@ Two hard rules on the gateway side:
   test sitekeys (a mock in a shipped path).
 
 Related: `docs/runbooks/credential-rotation.md` (the three new rows), the switch-on runbook on
-[#1438](https://github.com/chippr-robotics/prediction-dao-research/issues/1438),
+[#1438](https://github.com/chippr-robotics/fairwins-platform/issues/1438),
 `specs/106-gateway-caller-auth/` and `specs/107-keyed-rpc-access/`.

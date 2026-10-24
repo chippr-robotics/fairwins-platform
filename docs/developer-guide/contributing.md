@@ -10,7 +10,7 @@ Be respectful, inclusive, and collaborative. We're building something important 
 
 ### Reporting Bugs
 
-1. Check if the bug is already reported in [GitHub Issues](https://github.com/chippr-robotics/prediction-dao-research/issues)
+1. Check if the bug is already reported in [GitHub Issues](https://github.com/chippr-robotics/fairwins-platform/issues)
 2. If not, create a new issue with:
    - Clear title and description
    - Steps to reproduce
@@ -64,8 +64,8 @@ The full protocol — triage, sizing, sub-issues, reviewing delegated work — i
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/prediction-dao-research.git
-cd prediction-dao-research
+git clone https://github.com/YOUR_USERNAME/fairwins-platform.git
+cd fairwins-platform
 npm install
 # (spec 075) one root `npm install` covers frontend and every other workspace
 ```

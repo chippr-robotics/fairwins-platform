@@ -4,14 +4,16 @@
  * per UTC day) and "voucher redeemable" (action: redeem) from a best-effort bounded voucher scan. Pure
  * snapshot-diff (first-sight = baseline). No hooks; read-only provider.
  */
-import { ethers } from 'ethers'
-import { getProvider } from '../../../utils/blockchainService'
+import { keccak256, stringToHex, isAddress } from 'viem'
+import { getPublicClient } from '../../../lib/chains/publicClient'
+import { readContract } from '../../../lib/chains/readContract'
+import { eventScanHandle } from '../../../lib/chains/eventScan'
 import { getContractAddressForChain, getDeploymentBlockForChain } from '../../../config/contracts'
 import { MEMBERSHIP_MANAGER_ABI } from '../../../abis/MembershipManager'
 import { MEMBERSHIP_VOUCHER_ABI } from '../../../abis/MembershipVoucher'
 import { scanLogs } from '../../../lib/chain/logScan'
 
-const ROLE = ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE'))
+const ROLE = keccak256(stringToHex('WAGER_PARTICIPANT_ROLE'))
 const TIER = ['None', 'Bronze', 'Silver', 'Gold', 'Platinum']
 const DAY_S = 86400
 const EXPIRING_WINDOW_S = 7 * DAY_S
@@ -37,12 +39,13 @@ const VOUCHER_CHUNK_BUDGET_PER_POLL = 12
  *
  * @returns {Promise<{held: number|null, complete: boolean}>}
  */
-async function countRedeemableVouchers(voucherAddr, account, chainId, provider) {
+async function countRedeemableVouchers(voucherAddr, account, chainId) {
   // Never scan from genesis: without a recorded deploy block there is no honest starting point.
   const fromBlock = getDeploymentBlockForChain('membershipVoucher', chainId)
   if (!fromBlock) return { held: null, complete: false }
 
-  const voucher = new ethers.Contract(voucherAddr, MEMBERSHIP_VOUCHER_ABI, provider)
+  const voucher = eventScanHandle(chainId, { address: voucherAddr, abi: MEMBERSHIP_VOUCHER_ABI })
+  if (!voucher) return { held: null, complete: false }
   const { logs, complete } = await scanLogs({
     contract: voucher,
     filters: [voucher.filters.Transfer(null, account)],
@@ -56,7 +59,13 @@ async function countRedeemableVouchers(voucherAddr, account, chainId, provider) 
   let held = 0
   for (const id of ids) {
     try {
-      if (String(await voucher.ownerOf(id)).toLowerCase() === String(account).toLowerCase()) held += 1
+      const owner = await readContract(chainId, {
+        address: voucherAddr,
+        abi: MEMBERSHIP_VOUCHER_ABI,
+        functionName: 'ownerOf',
+        args: [BigInt(id)],
+      })
+      if (String(owner).toLowerCase() === String(account).toLowerCase()) held += 1
     } catch { /* burned / redeemed / transferred away */ }
   }
   return { held, complete: true }
@@ -67,21 +76,21 @@ export const membershipSource = {
   label: 'Membership',
   async detect({ account, chainId, nowMs, prior }) {
     const managerAddr = getContractAddressForChain('membershipManager', chainId)
-    if (!managerAddr || !ethers.isAddress(managerAddr)) {
+    if (!managerAddr || !isAddress(managerAddr)) {
       return { ok: true, entries: [], nextSnapshots: {}, currentIds: [], actionNeededById: {} }
     }
-    let provider
-    try {
-      provider = getProvider(chainId)
-    } catch {
-      return { ok: false }
-    }
+    // The seam is the availability gate: no route, no read, and the caller keeps its prior slice.
+    if (!getPublicClient(chainId)) return { ok: false }
 
     let tier
     let expiresAt
     try {
-      const mgr = new ethers.Contract(managerAddr, MEMBERSHIP_MANAGER_ABI, provider)
-      const m = await mgr.getMembership(account, ROLE)
+      const m = await readContract(chainId, {
+        address: managerAddr,
+        abi: MEMBERSHIP_MANAGER_ABI,
+        functionName: 'getMembership',
+        args: [account, ROLE],
+      })
       tier = Number(m.tier ?? m[0])
       expiresAt = Number(m.expiresAt ?? m[1])
     } catch {
@@ -127,7 +136,7 @@ export const membershipSource = {
     // notice over a best-effort extra.
     let partial = false
     const voucherAddr = getContractAddressForChain('membershipVoucher', chainId)
-    if (voucherAddr && ethers.isAddress(voucherAddr)) {
+    if (voucherAddr && isAddress(voucherAddr)) {
       currentIds.push('voucher')
       const keepPrior = () => {
         partial = true
@@ -137,7 +146,7 @@ export const membershipSource = {
         }
       }
       try {
-        const { held, complete } = await countRedeemableVouchers(voucherAddr, account, chainId, provider)
+        const { held, complete } = await countRedeemableVouchers(voucherAddr, account, chainId)
         if (!complete || held == null) {
           keepPrior()
         } else {

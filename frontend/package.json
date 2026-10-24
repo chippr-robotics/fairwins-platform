@@ -1,7 +1,7 @@
 {
   "name": "frontend",
   "private": true,
-  "version": "1.18.0",
+  "version": "1.19.1",
   "type": "module",
   "engines": {
     "node": ">=22.0.0"
@@ -28,7 +28,11 @@
     "test:e2e:fast": "start-server-and-test dev:fast http://localhost:5173 'cypress run --spec cypress/e2e/fast/**/*.cy.js'",
     "test:e2e:full": "start-server-and-test dev http://localhost:5173 'cypress run --spec cypress/e2e/full/**/*.cy.js'",
     "test:e2e:open": "start-server-and-test dev http://localhost:5173 cypress",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:hw": "vitest run --config vitest.hardware.config.js",
+    "hw:speculos:up": "node scripts/hardware/speculos.mjs up",
+    "hw:speculos:down": "node scripts/hardware/speculos.mjs down",
+    "check:no-emulator": "node scripts/hardware/check-no-emulator.mjs"
   },
   "dependencies": {
     "@capacitor-community/bluetooth-le": "8.3.0",

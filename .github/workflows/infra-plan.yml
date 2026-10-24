@@ -21,7 +21,7 @@ permissions:
   pull-requests: write
 
 env:
-  TERRAFORM_VERSION: "1.15.8"
+  TERRAFORM_VERSION: "1.15.9"
 
 concurrency:
   group: infra-plan-${{ github.ref }}
@@ -219,7 +219,7 @@ jobs:
 
       - uses: terraform-linters/setup-tflint@v6
         with:
-          tflint_version: latest
+          tflint_version: v0.64.0
 
       - name: tflint
         run: |
@@ -245,12 +245,12 @@ jobs:
           # Nothing here pushes, so the persisted credential buys nothing and costs correctness.
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Install Ansible
-        run: pip install --quiet ansible-core ansible-lint
+        run: pip install --quiet ansible-core==2.21.5 ansible-lint==26.9.0
 
       # Install into the path ansible.cfg declares (`collections_path = collections`), not galaxy's
       # default. Installing to the default while the config points elsewhere leaves an EMPTY

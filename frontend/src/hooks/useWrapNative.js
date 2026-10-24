@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { parseUnits } from '../lib/evm/units'
+import { getAddress } from '../lib/evm/address'
 import { useWallet } from './useWalletManagement'
 import { useActiveAccount } from './useActiveAccount'
 import { getNetwork, NETWORKS } from '../config/networks'
@@ -8,6 +11,7 @@ import { isPasskeySupported, getPasskeySupport } from '../config/passkeySupport'
 import { WNATIVE_ABI } from '../abis/WNative'
 import { getReadProvider } from '../utils/rpcProvider'
 import { useEndpointsRevision } from './useRpcEndpoints'
+import { settleWalletOn } from '../lib/chains/submitOn'
 
 /**
  * useWrapNative — wrap the connected network's coin into its canonical wrapped form,
@@ -56,9 +60,6 @@ import { useEndpointsRevision } from './useRpcEndpoints'
  * pre-108 caller.
  */
 
-const SETTLE_TIMEOUT_MS = 20_000
-const SETTLE_POLL_MS = 150
-
 const chainName = (chainId) => NETWORKS[chainId]?.name || `chain ${chainId}`
 
 export const WRAP_DIRECTION = Object.freeze({ WRAP: 'wrap', UNWRAP: 'unwrap' })
@@ -67,7 +68,10 @@ export const WRAP_DIRECTION = Object.freeze({ WRAP: 'wrap', UNWRAP: 'unwrap' })
 // kept as literals so this hook doesn't pull the relay graph in, same as useTransfer).
 const OP_STATE = Object.freeze({ SUBMITTED: 'submitted', INCLUDED: 'included', FAILED: 'failed' })
 
-const WNATIVE_IFACE = new ethers.Interface(WNATIVE_ABI)
+const WNATIVE_ABI_PARSED = normalizeAbi(WNATIVE_ABI)
+const SYMBOL_ABI = ['function symbol() view returns (string)']
+const wnativeCall = (functionName, args = []) =>
+  encodeFunctionData({ abi: WNATIVE_ABI_PARSED, functionName, args })
 
 // WETH9's deposit/withdraw are small, fixed-shape calls; 100k covers both with room for
 // the L2 variants that charge more for the same work. Used only to SIZE the gas reserve
@@ -148,12 +152,18 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
       setNativeBalance(null) // unread, NOT zero — the view renders "—" for this
     }
     try {
-      const erc20 = new ethers.Contract(token.address, WNATIVE_ABI, readProvider)
-      setWrappedBalance(await erc20.balanceOf(actingAddress))
+      setWrappedBalance(
+        await readContract(target, {
+          address: token.address,
+          abi: WNATIVE_ABI,
+          functionName: 'balanceOf',
+          args: [getAddress(String(actingAddress))],
+        }),
+      )
     } catch {
       setWrappedBalance(null)
     }
-  }, [readProvider, actingAddress, token])
+  }, [readProvider, actingAddress, token, target])
 
   useEffect(() => { refresh() }, [refresh])
 
@@ -164,12 +174,11 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
     let cancelled = false
     setOnChainSymbol(null)
     if (!readProvider || !token) return undefined
-    const erc20 = new ethers.Contract(token.address, ['function symbol() view returns (string)'], readProvider)
-    erc20.symbol()
+    readContract(target, { address: token.address, abi: SYMBOL_ABI, functionName: 'symbol' })
       .then((s) => { if (!cancelled && typeof s === 'string' && s) setOnChainSymbol(s) })
       .catch(() => { /* label falls back to the derived one — never blocks wrapping */ })
     return () => { cancelled = true }
-  }, [readProvider, token])
+  }, [readProvider, token, target])
 
   // Gas reserve, quoted from the chain rather than assumed. An unreadable fee leaves the
   // reserve null and MAX falls back to a balance-minus-nothing offer only when there is
@@ -208,43 +217,28 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
   }, [isVault, isLegacy, isHardware, isPasskey, target, onTargetChain])
 
   /**
-   * Land the wallet on the target chain, then hand back the SETTLED signer. Same-chain:
-   * the current signer, untouched. A refusal (or a switch that never settles) throws with
-   * BOTH chains named and nothing sent.
+   * Land the wallet on the target chain, then hand back the SETTLED signer. Same-chain: the
+   * current signer, untouched. A refusal (or a switch that never settles) throws with BOTH chains
+   * named and nothing sent.
+   *
+   * Spec 110 T026/T028 — this WAS a fourth private copy of the switch-then-settle loop, and it was
+   * the best of the four: it alone verified that the settled signer's OWN provider reports the
+   * target chain, because pairing the new chainId with the pre-switch signer is a race this hook
+   * had actually met (ethers reports `network changed: A => B` only AFTER broadcasting). That
+   * check has been moved INTO the shared `settleWalletOn`, so the three hooks that had not met the
+   * race now carry the fix too, and this one stops maintaining its own.
    */
   const settleOnTargetChain = useCallback(async () => {
     if (onTargetChain && signer) return signer
-    const refusal =
-      `This wrap runs on ${chainName(target)}, but the wallet stayed on ${chainName(chainId)} — nothing was sent.`
-    if (typeof switchNetwork !== 'function') throw new Error(refusal)
-    try {
-      await switchNetwork(target)
-    } catch (cause) {
-      throw new Error(refusal, { cause })
-    }
-    const deadline = Date.now() + SETTLE_TIMEOUT_MS
-    for (;;) {
-      const { chainId: settledChain, signer: settledSigner } = latestRef.current
-      if (Number(settledChain) === target && settledSigner) {
-        // A truthy signer is not yet a SETTLED one: the context chainId updates from the
-        // connector's chainChanged event before WalletContext's async effect rebuilds the
-        // chain-scoped signer, so the snapshot can pair the new chain with the PRE-switch
-        // signer — bound to a provider whose (static) network is still the old chain, which
-        // ethers rejects with "network changed: A => B" only AFTER broadcasting. Only a
-        // signer whose own provider reports the target chain may send.
-        try {
-          const settledNet = await settledSigner.provider?.getNetwork?.()
-          if (Number(settledNet?.chainId) === target) return settledSigner
-        } catch {
-          // Provider mid-teardown or still bound to the old chain — keep waiting.
-        }
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`The switch to ${chainName(target)} did not complete — nothing was sent.`)
-      }
-      await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS))
-    }
-  }, [onTargetChain, signer, target, chainId, switchNetwork])
+    const settled = await settleWalletOn(target, {
+      readWallet: () => latestRef.current,
+      switchNetwork,
+      chainName,
+      needsSigner: true,
+      subject: 'This wrap',
+    })
+    return settled.signer
+  }, [onTargetChain, signer, target, switchNetwork])
 
   /**
    * The most that can be wrapped: the balance less a gas reserve, because the fee is paid in
@@ -273,7 +267,10 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
 
       let value
       try {
-        value = ethers.parseUnits(String(amount), decimals)
+        // The seam refuses a value the unit cannot represent EXACTLY (spec 110 divergence 20:
+        // viem rounds half-up where ethers threw). On this path that refusal is the whole point —
+        // what gets wrapped must be what the member typed, never a rounded neighbour of it.
+        value = parseUnits(String(amount), decimals)
       } catch {
         throw new Error('Enter a valid amount.')
       }
@@ -287,8 +284,8 @@ export function useWrapNative({ chainId: targetChainId } = {}) {
 
       // One call, two shapes: deposit carries the coin as msg.value, withdraw names the amount.
       const call = wrapping
-        ? { to: token.address, value, data: WNATIVE_IFACE.encodeFunctionData('deposit', []) }
-        : { to: token.address, value: 0n, data: WNATIVE_IFACE.encodeFunctionData('withdraw', [value]) }
+        ? { to: token.address, value, data: wnativeCall('deposit') }
+        : { to: token.address, value: 0n, data: wnativeCall('withdraw', [value]) }
 
       setError(null)
 

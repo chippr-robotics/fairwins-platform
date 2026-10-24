@@ -31,7 +31,7 @@
  * allowlist below contains exactly the chains that were verified, not the chains a registry
  * claims; adding one is one line, after running the same `eth_getCode` check.
  */
-import { Contract, Interface, AbiCoder } from 'ethers'
+import { decodeAbiParameters, decodeFunctionResult, encodeFunctionData, parseAbi } from 'viem'
 
 /** Canonical deterministic deployment — the same address on every chain that has it. */
 export const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11'
@@ -43,20 +43,41 @@ export const MULTICALL3_ADDRESS = '0xcA11bde05977b3631167028862bE2a173976CA11'
  */
 export const MULTICALL3_CHAIN_IDS = Object.freeze(new Set([1, 10, 137, 8453, 42161]))
 
-const MULTICALL3_ABI = [
+const MULTICALL3_ABI = parseAbi([
   'function aggregate3((address target, bool allowFailure, bytes callData)[] calls) view returns ((bool success, bytes returnData)[])',
   'function getEthBalance(address addr) view returns (uint256)',
-]
-const ERC20_IFACE = new Interface(['function balanceOf(address) view returns (uint256)'])
-const MC3_IFACE = new Interface(MULTICALL3_ABI)
-const ABI_CODER = AbiCoder.defaultAbiCoder()
+])
+const ERC20_ABI = parseAbi(['function balanceOf(address) view returns (uint256)'])
+const UINT256 = [{ type: 'uint256' }]
 
-const BALANCE_OF_ABI = ['function balanceOf(address) view returns (uint256)']
+/**
+ * `eth_call` over whichever provider shape the caller holds. ethers hands back the return
+ * bytes as a hex string; a viem client wraps them in `{ data }`. Reading both keeps this
+ * module's one provider dependency as small as its header promises, and lets a caller be
+ * converted to the spec-110 seam without touching the batch path.
+ */
+async function callRaw(provider, tx) {
+  const raw = await provider.call(tx)
+  return typeof raw === 'string' ? raw : raw?.data
+}
+
+/** Decode a `uint256` return, REFUSING empty data — see `decodeReturn` for why that matters. */
+function decodeUint(returnData) {
+  if (!returnData || returnData === '0x') {
+    throw new Error('balance read returned no data')
+  }
+  return decodeAbiParameters(UINT256, returnData)[0]
+}
 
 /** The unbatched read — one request per asset. Kept as the universal fallback. */
 async function readSingle(asset, provider, address) {
   if (asset.kind === 'native') return provider.getBalance(address)
-  return new Contract(asset.address, BALANCE_OF_ABI, provider).balanceOf(address)
+  // Encoded by hand and sent through `call` for the same reasons the batch path is — and so the
+  // empty-data case is refused HERE too. `Contract.balanceOf` used to reject it for us; a
+  // hand-rolled read that quietly decoded `0x` as 0 would put the false zero back on the
+  // fallback path only, which is the path nothing notices until an RPC misbehaves.
+  const data = encodeFunctionData({ abi: ERC20_ABI, functionName: 'balanceOf', args: [address] })
+  return decodeUint(await callRaw(provider, { to: asset.address, data }))
 }
 
 /**
@@ -71,7 +92,7 @@ function decodeReturn({ success, returnData }) {
     return { status: 'rejected', reason: new Error('multicall leg failed or returned no data') }
   }
   try {
-    return { status: 'fulfilled', value: ABI_CODER.decode(['uint256'], returnData)[0] }
+    return { status: 'fulfilled', value: decodeUint(returnData) }
   } catch (err) {
     return { status: 'rejected', reason: err }
   }
@@ -80,27 +101,40 @@ function decodeReturn({ success, returnData }) {
 /**
  * One aggregate3 round trip for every asset on one chain. Throws on transport failure.
  *
- * DELIBERATELY NOT an ethers `Contract`. The calldata is encoded by hand and sent through
+ * DELIBERATELY NOT a contract object. The calldata is encoded by hand and sent through
  * `provider.call` for two reasons that both bit during development:
  *
- *   - `Contract` is the seam every test in this codebase mocks — the global setup replaces it
- *     with a stub that answers `balanceOf` and nothing else. Routed through `Contract`, the batch
- *     path would silently throw in every suite and take the per-asset fallback, so the property
- *     this module exists for ("one request per chain") would never be exercised by a single test.
+ *   - A contract wrapper is the seam every test in this codebase mocks — the global setup
+ *     replaces it with a stub that answers `balanceOf` and nothing else. Routed through one, the
+ *     batch path would silently throw in every suite and take the per-asset fallback, so the
+ *     property this module exists for ("one request per chain") would never be exercised by a
+ *     single test.
  *   - `provider.call` with pre-encoded bytes is the smallest possible dependency on the provider:
  *     anything that can send eth_call can carry a batch, including the header-injecting
- *     FetchRequest providers from the spec-069 seam, untouched.
+ *     transports from the spec-069 seam, untouched.
  */
 async function readChainBatched(assets, provider, address) {
   const calls = assets.map((asset) =>
     asset.kind === 'native'
       ? // Multicall3 exposes the native balance itself, so native rides the same batch.
-        [MULTICALL3_ADDRESS, true, MC3_IFACE.encodeFunctionData('getEthBalance', [address])]
-      : [asset.address, true, ERC20_IFACE.encodeFunctionData('balanceOf', [address])]
+        {
+          target: MULTICALL3_ADDRESS,
+          allowFailure: true,
+          callData: encodeFunctionData({
+            abi: MULTICALL3_ABI,
+            functionName: 'getEthBalance',
+            args: [address],
+          }),
+        }
+      : {
+          target: asset.address,
+          allowFailure: true,
+          callData: encodeFunctionData({ abi: ERC20_ABI, functionName: 'balanceOf', args: [address] }),
+        }
   )
-  const data = MC3_IFACE.encodeFunctionData('aggregate3', [calls])
-  const raw = await provider.call({ to: MULTICALL3_ADDRESS, data })
-  const [results] = MC3_IFACE.decodeFunctionResult('aggregate3', raw)
+  const data = encodeFunctionData({ abi: MULTICALL3_ABI, functionName: 'aggregate3', args: [calls] })
+  const raw = await callRaw(provider, { to: MULTICALL3_ADDRESS, data })
+  const results = decodeFunctionResult({ abi: MULTICALL3_ABI, functionName: 'aggregate3', data: raw })
   return results.map(decodeReturn)
 }
 

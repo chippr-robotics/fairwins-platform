@@ -25,8 +25,8 @@ Before you begin, ensure you have the following installed:
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/chippr-robotics/prediction-dao-research.git
-cd prediction-dao-research
+git clone https://github.com/chippr-robotics/fairwins-platform.git
+cd fairwins-platform
 ```
 
 ### 2. Install Dependencies
@@ -69,7 +69,7 @@ npx hardhat compile
 ## Project Structure
 
 ```
-prediction-dao-research/
+fairwins-platform/
 ├── contracts/              # Active Solidity smart contracts
 │   ├── wagers/
 │   │   └── WagerRegistry.sol            # escrow + open challenges (UUPS proxy)
@@ -591,6 +591,6 @@ Now that your environment is set up:
 If you encounter issues:
 
 - Check the [FAQ](../user-guide/faq.md)
-- Review existing [GitHub issues](https://github.com/chippr-robotics/prediction-dao-research/issues)
+- Review existing [GitHub issues](https://github.com/chippr-robotics/fairwins-platform/issues)
 - Ask in community channels
 - Create a new issue with details

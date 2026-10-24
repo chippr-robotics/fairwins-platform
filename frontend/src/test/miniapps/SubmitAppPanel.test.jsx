@@ -62,22 +62,29 @@ vi.mock('../../lib/miniapps/registryClient', async (importOriginal) => {
   }
 })
 
-// A read provider only has to be truthy — the gate read goes through the fake Contract below.
-vi.mock('../../utils/rpcProvider', () => ({
-  getReadProvider: () => ({ _isFakeProvider: true }),
-}))
-
-// One fake Contract for the registry's gate config read. `Interface` stays real: this file decodes
-// the calldata the panel produces, and a fake encoder would prove nothing about what reaches a chain.
-vi.mock('ethers', async (importOriginal) => {
+/**
+ * The registry's gate-config read.
+ *
+ * Spec 110 T028 — this mocks the CHAIN SEAM, not `ethers.Contract`. The panel no longer constructs
+ * one, so a `vi.mock('ethers')` would be a mock on a retired path: it would intercept nothing while
+ * still looking like the thing keeping this test honest. Mocking the seam also lets the assertion
+ * read the REQUEST — which chain, which function — instead of a method name on a fake object.
+ *
+ * `Interface` stays real below: this file decodes the calldata the panel produces, and after the
+ * swap that is a live cross-library check on the viem encoder rather than a fake proving nothing.
+ */
+const gateReads = []
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
-  function FakeContract() {
-    return {
-      membershipManager: async () => state.gate.manager,
-      minTier: async () => state.gate.minTier,
-    }
+  return {
+    ...actual,
+    readContract: vi.fn(async (chainId, call) => {
+      gateReads.push({ chainId, ...call })
+      if (call.functionName === 'membershipManager') return state.gate.manager
+      if (call.functionName === 'minTier') return state.gate.minTier
+      throw new Error(`unstubbed registry read: ${call.functionName}`)
+    }),
   }
-  return { ...actual, Contract: FakeContract }
 })
 
 import { Interface } from 'ethers'
@@ -233,6 +240,7 @@ beforeEach(() => {
     chainId: REGISTRY_CHAIN,
     registryAddress: REGISTRY_ADDRESS,
   }))
+  gateReads.length = 0
   state.gate = { manager: ZERO_ADDRESS, minTier: 0 }
   state.fetchImpl = servesNothing()
 })
@@ -574,6 +582,14 @@ describe('SubmitAppPanel — network and connection guards (FR-024/FR-025)', () 
     expect(
       await screen.findByText(/requires Gold membership or above/i),
     ).toBeInTheDocument()
+    // The gate is read from the REGISTRY'S OWN chain, not the wallet's — spec 073 pins the registry
+    // to one chain per cohort, and reading the wallet's would state another deployment's gate as
+    // this one's. The retired `new Contract(addr, abi, provider)` fake could show neither the chain
+    // nor the address it was handed.
+    expect(gateReads.length).toBeGreaterThan(0)
+    for (const read of gateReads) {
+      expect(read).toMatchObject({ chainId: REGISTRY_CHAIN, address: REGISTRY_ADDRESS })
+    }
   })
 
   it('surfaces a decoded revert as guidance', async () => {

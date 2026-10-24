@@ -7,8 +7,9 @@
  * Documented + omitted (no backend/subgraph): historical role/pause/mint EVENTS and role grants on tokens the
  * user did NOT issue are not enumerable client-side — only live changes from first-sight onward are detected.
  */
-import { ethers } from 'ethers'
-import { getProvider } from '../../../utils/blockchainService'
+import { isAddress } from 'viem'
+import { getPublicClient } from '../../../lib/chains/publicClient'
+import { readContract } from '../../../lib/chains/readContract'
 import { getContractAddressForChain } from '../../../config/contracts'
 
 const FACTORY_ABI = [
@@ -34,18 +35,24 @@ const ROLE_GETTER = { admin: 'DEFAULT_ADMIN_ROLE', minter: 'MINTER_ROLE', pauser
  * returned as `{ v2:false }` — a stable shape that never produces role entries. paused() is only read for
  * pausable tokens (structural), so a non-pausable token doesn't look like a transient failure.
  */
-async function readToken(addr, account, provider, isPausable) {
-  const c = new ethers.Contract(addr, TOKEN_ABI, provider)
+async function readToken(addr, account, chainId, isPausable) {
+  const c = (functionName, args) =>
+    readContract(chainId, { address: addr, abi: TOKEN_ABI, functionName, args })
   let adminRole
   try {
-    adminRole = await c.DEFAULT_ADMIN_ROLE()
+    adminRole = await c('DEFAULT_ADMIN_ROLE')
   } catch {
     return { v2: false } // v1/Ownable — no role surface to track (stable; never diffs)
   }
-  const ids = { admin: adminRole, minter: await c.MINTER_ROLE(), pauser: await c.PAUSER_ROLE(), burner: await c.BURNER_ROLE() }
+  const ids = {
+    admin: adminRole,
+    minter: await c('MINTER_ROLE'),
+    pauser: await c('PAUSER_ROLE'),
+    burner: await c('BURNER_ROLE'),
+  }
   const roles = {}
-  for (const name of ROLE_NAMES) roles[name] = await c.hasRole(ids[name], account) // throws on transient failure
-  const paused = isPausable ? await c.paused() : null
+  for (const name of ROLE_NAMES) roles[name] = await c('hasRole', [ids[name], account]) // throws on transient failure
+  const paused = isPausable ? await c('paused') : null
   return { v2: true, roles, paused }
 }
 
@@ -69,23 +76,20 @@ export const tokenSource = {
   label: 'Token',
   async detect({ account, chainId, nowMs, prior }) {
     const factoryAddr = getContractAddressForChain('tokenFactory', chainId)
-    if (!factoryAddr || !ethers.isAddress(factoryAddr)) {
+    if (!factoryAddr || !isAddress(factoryAddr)) {
       return { ok: true, entries: [], nextSnapshots: {}, currentIds: [], actionNeededById: {} }
     }
-    let provider
-    try {
-      provider = getProvider(chainId)
-    } catch {
-      return { ok: false }
-    }
+    // The seam is the availability gate: no route, no read, and the caller keeps its prior slice.
+    if (!getPublicClient(chainId)) return { ok: false }
 
     let ids = []
     let metaById = {}
     try {
-      const factory = new ethers.Contract(factoryAddr, FACTORY_ABI, provider)
-      const tokenIds = await factory.getTokensByIssuer(account)
+      const factory = (functionName, args) =>
+        readContract(chainId, { address: factoryAddr, abi: FACTORY_ABI, functionName, args })
+      const tokenIds = await factory('getTokensByIssuer', [account])
       for (const tid of tokenIds) {
-        const info = await factory.getToken(tid)
+        const info = await factory('getToken', [tid])
         const addr = String(info.tokenAddress).toLowerCase()
         ids.push(addr)
         metaById[addr] = { symbol: info.symbol || info.name || 'token', isPausable: !!info.isPausable }
@@ -101,7 +105,7 @@ export const tokenSource = {
       currentIds.push(addr)
       let snap
       try {
-        snap = await readToken(addr, account, provider, metaById[addr]?.isPausable)
+        snap = await readToken(addr, account, chainId, metaById[addr]?.isPausable)
       } catch {
         // transient read failure — carry the prior snapshot, emit nothing (never fabricate a change)
         if (prior.snapshots?.[addr]) nextSnapshots[addr] = prior.snapshots[addr]

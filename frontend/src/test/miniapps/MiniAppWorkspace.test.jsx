@@ -541,7 +541,14 @@ describe('accessibility (WCAG 2.1 AA)', () => {
       renderWorkspace()
       await screen.findByText('token mint surface')
       const heading = screen.getByRole('heading', { name: NAME })
-      expect(document.activeElement).toBe(heading)
+      // `waitFor`, because focus ARRIVING is the claim and the instant it arrives is not.
+      // `findByText` resolves on the commit that rendered the package; the focus move is a
+      // separate effect gated on `launch.phase`, so the two are different moments. Asserting
+      // synchronously here pinned an ordering that holds on an idle machine and does not hold
+      // under a full 828-file run — it went red exactly once, in CI, on a commit that touches
+      // nothing this file can reach. The sibling test below already makes the same claim this
+      // way; this one was the outlier.
+      await waitFor(() => expect(document.activeElement).toBe(heading))
       // Focusable as a target, never as a Tab stop.
       expect(heading).toHaveAttribute('tabindex', '-1')
     })

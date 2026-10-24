@@ -705,7 +705,7 @@ export default function SupplySheet({
       try {
         const provider = makeReadProvider(pool.chainId)
         const pooled = provider
-          ? await readPooledToken({ provider, hubPool: pool.hubPool, l1Token: pool.token0 })
+          ? await readPooledToken({ chainId: pool.chainId, provider, hubPool: pool.hubPool, l1Token: pool.token0 })
           : null
         if (pooled && pooled.isEnabled === false) {
           setTxState({ step: 'error', txUrl: null, note: null, error: RETIRED_POOL_COPY })

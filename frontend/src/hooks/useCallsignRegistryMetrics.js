@@ -11,9 +11,10 @@
  * and lifetime tallies are honestly "within the scanned window", not all-time.
  */
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
 import { CALLSIGN_REGISTRY_ABI, CallsignStatus } from '../abis/callsignRegistry'
-import { getLogsRange } from '../lib/clearpath/connectors/ozGovernor'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { getLogsRange } from '../lib/chains/logRange'
 
 const CHUNK = 45_000
 const MAX_SPAN = 3_000_000
@@ -129,7 +130,13 @@ export function useCallsignRegistryMetrics({ provider, chainId, address } = {}) 
 
   const refresh = useCallback(
     async ({ force = false } = {}) => {
-      if (!provider || !address || !ethers.isAddress(address)) {
+      // Spec 110 Phase 1: the scan reads through the chain seam; `provider` stays the
+      // caller-side availability gate until callers convert.
+      const handle =
+        chainId != null && address && isAddress(address)
+          ? eventScanHandle(chainId, { address, abi: CALLSIGN_REGISTRY_ABI })
+          : null
+      if (!provider || !handle) {
         setState({ loading: false, error: null, data: null, truncated: false })
         return
       }
@@ -141,15 +148,14 @@ export function useCallsignRegistryMetrics({ provider, chainId, address } = {}) 
       }
       setState((s) => ({ ...s, loading: true, error: null }))
       try {
-        const iface = new ethers.Interface(CALLSIGN_REGISTRY_ABI)
-        const latest = await provider.getBlockNumber()
+        const latest = await handle.provider.getBlockNumber()
         const floor = Math.max(0, latest - MAX_SPAN)
         const rawLogs = []
         let to = latest
         while (to >= floor) {
           const from = Math.max(floor, to - CHUNK + 1)
           // No topic filter → all registry events in the range; getLogsRange bisects on RPC range-caps.
-          const batch = await getLogsRange(provider, address, from, to, 2000, [])
+          const batch = await getLogsRange(handle.provider, address, from, to, 2000, [])
           rawLogs.push(...batch)
           if (from === floor) break
           to = from - 1
@@ -157,7 +163,7 @@ export function useCallsignRegistryMetrics({ provider, chainId, address } = {}) 
         const parsed = []
         for (const log of rawLogs) {
           try {
-            const p = iface.parseLog({ topics: log.topics, data: log.data })
+            const p = handle.interface.parseLog({ topics: log.topics, data: log.data })
             if (p) parsed.push({ name: p.name, args: p.args, blockNumber: log.blockNumber, logIndex: log.index ?? log.logIndex })
           } catch {
             /* not one of our events — skip */

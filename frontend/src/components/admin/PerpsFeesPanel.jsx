@@ -37,7 +37,8 @@
  * `NETWORKS[chainId].rpcUrl` (spec 069).
  */
 import { useState, useEffect, useMemo, useCallback } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { normalizeAbi } from '../../lib/chains/readContract'
 import { getContractAddressForChain } from '../../config/contracts'
 import { GMX_EXCHANGE_ROUTER_ABI } from '../../abis/perps/gmxExchangeRouter'
 import {
@@ -178,9 +179,14 @@ export default function PerpsFeesPanel({
     }
     runTx(
       () =>
-        new ethers.Contract(gmxAddrs.exchangeRouter, GMX_EXCHANGE_ROUTER_ABI, signer).setUiFeeFactor(
-          converted.factor,
-        ),
+        signer.sendTransaction({
+          to: gmxAddrs.exchangeRouter,
+          data: encodeFunctionData({
+            abi: normalizeAbi(GMX_EXCHANGE_ROUTER_ABI),
+            functionName: 'setUiFeeFactor',
+            args: [converted.factor],
+          }),
+        }),
       `GMX UI fee set to ${converted.bps} bps of notional (uiFeeFactor ${converted.factor.toString()}) for ${shortAddr(receiver)}`,
     ).then(refresh)
   }

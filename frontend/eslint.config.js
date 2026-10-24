@@ -58,6 +58,19 @@ export default defineConfig([
               message:
                 "spec 110: new code imports 'viem' (units via src/lib/evm/units). A file may only join eslint-ethers-allowlist.js as part of an explicitly-scoped exception on issue #1552.",
             },
+            {
+              // Spec 110 Phase 3 (#1594) — the ambient-chain ban. It rides in THIS rule rather
+              // than a block of its own because eslint flat config REPLACES a rule rather than
+              // merging it: a second block setting `no-restricted-imports` would silently switch
+              // the ethers ban off for every file it matched. The cost is that the 15 files in
+              // ETHERS_ALLOWLIST (this block's `ignores`) are unchecked here too, which is why
+              // `src/test/lint/ambientChainBan.test.js` greps the tree as well — it sees the
+              // files this rule cannot.
+              name: 'wagmi',
+              importNames: ['useChainId'],
+              message:
+                "spec 110 (#1030): useChainId() reads wagmi's CONFIGURED chain, not the wallet's — with the wallet on an unconfigured chain it keeps reporting the previous one. Use useWalletChainId() for where the wallet is; a write's TARGET chain comes from the action.",
+            },
           ],
         },
       ],

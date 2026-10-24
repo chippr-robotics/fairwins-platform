@@ -10,9 +10,20 @@
  * offline attacker could brute-force a four-word code. This residual risk is accepted for v1 (FR-003a) and
  * MUST be surfaced honestly in the UI for meaningful stakes.
  */
-import { wordlists } from 'ethers'
+import { english } from 'viem/accounts'
 
-const WORDLIST = wordlists.en
+/*
+ * The BIP-39 English list, from viem rather than ethers (spec 110). viem exports it as a plain
+ * ARRAY where ethers wrapped it in a `Wordlist` object, so `getWord(i)` becomes an index and
+ * `getWordIndex(w)` becomes `indexOf`. The two lists were compared word-for-word before the swap —
+ * 2048 entries, identical and in the same order — which is what makes this safe: a claim code is
+ * DERIVED from word indices, so a list that differed anywhere would silently change every code
+ * generated after the swap and invalidate every code issued before it.
+ */
+const WORDLIST = {
+  getWord: (i) => english[i],
+  getWordIndex: (w) => english.indexOf(w),
+}
 const WORD_COUNT = 4
 const LIST_SIZE = 2048
 
