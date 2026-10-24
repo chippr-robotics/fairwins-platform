@@ -1,6 +1,6 @@
 # Infrastructure as Code
 
-**Spec**: [087-infrastructure-as-code](https://github.com/chippr-robotics/prediction-dao-research/tree/main/specs/087-infrastructure-as-code) · **Issue**: #1177
+**Spec**: [087-infrastructure-as-code](https://github.com/chippr-robotics/fairwins-platform/tree/main/specs/087-infrastructure-as-code) · **Issue**: #1177
 
 The FairWins cloud estate is described declaratively: **Terraform** provisions cloud resources,
 **Ansible** converges node interiors. The goal is that the environment can be reconstructed or
@@ -88,7 +88,7 @@ Terraform and Ansible are not part of the npm toolchain — install them separat
 
 ```bash
 # Terraform 1.15.x
-curl -fsSL -o tf.zip https://releases.hashicorp.com/terraform/1.15.8/terraform_1.15.8_linux_amd64.zip
+curl -fsSL -o tf.zip https://releases.hashicorp.com/terraform/1.15.9/terraform_1.15.9_linux_amd64.zip
 unzip tf.zip && sudo mv terraform /usr/local/bin/
 
 # Ansible

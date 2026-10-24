@@ -15,7 +15,6 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ethers } from 'ethers'
 import NavIcon from '../nav/NavIcon'
 import AdminAccessGate from './AdminAccessGate'
 import { useAdminAccess, adminBadgeLabel } from './useAdminAccess'
@@ -25,6 +24,7 @@ import { useWeb3 } from '../../hooks/useWeb3'
 import { useChainTokens } from '../../hooks/useChainTokens'
 import { useFeeEstate } from '../../hooks/useFeeEstate'
 import { useGatewayStatus } from '../../hooks/useGatewayStatus'
+import { readContract } from '../../lib/chains/readContract'
 import { getContractAddressForChain } from '../../config/contracts'
 import { getProvider } from '../../utils/blockchainService'
 import { networkName, readProviderFor, estateNetworks } from '../../lib/chains/estate'
@@ -60,9 +60,17 @@ function usePauseStatus() {
     const reads = await Promise.all(
       targets.map(async (t) => {
         try {
-          const p = readProviderFor(t.chainId, chainId, provider) || getProvider(t.chainId)
-          const contract = new ethers.Contract(t.addr, PAUSED_ABI, p)
-          const paused = await contract.paused()
+          // The gate stays `readProviderFor` — it carries the cohort bound — while the read
+          // itself names the chain it is about (spec 110), so an estate sweep can never report
+          // one network's pause state under another's name.
+          if (!readProviderFor(t.chainId, chainId, provider) && !getProvider(t.chainId)) {
+            return { chainId: t.chainId, ok: false }
+          }
+          const paused = await readContract(t.chainId, {
+            address: t.addr,
+            abi: PAUSED_ABI,
+            functionName: 'paused',
+          })
           return { chainId: t.chainId, ok: true, paused: Boolean(paused) }
         } catch {
           return { chainId: t.chainId, ok: false }

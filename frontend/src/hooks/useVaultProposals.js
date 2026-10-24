@@ -4,7 +4,10 @@
 // once per owner on-chain (idempotent); non-owners get read-only.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Contract, Interface, getAddress } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { readContract, normalizeAbi } from '../lib/chains/readContract'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { getAddress } from '../lib/evm/address'
 import { useWallet } from '.'
 import { SAFE_ABI } from '../abis/Safe'
 import { getContractAddressForChain, getDeploymentBlockForChain } from '../config/contracts'
@@ -23,15 +26,18 @@ import {
 } from '../lib/custody/proposalHub'
 import { readExecutionOutcomes } from '../lib/custody/vaultProposalReads'
 import { deriveProposalStatus, isQueued, STATUS } from '../lib/custody/proposalStatus'
-import { resolveWriteRail, requireWriteRail, RAILS } from '../lib/custody/writeRail'
+import { resolveWriteRail, requireWriteRail, RAILS } from '../lib/chains/writeRail'
 import { chainDisplayName } from '../lib/custody/chainName'
 
-const safeIface = new Interface(SAFE_ABI)
+const SAFE_ABI_PARSED = normalizeAbi(SAFE_ABI)
+/** Calldata for a Safe call — the viem twin of the `Interface` this replaces. */
+const safeCall = (functionName, args) =>
+  encodeFunctionData({ abi: SAFE_ABI_PARSED, functionName, args })
 
 export function useVaultProposals(vault) {
   const { chainId, signer, provider, sendCalls, loginMethod } = useWallet()
   /*
-   * The rail is a property of the SIGNER, not the login (lib/custody/writeRail.js).
+   * The rail is a property of the SIGNER, not the login (lib/chains/writeRail.js).
    *
    * This used to be `loginMethod === 'passkey'`, which meant a member holding a key that signs
    * perfectly well on Ethereum Classic was routed down a rail that has no bundler there — and got
@@ -79,11 +85,16 @@ export function useVaultProposals(vault) {
         }
         return
       }
-      const safe = new Contract(vaultAddress, SAFE_ABI, provider)
+      const askSafe = (functionName, args = []) =>
+        readContract(chainId, { address: vaultAddress, abi: SAFE_ABI, functionName, args })
+      // The log-scan handle is the duck type `scanLogs` consumes (target / runner.provider /
+      // filters / interface.parseLog) — the seam exists for exactly this swap, so
+      // `readExecutionOutcomes` is unchanged.
+      const safe = eventScanHandle(chainId, { address: vaultAddress, abi: SAFE_ABI })
       const [owners, threshold, currentNonce] = await Promise.all([
-        safe.getOwners(),
-        safe.getThreshold(),
-        safe.nonce(),
+        askSafe('getOwners'),
+        askSafe('getThreshold'),
+        askSafe('nonce'),
       ])
       // History is scanned in bounded, resumable chunks (lib/chain/logScan) — the hub is over a
       // million blocks old on the live networks and public RPCs cap one getLogs at 10,000 blocks.
@@ -107,7 +118,11 @@ export function useVaultProposals(vault) {
         verified.map(async (p) => {
           const hashLc = String(p.safeTxHash).toLowerCase()
           const approvalFlags = await Promise.all(
-            owners.map((o) => safe.approvedHashes(o, p.safeTxHash).then((n) => (n > 0n ? getAddress(o) : null))),
+            owners.map((o) =>
+              askSafe('approvedHashes', [getAddress(o), p.safeTxHash]).then((n) =>
+                BigInt(n) > 0n ? getAddress(o) : null,
+              ),
+            ),
           )
           const approvers = approvalFlags.filter(Boolean)
           const status = deriveProposalStatus({
@@ -152,9 +167,16 @@ export function useVaultProposals(vault) {
     async ({ to, value = 0n, data = '0x', operation = 0, nonce: nonceOverride }) => {
       requireWriteRail(railArgs)
       if (!hubAddress) throw new Error('Custody proposals are not configured on this network')
-      // Nonce is a read: use the signer when present, else the session read provider (passkey).
-      const safe = new Contract(vaultAddress, SAFE_ABI, signer || provider)
-      const nonce = nonceOverride ?? (await safe.nonce())
+      // The nonce is a READ, and reads are chain-parameterised now — it no longer matters whether
+      // a signer or the session read provider is at hand, which is what the old
+      // `signer || provider` was choosing between.
+      const nonce =
+        nonceOverride ??
+        (await readContract(chainId, {
+          address: vaultAddress,
+          abi: SAFE_ABI,
+          functionName: 'nonce',
+        }))
       const safeTx = buildSafeTx({ to, value, data, operation, nonce })
       const safeTxHash = computeSafeTxHash(vaultAddress, chainId, safeTx)
       if (isPasskey) {
@@ -162,18 +184,21 @@ export function useVaultProposals(vault) {
         // UserOp — same two on-chain effects as the classic path, batched.
         const calls = [
           emitProposalCall({ hubAddress, safe: vaultAddress, safeTx, safeTxHash }),
-          { target: vaultAddress, data: safeIface.encodeFunctionData('approveHash', [safeTxHash]), value: 0n },
+          { target: vaultAddress, data: safeCall('approveHash', [safeTxHash]), value: 0n },
         ]
         await sendCalls(calls)
       } else {
         await emitProposal({ hubAddress, safe: vaultAddress, safeTx, safeTxHash, signer })
-        const approveTx = await safe.approveHash(safeTxHash)
+        const approveTx = await signer.sendTransaction({
+          to: vaultAddress,
+          data: safeCall('approveHash', [safeTxHash]),
+        })
         await approveTx.wait()
       }
       await refresh()
       return { safeTxHash, nonce: Number(nonce) }
     },
-    [isPasskey, signer, railArgs, sendCalls, provider, vaultAddress, hubAddress, chainId, refresh],
+    [isPasskey, signer, railArgs, sendCalls, vaultAddress, hubAddress, chainId, refresh],
   )
 
   /** Record the connected owner's approval for a proposal (idempotent on-chain). */
@@ -182,11 +207,13 @@ export function useVaultProposals(vault) {
       requireWriteRail(railArgs)
       if (isPasskey) {
         await sendCalls([
-          { target: vaultAddress, data: safeIface.encodeFunctionData('approveHash', [safeTxHash]), value: 0n },
+          { target: vaultAddress, data: safeCall('approveHash', [safeTxHash]), value: 0n },
         ])
       } else {
-        const safe = new Contract(vaultAddress, SAFE_ABI, signer)
-        const tx = await safe.approveHash(safeTxHash)
+        const tx = await signer.sendTransaction({
+          to: vaultAddress,
+          data: safeCall('approveHash', [safeTxHash]),
+        })
         await tx.wait()
       }
       await refresh()
@@ -203,13 +230,15 @@ export function useVaultProposals(vault) {
       const args = encodeExecTransaction(proposal.safeTx, signatures)
       if (isPasskey) {
         const sent = await sendCalls([
-          { target: vaultAddress, data: safeIface.encodeFunctionData('execTransaction', args), value: 0n },
+          { target: vaultAddress, data: safeCall('execTransaction', args), value: 0n },
         ])
         await refresh()
         return { txHash: sent?.txHash ?? sent?.userOpHash ?? sent?.intentId }
       }
-      const safe = new Contract(vaultAddress, SAFE_ABI, signer)
-      const tx = await safe.execTransaction(...args)
+      const tx = await signer.sendTransaction({
+        to: vaultAddress,
+        data: safeCall('execTransaction', args),
+      })
       const receipt = await tx.wait()
       await refresh()
       return { txHash: receipt.hash }

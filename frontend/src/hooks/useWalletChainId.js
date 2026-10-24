@@ -1,17 +1,19 @@
-import { useAccount, useChainId } from 'wagmi'
+import { useAccount } from 'wagmi'
+import { getCurrentChainId } from '../config/networks'
 
 /**
- * The chain the WALLET is actually on — not the one wagmi's config settled on (issue #1030).
+ * The chain the WALLET is actually on — the one answer to "where is the wallet?" (spec 110
+ * Phase 3, issue #1594).
  *
- * `useChainId()` reads `config.state.chainId`, and wagmi only ever writes a CONFIGURED chain
- * there. `createConfig`'s sync subscription is explicit about it:
+ * ── WHY wagmi's `useChainId()` IS BANNED (issue #1030) ─────────────────────────────────────────
+ * It reads `config.state.chainId`, and wagmi only ever writes a CONFIGURED chain there.
+ * `createConfig`'s sync subscription is explicit about it:
  *
  *     // If chain is not configured, then don't switch over to it.
  *     if (!isChainConfigured) return
  *
- * (node_modules/wagmi/node_modules/@wagmi/core/dist/esm/createConfig.js). So with the member's
- * wallet on a chain absent from `chains` (src/wagmi.js), `useChainId()` keeps reporting the
- * previous configured chain — measured with the wallet on BNB (0x38), the app displayed
+ * So with the member's wallet on a chain absent from `chains` (src/wagmi.js), it keeps reporting
+ * the PREVIOUS configured chain — measured with the wallet on BNB (0x38): the app displayed
  * "Polygon", raised no warning, and pointed every read at Polygon.
  *
  * The connection's own chainId is not filtered that way: `getConnection()` returns
@@ -19,15 +21,27 @@ import { useAccount, useChainId } from 'wagmi'
  * verbatim. `useAccount()` is an alias of `useConnection()` in wagmi 3 and tracks the keys you
  * read, so destructuring `chainId` subscribes to it and re-renders on a real chain change.
  *
- * Falls back to the config chain whenever there is no connection (disconnected, or mid-connect
- * before the connector has answered), which is exactly what `useChainId()` returns anyway — so
- * for every configured chain, and for every passkey session (whose connector only ever reports
- * `config.chains[...]` ids), this returns the identical value it always did.
+ * ── THE FALLBACK IS THE BUILD'S, NOT wagmi's, AND THAT IS A FIX ────────────────────────────────
+ * This hook used to fall back to `useChainId()` when there was no connection. That looked
+ * equivalent and is not: wagmi's default is `chains[0]`, which is **Polygon** — first in the list
+ * so it is the default for a mainnet build — while `getCurrentChainId()` is the build's own
+ * answer (`VITE_NETWORK_ID`, else `PRIMARY_CHAIN_ID`). In a TESTNET build those disagree, and
+ * wagmi's is a MAINNET chain: a disconnected member on a testnet build was answered "Polygon",
+ * which is the cohort-crossing read constitution III forbids.
+ *
+ * It also explains something that looked deliberate and never worked. Nine call sites wrote
+ * `useChainId() || getCurrentChainId()` — an explicit fallback to the build's chain that could
+ * NEVER fire, because `useChainId()` always returns something. They were asking for exactly what
+ * this hook now does, and silently getting Polygon instead.
+ *
+ * `undefined` is deliberately NOT returned when disconnected: ~14 call sites read this to pick a
+ * chain to READ from, and a chain-less read is not more honest than the build's own default — it
+ * is a blank surface. Where the distinction matters (is a WALLET actually there?), callers ask
+ * `useAccount().isConnected`, which is a different question with its own honest answer.
  */
 export function useWalletChainId() {
-  const configChainId = useChainId()
-  const { chainId: connectionChainId } = useAccount()
-  return connectionChainId ?? configChainId
+  const { chainId } = useAccount()
+  return chainId ?? getCurrentChainId()
 }
 
 export default useWalletChainId

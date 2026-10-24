@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { getAddress, isAddress } from 'ethers'
+import { createPublicClient, custom } from 'viem'
 
 // A plain hoisted object rather than a vi.fn: a mock whose implementation THROWS is reported by
 // vitest as the test's own failure even when the code under test catches it, and the catching is
@@ -25,20 +26,33 @@ import {
 const ACCOUNT = '0x098B716B8Aaf21512996dC57EB0615e2383E2f96'
 const GUARD = '0x2Dc53d91A189be71DfE96Ea9BCFCF6aDDA77BC76'
 
-/** A provider that answers `eth_call` by selector, like the no-chain e2e world does. */
+// Since spec 110 the reads go through the chain seam, so the world is installed there rather
+// than handed in as a provider. It is still answered at the SELECTOR — the encoding stays real,
+// which is the whole point of this harness: `isBlacklisted` and `isBlackListed` differ by one
+// letter and hash to different selectors, and only a real encode catches a source asking for
+// the wrong one.
+const seam = vi.hoisted(() => ({ client: null }))
+vi.mock('../../lib/chains/publicClient', async (orig) => ({
+  ...(await orig()),
+  getPublicClient: () => seam.client,
+}))
+
+/** A read client that answers `eth_call` by selector, like the no-chain e2e world does. */
 function providerAnswering(bySelector) {
-  return {
-    async call(tx) {
-      const sel = String(tx.data).slice(0, 10)
-      if (!(sel in bySelector)) throw new Error(`no answer for ${sel}`)
-      const v = bySelector[sel]
-      if (v instanceof Error) throw v
-      return `0x${'0'.repeat(63)}${v ? '1' : '0'}`
-    },
-    // ethers v6 Contract probes these on construction / resolution.
-    getNetwork: async () => ({ chainId: 137n }),
-    resolveName: async (n) => n,
-  }
+  seam.client = createPublicClient({
+    transport: custom({
+      async request({ method, params }) {
+        if (method !== 'eth_call') throw new Error(`unexpected method ${method}`)
+        const sel = String(params[0].data).slice(0, 10)
+        if (!(sel in bySelector)) throw new Error(`no answer for ${sel}`)
+        const v = bySelector[sel]
+        if (v instanceof Error) throw v
+        return `0x${'0'.repeat(63)}${v ? '1' : '0'}`
+      },
+    }),
+  })
+  // Returned so each call site reads unchanged: it is the availability gate the source takes.
+  return seam.client
 }
 const SEL = {
   isAllowed: '0xbabcc539',

@@ -21,10 +21,9 @@ const mockUseChainId = vi.fn()
 const mockUseSwitchChain = vi.fn()
 
 vi.mock('wagmi', () => ({
-  useAccount: () => mockUseAccount(),
+  useAccount: () => ({ ...mockUseAccount(), chainId: mockUseChainId() }),
   useConnect: () => mockUseConnect(),
   useDisconnect: () => mockUseDisconnect(),
-  useChainId: () => mockUseChainId(),
   useSwitchChain: () => mockUseSwitchChain(),
   useWalletClient: () => ({
     data: {

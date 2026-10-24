@@ -1,5 +1,5 @@
 import React from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from '../../hooks/useWalletChainId'
 import { getTransactionUrl } from '../../config/blockExplorer'
 import './TransactionProgress.css'
 
@@ -41,7 +41,7 @@ function TransactionProgress({
   onCancel,
   pendingState = null  // For resuming: { step, txHash, timestamp }
 }) {
-  const chainId = useChainId()
+  const chainId = useWalletChainId()
   const steps = STEP_CONFIGS[type] || STEP_CONFIGS.friend_market
 
   // Filter out optional steps when not needed (e.g. no token approval needed for the native token).

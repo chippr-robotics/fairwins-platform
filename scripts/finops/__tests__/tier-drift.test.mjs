@@ -24,6 +24,14 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '../../..')
+// The C6 cases below edit this REAL file, run the gate against it, and restore it in a `finally`.
+// Nothing else may read the tree while that window is open, so `test:finops-gate` passes
+// `--test-concurrency=1` — `node --test` otherwise runs the files in this directory in parallel
+// processes, and money-paths' "check:finops passes on this tree" then sees the paid-gateway URL
+// and fails with a C6 violation it did not cause. That is a race, not a flake: it reproduces
+// whenever the two windows overlap, which is why it appeared on CI and not locally. If a mutating
+// case is ever added here, keep the suite serialized — or give the gate a tree to read that is not
+// the working copy.
 const NETWORKS = join(ROOT, 'frontend/src/config/networks.js')
 const GATE = join(ROOT, 'scripts/finops/check-finops-coverage.js')
 

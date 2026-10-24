@@ -16,6 +16,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, waitFor, act } from '@testing-library/react'
 import { WalletContext } from '../../contexts'
 import usePortfolio from '../../hooks/usePortfolio'
+// Fixtures are ENCODED with ethers while batchBalances decodes with viem — the same
+// cross-library parity the module's own suite relies on (spec 110).
+import { AbiCoder } from 'ethers'
+import { MULTICALL3_ADDRESS } from '../../lib/portfolio/batchBalances'
 import { getPortfolioRegistry } from '../../config/assetTaxonomy'
 
 const fixtures = vi.hoisted(() => ({
@@ -38,24 +42,20 @@ vi.mock('../../utils/rpcProvider', () => ({
   makeReadProvider: (url, chainId) => ({
     chainId,
     getBalance: () => resolveFixture(fixtures.nativeBalances.get(chainId)),
+    // The ERC-20 leg is a bare `eth_call` now (spec 110 — batchBalances encodes its own
+    // calldata rather than going through a contract object), so the fixture is served here.
+    // Multicall3 stays UNAVAILABLE on this fake, which is what it always was: these suites
+    // exercise the per-asset fallback ladder, and answering the batch here would silently
+    // move them onto a path they were never written to cover.
+    call: async ({ to }) => {
+      if (String(to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
+        throw new Error('no multicall on this fake provider')
+      }
+      const raw = await resolveFixture(fixtures.tokenBalances.get(`${chainId}:${String(to).toLowerCase()}`))
+      return AbiCoder.defaultAbiCoder().encode(['uint256'], [raw])
+    },
   }),
 }))
-
-vi.mock('ethers', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...actual,
-    Contract: class {
-      constructor(address, abi, provider) {
-        this.key = `${provider.chainId}:${String(address).toLowerCase()}`
-      }
-
-      balanceOf() {
-        return resolveFixture(fixtures.tokenBalances.get(this.key))
-      }
-    },
-  }
-})
 
 vi.mock('../../lib/portfolio/prices', async (importOriginal) => {
   const actual = await importOriginal()

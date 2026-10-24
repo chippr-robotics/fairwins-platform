@@ -3,8 +3,8 @@ site_description: Self-custody digital asset infrastructure — embedded wallets
 site_author: Chippr Robotics
 site_url: https://docs.fairwins.app/
 
-repo_name: chippr-robotics/prediction-dao-research
-repo_url: https://github.com/chippr-robotics/prediction-dao-research
+repo_name: chippr-robotics/fairwins-platform
+repo_url: https://github.com/chippr-robotics/fairwins-platform
 edit_uri: edit/main/docs/
 
 theme:
@@ -115,6 +115,7 @@ nav:
   - Developer Guide:
     - Setup: developer-guide/setup.md
     - Architecture: developer-guide/architecture.md
+    - Transaction Lifecycle (spec 110): developer-guide/transaction-lifecycle.md
     - Smart Contracts: developer-guide/smart-contracts.md
     - Frontend Development: developer-guide/frontend.md
     - ClearPath Multi-Network DAOs: developer-guide/clearpath-multi-network.md
@@ -131,6 +132,7 @@ nav:
     - Agentic Payments (spec 096): developer-guide/agentic-payments.md
     - Message Signing (Protect ▸ Verify): developer-guide/message-signing.md
     - Hardware Wallets (Protect ▸ Off chain): developer-guide/hardware-wallets.md
+    - Sigil Cold Signer (Protect ▸ Off chain): developer-guide/sigil-cold-signer.md
     - Account Cards & Identity (spec 086): developer-guide/account-cards.md
     - Infrastructure as Code (spec 087): developer-guide/infrastructure-as-code.md
     - Account Statements: developer-guide/account-statements.md
@@ -182,6 +184,7 @@ nav:
     - Batch Operations: runbooks/batch-operations.md
     - Passkey Account Recovery: runbooks/passkey-account-recovery.md
     - Hardware Wallet Staging Validation: runbooks/hardware-wallet-staging-validation.md
+    - Sigil Cold Signer Staging Validation: runbooks/sigil-cold-signer-staging-validation.md
   - Architecture Workbook:
     - Overview: architecture/workbook/README.md
     - Executive Summary: architecture/workbook/00-executive-summary.md
@@ -201,6 +204,7 @@ nav:
     - ADR-003 X-Wing Post-Quantum Encryption: adr/003-xwing-post-quantum-encryption.md
     - ADR-004 Upgradeable Registry (UUPS): adr/004-upgradeable-registry-uups.md
     - ADR-005 Remove Unused X3DH Messaging Layer: adr/005-remove-unused-x3dh-messaging-layer.md
+    - ADR-006 Dependency Version Policy: adr/006-dependency-version-policy.md
   - Research:
     - Dex v3 Integration Analysis: research/dex-v3-integration-analysis.md
     - Alternative Approaches (Appendix): research/dex-v3-alternative-approaches.md
@@ -323,7 +327,7 @@ not_in_nav: |
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/chippr-robotics/prediction-dao-research
+      link: https://github.com/chippr-robotics/fairwins-platform
 
 extra_css:
   - stylesheets/extra.css

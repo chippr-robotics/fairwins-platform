@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import { WalletContext } from '../../contexts/WalletContext.js'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
 
@@ -38,7 +38,7 @@ function wrapperFor(walletOver = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useChainId.mockReturnValue(137)
+  setWalletChain(137)
 })
 
 describe('usePredictTrade', () => {
@@ -93,7 +93,7 @@ describe('usePredictTrade', () => {
   })
 
   it('prompts a network switch when off Polygon (FR-021)', async () => {
-    useChainId.mockReturnValue(1)
+    setWalletChain(1)
     const deps = makeDeps()
     const switchChain = vi.fn().mockRejectedValue(new Error('declined'))
     const { result } = renderHook(() => usePredictTrade({ deps }), { wrapper: wrapperFor({ switchChain }) })
@@ -190,7 +190,7 @@ describe('usePredictTrade', () => {
   })
 
   it('enableTrading enforces Polygon BEFORE any approvals ceremony (FR-021)', async () => {
-    useChainId.mockReturnValue(1)
+    setWalletChain(1)
     const deps = passkeyDeps({ missingApprovals: vi.fn().mockResolvedValue([{ target: '0xUSDC', data: '0x1' }]) })
     const sendCalls = vi.fn()
     const switchChain = vi.fn().mockRejectedValue(new Error('declined'))

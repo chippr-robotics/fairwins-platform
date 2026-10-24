@@ -50,9 +50,9 @@
  *     credential when it lands, not behind a FairWins key.
  *   • Nothing here is enforcement. The on-chain guard remains the only thing that blocks.
  */
-import { ethers } from 'ethers'
 import { getContractAddressForChain, isLocalOnlyChain } from '../../config/contracts'
 import { cohortChainIds } from '../../config/networks'
+import { readContract } from '../chains/readContract'
 
 export const SOURCE_KINDS = Object.freeze({
   GUARD: 'fairwins-guard',
@@ -107,6 +107,10 @@ const FREEZE_ABI = {
  * @property {string} address   the contract read
  * @property {string} label     who maintains the list, in words a member can read
  * @property {(provider: any, account: string) => Promise<{flagged: boolean, detail: string|null}>} read
+ *   `provider` is the caller's availability gate, not the transport: a source already knows the
+ *   chain it speaks for, so since spec 110 the read NAMES that chain rather than inheriting one
+ *   from whatever connection it was handed. The signature is unchanged — a BYO provider source
+ *   would still implement exactly this.
  */
 
 function guardSource(chainId, address) {
@@ -117,14 +121,15 @@ function guardSource(chainId, address) {
     address,
     label: 'FairWins sanctions guard',
     async read(provider, account) {
-      const guard = new ethers.Contract(address, GUARD_ABI, provider)
+      const guard = (functionName) =>
+        readContract(chainId, { address, abi: GUARD_ABI, functionName, args: [account] })
       // `isAllowed` is the verdict; `isDenied` only explains it. A world that answers the first
       // and not the second (the no-chain e2e tier models exactly one selector) still screens.
-      const allowed = Boolean(await guard.isAllowed(account))
+      const allowed = Boolean(await guard('isAllowed'))
       if (allowed) return { flagged: false, detail: null }
       let denied
       try {
-        denied = Boolean(await guard.isDenied(account))
+        denied = Boolean(await guard('isDenied'))
       } catch {
         denied = null // the reason is a nicety; the refusal above is the fact
       }
@@ -146,8 +151,14 @@ function oracleSource(chainId, address) {
     address,
     label: 'Chainalysis sanctions oracle',
     async read(provider, account) {
-      const oracle = new ethers.Contract(address, ORACLE_ABI, provider)
-      const sanctioned = Boolean(await oracle.isSanctioned(account))
+      const sanctioned = Boolean(
+        await readContract(chainId, {
+          address,
+          abi: ORACLE_ABI,
+          functionName: 'isSanctioned',
+          args: [account],
+        }),
+      )
       return { flagged: sanctioned, detail: sanctioned ? 'on the OFAC sanctions list' : null }
     },
   }
@@ -163,8 +174,16 @@ function issuerSource(chainId, token) {
     async read(provider, account) {
       const abi = FREEZE_ABI[token.fn]
       if (!abi) throw new Error(`unknown freeze selector ${token.fn}`)
-      const c = new ethers.Contract(token.address, abi, provider)
-      const frozen = Boolean(await c[token.fn](account))
+      const frozen = Boolean(
+        await readContract(chainId, {
+          address: token.address,
+          abi,
+          // Circle spells it `isBlacklisted`, Tether `isBlackListed`; the two hash differently,
+          // so the selector name is carried per token rather than guessed.
+          functionName: token.fn,
+          args: [account],
+        }),
+      )
       return {
         flagged: frozen,
         detail: frozen ? `frozen by ${token.issuer} — ${token.symbol} sent here cannot be moved` : null,

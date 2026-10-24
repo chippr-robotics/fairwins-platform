@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { keccak256, stringToHex } from 'viem'
+import { formatUnits } from '../lib/evm/units'
+import { readContract } from '../lib/chains/readContract'
 import { getContractAddressForChain } from '../config/contracts'
 import { membershipChainId, NETWORKS } from '../config/networks'
 import { getProvider } from '../utils/blockchainService'
@@ -25,7 +27,7 @@ function paymentTokenDecimals(chainId) {
 }
 
 const ROLE_HASHES = {
-  WAGER_PARTICIPANT: ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE')),
+  WAGER_PARTICIPANT: keccak256(stringToHex('WAGER_PARTICIPANT_ROLE')),
 }
 
 const TIER_IDS = {
@@ -69,10 +71,20 @@ export function useTierPrices() {
   const referenceChainId = membershipChainId()
   const provider = useMemo(() => getProvider(referenceChainId), [referenceChainId])
 
+  // A reader bound to the reference chain, or null when no manager is deployed there.
+  // `provider` stays the availability gate it was.
   const contract = useMemo(() => {
     const addr = getContractAddressForChain('membershipManager', referenceChainId)
-    if (!addr) return null
-    return new ethers.Contract(addr, MEMBERSHIP_MANAGER_ABI, provider)
+    if (!addr || !provider) return null
+    return {
+      getTierConfig: (roleHash, tierId) =>
+        readContract(referenceChainId, {
+          address: addr,
+          abi: MEMBERSHIP_MANAGER_ABI,
+          functionName: 'getTierConfig',
+          args: [roleHash, tierId],
+        }),
+    }
   }, [provider, referenceChainId])
 
   const fetchPrices = useCallback(async () => {
@@ -98,7 +110,7 @@ export function useTierPrices() {
         for (const [tierName, tierId] of Object.entries(TIER_IDS)) {
           try {
             const cfg = await contract.getTierConfig(roleHash, tierId)
-            prices[tierName][roleKey] = parseFloat(ethers.formatUnits(cfg.priceUSDC, paymentTokenDecimals(referenceChainId)))
+            prices[tierName][roleKey] = parseFloat(formatUnits(cfg.priceUSDC, paymentTokenDecimals(referenceChainId)))
             limits[tierName][roleKey] = {
               monthlyMarketCreation: Number(cfg.limits.monthlyMarketCreation),
               maxConcurrentMarkets: Number(cfg.limits.maxConcurrentMarkets),

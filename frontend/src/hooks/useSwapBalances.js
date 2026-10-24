@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Contract, formatUnits } from 'ethers'
+import { formatUnits } from '../lib/evm/units'
+import { readContract } from '../lib/chains/readContract'
 import { NETWORKS } from '../config/networks'
-import { makeReadProvider } from '../utils/rpcProvider'
 import { useEndpointsRevision } from './useRpcEndpoints'
 import logger from '../utils/logger'
 
@@ -56,11 +56,15 @@ export function useSwapBalances({ chainId, address, tokens = [] } = {}) {
     const reqId = ++reqIdRef.current
     setLoading(true)
     try {
-      const provider = makeReadProvider(rpcUrl, numericChainId)
       const results = await Promise.all(
         targets.map(async (token) => {
           try {
-            const raw = await new Contract(token.address, BALANCE_OF_ABI, provider).balanceOf(address)
+            const raw = await readContract(numericChainId, {
+              address: token.address,
+              abi: BALANCE_OF_ABI,
+              functionName: 'balanceOf',
+              args: [address],
+            })
             return [token.address.toLowerCase(), formatUnits(raw, token.decimals)]
           } catch (error) {
             // Stale-or-unknown, never zero: a failed read must not read as "no funds".

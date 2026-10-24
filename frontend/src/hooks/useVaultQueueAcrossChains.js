@@ -1,6 +1,6 @@
 // Spec 102 (D5, US3) — a vault's proposal queue on EVERY network it lives on. `useVaultProposals`
 // reads one instance, and only while the wallet is on that instance's chain; this hook reads each
-// instance of a VaultGroup through a provider for ITS chain, so the member's pending work is not a
+// instance of a VaultGroup on ITS OWN chain, named per read, so the member's pending work is not a
 // function of which network their wallet happens to be on.
 //
 // Every chain resolves to exactly one state — `read` / `unreadable` / `not-configured` /
@@ -15,12 +15,13 @@
 // two statuses depending on which surface the member opened.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { Contract, getAddress } from 'ethers'
 import { useWallet } from '.'
 import { SAFE_ABI } from '../abis/Safe'
 import { NETWORKS } from '../config/networks'
 import { getContractAddressForChain, getDeploymentBlockForChain } from '../config/contracts'
-import { getProvider } from '../utils/blockchainService'
+import { eventScanHandle } from '../lib/chains/eventScan'
+import { readContract, NoRpcEndpointError } from '../lib/chains/readContract'
+import { getAddress } from '../lib/evm/address'
 import { readVerifiedProposals } from '../lib/custody/proposalHub'
 import { readExecutionOutcomes } from '../lib/custody/vaultProposalReads'
 
@@ -43,7 +44,10 @@ const EMPTY = Object.freeze({})
  * @returns {{ byChain: object, rows: object[], pending: number, missing: number[], partial: boolean, loading: boolean, refresh: (chainId?: number) => Promise<void> }}
  */
 export function useVaultQueueAcrossChains(group) {
-  const { address, chainId: walletChainId, provider: walletProvider } = useWallet()
+  // The wallet supplies the member's identity only. WHICH CHAIN a queue is read on is a property of
+  // the vault instance, never of the connection (spec 102, spec 110) — so no provider is taken here,
+  // and a member sitting on Polygon reads their Base queue by exactly the same path.
+  const { address } = useWallet()
   const [byChain, setByChain] = useState(EMPTY)
   // Per-(vault, chain) request ids: `${key}:${chainId}` → latest request number.
   const reqIds = useRef({})
@@ -109,14 +113,17 @@ export function useVaultQueueAcrossChains(group) {
 
       commit({ state: 'loading' })
       try {
-        // The wallet's own provider when it is already on this chain; the chain's read provider otherwise.
-        const reader = Number(walletChainId) === cid && walletProvider ? walletProvider : getProvider(cid)
-        const safe = new Contract(inst.address, SAFE_ABI, reader)
+        const safeRead = (functionName, args) =>
+          readContract(cid, { address: inst.address, abi: SAFE_ABI, functionName, args })
+        // The scan handle is the log-reading half of what `new Contract(…)` used to be; the views go
+        // through `readContract`. Both name `cid`, so nothing here can read the wrong chain.
+        const safe = eventScanHandle(cid, { address: inst.address, abi: SAFE_ABI })
+        if (!safe) throw new NoRpcEndpointError(cid)
         // A chain whose endpoint never answers must resolve to `unreadable`, not sit on
-        // "reading…" for the life of the sheet: ethers keeps retrying network detection on a dead
+        // "reading…" for the life of the sheet: a transport can retry indefinitely on a dead
         // endpoint, so without a ceiling the member never learns that this network was not read.
         const [ownersRaw, thresholdRaw, nonceRaw] = await withReadTimeout(
-          Promise.all([safe.getOwners(), safe.getThreshold(), safe.nonce()]),
+          Promise.all([safeRead('getOwners'), safeRead('getThreshold'), safeRead('nonce')]),
           cid,
         )
         const owners = ownersRaw.map((o) => getAddress(o))
@@ -128,7 +135,6 @@ export function useVaultQueueAcrossChains(group) {
             hubAddress,
             safeAddress: inst.address,
             chainId: cid,
-            provider: reader,
             fromBlock,
           }),
           cid,
@@ -158,7 +164,7 @@ export function useVaultQueueAcrossChains(group) {
           unique.map(async (p) => {
             const hashLc = String(p.safeTxHash).toLowerCase()
             const flags = await Promise.all(
-              owners.map((o) => safe.approvedHashes(o, p.safeTxHash).then((n) => (n > 0n ? o : null))),
+              owners.map((o) => safeRead('approvedHashes', [o, p.safeTxHash]).then((n) => (BigInt(n) > 0n ? o : null))),
             )
             const approvers = flags.filter(Boolean)
             const status = deriveProposalStatus({
@@ -190,7 +196,7 @@ export function useVaultQueueAcrossChains(group) {
         commit({ state: 'unreadable', error: e?.message || 'Failed to read proposals' })
       }
     },
-    [key, address, walletChainId, walletProvider],
+    [key, address],
   )
 
   /** Re-read one chain (after an action there) or every chain. */

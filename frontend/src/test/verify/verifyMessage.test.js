@@ -29,6 +29,7 @@ import {
   SIGNATURE,
   AWKWARD_SIGNATURE,
   SIGNER_ADDRESS,
+  SIGNER_KEY,
   OTHER_ADDRESS,
   CONTRACT_ACCOUNT,
   CONTRACT_ACCOUNT_CHAIN_ID,
@@ -40,9 +41,14 @@ import {
 
 // No test may fall through to a real network route; the ERC-1271 leg always takes an injected
 // provider here, and this makes an accidental omission fail loudly rather than hang.
-vi.mock('../../utils/rpcProvider', () => ({
-  getReadProvider: () => {
-    throw new Error('a test reached the real provider factory')
+//
+// Mocked at the CHAIN SEAM since spec 110 — the module resolves through `getPublicClient(chainId)`
+// now, and a guard left on the retired `utils/rpcProvider` would still LOOK like it was protecting
+// this suite while protecting nothing at all.
+vi.mock('../../lib/chains/publicClient', async (orig) => ({
+  ...(await orig()),
+  getPublicClient: () => {
+    throw new Error('a test reached the real client factory')
   },
 }))
 
@@ -309,6 +315,33 @@ describe('checkErc1271', () => {
 describe('recoverPersonalSigner', () => {
   it('returns null instead of throwing on bytes that are not a signature', () => {
     expect(recoverPersonalSigner(MESSAGE, ERC1271_SIGNATURE)).toBeNull()
+  })
+
+  /*
+   * Spec 110 T020. The recovery runs on `@noble/curves` rather than viem for ONE reason: viem's
+   * `verifyMessage`/`recoverAddress` are async, and spec 084 requires this path to be synchronous
+   * because the type is what stops a network call being added to signature arithmetic later. A
+   * conversion that "worked" but returned a promise would pass every value assertion in this file
+   * and quietly remove that guarantee, so it is asserted directly.
+   */
+  it('is SYNCHRONOUS — the type is what keeps the offline guarantee (spec 084)', () => {
+    const out = recoverPersonalSigner(MESSAGE, SIGNATURE)
+    expect(out).not.toBeInstanceOf(Promise)
+    expect(typeof out).toBe('string')
+    expect(recoverPersonalSigner(MESSAGE, ERC1271_SIGNATURE)).not.toBeInstanceOf(Promise)
+  })
+
+  /*
+   * EIP-2098: 64 bytes, with yParity packed into the top bit of `s`. ethers accepted this form and
+   * so must we — this surface verifies signatures OTHER people produced, so refusing an encoding
+   * turns a good proof into "unverifiable". viem's own `parseSignature` rejects it, which is why
+   * the split is written out in the module rather than delegated.
+   */
+  it('accepts the 64-byte EIP-2098 compact form, as ethers did', () => {
+    const wallet = new ethers.Wallet(SIGNER_KEY)
+    const compact = wallet.signingKey.sign(ethers.hashMessage(MESSAGE)).compactSerialized
+    expect(compact).toHaveLength(2 + 128) // 64 bytes, not 65
+    expect(recoverPersonalSigner(MESSAGE, compact)).toBe(SIGNER_ADDRESS)
   })
 })
 

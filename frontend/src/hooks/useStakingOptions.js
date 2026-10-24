@@ -16,7 +16,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { NETWORKS, getStakingNetworks } from '../config/networks'
 import { POL_TOKEN_L1, stakingRouterServiceIdFor } from '../config/staking'
-import { makeReadProvider } from '../utils/rpcProvider'
+import { getPublicClient } from '../lib/chains/publicClient'
 import { fetchLidoApr, readLidoPosition } from '../lib/staking/lidoStaking'
 import { readSpolTvl, readSpolRewardFee } from '../lib/staking/spolStaking'
 import { fetchValidatorDecoration, unbondingLabel, readStakeManagerTiming } from '../lib/staking/polygonDelegation'
@@ -152,12 +152,8 @@ export function useStakingOptions() {
       for (const chainId of stakingChainIds) {
         const config = NETWORKS[chainId].staking
         const base = buildBaseOptions(chainId, config)
-        let provider
-        try {
-          provider = makeReadProvider(NETWORKS[chainId].rpcUrl, chainId)
-        } catch {
-          provider = null
-        }
+        // Availability gate only — reads themselves go through the chain seam.
+        const provider = getPublicClient(chainId)
 
         // Best-effort enrichment — every call degrades to null on failure.
         const lidoApr = await fetchLidoApr(config.liquid?.find((l) => l.kind === 'lido')?.aprApi)
@@ -165,8 +161,8 @@ export function useStakingOptions() {
         let spolTvl = null
         let spolFeeBps = null
         if (spol && provider) {
-          spolTvl = await readSpolTvl({ provider, contracts: spol.contracts })
-          spolFeeBps = await readSpolRewardFee({ provider, contracts: spol.contracts })
+          spolTvl = await readSpolTvl({ chainId, contracts: spol.contracts })
+          spolFeeBps = await readSpolRewardFee({ chainId, contracts: spol.contracts })
         }
         let decoration = new Map()
         let unbondLabel = null
@@ -176,7 +172,7 @@ export function useStakingOptions() {
             (config.delegated.validators || []).map((v) => v.validatorId),
           )
           try {
-            const timing = await readStakeManagerTiming({ stakeManager: config.delegated.stakeManager, provider })
+            const timing = await readStakeManagerTiming({ stakeManager: config.delegated.stakeManager, chainId })
             unbondLabel = unbondingLabel(timing.withdrawalDelay)
           } catch {
             unbondLabel = null

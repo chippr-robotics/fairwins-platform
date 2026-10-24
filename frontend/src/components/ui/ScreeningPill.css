@@ -74,6 +74,17 @@ button.screen-pill:focus-visible {
   border-radius: 8px;
   background: var(--bg-secondary);
   max-width: 100%;
+  /*
+   * ONE ROW PER SOURCE PER CHAIN, and the estate only gains chains — so this list's height is a
+   * function of the deployment, not of the design. Unbounded, it outgrew the address-book modal
+   * it opens inside and spilled past the viewport; on the phone profile the browser then reports
+   * it as covered by the modal backdrop, which is the same "taller than a phone, clipped by the
+   * scrolling modal" failure the InfoTip bubble already hit. It scrolls internally instead, so no
+   * number of networks can push its own contents out of reach.
+   */
+  max-height: min(42vh, 22rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .screen-pill-row {

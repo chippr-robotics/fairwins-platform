@@ -26,6 +26,12 @@
   animation: action-sheet-fade 160ms ease-out;
 }
 
+/* Spec 111 — the deferred-signing ceremony (spec 088) opens FROM another sheet and must sit above
+   it. Same tier as that sheet meant DOM order decided, and the global host mounts first. */
+.action-sheet__backdrop--ceremony {
+  z-index: 2200;
+}
+
 .action-sheet {
   width: 100%;
   max-width: 460px;

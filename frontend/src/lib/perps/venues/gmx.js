@@ -32,24 +32,25 @@
  * the member's collateral attached. The decoders, the execution-fee estimate and its live read are
  * the opposite — they run over venue data inside effects and render, so they are total and return
  * null / []. `readExecutionFee` is the one asynchronous thing here and it is total too: no GMX on
- * this chain, no provider, a reverting call and a suspicious zero all resolve to `null`, and the
- * surface says the fee could not be read rather than guessing at money the member will pay.
+ * this chain, no read connection, a reverting call and a suspicious zero all resolve to `null`, and
+ * the surface says the fee could not be read rather than guessing at money the member will pay.
  */
 import {
-  AbiCoder,
-  Contract,
-  Interface,
-  ZeroAddress,
-  ZeroHash,
-  formatUnits,
-  getAddress,
-  id,
-  isAddress,
-  isHexString,
+  encodeAbiParameters,
+  encodeFunctionData,
+  decodeEventLog,
+  decodeFunctionResult,
+  isHex,
   keccak256,
-  parseUnits,
-  zeroPadValue,
-} from 'ethers'
+  pad,
+  toEventSelector,
+  toHex,
+  zeroAddress,
+  zeroHash,
+} from 'viem'
+import { normalizeAbi, readContract } from '../../chains/readContract'
+import { getAddress, isAddress } from '../../evm/address'
+import { formatUnits, parseUnits } from '../../evm/units'
 import { GMX_DATA_STORE_ABI } from '../../../abis/perps/gmxDataStore'
 import {
   GMX_DECREASE_POSITION_SWAP_TYPE,
@@ -60,16 +61,17 @@ import {
 } from '../../../abis/perps/gmxExchangeRouter'
 import { GMX_READER_ABI } from '../../../abis/perps/gmxReader'
 import { gmxAddressesFor } from '../../../config/perps'
-import { getReadProvider } from '../../../utils/rpcProvider'
+import { getPublicClient } from '../../chains/publicClient'
 
-const EXCHANGE_ROUTER = new Interface(GMX_EXCHANGE_ROUTER_ABI)
-const EVENT_EMITTER = new Interface(GMX_EVENT_EMITTER_ABI)
-const READER = new Interface(GMX_READER_ABI)
+const EXCHANGE_ROUTER = normalizeAbi(GMX_EXCHANGE_ROUTER_ABI)
+const EVENT_EMITTER = normalizeAbi(GMX_EVENT_EMITTER_ABI)
+const READER = normalizeAbi(GMX_READER_ABI)
 
 /** Exact-amount approvals only — the repo never grants an unlimited allowance for collateral. */
-const ERC20 = new Interface(['function approve(address spender, uint256 value) returns (bool)'])
+const ERC20 = normalizeAbi(['function approve(address spender, uint256 value) returns (bool)'])
 
-const ABI_CODER = AbiCoder.defaultAbiCoder()
+/** `Interface.encodeFunctionData(name, args)`, in the shape viem spells it. Byte-identical. */
+const callData = (abi, functionName, args) => encodeFunctionData({ abi, functionName, args })
 
 /**
  * GMX v2 is deployed on Arbitrum and nowhere else this product touches, so builders default to it.
@@ -133,12 +135,19 @@ function requireGmx(chainId) {
   return gmx
 }
 
+/**
+ * `isAddress` comes from `lib/evm/address` rather than straight from viem: neither of viem's two
+ * settings reproduces ethers, and the safety invariant this module is built around depends on it —
+ * an ALL-UPPERCASE FairWins address must get past the format check so the receiver guard below can
+ * refuse it by identity (safetyInvariants.test.js), while a mistyped MIXED-CASE address must still
+ * be refused as malformed. See that seam for the full table.
+ */
 function requireAddress(value, label) {
   if (typeof value !== 'string' || !isAddress(value)) {
     throw new TypeError(`${label} must be an address, received ${describe(value)}`)
   }
   const addr = getAddress(value)
-  if (addr === ZeroAddress) throw new TypeError(`${label} cannot be the zero address`)
+  if (addr === zeroAddress) throw new TypeError(`${label} cannot be the zero address`)
   return addr
 }
 
@@ -147,7 +156,7 @@ function requireAddress(value, label) {
  * a zero `uiFeeReceiver` is a zero UI fee, and a zero `cancellationReceiver` defaults to the account.
  */
 function optionalAddress(value, label) {
-  if (value == null || value === '') return ZeroAddress
+  if (value == null || value === '') return zeroAddress
   if (typeof value !== 'string' || !isAddress(value)) {
     throw new TypeError(`${label} must be an address or null, received ${describe(value)}`)
   }
@@ -195,14 +204,15 @@ function requireBoolean(value, label) {
 }
 
 function requireBytes32(value, label) {
-  if (typeof value !== 'string' || !isHexString(value, 32)) {
+  // ethers' `isHexString(v, 32)` in two viem words: hex, and exactly 32 bytes of it.
+  if (typeof value !== 'string' || !isHex(value) || value.length !== 66) {
     throw new TypeError(`${label} must be a 32-byte hex string, received ${describe(value)}`)
   }
   return value
 }
 
 function optionalBytes32(value, label) {
-  if (value == null || value === '') return ZeroHash
+  if (value == null || value === '') return zeroHash
   return requireBytes32(value, label)
 }
 
@@ -277,7 +287,7 @@ function createOrderParams({
   // of `createOrder`, so building an order whose account IS the FairWins fee receiver means FairWins
   // holds the position — forbidden pattern 2 in venue-calldata.md. Both sides are already
   // checksum-normalised (`requireAddress` / `optionalAddress`), so this compares addresses, not case.
-  if (uiFeeReceiver !== ZeroAddress && uiFeeReceiver === account) {
+  if (uiFeeReceiver !== zeroAddress && uiFeeReceiver === account) {
     throw new Error(
       'refusing to build a GMX order owned by the FairWins UI-fee receiver — the position owner is ' +
         'msg.sender, so this would give FairWins the position (venue-calldata.md, forbidden pattern 2)',
@@ -287,7 +297,7 @@ function createOrderParams({
     [
       account, // receiver — the MEMBER (payout target, NOT ownership)
       account, // cancellationReceiver — the MEMBER (refund target, NOT ownership)
-      ZeroAddress, // callbackContract
+      zeroAddress, // callbackContract
       uiFeeReceiver, // ← the ONLY FairWins address permitted in this calldata
       market,
       collateralToken,
@@ -317,7 +327,7 @@ function createOrderParams({
 function multicall(exchangeRouter, calls, value) {
   return {
     target: exchangeRouter,
-    data: EXCHANGE_ROUTER.encodeFunctionData('multicall', [calls]),
+    data: callData(EXCHANGE_ROUTER, 'multicall', [calls]),
     value,
   }
 }
@@ -341,7 +351,7 @@ export function buildApprovalCall({ chainId = GMX_CHAIN_ID, token, amount }) {
   const value = requireTokenAmount(amount, 'amount')
   return {
     target: collateral,
-    data: ERC20.encodeFunctionData('approve', [gmx.router, value]),
+    data: callData(ERC20, 'approve', [gmx.router, value]),
     value: 0n,
   }
 }
@@ -402,9 +412,9 @@ export function buildOpenPositionCalls({
   return multicall(
     gmx.exchangeRouter,
     [
-      EXCHANGE_ROUTER.encodeFunctionData('sendWnt', [gmx.orderVault, fee]),
-      EXCHANGE_ROUTER.encodeFunctionData('sendTokens', [collateralAddress, gmx.orderVault, collateral]),
-      EXCHANGE_ROUTER.encodeFunctionData('createOrder', [params]),
+      callData(EXCHANGE_ROUTER, 'sendWnt', [gmx.orderVault, fee]),
+      callData(EXCHANGE_ROUTER, 'sendTokens', [collateralAddress, gmx.orderVault, collateral]),
+      callData(EXCHANGE_ROUTER, 'createOrder', [params]),
     ],
     fee,
   )
@@ -466,8 +476,8 @@ export function buildClosePositionCalls({
   return multicall(
     gmx.exchangeRouter,
     [
-      EXCHANGE_ROUTER.encodeFunctionData('sendWnt', [gmx.orderVault, fee]),
-      EXCHANGE_ROUTER.encodeFunctionData('createOrder', [params]),
+      callData(EXCHANGE_ROUTER, 'sendWnt', [gmx.orderVault, fee]),
+      callData(EXCHANGE_ROUTER, 'createOrder', [params]),
     ],
     fee,
   )
@@ -542,8 +552,8 @@ export function buildProtectionCalls({
     return multicall(
       gmx.exchangeRouter,
       [
-        EXCHANGE_ROUTER.encodeFunctionData('sendWnt', [gmx.orderVault, fee]),
-        EXCHANGE_ROUTER.encodeFunctionData('createOrder', [params]),
+        callData(EXCHANGE_ROUTER, 'sendWnt', [gmx.orderVault, fee]),
+        callData(EXCHANGE_ROUTER, 'createOrder', [params]),
       ],
       fee,
     )
@@ -567,7 +577,7 @@ export function buildCancelOrderCall(arg) {
   const gmx = requireGmx(chainId)
   return {
     target: gmx.exchangeRouter,
-    data: EXCHANGE_ROUTER.encodeFunctionData('cancelOrder', [requireBytes32(key, 'key')]),
+    data: callData(EXCHANGE_ROUTER, 'cancelOrder', [requireBytes32(key, 'key')]),
     value: 0n,
   }
 }
@@ -596,7 +606,7 @@ export function buildUpdateOrderCall({
   const gmx = requireGmx(chainId)
   return {
     target: gmx.exchangeRouter,
-    data: EXCHANGE_ROUTER.encodeFunctionData('updateOrder', [
+    data: callData(EXCHANGE_ROUTER, 'updateOrder', [
       requireBytes32(key, 'key'),
       toUsdUnits(sizeDeltaUsd, 'sizeDeltaUsd'),
       toUsdUnits(acceptablePrice, 'acceptablePrice'),
@@ -647,7 +657,7 @@ export function buildUpdateOrderCall({
 
 /** A DataStore key: `keccak256(abi.encode("<NAME>"))`, the derivation `feeUnits.js` uses for the UI fee. */
 function dataStoreKey(name) {
-  return keccak256(ABI_CODER.encode(['string'], [name]))
+  return keccak256(encodeAbiParameters([{ type: 'string' }], [name]))
 }
 
 /** `Keys.ESTIMATED_GAS_FEE_BASE_AMOUNT_V2_1` — the flat base, before the per-oracle term. */
@@ -750,26 +760,40 @@ export function estimateExecutionFee(input) {
   }
 }
 
-/** The provider's current gas price, or null. `getFeeData` is ethers v6's only total answer for it. */
-async function defaultGasPrice(provider) {
-  const feeData = await provider.getFeeData()
-  // `gasPrice` is what `tx.gasprice` will be on Arbitrum, which is the number GMX validates
-  // against. `maxFeePerGas` is the EIP-1559 ceiling and is only a fallback — never below it.
-  return toUnsigned(feeData?.gasPrice) ?? toUnsigned(feeData?.maxFeePerGas)
+/**
+ * The network's current gas price, or null.
+ *
+ * `eth_gasPrice` is what `tx.gasprice` will be on Arbitrum, which is the number GMX validates
+ * against; the EIP-1559 ceiling is only a fallback and is never below it. ethers' `getFeeData`
+ * answered both in one round trip and viem splits them, so the fallback costs a second call — and
+ * is only paid when the first had nothing to say. A gas price of ZERO is passed through rather than
+ * fallen back from, because `readExecutionFee`'s zero rule must see it: a chain answering 0 is an
+ * unreadable venue, not an invitation to substitute a different number.
+ */
+async function defaultGasPrice(client) {
+  const direct = toUnsigned(await client.getGasPrice().catch(() => null))
+  if (direct !== null) return direct
+  const fees = await client.estimateFeesPerGas().catch(() => null)
+  return toUnsigned(fees?.maxFeePerGas)
 }
 
-function defaultMakeDataStore(address, abi, provider) {
-  return new Contract(address, abi, provider)
+/**
+ * The DataStore read handle. `chainId` is the trailing argument rather than a property of the
+ * client, so the chain a read lands on is named at the call site (spec 110) and an injected fake
+ * keeps the shape it always had.
+ */
+function defaultMakeDataStore(address, abi, client, chainId) {
+  return { getUint: (key) => readContract(chainId, { address, abi, functionName: 'getUint', args: [key] }) }
 }
 
 /**
  * THE PRODUCER. Reads GMX's own gas configuration plus the network's gas price and returns the
  * execution fee to attach to one order, in WEI.
  *
- * Everything is injectable (`getProvider` / `makeContract` / `getGasPrice`), so the estimate is
- * exercised with no network — the `venueStatus.js` convention. The provider comes from
- * `utils/rpcProvider` so the member's own endpoint, headers and failover apply (spec 069); never
- * hand-build one from `NETWORKS[chainId].rpcUrl`.
+ * Everything is injectable (`getClient` / `makeContract` / `getGasPrice`), so the estimate is
+ * exercised with no network — the `venueStatus.js` convention. The client comes from
+ * `lib/chains/publicClient` so the member's own endpoint, headers and failover apply (spec 069);
+ * never hand-build one from `NETWORKS[chainId].rpcUrl`.
  *
  * **A ZERO FROM ANY OF THE FOUR CONSTANTS IS TREATED AS AN UNREADABLE VENUE, NOT AS ZERO GAS.**
  * GMX has never configured one of these at zero, and a zero `multiplierFactor` or `orderGasLimit`
@@ -777,7 +801,7 @@ function defaultMakeDataStore(address, abi, provider) {
  * DataStore address produces. Refusing here means the sheet says the fee could not be read and
  * points at GMX's own app, instead of asking a member to sign an order that cannot execute.
  *
- * TOTAL: it runs inside an effect, so every failure — no GMX on this chain, no provider, a
+ * TOTAL: it runs inside an effect, so every failure — no GMX on this chain, no read connection, a
  * reverting call, a dropped connection — is `null`, never a throw and never a guess.
  *
  * → `{ chainId, orderKind, fee, baseFee, gasLimit, gasPrice, oraclePriceCount, bufferBps }` or null.
@@ -789,7 +813,7 @@ export async function readExecutionFee(input) {
     swapPathLength = 0,
     bufferBps = GMX_EXECUTION_FEE_BUFFER_BPS,
     addressesFor = gmxAddressesFor,
-    getProvider = getReadProvider,
+    getClient = getPublicClient,
     makeContract = defaultMakeDataStore,
     getGasPrice = defaultGasPrice,
   } = input ?? {}
@@ -801,10 +825,12 @@ export async function readExecutionFee(input) {
   try {
     const addresses = addressesFor(chainId)
     if (!addresses?.dataStore) return null // GMX is not deployed here — absence, not a failed read
-    const provider = getProvider(chainId)
-    if (!provider) return null
+    // The client is the availability gate: no endpoint configured for this chain is a different
+    // fact from a read that failed, and it costs nothing to establish before any round trip.
+    const client = getClient(chainId)
+    if (!client) return null
 
-    const store = makeContract(addresses.dataStore, GMX_DATA_STORE_ABI, provider)
+    const store = makeContract(addresses.dataStore, GMX_DATA_STORE_ABI, client, chainId)
     const [baseGasLimit, gasPerOraclePrice, multiplierFactor, orderGasLimit, singleSwapGasLimit, gasPrice] =
       await Promise.all([
         store.getUint(GMX_ESTIMATED_GAS_FEE_BASE_AMOUNT_KEY),
@@ -814,7 +840,7 @@ export async function readExecutionFee(input) {
         // Not read at all when nothing swaps — this feature's swapPath is always empty, and an
         // extra call is an extra way for the read to fail for no gain.
         swapPathLength > 0 ? store.getUint(GMX_SINGLE_SWAP_GAS_LIMIT_KEY) : 0n,
-        getGasPrice(provider),
+        getGasPrice(client),
       ])
 
     const required = [baseGasLimit, gasPerOraclePrice, multiplierFactor, orderGasLimit, gasPrice]
@@ -857,8 +883,8 @@ export async function readExecutionFee(input) {
 export function positionKey(account, market, collateralToken, isLong) {
   try {
     return keccak256(
-      ABI_CODER.encode(
-        ['address', 'address', 'address', 'bool'],
+      encodeAbiParameters(
+        [{ type: 'address' }, { type: 'address' }, { type: 'address' }, { type: 'bool' }],
         [getAddress(account), getAddress(market), getAddress(collateralToken), Boolean(isLong)],
       ),
     )
@@ -870,8 +896,8 @@ export function positionKey(account, market, collateralToken, isLong) {
 /**
  * `Reader.getAccountPositions` → normalized position objects.
  *
- * Accepts either the decoded ethers result or the raw returndata hex, so a caller that already has
- * a `Contract` result and one that has bytes both land here rather than each rolling their own.
+ * Accepts either the decoded read result or the raw returndata hex, so a caller that already has
+ * a decoded result and one that has bytes both land here rather than each rolling their own.
  *
  * TOTAL: an empty array for junk, and an unreadable ROW is dropped rather than emitted with holes —
  * an account with no positions returns a clean empty array from GMX, so absence is never an error
@@ -893,8 +919,10 @@ export function decodeAccountPositions(readerResult) {
 function positionRows(readerResult) {
   if (typeof readerResult === 'string') {
     try {
-      const [decoded] = READER.decodeFunctionResult('getAccountPositions', readerResult)
-      return Array.from(decoded)
+      // `getAccountPositions` has ONE output, and viem hands a single output back directly where
+      // ethers wrapped it in a Result — so there is no array to destructure off the front. Taking
+      // `[0]` here would yield the first POSITION and then `Array.from` its three tuples.
+      return Array.from(decodeFunctionResult({ abi: READER, functionName: 'getAccountPositions', data: readerResult }))
     } catch {
       return null
     }
@@ -908,9 +936,11 @@ function positionRows(readerResult) {
 }
 
 /**
- * ethers `Result` exposes both named and positional access; a plain array fixture only the latter.
- * Reading by name FIRST keeps the field mapping honest even if the tuple ever gains a member, and
- * the positional fallback keeps test fixtures from having to fake a Result.
+ * viem decodes a named tuple into an OBJECT (`{ addresses, numbers, flags }`) and has no positional
+ * access at all; ethers' `Result` had both; a plain array fixture only the index. Reading by name
+ * FIRST is therefore the production path as well as the honest one — it keeps the field mapping
+ * correct even if the tuple ever gains a member — and the positional fallback keeps test fixtures
+ * from having to fake a decode.
  */
 function at(tuple, name, index) {
   if (tuple == null) return undefined
@@ -959,7 +989,9 @@ function decodePosition(row) {
 }
 
 /** The `EventLog2` topic — every order event GMX emits shares it. */
-export const GMX_EVENT_LOG2_TOPIC = EVENT_EMITTER.getEvent('EventLog2').topicHash
+export const GMX_EVENT_LOG2_TOPIC = toEventSelector(
+  EVENT_EMITTER.find((item) => item.type === 'event' && item.name === 'EventLog2'),
+)
 
 /**
  * The log filter for one member's order events.
@@ -971,7 +1003,7 @@ export const GMX_EVENT_LOG2_TOPIC = EVENT_EMITTER.getEvent('EventLog2').topicHas
  *
  * TOTAL: null for a bad address or a chain without GMX, so an effect can branch instead of throwing.
  *
- * → `{ address, topics }` — an ethers filter, ready for `getLogs` / `provider.on`.
+ * → `{ address, topics }` — a raw `eth_getLogs` filter, ready for the read seam's log scan.
  */
 export function eventTopicsForAccount(account, options) {
   // `?? {}` inside the body — an explicit null options object must degrade, not throw (see above).
@@ -985,9 +1017,9 @@ export function eventTopicsForAccount(account, options) {
     topics: [
       GMX_EVENT_LOG2_TOPIC,
       // An indexed string is topic'd as keccak(bytes(name)); an array here is an OR filter.
-      names.length ? names.map((name) => id(name)) : null,
+      names.length ? names.map((name) => keccak256(toHex(name))) : null,
       null, // topic1 = the order key
-      zeroPadValue(getAddress(account).toLowerCase(), 32),
+      pad(getAddress(account).toLowerCase(), { size: 32 }),
     ],
   }
 }
@@ -1018,11 +1050,11 @@ export function decodeOrderEvent(log) {
   if (String(topics[0]).toLowerCase() !== GMX_EVENT_LOG2_TOPIC.toLowerCase()) return null
   let parsed
   try {
-    parsed = EVENT_EMITTER.parseLog({ topics: [...topics], data: log.data ?? '0x' })
+    parsed = decodeEventLog({ abi: EVENT_EMITTER, topics: [...topics], data: log.data ?? '0x' })
   } catch {
     return null
   }
-  if (parsed?.name !== 'EventLog2') return null
+  if (parsed?.eventName !== 'EventLog2') return null
   const eventName = typeof parsed.args?.eventName === 'string' ? parsed.args.eventName : null
   // Not one of ours — a position/market event sharing the emitter, not an order event.
   if (!eventName || !GMX_ORDER_EVENT_NAMES.includes(eventName)) return null
@@ -1066,7 +1098,7 @@ function toSigned(value) {
 function toAddress(value) {
   if (typeof value !== 'string' || !isAddress(value)) return null
   const addr = getAddress(value)
-  return addr === ZeroAddress ? null : addr
+  return addr === zeroAddress ? null : addr
 }
 
 function toSeconds(value) {

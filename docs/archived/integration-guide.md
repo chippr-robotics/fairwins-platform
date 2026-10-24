@@ -487,5 +487,5 @@ const tx = await exchange.fillOrder(order, signature, amount, {
 ## Support
 
 For questions or issues:
-- GitHub Issues: [chippr-robotics/prediction-dao-research](https://github.com/chippr-robotics/prediction-dao-research/issues)
+- GitHub Issues: [chippr-robotics/fairwins-platform](https://github.com/chippr-robotics/fairwins-platform/issues)
 - Email: howdy@FairWins.app

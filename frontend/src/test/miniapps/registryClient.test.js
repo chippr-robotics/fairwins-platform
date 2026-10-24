@@ -6,7 +6,7 @@
  * answers, and only the last one is an empty catalog. Plus the FR-010 rule that the launch read
  * never sees the browsing memo.
  *
- * The registry address, the registry chain, and the read provider are all mocked so the module is
+ * The registry address, the registry chain, and the chain seam are all mocked so the module is
  * exercised against a scripted chain rather than a deployment — none of the three exists on any
  * network yet, and `getContractAddressForChain('miniAppRegistry', …)` returns '' everywhere.
  */
@@ -24,27 +24,20 @@ const m = vi.hoisted(() => ({
   calls: [],
 }))
 
-vi.mock('ethers', async (importOriginal) => {
+// Reads ride the spec-110 chain seam. Each call records the CHAIN it named alongside the method,
+// so the FR-025 rule — this catalog is only ever read on the cohort's registry chain — is checked
+// by the same recording the paging assertions use.
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
-  function FakeContract(address, _abi, provider) {
-    m.calls.push({ method: 'new Contract', args: [address, provider] })
-    return new Proxy(
-      {},
-      {
-        get(_target, prop) {
-          if (prop === 'then') return undefined // not a thenable
-          const key = String(prop)
-          return (...args) => {
-            m.calls.push({ method: key, args })
-            const fn = m.fns[key]
-            if (!fn) throw new Error(`unmocked contract method: ${key}`)
-            return fn(...args)
-          }
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: (chainId, { functionName, args = [] }) => {
+      m.calls.push({ method: functionName, args, chainId })
+      const fn = m.fns[functionName]
+      if (!fn) throw new Error(`unmocked contract method: ${functionName}`)
+      return fn(...args)
+    },
   }
-  return { ...actual, Contract: vi.fn(FakeContract) }
 })
 
 vi.mock('../../config/contracts', () => ({
@@ -55,8 +48,9 @@ vi.mock('../../config/networks', () => ({
   miniAppChainId: vi.fn(() => m.chainId),
 }))
 
-vi.mock('../../utils/rpcProvider', () => ({
-  getReadProvider: vi.fn(() => m.provider),
+vi.mock('../../lib/chains/publicClient', async (importOriginal) => ({
+  ...(await importOriginal()),
+  getPublicClient: vi.fn(() => m.provider),
 }))
 
 import { AppStatus, AppCategory } from '../../abis/miniAppRegistry'
@@ -459,6 +453,35 @@ describe('fetchApp — the launch read (FR-010)', () => {
     const result = await fetchApp(42)
     expect(result.status).toBe(REGISTRY_STATUS.NOT_FOUND)
     expect(result.id).toBe(42)
+  })
+
+  // The decoded-revert shape is library-specific and this is where it decides a member-facing
+  // fact, so BOTH shapes are pinned: an RPC failure misread as "no such app" would tell a member
+  // the platform has no such package when it is merely unreachable.
+  it('recognises the viem revert shape as not-found too', async () => {
+    m.fns.getApp = async () => {
+      // What viem raises: the decoded revert sits in the cause chain, not on the error itself.
+      const inner = Object.assign(new Error('reverted'), { data: { errorName: 'AppNotFound' } })
+      throw Object.assign(new Error('execution reverted'), { cause: inner })
+    }
+    const result = await fetchApp(42)
+    expect(result.status).toBe(REGISTRY_STATUS.NOT_FOUND)
+  })
+
+  it('does not mistake ANOTHER contract’s custom error for not-found', async () => {
+    m.fns.getApp = async () => {
+      const inner = Object.assign(new Error('reverted'), { data: { errorName: 'StaleProposal' } })
+      throw Object.assign(new Error('execution reverted'), { cause: inner })
+    }
+    const result = await fetchApp(42)
+    expect(result.status).toBe(REGISTRY_STATUS.UNREACHABLE)
+  })
+
+  it('reads the catalog only on the registry’s own chain (FR-025)', async () => {
+    m.fns.getApp = async (id) => appView({ id: Number(id) })
+    await fetchApp(7)
+    const chains = [...new Set(m.calls.map((c) => c.chainId))]
+    expect(chains).toEqual([m.chainId])
   })
 
   it('treats an undecodable failure as unreachable, never as "no such app"', async () => {

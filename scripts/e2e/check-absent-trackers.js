@@ -48,7 +48,7 @@ const path = require("path");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const DEFAULT_MATRIX = path.join(ROOT, "frontend", "cypress", "coverage", "matrix.json");
-const DEFAULT_REPO = "chippr-robotics/prediction-dao-research";
+const DEFAULT_REPO = "chippr-robotics/fairwins-platform";
 
 /** `#1234` only — anything else (bare number, whitespace-mangled, a range, absent) is malformed. */
 const ISSUE_RE = /^#([1-9]\d*)$/;

@@ -4,19 +4,28 @@
 // enforcement), and decodes the guard's typed errors into plain language (FR-011/FR-012).
 // See specs/049-multisig-policy-engine/contracts/frontend-integration.md.
 
-import { Contract, Interface, ZeroAddress, formatUnits, getAddress } from 'ethers'
+import { decodeErrorResult, encodeFunctionData, zeroAddress } from 'viem'
+import { NoRpcEndpointError, normalizeAbi, readContract } from '../chains/readContract'
+import { getPublicClient } from '../chains/publicClient'
+import { getAddress } from '../evm/address'
+import { formatUnits } from '../evm/units'
 import { POLICY_GUARD_SETUP_ABI, SAFE_POLICY_GUARD_ABI } from '../../abis/SafePolicyGuard'
 import { getContractAddressForChain } from '../../config/contracts'
-import { getProvider } from '../../utils/blockchainService'
 
 /** keccak256("guard_manager.guard.address") — the Safe v1.4.1 guard storage slot. */
 export const GUARD_STORAGE_SLOT = '0x4a204f620c8c5ccdca3fd54d003badd85ba500436a431f0cbda4f558c93c34c8'
 
 /** Native-coin asset key inside the guard (address(0)). */
-export const NATIVE_ASSET = ZeroAddress
+export const NATIVE_ASSET = zeroAddress
 
-export const guardIface = new Interface(SAFE_POLICY_GUARD_ABI)
-export const setupIface = new Interface(POLICY_GUARD_SETUP_ABI)
+/**
+ * The parsed ABIs, exported in place of the ethers `Interface`s this module used to hand out
+ * (spec 110). Consumers encode with `encodeFunctionData({ abi: GUARD_ABI, … })` and decode with
+ * `decodeFunctionData` / `decodeErrorResult`.
+ */
+export const GUARD_ABI = normalizeAbi(SAFE_POLICY_GUARD_ABI)
+export const SETUP_ABI = normalizeAbi(POLICY_GUARD_SETUP_ABI)
+const SET_GUARD_ABI = normalizeAbi(['function setGuard(address guard)'])
 
 /** Policy engine addresses for a chain; null when the engine is not deployed there (FR-013). */
 export function getPolicyEngineAddresses(chainId) {
@@ -31,12 +40,18 @@ export function isPolicySupported(chainId) {
   return getPolicyEngineAddresses(chainId) !== null
 }
 
-/** Read the guard address set on a vault (ZeroAddress when none). */
-export async function readVaultGuard(vaultAddress, chainId, provider) {
-  const reader = provider || getProvider(chainId)
-  const raw = await reader.getStorage(getAddress(vaultAddress), GUARD_STORAGE_SLOT)
-  const guard = getAddress('0x' + raw.slice(-40))
-  return guard
+/**
+ * Read the guard address set on a vault (the zero address when none).
+ *
+ * No `provider` parameter since spec 110: the chain is NAMED, so the slot is always read on the
+ * chain the vault instance lives on rather than through whatever connection was passed down. That
+ * is the point of the seam — a vault on Base is read on Base whatever the wallet is doing.
+ */
+export async function readVaultGuard(vaultAddress, chainId) {
+  const client = getPublicClient(chainId)
+  if (!client) throw new NoRpcEndpointError(chainId)
+  const raw = await client.getStorageAt({ address: getAddress(vaultAddress), slot: GUARD_STORAGE_SLOT })
+  return getAddress('0x' + String(raw).slice(-40))
 }
 
 /**
@@ -44,12 +59,12 @@ export async function readVaultGuard(vaultAddress, chainId, provider) {
  * 'none' (no guard set), 'managed' (our guard), or 'foreign' (another guard —
  * "unrecognized rule — manage with the interface that created it").
  */
-export async function getPolicyStatus(vaultAddress, chainId, provider) {
+export async function getPolicyStatus(vaultAddress, chainId) {
   const engine = getPolicyEngineAddresses(chainId)
   // FR-013: networks without the engine surface "policy unsupported" — no guard-slot read needed.
   if (!engine) return 'unsupported'
-  const guardSet = await readVaultGuard(vaultAddress, chainId, provider).catch(() => ZeroAddress)
-  if (guardSet === ZeroAddress) return 'none'
+  const guardSet = await readVaultGuard(vaultAddress, chainId).catch(() => zeroAddress)
+  if (guardSet === zeroAddress) return 'none'
   return guardSet === engine.guard ? 'managed' : 'foreign'
 }
 
@@ -57,23 +72,28 @@ export async function getPolicyStatus(vaultAddress, chainId, provider) {
  * Aggregate one vault's full policy for rendering (FR-005/FR-006, batched for SC-004):
  * summary + per-asset rules with live window state + allowlist + next-allowed time.
  */
-export async function readPolicy(vaultAddress, chainId, provider) {
+export async function readPolicy(vaultAddress, chainId) {
   const engine = getPolicyEngineAddresses(chainId)
   if (!engine) return null
-  const reader = provider || getProvider(chainId)
-  const guard = new Contract(engine.guard, SAFE_POLICY_GUARD_ABI, reader)
+  // `getPolicy` and `getAssetRule` are MULTI-OUTPUT, which viem returns as a bare array where
+  // ethers returned a named Result. `readContract` re-attaches the parameter names, so the field
+  // reads below are unchanged — see the note in `lib/chains/readContract.js`. The small integers
+  // (`allowlistCount`/`cooldown`, uint32) come back as NUMBERS rather than bigints; every one of
+  // them already goes through `Number(...)`, and a new one must too.
+  const guardRead = (functionName, args) =>
+    readContract(chainId, { address: engine.guard, abi: SAFE_POLICY_GUARD_ABI, functionName, args })
   const safe = getAddress(vaultAddress)
   const [summary, allowlist, nextAllowed] = await Promise.all([
-    guard.getPolicy(safe),
-    guard.getAllowlist(safe),
-    guard.nextAllowedAt(safe),
+    guardRead('getPolicy', [safe]),
+    guardRead('getAllowlist', [safe]),
+    guardRead('nextAllowedAt', [safe]),
   ])
   const configuredAssets = [...summary.configuredAssets]
   const assetRules = await Promise.all(
     configuredAssets.map(async (asset) => {
       const [rule, remaining] = await Promise.all([
-        guard.getAssetRule(safe, asset),
-        guard.remainingInWindow(safe, asset),
+        guardRead('getAssetRule', [safe, asset]),
+        guardRead('remainingInWindow', [safe, asset]),
       ])
       return {
         asset: getAddress(asset),
@@ -145,7 +165,7 @@ export function validatePolicyConfig(config) {
 export function encodeConfigureRules(config) {
   validatePolicyConfig(config)
   const { limits = [], cooldown = 0, allowlistEnabled = false, allowlistAdd = [], allowlistRemove = [] } = config
-  return guardIface.encodeFunctionData('configureRules', [
+  return encodeFunctionData({ abi: GUARD_ABI, functionName: 'configureRules', args: [
     limits.map((l) => ({
       asset: getAddress(l.asset),
       perTxLimit: BigInt(l.perTxLimit ?? 0),
@@ -155,7 +175,7 @@ export function encodeConfigureRules(config) {
     allowlistEnabled,
     allowlistAdd.map((a) => getAddress(a)),
     allowlistRemove.map((a) => getAddress(a)),
-  ])
+  ] })
 }
 
 /**
@@ -169,7 +189,7 @@ export function buildEnablePolicySetup(chainId, config) {
   const configureCalldata = config ? encodeConfigureRules(config) : '0x'
   return {
     setupTo: engine.setup,
-    setupData: setupIface.encodeFunctionData('enablePolicy', [engine.guard, configureCalldata]),
+    setupData: encodeFunctionData({ abi: SETUP_ABI, functionName: 'enablePolicy', args: [engine.guard, configureCalldata] }),
   }
 }
 
@@ -192,20 +212,26 @@ export function buildPolicyChangeTx(chainId, config) {
 export function buildSetGuardTx(vaultAddress, chainId) {
   const engine = getPolicyEngineAddresses(chainId)
   if (!engine) throw new Error(`The policy engine is not available on chain ${chainId}`)
-  const safeIface = new Interface(['function setGuard(address guard)'])
-  return { to: getAddress(vaultAddress), value: 0n, data: safeIface.encodeFunctionData('setGuard', [engine.guard]) }
+  return {
+    to: getAddress(vaultAddress),
+    value: 0n,
+    data: encodeFunctionData({ abi: SET_GUARD_ABI, functionName: 'setGuard', args: [engine.guard] }),
+  }
 }
 
 /**
  * Pre-flight a drafted vault transaction against the vault's live policy (US4/FR-012) using the
  * guard's own read-only evaluation. Returns `{ok:true}` or `{ok:false, violation}`.
  */
-export async function previewPolicy(vaultAddress, chainId, { to, value = 0n, data = '0x', operation = 0 }, provider) {
+export async function previewPolicy(vaultAddress, chainId, { to, value = 0n, data = '0x', operation = 0 }) {
   const engine = getPolicyEngineAddresses(chainId)
   if (!engine) return { ok: true, unsupported: true }
-  const reader = provider || getProvider(chainId)
-  const guard = new Contract(engine.guard, SAFE_POLICY_GUARD_ABI, reader)
-  const [ok, revertData] = await guard.previewTransaction(getAddress(vaultAddress), getAddress(to), BigInt(value), data, operation)
+  const [ok, revertData] = await readContract(chainId, {
+    address: engine.guard,
+    abi: SAFE_POLICY_GUARD_ABI,
+    functionName: 'previewTransaction',
+    args: [getAddress(vaultAddress), getAddress(to), BigInt(value), data, operation],
+  })
   if (ok) return { ok: true }
   return { ok: false, violation: decodePolicyError(revertData) }
 }
@@ -220,7 +246,11 @@ export function decodePolicyError(revertData, opts = {}) {
   const fmt = opts.formatAmount || ((asset, amount) => `${amount} ${asset === NATIVE_ASSET ? '(native)' : shortAddress(asset)}`)
   let parsed
   try {
-    parsed = guardIface.parseError(revertData)
+    // viem names the field `errorName` where ethers used `name`, and THROWS on data it cannot
+    // match instead of returning null — both are handled here so an unrecognised revert still
+    // reaches the honest "Blocked by the vault policy" fallback rather than taking the sheet down.
+    const { errorName, args } = decodeErrorResult({ abi: GUARD_ABI, data: revertData })
+    parsed = { name: errorName, args }
   } catch {
     parsed = null
   }

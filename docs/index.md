@@ -43,7 +43,7 @@ FairWins is delivered as **tenant instances**: a validated configuration
 manifest defines an instance's brand, theme, domains, feature set, networks,
 and contract set. Branding-only instances front the shared contract estate;
 dedicated instances get an **isolated on-chain estate** — deterministic,
-tenant-salted deployments of the same audited contracts with their own
+tenant-salted deployments of the same contracts with their own
 membership base, fee configuration, treasury, and admin keys. Isolation is
 enforced by separate contract instances, never by an application filter.
 See the [White-Label Tenants guide](developer-guide/white-label-tenants.md).
@@ -59,7 +59,7 @@ See the [White-Label Tenants guide](developer-guide/white-label-tenants.md).
 | Bitcoin | — | Native wallet (portfolio/send/receive) |
 | Polygon Amoy / Mordor | 80002 / 63 | Test networks (toggle in the wallet menu) |
 
-Recorded contract addresses live in [`deployments/`](https://github.com/chippr-robotics/prediction-dao-research/tree/main/deployments)
+Recorded contract addresses live in [`deployments/`](https://github.com/chippr-robotics/fairwins-platform/tree/main/deployments)
 — see the [Architecture guide](developer-guide/architecture.md) for the full map.
 
 ## Privacy & security
@@ -137,12 +137,12 @@ swapped in place while state and addresses are preserved — so features ship
 without stranding funds or memberships (see
 [ADR-004](adr/004-upgradeable-registry-uups.md)). Earlier research materials
 are preserved under
-[`docs/archived/`](https://github.com/chippr-robotics/prediction-dao-research/tree/main/docs/archived)
+[`docs/archived/`](https://github.com/chippr-robotics/fairwins-platform/tree/main/docs/archived)
 and `contracts-archive/` (reference only).
 
 ## License
 
-This project is licensed under the Apache License 2.0. See [LICENSE](https://github.com/chippr-robotics/prediction-dao-research/blob/main/LICENSE) for details.
+This project is licensed under the Apache License 2.0. See [LICENSE](https://github.com/chippr-robotics/fairwins-platform/blob/main/LICENSE) for details.
 
 ## Contributing
 

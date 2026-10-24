@@ -32,9 +32,10 @@ import { useSwitchChain } from 'wagmi'
 import { useWallet } from './useWalletManagement'
 import { useEffectiveAccount } from './useEffectiveAccount'
 import { NETWORKS } from '../config/networks'
+import { settleWalletOn } from '../lib/chains/submitOn'
 
-const SETTLE_TIMEOUT_MS = 20_000
-const SETTLE_POLL_MS = 150
+/** Strict chain name — never `getNetwork()`, which would name the default network for an unknown id. */
+const chainName = (id) => NETWORKS[Number(id)]?.name || `Chain ${Number(id)}`
 
 /**
  * Spec 088 FR-001/FR-002 — the refusal a member gets while acting as any non-personal
@@ -112,28 +113,18 @@ export function useEarnSend() {
 
       if (Number(latestRef.current.chainId) !== target) {
         onState?.({ step: 'switching' })
-        try {
-          await switchChainAsync({ chainId: target })
-        } catch {
-          throw new Error(
-            `Could not switch to ${NETWORKS[target]?.name || 'the required network'} — approve the network change and try again.`,
-          )
-        }
-        // Wait for the session to settle on the target chain. Classic
-        // wallets also need the chain-scoped signer rebuilt before sendCalls
-        // can route the batch correctly.
-        const deadline = Date.now() + SETTLE_TIMEOUT_MS
-        while (
-          Number(latestRef.current.chainId) !== target ||
-          (!isPasskey && !latestRef.current.signer)
-        ) {
-          if (Date.now() > deadline) {
-            throw new Error(
-              `The switch to ${NETWORKS[target]?.name || 'the required network'} did not complete — please try again.`,
-            )
-          }
-          await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS))
-        }
+        // The loop is the shared one (spec 110 T026) — it switches, then waits for the session to
+        // settle on the target chain, and for a classic wallet for the chain-scoped signer to be
+        // rebuilt before sendCalls can route the batch correctly. Its refusal is STRONGER than the
+        // one this hook used to write: "Could not switch to Ethereum — approve the network change
+        // and try again" named neither the chain the wallet was actually on nor the fact that
+        // nothing had been signed, which are the two things a member needs to know.
+        await settleWalletOn(target, {
+          readWallet: () => latestRef.current,
+          switchNetwork: (id) => switchChainAsync({ chainId: id }),
+          chainName,
+          needsSigner: !isPasskey,
+        })
       }
 
       const send = latestRef.current.sendCalls

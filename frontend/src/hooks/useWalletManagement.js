@@ -90,8 +90,8 @@ export function useWalletAddress() {
  * ```
  */
 export function useWalletBalances() {
-  const { balances, balancesLoading, refreshBalances, getTokenBalance } = useWallet()
-  return { balances, balancesLoading, refreshBalances, getTokenBalance }
+  const { balances, balancesLoading, refreshBalances } = useWallet()
+  return { balances, balancesLoading, refreshBalances }
 }
 
 /**

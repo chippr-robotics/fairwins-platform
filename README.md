@@ -8,13 +8,27 @@
 FairWins is the platform layer a digital asset business would otherwise
 assemble from multiple vendors. One stack provides the wallet, custody,
 payment, trading, and compliance components — behind one interface, on
-audited, deterministically deployed smart contracts — with a property no
+deterministically deployed smart contracts — with a property no
 aggregation of vendors gives you: **the platform never takes custody.** Every
 value-bearing action is signed by the end user's own keys (passkey smart
 account, external wallet, or multisig vault).
 
 📖 **Full documentation:** [docs/](docs/index.md) (MkDocs site — user guide,
 architecture, contract reference, runbooks)
+
+> **On the repository name.** This repository was `prediction-dao-research`
+> until 2026-09-21 — a historical name from the futarchy-research project this
+> code grew out of. It is now `chippr-robotics/fairwins-platform`, and GitHub
+> redirects the old path indefinitely, so existing clones, forks and links keep
+> working.
+>
+> The old name is still the **name of live deployed resources** — the Graph
+> Studio subgraph slug, the Cloud Run services, the Artifact Registry image
+> path and the relayer service names — so it also still appears in the config
+> here that addresses them (`cloudbuild*.yaml`, `infra/terraform/`,
+> `services/oz-relayer/`, the `prediction-dao-research-subgraph` workspace
+> package). Each is a migration with its own cutover rather than a string
+> edit, and they are tracked in **#1628**.
 
 ## Platform capabilities
 
@@ -46,7 +60,7 @@ contract set:
 - **Branding-only instances** front the shared contract estate under your
   domain and brand — live in days.
 - **Dedicated instances** get an isolated on-chain estate: deterministic,
-  tenant-salted deployments of the same audited contracts, with your own
+  tenant-salted deployments of the same contracts, with your own
   membership base, fee configuration, treasury, and admin keys. Isolation is
   enforced by separate contract instances — never by an application filter.
 
@@ -81,6 +95,32 @@ tenant's identity or addresses. See
 4. **Honest state** — fees disclosed before signature; absence rendered as
    absence (never a zero); no mocked data in shipped paths. These rules are
    binding: see `.specify/memory/constitution.md`.
+
+### Assurance status
+
+**These contracts have not been audited by a third party.** No external firm
+has reviewed them, and no audit report exists. Anyone deciding whether to put
+funds at risk should weigh that directly.
+
+What does exist, and what it is worth:
+
+| Control | What it actually covers |
+|---|---|
+| Internal security review | Every contract change is reviewed against `.github/agents/` before merge — by the people who wrote it, which is not independence |
+| Slither + Medusa in CI | Automated static analysis and fuzzing. They catch known classes of defect; they do not reason about whether the design is right |
+| Storage-layout gate | `npm run check:storage-layout` blocks an upgrade that would corrupt state on a UUPS proxy |
+| Byte-level bytecode diff | Deployed bytecode cannot change without the change being deliberately re-recorded |
+| On-chain e2e money-path suite | Create, accept, resolve, claim, refund and cancel are exercised against a real chain, not mocks |
+
+Third-party claims elsewhere in this repository — audited OpenZeppelin
+Governor, Safe v1.4.1, Lido, `@noble`/`@scure` — refer to **those projects'**
+audits, not to ours.
+
+If an audit is commissioned, this section gets the firm, date, scope and a
+link to the report. Until then it says what is true. `README.md`, `docs/`
+and the landing page are gated by
+`frontend/src/test/claims/noUnsupportedAuditClaims.test.js`, so the word
+cannot quietly come back.
 
 ## Architecture
 

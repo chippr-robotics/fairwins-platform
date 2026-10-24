@@ -14,7 +14,7 @@ body:
         minimal back-and-forth.
 
         Work on this issue follows the
-        [multi-agent development flow](https://github.com/chippr-robotics/prediction-dao-research/blob/main/docs/developer-guide/multi-agent-workflow.md):
+        [multi-agent development flow](https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/developer-guide/multi-agent-workflow.md):
         triage sets Type/Priority/Effort, a spec number is claimed by merging a reservation PR to
         `staging`, and the issue's assignee and linked pull requests are the record of what stage
         it is in.
