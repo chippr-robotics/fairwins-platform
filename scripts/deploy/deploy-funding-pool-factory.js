@@ -18,7 +18,8 @@
  *   - POOL_ENABLE_MEMBERSHIP=1 | POOL_MEMBERSHIP_MANAGER=0x…  membership gate (POOL_PARTICIPANT_ROLE), off by default
  *   - POOL_SCREENING_REQUIRED=1|0   defaults true on mainnets (137, 61), false on testnets/localhost
  *   - POOL_USDC_<chainId>            escrow token to allow-list (FR-024 analogue)
- *   - POOL_ADMIN=0x… | deployer      who gets DEFAULT_ADMIN_ROLE (default: the chain's admin Safe)
+ *   - POOL_ADMIN=0x… | deployer | safe   who gets DEFAULT_ADMIN_ROLE (default: the chain's admin Safe;
+ *                                        `deployer` on localhost/hardhat, which host no Safe)
  *
  * ADMIN IS THE SAFE BY DEFAULT, NOT THE DEPLOYER (issue #966). Every earlier factory was initialised
  * with `deployer.address` and then handed over afterwards, which is how the estate accumulated 79
@@ -30,7 +31,9 @@
  * the Safe THIS SCRIPT CANNOT ALLOW-LIST THE ESCROW TOKEN. It prints the exact call for the Safe to
  * execute instead. Until that lands, `createPool` reverts `TokenNotAllowed` on a screened network —
  * a closed, honest failure (the feature is simply not live yet), never a pool that takes funds it
- * cannot handle. Pass POOL_ADMIN=deployer to get the old behaviour on a local/dev chain.
+ * cannot handle. On localhost/hardhat the default is the deployer instead: the local E2E chain reports
+ * chainId 80002, so the admin-safe.json lookup would name Amoy's Safe — which has no bytecode there and
+ * would trip the guard below on every `setup:e2e`. POOL_ADMIN=safe forces the Safe path anyway.
  */
 const hre = require("hardhat");
 const { ethers } = require("hardhat");
@@ -73,7 +76,8 @@ async function main() {
   // ---- who will be DEFAULT_ADMIN_ROLE on the new factory ----------------------------------
   let admin;
   let adminIsDeployer = false;
-  const adminSpec = process.env.POOL_ADMIN || "safe";
+  const isLocalNetwork = networkName === "localhost" || networkName === "hardhat";
+  const adminSpec = process.env.POOL_ADMIN || (isLocalNetwork ? "deployer" : "safe");
   if (adminSpec === "deployer") {
     admin = deployer.address;
     adminIsDeployer = true;
