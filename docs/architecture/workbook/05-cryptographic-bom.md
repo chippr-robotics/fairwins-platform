@@ -344,7 +344,7 @@ Versions are from `package-lock.json` (resolved), declarations from the respecti
 |---|---|---|---|---|---|
 | `@noble/curves` | `^2.3.0` | **2.4.0** (+ 1.2.0, 1.4.2, 1.8.0, 1.8.2, 1.9.0, 1.9.1, 1.9.7, 2.3.0 transitively) | ranged | X25519 ECDH, ed25519 (Solana) | `frontend/package.json`; `frontend/src/utils/crypto/primitives.js:12`; `lib/solana/derivation.js:26` |
 | `@noble/hashes` | `^2.3.0` | **2.4.0** (+ 1.2.0, 1.3.2, 1.4.0, 1.7.0, 1.7.2, 1.8.0, 2.3.0) | ranged | HKDF, SHA-256, SHA3-256, HMAC | `primitives.js:13-15`; `envelopeEncryption.js:19-21`; `lib/bitcoin/derivation.js:32-33` |
-| `@noble/ciphers` | `^1.0.0` | **1.3.0** (+ 2.4.0 under `@noble/post-quantum`) | ranged | ChaCha20-Poly1305, XChaCha20-Poly1305, `randomBytes` (webcrypto) | `primitives.js:16-18`; `envelopeEncryption.js:22-24` |
+| `@noble/ciphers` | `^2.4.0` | **2.4.0** (nested under `frontend/`; 1.3.0 stays top-level for transitive consumers) | ranged | ChaCha20-Poly1305, XChaCha20-Poly1305, `randomBytes` (utils); 1.x ciphertext still opening is gated by `src/test/crypto/nobleCiphers1xCompat.test.js` (#1670) | `primitives.js:16-17`; `envelopeEncryption.js:22-23` |
 | **`@noble/post-quantum`** | `^0.7.0` | **0.7.1** | ranged — **pre-1.0** | **ML-KEM-768** inside the hand-rolled X-Wing (R1) | `frontend/package.json`; `envelopeEncryption.js:18` |
 | `@scure/bip32` | `2.3.0` | 2.3.0 (+ 1.1.5, 1.4.0, 1.7.0) | **EXACT** | BIP-32 HD derivation (Bitcoin) | `frontend/package.json`; `lib/bitcoin/derivation.js:34` |
 | `@scure/bip39` | `2.4.0` | 2.4.0 (+ 1.1.1, 1.3.0, 1.6.0) | **EXACT** | BIP-39 mnemonics | `frontend/package.json` |

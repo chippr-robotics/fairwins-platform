@@ -13,9 +13,8 @@ import { x25519 } from '@noble/curves/ed25519.js'
 import { hkdf } from '@noble/hashes/hkdf.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { hmac } from '@noble/hashes/hmac.js'
-import { chacha20poly1305 } from '@noble/ciphers/chacha'
-import { randomBytes } from '@noble/ciphers/webcrypto'
-import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8 } from '@noble/ciphers/utils'
+import { chacha20poly1305 } from '@noble/ciphers/chacha.js'
+import { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes } from '@noble/ciphers/utils.js'
 
 // Re-export utilities
 export { bytesToHex, hexToBytes, utf8ToBytes, bytesToUtf8, randomBytes }
