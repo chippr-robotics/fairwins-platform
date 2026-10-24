@@ -98,7 +98,9 @@ cannot submit there; every approve / execute / cancel on those networks died ins
 that holds a key has no such problem: an injected wallet, a Ledger, or an unlocked recovered
 account signs `approveHash` natively and pays the fee in ETC.
 
-`lib/custody/writeRail.js#resolveWriteRail` answers it once, for every custody surface:
+`lib/chains/writeRail.js#resolveWriteRail` answers it once, for every custody surface (spec 110
+T025 moved it out of `lib/custody/` — nothing about the question is custody-specific, and the
+write seam `lib/chains/submitOn.js` asks it for every write):
 
 | condition | rail | offered? |
 |---|---|---|

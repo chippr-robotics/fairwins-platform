@@ -21,6 +21,7 @@ managed_secret_ids = [
   "alto-executor-key-137",
   "relay-webhook-secret",
   "relay-engine-api-key",
+  "relay-engine-storage-key",
 
   # workstation secrets (spec 088) — mirrors scripts/secrets/registry.js
   "fairwins-creator-key",

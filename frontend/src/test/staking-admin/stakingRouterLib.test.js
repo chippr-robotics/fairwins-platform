@@ -9,25 +9,18 @@ import { STAKING_ROUTER_ABI } from '../../abis/StakingRouter'
 
 const m = vi.hoisted(() => ({ address: null, methods: {} }))
 
-vi.mock('ethers', async (orig) => {
+// The router reads ride the spec-110 chain seam — fake them there. The
+// Interface/decode assertions below stay real ethers (cross-library byte parity).
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          const key = String(prop)
-          return (...args) => {
-            const f = m.methods[key]
-            if (!f) throw new Error('unmocked method: ' + key)
-            return f(...args)
-          }
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args }) => {
+      const f = m.methods[functionName]
+      if (!f) throw new Error('unmocked method: ' + functionName)
+      return f(...(args || []))
+    },
   }
-  return { ...actual, Contract: vi.fn(FakeContract) }
 })
 
 vi.mock('../../config/contracts', () => ({

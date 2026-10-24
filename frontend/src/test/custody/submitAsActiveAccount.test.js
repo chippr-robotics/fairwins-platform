@@ -78,6 +78,174 @@ describe('submitAsActiveAccount (vault mode) guards', () => {
         { to: TO },
         { mode: 'vault', vaultAddress: TO, chainId: 63, hubAddress: TO, safeContracts: { multiSendCallOnly: TO }, signer: {}, provider },
       ),
-    ).rejects.toThrow(/not connected to the vault/i)
+    ).rejects.toThrow(/nothing has been signed/i)
+  })
+
+  it('names BOTH chains in that refusal — "wrong network" is not something a member can act on', async () => {
+    const provider = { getNetwork: async () => ({ chainId: 137n }) }
+    const err = await submitAsActiveAccount(
+      { to: TO },
+      { mode: 'vault', vaultAddress: TO, chainId: 63, hubAddress: TO, safeContracts: { multiSendCallOnly: TO }, signer: {}, provider },
+    ).catch((e) => e)
+    expect(err.message).toMatch(/Mordor/)
+    expect(err.message).toMatch(/Polygon/)
+  })
+})
+
+/**
+ * Spec 110 T026 — the personal branch used to name no chain at all, so it sent on whatever network
+ * the signer happened to be bound to. That is the branch that moves the member's OWN money, and it
+ * was the one without the guard the vault branch has had since 043.
+ *
+ * The assertions that carry weight here are the negative ones: nothing is sent on a refusal, and
+ * the absence of a check never reads as a passed one.
+ */
+describe('submitAsActiveAccount (personal mode) — the chain is no longer ambient', () => {
+  const signerOn = (chainId) => ({
+    provider: { getNetwork: async () => ({ chainId: BigInt(chainId) }) },
+    sendTransaction: vi.fn(async () => ({ hash: '0xsent', wait: async () => {} })),
+  })
+
+  it('refuses a send whose named chain is not where the signer is, and sends NOTHING', async () => {
+    // Spec 088's acting signer is exactly this shape: the ceremony binds it to the wallet's
+    // CURRENT chain and does not switch, so a surface asking for Base while the wallet sits on
+    // Polygon used to get a Polygon transaction and a success.
+    const signer = signerOn(137)
+    const err = await submitAsActiveAccount({ to: TO, value: 1n }, { mode: 'personal', chainId: 8453, signer }).catch((e) => e)
+    expect(err.message).toMatch(/Base/)
+    expect(err.message).toMatch(/Polygon/)
+    expect(err.message).toMatch(/nothing has been signed/i)
+    expect(signer.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('refuses a BATCH the same way, before the first leg goes out', async () => {
+    // A sequential batch that fails halfway is the worst outcome available here: the approve is
+    // mined on the wrong chain and the member is left holding an allowance they did not want.
+    const signer = signerOn(137)
+    const err = await submitAsActiveAccount(
+      { batch: [{ to: TOKEN, data: '0xabcd' }, { to: TO, value: 1n }] },
+      { mode: 'personal', chainId: 8453, signer },
+    ).catch((e) => e)
+    expect(err.message).toMatch(/nothing has been signed/i)
+    expect(signer.sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('sends when the named chain is where the signer is', async () => {
+    const signer = signerOn(137)
+    const res = await submitAsActiveAccount({ to: TO, value: 1n }, { mode: 'personal', chainId: 137, signer })
+    expect(res).toEqual({ kind: 'sent', txHash: '0xsent' })
+  })
+
+  it('sends unguarded when no chain was named — the soft gate every unconverted caller still uses', async () => {
+    const signer = signerOn(137)
+    const res = await submitAsActiveAccount({ to: TO, value: 1n }, { mode: 'personal', signer })
+    expect(res.kind).toBe('sent')
+    expect(signer.sendTransaction).toHaveBeenCalled()
+  })
+
+  it('does not treat a signer it cannot ask as a signer on the right chain', async () => {
+    // No provider to read a network from. That is the ABSENCE of a check, and it must not be
+    // recorded as a passed one anywhere — it sends, exactly as it did before, and claims nothing.
+    const signer = { sendTransaction: vi.fn(async () => ({ hash: '0xsent' })) }
+    const res = await submitAsActiveAccount({ to: TO, value: 1n }, { mode: 'personal', chainId: 8453, signer })
+    expect(res).toEqual({ kind: 'sent', txHash: '0xsent' })
+  })
+})
+
+/**
+ * Spec 110 — the vault emit+approve path, which this file's header said was "exercised via the
+ * app". That was true and it is not enough: converting it changed BOTH halves, the nonce read
+ * (`safe.nonce()` → `readContract(chainId, …)`) and the approve (`safe.approveHash(h)` →
+ * `signer.sendTransaction`), and a conversion that turns a contract object into calldata is
+ * exactly the shape that left `StakingTab`'s pause button throwing `write(...)[fn] is not a
+ * function` for nineteen commits with its unit suite green.
+ *
+ * So the two things the conversion could get wrong are asserted directly: WHERE the nonce is read
+ * (the vault, on the vault's own chain) and WHAT the approve carries (the computed safeTxHash,
+ * DECODED from the calldata rather than compared as text — divergence 17).
+ */
+describe('submitAsActiveAccount (vault mode) — the emit + approve path', () => {
+  const VAULT = '0x00000000000000000000000000000000000000a1'
+  const HUB = '0x00000000000000000000000000000000000000b2'
+  const MSCO = '0x00000000000000000000000000000000000000c3'
+
+  function harness({ nonce = 7n } = {}) {
+    const reads = []
+    const sent = []
+    return {
+      reads,
+      sent,
+      readContract: async (chainId, req) => {
+        reads.push({ chainId, ...req })
+        if (req.functionName === 'nonce') return nonce
+        throw new Error(`unexpected read ${req.functionName}`)
+      },
+      signer: {
+        sendTransaction: async (tx) => {
+          sent.push(tx)
+          return { hash: '0xapprove', wait: async () => ({ status: 1 }) }
+        },
+      },
+    }
+  }
+
+  it('reads the nonce from the VAULT on the vault CHAIN, and approves the computed hash', async () => {
+    vi.resetModules()
+    const h = harness({ nonce: 7n })
+    const emitProposal = vi.fn(async () => {})
+    vi.doMock('../../lib/chains/readContract', async (orig) => ({
+      ...(await orig()),
+      readContract: h.readContract,
+    }))
+    vi.doMock('../../lib/custody/proposalHub', () => ({ emitProposal }))
+    const { submitAsActiveAccount: submit } = await import('../../lib/custody/submitAsActiveAccount')
+    const { Interface } = await import('ethers')
+    const { SAFE_ABI } = await import('../../abis/Safe')
+
+    const res = await submit(
+      { to: TO, value: 1n, data: '0x' },
+      {
+        mode: 'vault', vaultAddress: VAULT, chainId: 63, hubAddress: HUB,
+        safeContracts: { multiSendCallOnly: MSCO }, signer: h.signer,
+      },
+    )
+
+    expect(h.reads).toEqual([
+      { chainId: 63, address: VAULT, abi: SAFE_ABI, functionName: 'nonce' },
+    ])
+    expect(res.kind).toBe('proposed')
+    expect(res.nonce).toBe(7)
+
+    // The approve goes to the vault and carries the hash the proposal was emitted with.
+    expect(h.sent).toHaveLength(1)
+    expect(h.sent[0].to).toBe(VAULT)
+    const [approved] = new Interface(SAFE_ABI).decodeFunctionData('approveHash', h.sent[0].data)
+    expect(approved).toBe(res.safeTxHash)
+    expect(emitProposal.mock.calls[0][0].safeTxHash).toBe(res.safeTxHash)
+    vi.doUnmock('../../lib/chains/readContract')
+    vi.doUnmock('../../lib/custody/proposalHub')
+  })
+
+  it('does not read a nonce the caller already supplied (an ordered follow-up, issue #1368)', async () => {
+    vi.resetModules()
+    const h = harness()
+    vi.doMock('../../lib/chains/readContract', async (orig) => ({
+      ...(await orig()),
+      readContract: h.readContract,
+    }))
+    vi.doMock('../../lib/custody/proposalHub', () => ({ emitProposal: vi.fn(async () => {}) }))
+    const { submitAsActiveAccount: submit } = await import('../../lib/custody/submitAsActiveAccount')
+
+    const res = await submit(
+      { to: TO, value: 1n, data: '0x', nonce: 12n },
+      {
+        mode: 'vault', vaultAddress: VAULT, chainId: 63, hubAddress: HUB,
+        safeContracts: { multiSendCallOnly: MSCO }, signer: h.signer,
+      },
+    )
+    expect(h.reads).toEqual([])
+    expect(res.nonce).toBe(12)
+    vi.doUnmock('../../lib/chains/readContract')
+    vi.doUnmock('../../lib/custody/proposalHub')
   })
 })

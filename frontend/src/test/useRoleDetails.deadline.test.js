@@ -48,15 +48,17 @@ vi.mock('../hooks/useEffectiveAccount', () => ({
     chainId: null,
   }),
 }))
-vi.mock('ethers', async (importOriginal) => {
+// The membership reads ride the spec-110 chain seam; `contractFactory` still returns the same
+// { getMembership, getTierConfig } object each test seeds, now dispatched by function name.
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: function Contract(...args) {
-        return contractFactory(...args)
-      },
+    readContract: (_chainId, { functionName, args = [] }) => {
+      const fns = contractFactory()
+      const fn = fns?.[functionName]
+      if (!fn) throw new Error('unmocked membership read: ' + functionName)
+      return fn(...args)
     },
   }
 })

@@ -14,7 +14,9 @@
  * the table is exact and needs no three-state hedging.
  */
 import { useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, keccak256, stringToHex, zeroHash } from 'viem'
+import { normalizeAbi } from '../../../lib/chains/readContract'
+import { getAddress } from '../../../lib/evm/address'
 import AdminAppShell from '../AdminAppShell'
 import { NetworkScopeCard } from '../scopeControls'
 import { useScopedChain, contractAuthorityGate } from '../scopeGate'
@@ -37,31 +39,36 @@ import {
 
 const APP = adminAppById('access-control')
 
+/** `keccak256(utf8(name))` — byte-identical to the `ethers.keccak256(ethers.toUtf8Bytes(...))`
+ *  this replaced, checked against it for all eight role names before the swap. These hashes ARE
+ *  the roles on chain, so a wrong byte grants nothing and revokes nothing while reporting success. */
+const roleId = (name) => keccak256(stringToHex(name))
+
 const ROLE_HASHES = {
-  GUARDIAN: ethers.keccak256(ethers.toUtf8Bytes('GUARDIAN_ROLE')),
-  ACCOUNT_MODERATOR: ethers.keccak256(ethers.toUtf8Bytes('ACCOUNT_MODERATOR_ROLE')),
-  ROLE_MANAGER: ethers.keccak256(ethers.toUtf8Bytes('ROLE_MANAGER_ROLE')),
-  SANCTIONS_ADMIN: ethers.keccak256(ethers.toUtf8Bytes('SANCTIONS_ADMIN_ROLE')),
-  TOKEN_ISSUER: ethers.keccak256(ethers.toUtf8Bytes('TOKEN_ISSUER_ROLE')),
-  STAKING_ADMIN: ethers.keccak256(ethers.toUtf8Bytes('STAKING_ADMIN_ROLE')),
+  GUARDIAN: roleId('GUARDIAN_ROLE'),
+  ACCOUNT_MODERATOR: roleId('ACCOUNT_MODERATOR_ROLE'),
+  ROLE_MANAGER: roleId('ROLE_MANAGER_ROLE'),
+  SANCTIONS_ADMIN: roleId('SANCTIONS_ADMIN_ROLE'),
+  TOKEN_ISSUER: roleId('TOKEN_ISSUER_ROLE'),
+  STAKING_ADMIN: roleId('STAKING_ADMIN_ROLE'),
   // LIQUIDITY_ADMIN_ROLE (spec 067) is the same role id on two separate
   // AccessControl contracts — the BridgeRouter and the LiquidityRouter — so it
   // is granted/revoked once per router. The picker offers the two targets
   // explicitly instead of one option that would quietly authorize only half
   // of what the operator asked for.
-  LIQUIDITY_ADMIN_BRIDGE: ethers.keccak256(ethers.toUtf8Bytes('LIQUIDITY_ADMIN_ROLE')),
-  LIQUIDITY_ADMIN_LIQUIDITY: ethers.keccak256(ethers.toUtf8Bytes('LIQUIDITY_ADMIN_ROLE')),
+  LIQUIDITY_ADMIN_BRIDGE: roleId('LIQUIDITY_ADMIN_ROLE'),
+  LIQUIDITY_ADMIN_LIQUIDITY: roleId('LIQUIDITY_ADMIN_ROLE'),
   // GUARDIAN_ROLE is per-contract for the same reason, and the spec-067 routers
   // were unreachable: the bare `GUARDIAN` option grants on the WagerRegistry, so
   // there was NO in-app way to give anyone the routers' killswitch.
-  GUARDIAN_BRIDGE: ethers.keccak256(ethers.toUtf8Bytes('GUARDIAN_ROLE')),
-  GUARDIAN_LIQUIDITY: ethers.keccak256(ethers.toUtf8Bytes('GUARDIAN_ROLE')),
+  GUARDIAN_BRIDGE: roleId('GUARDIAN_ROLE'),
+  GUARDIAN_LIQUIDITY: roleId('GUARDIAN_ROLE'),
   // FEE_ADMIN_ROLE (spec 060) lives on the FeeRouter — the same defect-class as
   // the router guardians above: the role gates the whole Fees tab, so leaving it
   // out of this picker meant there was NO in-app way to hand anyone fee-rate
   // authority. Hash matches contracts/fees/FeeRouter.sol.
-  FEE_ADMIN: ethers.keccak256(ethers.toUtf8Bytes('FEE_ADMIN_ROLE')),
-  DEFAULT_ADMIN: ethers.ZeroHash,
+  FEE_ADMIN: roleId('FEE_ADMIN_ROLE'),
+  DEFAULT_ADMIN: zeroHash,
 }
 
 const ACCESS_CONTROL_ABI = [
@@ -171,6 +178,7 @@ export default function AccessControlApp() {
     let cancelled = false
     setRoleAdminAuthority(null)
     readAuthority({
+      chainId: selectedWriteChainId,
       provider: authorityProvider,
       address: selectedRoleContract,
       account,
@@ -181,7 +189,7 @@ export default function AccessControlApp() {
     return () => {
       cancelled = true
     }
-  }, [authorityProvider, selectedRoleContract, account])
+  }, [authorityProvider, selectedRoleContract, account, selectedWriteChainId])
 
   const roleAdminGate = contractAuthorityGate({
     authority: roleAdminAuthority,
@@ -204,6 +212,25 @@ export default function AccessControlApp() {
     return false
   }
 
+  /**
+   * Grant or revoke a role on one contract.
+   *
+   * `getAddress` is not decoration (spec 110 divergence 16). `isValidEthereumAddress` is a bare
+   * regex — it accepts an ALL-UPPERCASE address, and it tests `address.trim()` while handing the
+   * caller the UNTRIMMED value. viem's encoder refuses both, so without normalising here an
+   * operator pasting an upper-cased address, or one with a trailing space, would pass validation
+   * and then get a raw encoder error from under a button that grants GUARDIAN_ROLE.
+   */
+  const writeRole = (addr, functionName, roleHash, target) =>
+    signer.sendTransaction({
+      to: addr,
+      data: encodeFunctionData({
+        abi: normalizeAbi(ACCESS_CONTROL_ABI),
+        functionName,
+        args: [roleHash, getAddress(String(target).trim())],
+      }),
+    })
+
   const handleGrantAdminRole = () => {
     const target = adminRoleEns.resolvedAddress || adminRoleForm.address
     if (!isValidEthereumAddress(target)) return showNotification('Invalid address', 'error')
@@ -213,7 +240,7 @@ export default function AccessControlApp() {
     if (!addr) return showNotification('Role contract not deployed on this network', 'error')
     if (!requireRoleAdminAuthority()) return false
     return runTx(
-      () => new ethers.Contract(addr, ACCESS_CONTROL_ABI, signer).grantRole(roleHash, target),
+      () => writeRole(addr, 'grantRole', roleHash, target),
       `Granted ${adminRoleForm.role} to ${shortAddr(target)} on ${networkName(roleWriteChainId(adminRoleForm.role))}`,
     )
   }
@@ -227,7 +254,7 @@ export default function AccessControlApp() {
     if (!addr) return showNotification('Role contract not deployed on this network', 'error')
     if (!requireRoleAdminAuthority()) return false
     return runTx(
-      () => new ethers.Contract(addr, ACCESS_CONTROL_ABI, signer).revokeRole(roleHash, target),
+      () => writeRole(addr, 'revokeRole', roleHash, target),
       `Revoked ${adminRoleForm.role} from ${shortAddr(target)} on ${networkName(roleWriteChainId(adminRoleForm.role))}`,
     )
   }

@@ -12,32 +12,29 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const m = vi.hoisted(() => ({ fns: {} }))
 
-vi.mock('../../utils/blockchainService', () => ({ getProvider: () => ({}) }))
 vi.mock('../../config/contracts', () => ({
   getContractAddressForChain: () => '0x000000000000000000000000000000000000abcd',
   getDeploymentBlockForChain: () => 500,
 }))
 vi.mock('../../lib/chain/logScan', () => ({ scanLogs: (...a) => m.scan(...a) }))
-vi.mock('ethers', async (orig) => {
-  const actual = await orig()
-  function FakeContract() {
-    return new Proxy(
-      { filters: { Transfer: () => ({}) } },
-      {
-        get(target, prop) {
-          if (prop === 'then') return undefined
-          if (prop in target) return target[prop]
-          return (...args) => {
-            const fn = m.fns[prop]
-            if (!fn) throw new Error('unmocked contract method: ' + String(prop))
-            return fn(...args)
-          }
-        },
-      }
-    )
-  }
-  return { ...actual, ethers: { ...actual.ethers, Contract: vi.fn(FakeContract) } }
-})
+// Reads and the scan handle both come from the spec-110 seams; `m.fns` is unchanged. The handle
+// only needs the shape `scanLogs` is given, and `scanLogs` itself is mocked above.
+vi.mock('../../lib/chains/publicClient', async (orig) => ({
+  ...(await orig()),
+  getPublicClient: () => ({}),
+}))
+vi.mock('../../lib/chains/eventScan', async (orig) => ({
+  ...(await orig()),
+  eventScanHandle: () => ({ filters: { Transfer: () => ({}) } }),
+}))
+vi.mock('../../lib/chains/readContract', async (orig) => ({
+  ...(await orig()),
+  readContract: (_chainId, { functionName, args = [] }) => {
+    const fn = m.fns[functionName]
+    if (!fn) throw new Error('unmocked contract method: ' + functionName)
+    return fn(...args)
+  },
+}))
 
 import { membershipSource } from '../../data/notifications/sources/membershipSource'
 

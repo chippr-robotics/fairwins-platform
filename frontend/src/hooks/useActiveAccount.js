@@ -17,6 +17,12 @@
 // for the chain-scoped signer to be rebuilt) before the proposal is created with the SETTLED
 // signer/provider — never the one captured at tap time. A refusal is a stated error naming both
 // chains, and nothing is signed. The auto-switch adds a wallet prompt; it never removes one.
+//
+// Spec 110 T026 — the settle loop is no longer this hook's own; it is the shared
+// `lib/chains/submitOn.js#settleWalletOn`, which three hooks had each copied and then drifted apart
+// on (20s here and in useEarnSend, 30s in useVaultDeployment). submit() also forwards an optional
+// `payload.chainId` so a personal, recovered or hardware send NAMES the chain it lands on instead
+// of inheriting whatever the signer happens to be bound to.
 
 import { useCallback, useContext, useEffect, useRef } from 'react'
 import { useWallet } from './useWalletManagement'
@@ -25,14 +31,11 @@ import { getSafeContracts } from '../config/safeContracts'
 import { getContractAddressForChain } from '../config/contracts'
 import { NETWORKS } from '../config/networks'
 import { submitAsActiveAccount } from '../lib/custody/submitAsActiveAccount'
+import { settleWalletOn } from '../lib/chains/submitOn'
 
 const PERSONAL = { mode: 'personal' }
 const NOOP = () => {}
 const NO_BROKER = () => Promise.reject(new Error('No signing ceremony is available here.'))
-
-// Mirrors useEarnSend: how long a wallet is given to land on the target chain after it agreed to switch.
-const SETTLE_TIMEOUT_MS = 20_000
-const SETTLE_POLL_MS = 150
 
 /** Strict chain name — never `getNetwork()`, which would name the default network for an unknown id. */
 const chainName = (id) => NETWORKS[Number(id)]?.name || `Chain ${Number(id)}`
@@ -89,30 +92,26 @@ export function useActiveAccount() {
   }, [active, chainId, legacySigner, hardwareSigner, requestActingSigner, dropActingSigner])
 
   /**
-   * Spec 102 FR-014 — land the wallet on the vault's chain, then return the SETTLED signer/provider.
-   * On the vault's chain already: the current pair, untouched. Elsewhere: switch (awaited — a
-   * refusal rejects), then poll the wallet snapshot until the chain matches and (for a classic
-   * wallet) the chain-scoped signer exists.
+   * Spec 102 FR-014 — land the wallet on the vault's chain, then return the SETTLED
+   * signer/provider. The loop itself is the shared one (spec 110 T026,
+   * `lib/chains/submitOn.js#settleWalletOn`): this hook, `useEarnSend` and `useVaultDeployment`
+   * each carried a copy, and the copies had drifted to different timeouts — the same wallet on the
+   * same chain got ten more seconds of patience depending on which button was pressed. The only
+   * thing that genuinely differed between them was the NOUN the refusal opens with, so that is the
+   * only thing still passed in.
    */
-  const settleOnVaultChain = useCallback(async () => {
-    const target = Number(active.chainId)
-    if (Number(chainId) === target) return { signer, provider }
-    const refusal = `This proposal goes to ${chainName(target)}, but the wallet stayed on ${chainName(chainId)}, so nothing has been signed.`
-    if (typeof switchNetwork !== 'function') throw new Error(refusal)
-    try {
-      await switchNetwork(target)
-    } catch (cause) {
-      throw new Error(refusal, { cause })
-    }
-    const deadline = Date.now() + SETTLE_TIMEOUT_MS
-    while (Number(latestRef.current.chainId) !== target || (!isPasskey && !latestRef.current.signer)) {
-      if (Date.now() > deadline) {
-        throw new Error(`The switch to ${chainName(target)} did not complete, so nothing has been signed.`)
-      }
-      await new Promise((resolve) => setTimeout(resolve, SETTLE_POLL_MS))
-    }
-    return { signer: latestRef.current.signer, provider: latestRef.current.provider }
-  }, [active.chainId, chainId, signer, provider, switchNetwork, isPasskey])
+  const settleOnVaultChain = useCallback(
+    () =>
+      settleWalletOn(active.chainId, {
+        readWallet: () => latestRef.current,
+        switchNetwork,
+        chainName,
+        // A passkey session has no browser key to wait for; waiting would spin to the deadline.
+        needsSigner: !isPasskey,
+        subject: 'This proposal',
+      }),
+    [active.chainId, switchNetwork, isPasskey],
+  )
 
   const submit = useCallback(
     async (payload) => {
@@ -129,7 +128,15 @@ export function useActiveAccount() {
         })
       }
       if (active.mode === 'legacy' || active.mode === 'hardware') {
-        return submitAsActiveAccount(payload, { mode: 'personal', signer: await resolveActingSigner() })
+        // Spec 110 T026 — `payload.chainId` names the chain this send lands on, and the seam
+        // refuses if the signer is somewhere else. It matters most HERE: the spec-088 ceremony
+        // binds this signer to the wallet's CURRENT chain and deliberately does not switch, so a
+        // surface asking for another chain used to get a transaction on the wrong one.
+        return submitAsActiveAccount(payload, {
+          mode: 'personal',
+          chainId: payload.chainId,
+          signer: await resolveActingSigner(),
+        })
       }
       // Spec 088 FR-002 — every non-personal kind must be handled ABOVE. A mode with no branch
       // here (today: 'derived', the cross-chain identity useEffectiveAccount already resolves)
@@ -141,7 +148,7 @@ export function useActiveAccount() {
           `This account cannot send transactions here yet, so nothing has been signed. Switch back to acting as yourself to send from your own account.`,
         )
       }
-      return submitAsActiveAccount(payload, { mode: 'personal', signer })
+      return submitAsActiveAccount(payload, { mode: 'personal', chainId: payload.chainId, signer })
     },
     [active, signer, settleOnVaultChain, resolveActingSigner],
   )

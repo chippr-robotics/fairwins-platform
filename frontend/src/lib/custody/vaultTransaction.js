@@ -1,11 +1,13 @@
 // Spec 043 — Safe (v1.4.1) transaction encoders for the on-chain-only custody flow. Pure functions over
-// ethers v6; no provider required (so they are deterministically unit-testable). See
+// viem; no chain connection required (so they are deterministically unit-testable). See
 // specs/043-safe-multisig-custody/contracts/vault-transactions.md.
 //
 // Flow: build a SafeTx → computeSafeTxHash → each owner approveHash(hash) on-chain → any owner execTransaction
 // with a PRE-VALIDATED signature bundle once threshold owners have approved. No off-chain ECDSA is ever needed.
 
-import { Interface, TypedDataEncoder, ZeroAddress, getAddress, solidityPacked, zeroPadValue } from 'ethers'
+import { encodeFunctionData, encodePacked, hashTypedData, pad, zeroAddress } from 'viem'
+import { normalizeAbi } from '../chains/readContract'
+import { getAddress } from '../evm/address'
 import { SAFE_ABI } from '../../abis/Safe'
 import { MULTI_SEND_CALL_ONLY_ABI } from '../../abis/MultiSendCallOnly'
 
@@ -28,8 +30,13 @@ export const SAFE_TX_TYPES = {
 export const CALL = 0
 export const DELEGATECALL = 1
 
-const safeIface = new Interface(SAFE_ABI)
-const multiSendIface = new Interface(MULTI_SEND_CALL_ONLY_ABI)
+const SAFE = normalizeAbi(SAFE_ABI)
+const MULTI_SEND = normalizeAbi(MULTI_SEND_CALL_ONLY_ABI)
+
+/** The Safe's own EIP-712 primary type. viem needs it named; ethers inferred it from the type map. */
+const SAFE_TX_PRIMARY_TYPE = 'SafeTx'
+
+const safeCall = (functionName, args) => encodeFunctionData({ abi: SAFE, functionName, args })
 
 /**
  * Normalize a partial Safe transaction into a full SafeTx with the custody defaults (no gas refunds).
@@ -52,8 +59,8 @@ export function buildSafeTx(tx) {
     safeTxGas: BigInt(tx.safeTxGas ?? 0),
     baseGas: BigInt(tx.baseGas ?? 0),
     gasPrice: BigInt(tx.gasPrice ?? 0),
-    gasToken: getAddress(tx.gasToken ?? ZeroAddress),
-    refundReceiver: getAddress(tx.refundReceiver ?? ZeroAddress),
+    gasToken: getAddress(tx.gasToken ?? zeroAddress),
+    refundReceiver: getAddress(tx.refundReceiver ?? zeroAddress),
     nonce: BigInt(tx.nonce),
   }
 }
@@ -68,7 +75,10 @@ export function buildSafeTx(tx) {
  */
 export function computeSafeTxHash(safeAddress, chainId, safeTx) {
   const domain = { chainId: Number(chainId), verifyingContract: getAddress(safeAddress) }
-  return TypedDataEncoder.hash(domain, SAFE_TX_TYPES, safeTx)
+  // The domain is deliberately `{ chainId, verifyingContract }` ONLY — Safe v1.4.1 declares no
+  // `name` or `version`, and adding either would change the separator and produce a hash no owner's
+  // `approveHash` matches. `primaryType` is explicit because viem does not infer it.
+  return hashTypedData({ domain, types: SAFE_TX_TYPES, primaryType: SAFE_TX_PRIMARY_TYPE, message: safeTx })
 }
 
 /**
@@ -91,7 +101,13 @@ export function buildPrevalidatedSignatures(approverAddresses) {
   }
   let out = '0x'
   for (const owner of sorted) {
-    const r = zeroPadValue(owner, 32).slice(2) // 32-byte left-padded address
+    // LOWERCASED (spec 110 divergence 17). viem's `pad` preserves the EIP-55 checksum casing of
+    // the address it is handed, and viem's encoder then carries that casing into the calldata,
+    // where ethers emitted lowercase. The BYTES are identical either way — the Safe parses hex
+    // case-insensitively, and `safeTxHash` does not cover the signatures at all — so this is
+    // cosmetic rather than a defect. It is normalised because a calldata string that differs from
+    // what shipped is a trap for the next byte-comparison, not because anything is wrong on chain.
+    const r = pad(owner, { size: 32 }).slice(2).toLowerCase() // 32-byte left-padded address
     const s = '00'.repeat(32)
     const v = '01'
     out += r + s + v
@@ -113,13 +129,13 @@ export function encodeMultiSend(multiSendCallOnly, innerTxs) {
     .map((t) => {
       const data = t.data ?? '0x'
       const dataLen = (data.length - 2) / 2
-      return solidityPacked(
+      return encodePacked(
         ['uint8', 'address', 'uint256', 'uint256', 'bytes'],
         [CALL, getAddress(t.to), BigInt(t.value ?? 0), BigInt(dataLen), data],
       ).slice(2)
     })
     .join('')
-  const data = multiSendIface.encodeFunctionData('multiSend', ['0x' + packed])
+  const data = encodeFunctionData({ abi: MULTI_SEND, functionName: 'multiSend', args: ['0x' + packed] })
   return { to: getAddress(multiSendCallOnly), value: 0n, data, operation: DELEGATECALL }
 }
 
@@ -146,13 +162,13 @@ export function encodeExecTransaction(safeTx, signatures) {
 // --- Governance builders: ordinary Safe transactions targeting the Safe itself (to = safeAddress) ---
 
 export function buildAddOwner(safeAddress, newOwner, newThreshold, nonce) {
-  const data = safeIface.encodeFunctionData('addOwnerWithThreshold', [getAddress(newOwner), BigInt(newThreshold)])
+  const data = safeCall('addOwnerWithThreshold', [getAddress(newOwner), BigInt(newThreshold)])
   return buildSafeTx({ to: safeAddress, data, nonce })
 }
 
 /** prevOwner is the owner pointing to `owner` in the Safe's linked list (SENTINEL 0x…1 if `owner` is first). */
 export function buildRemoveOwner(safeAddress, prevOwner, owner, newThreshold, nonce) {
-  const data = safeIface.encodeFunctionData('removeOwner', [
+  const data = safeCall('removeOwner', [
     getAddress(prevOwner),
     getAddress(owner),
     BigInt(newThreshold),
@@ -161,7 +177,7 @@ export function buildRemoveOwner(safeAddress, prevOwner, owner, newThreshold, no
 }
 
 export function buildSwapOwner(safeAddress, prevOwner, oldOwner, newOwner, nonce) {
-  const data = safeIface.encodeFunctionData('swapOwner', [
+  const data = safeCall('swapOwner', [
     getAddress(prevOwner),
     getAddress(oldOwner),
     getAddress(newOwner),
@@ -170,7 +186,7 @@ export function buildSwapOwner(safeAddress, prevOwner, oldOwner, newOwner, nonce
 }
 
 export function buildChangeThreshold(safeAddress, newThreshold, nonce) {
-  const data = safeIface.encodeFunctionData('changeThreshold', [BigInt(newThreshold)])
+  const data = safeCall('changeThreshold', [BigInt(newThreshold)])
   return buildSafeTx({ to: safeAddress, data, nonce })
 }
 

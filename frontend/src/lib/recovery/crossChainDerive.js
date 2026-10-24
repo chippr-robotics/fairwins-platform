@@ -12,7 +12,7 @@
  * (FR-017/018) — never persisted, logged, or transmitted.
  */
 
-import { walletFromSecret } from './legacyKeys'
+import { addressFromSecret } from './legacyKeys'
 import { seedFromMnemonic } from '../bitcoin/legacyDerivation'
 import { bitcoinAccountId } from '../bitcoin/legacyBitcoin'
 import { deriveSolanaKeypair, SOLANA_SCHEMES } from '../solana/derivation'
@@ -31,7 +31,7 @@ import { deriveSolanaKeypair, SOLANA_SCHEMES } from '../solana/derivation'
  */
 export function deriveCrossChainAccounts(recovered, { solanaAccounts = 1, bitcoinNetwork = 'bitcoin' } = {}) {
   const { kind, secret } = recovered || {}
-  const evm = { address: walletFromSecret({ kind, secret }).address }
+  const evm = { address: addressFromSecret({ kind, secret }) }
 
   // A raw private key is a single key — reusable across EVM, but NOT a derivable tree (FR-013).
   if (kind !== 'mnemonic') {

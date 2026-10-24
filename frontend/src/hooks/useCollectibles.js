@@ -8,9 +8,8 @@
  * gateway configured the hook reports {supported:false} and performs NO fetches (FR-007).
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { WalletContext } from '../contexts/WalletContext.js'
-import { getCurrentChainId } from '../config/networks'
 import {
   collectiblesAvailable,
   fetchAccountCollectibles,
@@ -24,7 +23,7 @@ export function useCollectibles() {
   // "disconnected" wherever no wallet context exists, never take the page down.
   const wallet = useContext(WalletContext) || {}
   const { address, isConnected } = wallet
-  const chainId = useChainId() || getCurrentChainId()
+  const chainId = useWalletChainId()
   const supported = collectiblesAvailable(chainId)
 
   const [pages, setPages] = useState([]) // [{items, next, fetchedAt, stale}]

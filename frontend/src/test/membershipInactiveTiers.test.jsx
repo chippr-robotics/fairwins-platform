@@ -24,17 +24,15 @@ const LIVE_TIERS = {
 
 const { getTierConfig } = vi.hoisted(() => ({ getTierConfig: vi.fn() }))
 
-vi.mock('ethers', async (importOriginal) => {
+// The tier config now reads through the spec-110 chain seam; `getTierConfig` is the same
+// mock each test seeds, reached by function name rather than off a contract object.
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: class {
-        constructor() {
-          this.getTierConfig = getTierConfig
-        }
-      },
+    readContract: (_chainId, { functionName, args = [] }) => {
+      if (functionName !== 'getTierConfig') throw new Error('unmocked read: ' + functionName)
+      return getTierConfig(...args)
     },
   }
 })

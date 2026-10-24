@@ -8,25 +8,21 @@
  * multi-language registry is a separate concern). Sourced from ethers'
  * bundled wordlist — no extra 2048-word asset shipped.
  */
-import { wordlists } from 'ethers'
+import { english } from 'viem/accounts'
 
 let cachedWords = null
 let cachedSet = null
 
-/** The 2048 English BIP-39 words (cached). */
+/**
+ * The 2048 English BIP-39 words (cached).
+ *
+ * From viem rather than ethers since spec 110 — it exports the list as a plain array, so the
+ * index-by-index walk (and the guard against a list that stopped answering partway) is gone with
+ * the object wrapper that needed it. The two lists were compared word-for-word before the swap.
+ */
 export function bip39Words() {
   if (cachedWords) return cachedWords
-  const en = wordlists?.en
-  const out = []
-  if (en && typeof en.getWord === 'function') {
-    for (let i = 0; i < 2048; i += 1) {
-      try {
-        out.push(en.getWord(i))
-      } catch {
-        break
-      }
-    }
-  }
+  const out = Array.isArray(english) ? [...english] : []
   cachedWords = out
   cachedSet = new Set(out)
   return cachedWords

@@ -2,16 +2,26 @@
 // POSITIVELY recognises; anything else returns null and the caller keeps the honest raw rendering
 // — a guessed description of a money movement is worse than calldata (constitution III).
 
-import { Interface, getAddress, formatUnits } from 'ethers'
+import { decodeFunctionData, getAddress, parseAbi } from 'viem'
+import { formatUnits } from '../evm/units'
 import { classifyPolicyProposalV2 } from './policyV2'
 
-const erc20Iface = new Interface(['function transfer(address to, uint256 amount) returns (bool)'])
-const safeMgmtIface = new Interface([
+const ERC20_ABI = parseAbi(['function transfer(address to, uint256 amount) returns (bool)'])
+const SAFE_MGMT_ABI = parseAbi([
   'function addOwnerWithThreshold(address owner, uint256 _threshold)',
   'function removeOwner(address prevOwner, address owner, uint256 _threshold)',
   'function swapOwner(address prevOwner, address oldOwner, address newOwner)',
   'function changeThreshold(uint256 _threshold)',
 ])
+
+// ethers' iface.decodeFunctionData('name', data) threw on a selector mismatch, and the
+// describe cascade RELIES on that throw to fall through. viem matches by selector across the
+// whole ABI, so the name check is restated explicitly.
+function decodeAs(abi, functionName, data) {
+  const decoded = decodeFunctionData({ abi, data })
+  if (decoded.functionName !== functionName) throw new Error('selector mismatch')
+  return decoded.args
+}
 
 const short = (a) => {
   const x = getAddress(a)
@@ -56,7 +66,7 @@ export function describeProposal(proposal, opts = {}) {
   // ERC-20 transfer — described ONLY when the token's meta is known; formatting an amount with
   // guessed decimals would state a wrong number, which is worse than none.
   try {
-    const [to, amount] = erc20Iface.decodeFunctionData('transfer', data)
+    const [to, amount] = decodeAs(ERC20_ABI, 'transfer', data)
     const meta = assetMeta[getAddress(proposal.to)]
     if (!meta) return null
     return {
@@ -100,19 +110,19 @@ export function describeProposal(proposal, opts = {}) {
 
 function describeSafeManagement(data, name) {
   try {
-    const [owner] = safeMgmtIface.decodeFunctionData('addOwnerWithThreshold', data)
+    const [owner] = decodeAs(SAFE_MGMT_ABI, 'addOwnerWithThreshold', data)
     return { kind: 'add-owner', title: 'Add owner', detail: name(owner) }
   } catch { /* next */ }
   try {
-    const [, owner] = safeMgmtIface.decodeFunctionData('removeOwner', data)
+    const [, owner] = decodeAs(SAFE_MGMT_ABI, 'removeOwner', data)
     return { kind: 'remove-owner', title: 'Remove owner', detail: name(owner) }
   } catch { /* next */ }
   try {
-    const [, oldOwner, newOwner] = safeMgmtIface.decodeFunctionData('swapOwner', data)
+    const [, oldOwner, newOwner] = decodeAs(SAFE_MGMT_ABI, 'swapOwner', data)
     return { kind: 'swap-owner', title: 'Replace owner', detail: `${name(oldOwner)} → ${name(newOwner)}` }
   } catch { /* next */ }
   try {
-    const [threshold] = safeMgmtIface.decodeFunctionData('changeThreshold', data)
+    const [threshold] = decodeAs(SAFE_MGMT_ABI, 'changeThreshold', data)
     return { kind: 'change-threshold', title: 'Change approvals needed', detail: `${threshold} required` }
   } catch { /* not management */ }
   return null

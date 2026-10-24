@@ -30,6 +30,7 @@ import {
   keyState,
   listKeyRecords,
   markApiKeyRevoked,
+  randomKeyId,
   recordApiKey,
   revocationRequestBody,
   revocationTypedData,
@@ -78,6 +79,43 @@ describe('buildGrant', () => {
 
   it('declares no write-shaped scope — the API can never act as the member', () => {
     for (const scope of API_SCOPES) expect(scope.id.startsWith('write:')).toBe(false)
+  })
+})
+
+/**
+ * Spec 110 T028 — the ethers→viem swap in `apiKeys.js`, and the one property it could have lost.
+ *
+ * `buildGrant` shape-checked the account with a regex and then called `ethers.getAddress`, which
+ * THREW on a mistyped mixed-case address. viem's `getAddress` does not — it re-checksums whatever
+ * it is handed — so the refusal had to move to the explicit check, or a typo would have been
+ * silently accepted and written into a signed grant.
+ */
+describe('buildGrant — the EIP-55 refusal survives the viem swap', () => {
+  // Needs LETTERS in the body: a checksum only exists where there are letters to case, and the
+  // suite's usual 0x1111… address has none, so a typo cannot be constructed from it at all.
+  const MIXED = ethers.getAddress('0xdeadbeefcafebabefeedface0123456789abcdef')
+  const ok = (over = {}) => ({ account: MIXED, scopes: ['read:profile'], ttlDays: 1, ...over })
+
+  it('refuses a mixed-case address whose checksum does not verify', () => {
+    // One letter case-flipped: still shape-valid hex, but the EIP-55 checksum no longer holds —
+    // exactly the typo the checksum exists to catch, and what ethers' getAddress used to throw on.
+    const i = MIXED.slice(2).split('').findIndex((c) => /[a-f]/.test(c))
+    expect(i).toBeGreaterThanOrEqual(0)
+    const typo = '0x' + MIXED.slice(2, 2 + i) + MIXED[2 + i].toUpperCase() + MIXED.slice(3 + i)
+    expect(typo).not.toBe(MIXED)
+    expect(() => buildGrant(ok({ account: typo }))).toThrow(/must be a 0x address/)
+    expect(() => buildRevocation({ account: typo, keyId: randomKeyId() })).toThrow(/must be a 0x address/)
+  })
+
+  it('still accepts the caseless forms, which carry no checksum to verify', () => {
+    expect(buildGrant(ok({ account: MIXED.toLowerCase() })).account).toBe(MIXED)
+    expect(buildGrant(ok({ account: '0x' + MIXED.slice(2).toUpperCase() })).account).toBe(MIXED)
+  })
+
+  it('mints key ids that are 32 bytes of hex and do not repeat', () => {
+    const ids = new Set(Array.from({ length: 200 }, () => randomKeyId()))
+    expect(ids.size).toBe(200)
+    for (const id of ids) expect(id).toMatch(/^0x[0-9a-f]{64}$/)
   })
 })
 

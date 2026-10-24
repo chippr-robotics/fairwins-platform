@@ -25,7 +25,8 @@
  * gateway's live revocation set, and its metadata names credentials that may be live on other
  * devices. The same call was made for `network_endpoints` (spec 069). A test asserts the absence.
  */
-import { ethers } from 'ethers'
+import { toHex } from 'viem'
+import { getAddress, isAddress } from '../evm/address'
 import {
   MEMBER_API_DOMAIN,
   MEMBER_API_GRANT_TYPES,
@@ -104,12 +105,11 @@ export const EXPIRY_CHOICES_DAYS = Object.freeze([7, 30, 90])
 export const MAX_TTL_DAYS = 90
 
 const DAY_SECONDS = 86_400
-const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const BYTES32_RE = /^0x[0-9a-fA-F]{64}$/
 
 /** A fresh random 32-byte key id. An identifier, not a secret: revocations name it, `/me` echoes it. */
 export function randomKeyId() {
-  return ethers.hexlify(ethers.randomBytes(32))
+  return toHex(crypto.getRandomValues(new Uint8Array(32)))
 }
 
 /**
@@ -119,7 +119,7 @@ export function randomKeyId() {
  * @returns {{v: 1, account: string, keyId: string, scopes: string[], issuedAt: number, expiresAt: number, label: string}}
  */
 export function buildGrant({ account, keyId, scopes, ttlDays, label = '', nowSeconds }) {
-  if (!ADDRESS_RE.test(account ?? '')) throw new Error('buildGrant: account must be a 0x address')
+  if (!isAddress(account ?? '')) throw new Error('buildGrant: account must be a 0x address')
   if (!Array.isArray(scopes) || scopes.length === 0) throw new Error('buildGrant: at least one scope is required')
   const unknown = scopes.filter((s) => !ALL_SCOPE_IDS.includes(s))
   if (unknown.length > 0) throw new Error(`buildGrant: unknown scope(s): ${unknown.join(', ')}`)
@@ -132,7 +132,7 @@ export function buildGrant({ account, keyId, scopes, ttlDays, label = '', nowSec
   const sorted = canonicalScopeString(scopes).split(' ')
   return {
     v: 1,
-    account: ethers.getAddress(account),
+    account: getAddress(account),
     keyId: keyId || randomKeyId(),
     scopes: sorted,
     issuedAt,
@@ -169,10 +169,10 @@ export function grantTypedData(grant) {
  * credential would be the wrong shape.
  */
 export function buildRevocation({ account, keyId, nowSeconds }) {
-  if (!ADDRESS_RE.test(account ?? '')) throw new Error('buildRevocation: account must be a 0x address')
+  if (!isAddress(account ?? '')) throw new Error('buildRevocation: account must be a 0x address')
   if (!BYTES32_RE.test(keyId ?? '')) throw new Error('buildRevocation: keyId must be 32 bytes of hex')
   return {
-    account: ethers.getAddress(account),
+    account: getAddress(account),
     keyId,
     revokedAt: Math.floor(nowSeconds != null ? nowSeconds : Date.now() / 1000),
   }

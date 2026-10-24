@@ -260,7 +260,7 @@ spec 097 keeps in Secret Manager rather than a `.env`. **Dry run is the default*
 npm run check:dep-alerts          # offline: schema, expiry, wiring
 npm run test:dep-alerts           # the gate's own must-fail fixtures
 
-GITHUB_REPOSITORY=chippr-robotics/prediction-dao-research \
+GITHUB_REPOSITORY=chippr-robotics/fairwins-platform \
 GITHUB_TOKEN=$(gh auth token) \
 npm run check:dep-alerts:live     # live reconciliation
 ```
@@ -268,11 +268,11 @@ npm run check:dep-alerts:live     # live reconciliation
 Dismissals, with a token carrying `security_events`:
 
 ```bash
-GITHUB_REPOSITORY=chippr-robotics/prediction-dao-research \
+GITHUB_REPOSITORY=chippr-robotics/fairwins-platform \
 GITHUB_TOKEN=$SECURITY_EVENTS_TOKEN \
 npm run dismiss:alerts                      # dry run — prints the selection and every near miss
 
-GITHUB_REPOSITORY=chippr-robotics/prediction-dao-research \
+GITHUB_REPOSITORY=chippr-robotics/fairwins-platform \
 GITHUB_TOKEN=$SECURITY_EVENTS_TOKEN \
 npm run dismiss:alerts -- --apply
 ```

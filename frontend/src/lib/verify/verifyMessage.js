@@ -34,14 +34,22 @@
  * when the offline answer cannot settle the specific claim being made.
  */
 
-import { ethers } from 'ethers'
-import { getReadProvider } from '../../utils/rpcProvider'
+import { bytesToHex, encodeFunctionData, hashMessage } from 'viem'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { keccak_256 } from '@noble/hashes/sha3.js'
+import { getPublicClient } from '../chains/publicClient'
+import { normalizeAbi } from '../chains/readContract'
+import { getAddress } from '../evm/address'
+// Spec 110 T028 — the split moved to `lib/evm/signature.js` so `lib/pools/gasless.js` uses the
+// same one. Neither of viem's answers is right for it (the compact form is refused, and `v` comes
+// back a bigint), so there must be exactly one place that gets it right.
+import { splitSignature } from '../evm/signature'
 import { SIGN_SCHEMES } from './signedMessage'
 
 /** bytes4(keccak256("isValidSignature(bytes32,bytes)")) — the ONLY accepted success value. */
 export const ERC1271_MAGIC = '0x1626ba7e'
 
-const ERC1271_IFACE = new ethers.Interface([
+const ERC1271_ABI = normalizeAbi([
   'function isValidSignature(bytes32 hash, bytes signature) view returns (bytes4)',
 ])
 
@@ -67,13 +75,32 @@ const isHexBytes = (value) =>
 
 const sameAddress = (a, b) => Boolean(a && b && a.toLowerCase() === b.toLowerCase())
 
+const TOP_BIT = 1n << 255n
+
 /**
  * Recover the EIP-191 signer, or null when the bytes are not a recoverable ECDSA signature.
  * Never throws: a 900-byte WebAuthn envelope reaching here is expected, not exceptional.
+ *
+ * ON `@noble/curves` RATHER THAN viem, AND THAT IS THE WHOLE POINT (spec 110 T020). viem's
+ * `verifyMessage` and `recoverAddress` are ASYNC; ethers' were synchronous. Swapping to them would
+ * make this function — and `verifyMessage` above it — return a promise, which is exactly what the
+ * spec-084 rule forbids: "verifyMessage is OFFLINE and SYNCHRONOUS … never make it async: the type
+ * is what enforces it." The type is the guard that stops a network call being added to signature
+ * arithmetic later, and an async signature removes it without anything failing. noble does the
+ * recovery synchronously, so the guarantee stays a fact about the code rather than a comment.
+ *
+ * Checked against `ethers.verifyMessage` over 18 curated cases and a 300-case fuzz across both
+ * signature encodings before the swap: identical answer every time, including the negatives.
  */
 export function recoverPersonalSigner(message, signature) {
   try {
-    return ethers.verifyMessage(message, signature)
+    const parts = splitSignature(signature)
+    if (!parts) return null
+    const sig = new secp256k1.Signature(BigInt(parts.r), BigInt(parts.s), parts.yParity)
+    const digest = hashMessage(message, 'bytes')
+    const publicKey = sig.recoverPublicKey(digest).toBytes(false).slice(1) // drop the 0x04 tag
+    // `bytesToHex`, not `Buffer` — this runs in the browser, where Buffer does not exist.
+    return getAddress(`0x${bytesToHex(keccak_256(publicKey)).slice(-40)}`)
   } catch {
     return null
   }
@@ -94,7 +121,7 @@ export async function checkErc1271({ message, signature, address, chainId, provi
   let node = provider
   if (!node) {
     try {
-      node = getReadProvider(Number(chainId))
+      node = getPublicClient(Number(chainId))
     } catch {
       node = null
     }
@@ -104,16 +131,40 @@ export async function checkErc1271({ message, signature, address, chainId, provi
   // Encoding is inside the guarded region because this function is exported and can be called
   // without going through verifyMessage's input check. A malformed signature is a verdict input,
   // never a crash.
+  //
+  // THE SHAPE CHECK IS EXPLICIT, AND IT HAS TO BE (spec 110). ethers' encoder REFUSED a malformed
+  // `bytes` value — `0x123`, `0xZZ`, even `nothex` — and that refusal was what produced the
+  // `malformed-signature` answer. viem's `encodeFunctionData` accepts all three and encodes
+  // something, so without this guard the garbage would be put to the contract and whatever it
+  // answered would be reported as a verdict on the member's signature. That is the one divergence
+  // in this migration that fails toward a CONFIDENT WRONG ANSWER rather than toward reporting
+  // less, which is why it is checked here instead of relied on from the library.
   let data
   try {
-    data = ERC1271_IFACE.encodeFunctionData('isValidSignature', [ethers.hashMessage(message), signature])
+    if (!isHexBytes(signature)) throw new Error('signature is not a byte string')
+    data = encodeFunctionData({
+      abi: ERC1271_ABI,
+      functionName: 'isValidSignature',
+      args: [hashMessage(message), signature],
+    })
   } catch {
     return { answered: true, valid: false, reason: 'malformed-signature' }
   }
 
+  /*
+   * Deliberately raw `getCode` + `call` rather than `readContract`: each of the four outcomes
+   * below is a DIFFERENT answer to the member, and `readContract` collapses three of them into one
+   * thrown error. `no-code` is a real negative, `no-answer` is a broken account, and `call-failed`
+   * is not a verdict at all. viem also differs from ethers twice here and both are load-bearing —
+   * `getCode` resolves to `undefined` where ethers gave `'0x'`, and `call` resolves to
+   * `{ data }` rather than a bare hex string — so the shapes are normalized at this seam and the
+   * state machine below is byte-for-byte the one it replaces.
+   */
   let code
   try {
-    code = await node.getCode(address)
+    code = node.getCode
+      ? await node.getCode({ address })
+      : await node.getBytecode({ address })
   } catch {
     return { answered: false, reason: 'unreachable' }
   }
@@ -124,7 +175,8 @@ export async function checkErc1271({ message, signature, address, chainId, provi
 
   let returned
   try {
-    returned = await node.call({ to: address, data })
+    const answer = await node.call({ to: address, data })
+    returned = typeof answer === 'string' ? answer : answer?.data
   } catch {
     // A revert and a dead node are indistinguishable at this seam in the general case, and a
     // dead node must never read as a forged signature — so this stays unverifiable rather than
@@ -181,7 +233,7 @@ export function verifyMessage({ message, signature, address = null }) {
   let claimed = null
   if (address) {
     try {
-      claimed = ethers.getAddress(address)
+      claimed = getAddress(address)
     } catch {
       return {
         status: VERIFY_STATUS.INVALID,
@@ -246,7 +298,7 @@ export function verifyMessage({ message, signature, address = null }) {
 export async function verifyOnChain({ message, signature, address, chainId, provider = null }) {
   let claimed
   try {
-    claimed = ethers.getAddress(address)
+    claimed = getAddress(address)
   } catch {
     return {
       status: VERIFY_STATUS.INVALID,

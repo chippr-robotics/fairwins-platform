@@ -91,7 +91,7 @@ All research documents should:
 
 For questions about research documents or to propose new research topics, please:
 
-- Open an issue on [GitHub](https://github.com/chippr-robotics/prediction-dao-research/issues)
+- Open an issue on [GitHub](https://github.com/chippr-robotics/fairwins-platform/issues)
 - Contact the core team
 
 ---

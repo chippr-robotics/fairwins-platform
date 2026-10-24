@@ -45,7 +45,9 @@
  * at.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { errorParser } from '../../lib/evm/revertParser'
+import { normalizeAbi } from '../../lib/chains/readContract'
 
 import { APP_CATEGORY_LABELS, AppStatus, MINI_APP_REGISTRY_ABI } from '../../abis/miniAppRegistry'
 import { captureMiniAppLog } from '../../data/ledger/sources/miniAppSource'
@@ -122,7 +124,7 @@ const registryTxOptions = Object.freeze({ errorAbi: MINI_APP_REGISTRY_ABI })
  */
 let registryErrorInterface = null
 function registryInterface() {
-  if (!registryErrorInterface) registryErrorInterface = new ethers.Interface(MINI_APP_REGISTRY_ABI)
+  if (!registryErrorInterface) registryErrorInterface = errorParser(MINI_APP_REGISTRY_ABI)
   return registryErrorInterface
 }
 
@@ -360,20 +362,31 @@ export default function MiniAppReviewTab({ signer, account, chainId, runTx, pend
       if (Number(chainId) !== Number(registryChainId)) return
       if (!registryAddress) return
 
-      const registry = new ethers.Contract(registryAddress, MINI_APP_REGISTRY_ABI, signer)
+      // Spec 110 T028 — the calldata is built explicitly instead of through an ethers `Contract`.
+      // `expectedManifestHash` is a `bytes32`, and fixed-size `bytesN` is one of the places viem
+      // and ethers agree exactly: both refuse null, undefined, short, odd-length, non-hex and
+      // wrong-length values (measured). The divergence-7 hazard — viem encoding a malformed value
+      // where ethers refused — is DYNAMIC `bytes` only, so the content commitment spec 073 relies
+      // on here (`approveApp(id, expectedManifestHash)` reverting StaleProposal) cannot be
+      // weakened by the swap, and needs no guard invented for it.
+      const REGISTRY_ABI = normalizeAbi(MINI_APP_REGISTRY_ABI)
+      const callFor = (kind) =>
+        kind === 'approve'
+          ? { functionName: 'approveApp', args: [app.id, expectedHash] }
+          : kind === 'reject'
+            ? { functionName: 'rejectProposal', args: [app.id, expectedHash] }
+            : kind === 'suspend'
+              ? { functionName: 'suspendApp', args: [app.id] }
+              : { functionName: 'deprecateApp', args: [app.id] }
       let txHash = null
       let stale = null
 
       const ok = await runTx(async () => {
         try {
-          const tx =
-            action === 'approve'
-              ? await registry.approveApp(app.id, expectedHash)
-              : action === 'reject'
-                ? await registry.rejectProposal(app.id, expectedHash)
-                : action === 'suspend'
-                  ? await registry.suspendApp(app.id)
-                  : await registry.deprecateApp(app.id)
+          const tx = await signer.sendTransaction({
+            to: registryAddress,
+            data: encodeFunctionData({ abi: REGISTRY_ABI, ...callFor(action) }),
+          })
           txHash = tx?.hash ?? null
           return tx
         } catch (error) {

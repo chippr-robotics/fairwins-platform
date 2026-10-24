@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { parseUnits } from 'ethers'
+import { parseUnits } from '../../evm/units'
 import { quoteBestRoute } from '../quote'
 import { ROUTED_FEE_TIERS } from '../trade'
 

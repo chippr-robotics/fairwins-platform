@@ -65,8 +65,8 @@ The target network must support:
 
 ```bash
 # Clone the repository
-git clone https://github.com/chippr-robotics/prediction-dao-research.git
-cd prediction-dao-research
+git clone https://github.com/chippr-robotics/fairwins-platform.git
+cd fairwins-platform
 
 # Install dependencies
 npm install
@@ -1002,7 +1002,7 @@ Here's a complete end-to-end deployment on Polygon Amoy (Polymarket testnet):
 
 ```bash
 # 1. Setup
-cd prediction-dao-research
+cd fairwins-platform
 npm install
 cp .env.example .env
 # Edit .env with your settings
@@ -1053,8 +1053,8 @@ echo "✅ Deployment complete!"
 ## Support
 
 For issues or questions:
-- GitHub Issues: https://github.com/chippr-robotics/prediction-dao-research/issues
-- Documentation: https://github.com/chippr-robotics/prediction-dao-research/tree/main/docs
+- GitHub Issues: https://github.com/chippr-robotics/fairwins-platform/issues
+- Documentation: https://github.com/chippr-robotics/fairwins-platform/tree/main/docs
 
 ---
 

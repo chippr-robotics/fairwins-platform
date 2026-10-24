@@ -4,7 +4,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import { WalletContext } from '../../contexts/WalletContext.js'
 import { useCollectibles, useCollectiblesValuation } from '../../hooks/useCollectibles'
 import {
@@ -46,7 +46,7 @@ const wrapper = ({ children }) => (
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useChainId.mockReturnValue(137)
+  setWalletChain(137)
   collectiblesAvailable.mockReturnValue(true)
 })
 
@@ -75,7 +75,7 @@ describe('useCollectibles', () => {
 
   it('short-circuits on unsupported networks: {supported:false}, ZERO fetches (FR-007)', async () => {
     collectiblesAvailable.mockReturnValue(false)
-    useChainId.mockReturnValue(63)
+    setWalletChain(63)
     const { result } = renderHook(() => useCollectibles(), { wrapper })
     expect(result.current.supported).toBe(false)
     expect(result.current.status).toBe('unsupported')

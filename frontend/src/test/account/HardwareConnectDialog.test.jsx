@@ -29,7 +29,7 @@ describe('HardwareConnectDialog', () => {
   it('explains the ceremony and connects on demand', async () => {
     const signer = { fake: true }
     const connectAccount = vi.fn(async () => signer)
-    const { onConnected } = renderDialog({ connectAccount, provider: {} })
+    const { onConnected } = renderDialog({ connectAccount })
 
     expect(screen.getByText(/confirmed on your ledger screen/i)).toBeInTheDocument()
     fireEvent.click(screen.getByRole('button', { name: /^connect$/i }))
@@ -44,7 +44,7 @@ describe('HardwareConnectDialog', () => {
         'The connected device does not hold this account — it derives a different address for the saved path. Check that it is the same device (and passphrase, if you use one).',
       )
     })
-    const { onConnected } = renderDialog({ connectAccount, provider: {} })
+    const { onConnected } = renderDialog({ connectAccount })
     fireEvent.click(screen.getByRole('button', { name: /^connect$/i }))
     expect(await screen.findByRole('alert')).toHaveTextContent(/does not hold this account/i)
     expect(onConnected).not.toHaveBeenCalled()
@@ -55,7 +55,6 @@ describe('HardwareConnectDialog', () => {
   it('describes Bluetooth pairing, not a cable, when BLE is the rail', () => {
     renderDialog({
       connectAccount: vi.fn(),
-      provider: {},
       guidance: (vendor) => connectGuidance(vendor, { webhid: false, webusb: true, webble: true }),
     })
     const hint = screen.getByText(/bluetooth pairing prompt/i)
@@ -66,7 +65,6 @@ describe('HardwareConnectDialog', () => {
   it('keeps the cable wording on a USB rail', () => {
     renderDialog({
       connectAccount: vi.fn(),
-      provider: {},
       guidance: (vendor) => connectGuidance(vendor, { webhid: true, webusb: true, webble: false }),
     })
     expect(screen.getByText(/plug in the device, unlock it, and open the ethereum app/i)).toBeInTheDocument()
@@ -76,7 +74,7 @@ describe('HardwareConnectDialog', () => {
     const connectAccount = vi.fn(async () => {
       throw new Error('TransportStatusError: 0x6511 UNKNOWN_APDU')
     })
-    renderDialog({ connectAccount, provider: {} })
+    renderDialog({ connectAccount })
     fireEvent.click(screen.getByRole('button', { name: /^connect$/i }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent(/something went wrong talking to the device/i)

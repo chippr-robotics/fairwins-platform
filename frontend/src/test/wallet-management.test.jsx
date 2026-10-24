@@ -16,7 +16,8 @@ import { useWallet, useWalletRoles } from '../hooks/useWalletManagement'
 vi.mock('wagmi', () => ({
   useAccount: () => ({
     address: '0x1234567890123456789012345678901234567890',
-    isConnected: true
+    isConnected: true,
+    chainId: 61
   }),
   useConnect: () => ({
     connect: vi.fn(),
@@ -25,7 +26,6 @@ vi.mock('wagmi', () => ({
   useDisconnect: () => ({
     disconnect: vi.fn()
   }),
-  useChainId: () => 61,
   useSwitchChain: () => ({
     switchChain: vi.fn()
   }),

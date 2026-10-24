@@ -1,7 +1,8 @@
 import { useState, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
 import { getContractAddressForChain } from '../../config/contracts'
 import { estateNetworks, networkName } from '../../lib/chains/estate'
+import { normalizeAbi } from '../../lib/chains/readContract'
 import { NetworkScopeCard } from './scopeControls'
 import { useScopedChain } from './scopeGate'
 
@@ -47,7 +48,11 @@ function MaintenanceTab({ signer, chainId, runTx, pendingTx }) {
   const [resolveForm, setResolveForm] = useState({ id: '', source: 'polymarket' })
   const [parseError, setParseError] = useState('')
 
-  const write = () => new ethers.Contract(registryAddr, MAINTENANCE_ABI, signer)
+  const write = (functionName, args) =>
+    signer.sendTransaction({
+      to: registryAddr,
+      data: encodeFunctionData({ abi: normalizeAbi(MAINTENANCE_ABI), functionName, args }),
+    })
 
   const handleBatchExpire = () => {
     let ids
@@ -60,7 +65,7 @@ function MaintenanceTab({ signer, chainId, runTx, pendingTx }) {
     }
     if (ids.length === 0) return
     runTx(
-      () => write().batchExpireOpen(ids),
+      () => write('batchExpireOpen', [ids]),
       `Expired ${ids.length} open wager${ids.length === 1 ? '' : 's'} on ${networkName(scopeChainId)} — creators refunded`
     )
   }
@@ -74,8 +79,8 @@ function MaintenanceTab({ signer, chainId, runTx, pendingTx }) {
     setParseError('')
     const id = BigInt(raw)
     const fn = resolveForm.source === 'polymarket'
-      ? () => write().autoResolveFromPolymarket(id)
-      : () => write().autoResolveFromOracle(id)
+      ? () => write('autoResolveFromPolymarket', [id])
+      : () => write('autoResolveFromOracle', [id])
     runTx(fn, `Auto-resolution triggered for wager #${resolveForm.id} on ${networkName(scopeChainId)}`)
   }
 

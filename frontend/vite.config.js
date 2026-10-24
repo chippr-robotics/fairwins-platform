@@ -121,7 +121,12 @@ export default defineConfig({
       // neither holds tests, and both would be scanned on every run.
       'miniapps/*/dist/**',
       'miniapps/*/node_modules/**',
-      '**/useIpfs.test.js'
+      '**/useIpfs.test.js',
+      // Spec 085/110 — the hardware-emulator suite runs on its OWN config
+      // (vitest.hardware.config.js): it needs `environment: 'node'` because Speculos answers with
+      // a chunked body whose first chunk is empty and jsdom's fetch drops it, and it must not load
+      // this config's jsdom setup file. Left in, it fails every ordinary run.
+      'src/test/hardware/speculosDevice.test.js'
     ],
     alias: {
       // Spec 073: `@fairwins/miniapp-sdk` is not an npm package — at runtime the

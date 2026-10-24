@@ -276,9 +276,11 @@ function transportFor(chainId, defaultUrl) {
   return fallback(transports)
 }
 
-// Define supported chains. Polygon mainnet is first so it is wagmi's default
-// chain (used by useChainId when no wallet is connected), matching the primary
-// network. The Testnet/Mainnet toggle still switches to Amoy on demand.
+// Define supported chains. Polygon mainnet is first so it is wagmi's own default chain,
+// matching the primary network. The app no longer READS that default — `useChainId()` is banned
+// (spec 110 Phase 3, #1594) and `useWalletChainId` falls back to the BUILD's `getCurrentChainId()`,
+// which differs from `chains[0]` in a testnet build. The Testnet/Mainnet toggle still switches to
+// Amoy on demand.
 // Exported so config-parity tests can assert every selectable network (config/networks.js)
 // is registered here — otherwise switchChain cannot reach it. Polygon stays first (wagmi
 // default chain — FR-015).

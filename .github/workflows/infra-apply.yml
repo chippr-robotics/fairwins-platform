@@ -26,7 +26,7 @@ permissions:
   actions: read
 
 env:
-  TERRAFORM_VERSION: "1.15.8"
+  TERRAFORM_VERSION: "1.15.9"
 
 # Queue, never cancel. Two infra PRs merging close together would otherwise race for the state lock,
 # with the loser failing after having already passed review. Combined with Terraform's own

@@ -20,9 +20,9 @@
  * it is writing to is the one that supplies the fragments.
  */
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
 import { useWeb3 } from '../../hooks/useWeb3'
 import { useNotification } from '../../hooks/useUI'
+import { errorParser } from '../../lib/evm/revertParser'
 import { describeRevert, extractRevert } from '../../lib/chain/revertError'
 
 /**
@@ -38,7 +38,7 @@ function describeFailure(err, errorAbi) {
   const fallback = err?.shortMessage || err?.message || 'The transaction failed.'
   if (!errorAbi || err?.revert?.name || err?.errorName) return fallback
   try {
-    const named = describeRevert(extractRevert(err, new ethers.Interface(errorAbi)))
+    const named = describeRevert(extractRevert(err, errorParser(errorAbi)))
     return named ? `Refused on-chain: ${named}` : fallback
   } catch {
     // A malformed ABI must never cost the operator the message they would otherwise have had.
