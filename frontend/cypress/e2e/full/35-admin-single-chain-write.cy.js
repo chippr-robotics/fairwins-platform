@@ -116,4 +116,53 @@ describe('Operations: a write acts on one named chain (specs 071 + 093)', () => 
       expect(r.paused, 'unpausing restored the network').to.equal(false)
     })
   })
+
+  it('[AD-07] admin.grant-revoke-operator-role — a grant lands on the contract the picker names, and a revoke removes it', () => {
+    /*
+     * Issue #1228: the Access Control app is the surface that MINTS and removes operator
+     * authority — the highest-consequence write in the console — and until this test no e2e
+     * ever pressed its buttons (AD-01 only proves the tile hides from a guardian).
+     *
+     * Guardian on the WagerRegistry is the role driven: it is the picker's default, its home
+     * contract exists on the local chain, and granting-then-revoking inside one test leaves
+     * the chain exactly as found — so the spec needs no cleanup net for it.
+     */
+    const TARGET = '0xcd3B766CCDd6AE721141F452C550Ca635964ce71' // hardhat #15 — no seeded roles
+    const heldGuardian = () =>
+      cy.task(
+        'chainTx',
+        { action: 'hasAdminRole', args: { role: 'GUARDIAN_ROLE', address: TARGET } },
+        { timeout: 60000 },
+      )
+
+    heldGuardian().should((r) => {
+      expect(r.ok, 'read GUARDIAN_ROLE from the registry').to.equal(true)
+      expect(r.held, 'the target starts without the role').to.equal(false)
+    })
+
+    cy.mockWeb3Provider({ account: GUARDIAN }) // #0 also holds DEFAULT_ADMIN_ROLE, which gates grants
+    cy.visit('/fairwins')
+    cy.connectWallet()
+    cy.visit('/admin/access-control?view=admin-roles')
+
+    // The header names the chain this role's grant SIGNS on (Copilot/spec 071 FR-017) —
+    // for the default Guardian selection that is the scoped chain, which is the wallet's.
+    cy.contains('h3', `Grant / Revoke Admin Roles on ${LOCAL}`, { timeout: 40000 }).should('be.visible')
+
+    cy.get('input[placeholder="0x… or name.eth"]').type(TARGET)
+    cy.contains('button', /^Grant Role$/).should('not.be.disabled').click()
+
+    // Console first (useAdminTx has awaited tx.wait()), then the chain — the same order the
+    // pause flow above justifies: it makes the chain read below unambiguous.
+    cy.contains(/granted guardian to 0xcd3b/i, { timeout: 90000 }).should('be.visible')
+    heldGuardian().should((r) => {
+      expect(r.held, 'the grant reached the registry the picker named').to.equal(true)
+    })
+
+    cy.contains('button', /^Revoke Role$/).should('not.be.disabled').click()
+    cy.contains(/revoked guardian from 0xcd3b/i, { timeout: 90000 }).should('be.visible')
+    heldGuardian().should((r) => {
+      expect(r.held, 'the revoke removed exactly what the grant minted').to.equal(false)
+    })
+  })
 })

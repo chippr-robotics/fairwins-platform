@@ -81,19 +81,33 @@ sys.exit(0 if c and c.get('rpc')=='up' else 1)" 2>/dev/null; then
       # Gas-wallet runway — the numeric check no string matcher can do. If the relay gas wallet runs
       # dry, gasless relaying stops platform-wide and members silently fall back to paying their own
       # gas. Threshold is generous because topping up is a manual, human-latency operation.
+      # ABSENT IS NOT HEALTHY. This check previously read `if r is not None and r < 48`, so a
+      # response with no runway fields at all appended nothing, exited 0 and reported `ok runway`.
+      # The runway numbers live in the DISCLOSED view, so the way they go missing is the probe's own
+      # X-Origin-Auth failing — i.e. exactly when the operator has least reason to trust silence.
+      # A missing number is now its own failure, distinct from a number below the threshold.
       printf '%s' "$status" | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
+chains=(d.get('chains') or {})
 bad=[]
-for cid,c in (d.get('chains') or {}).items():
-    r=c.get('gasWalletRunwayHrs')
-    if r is not None and r < 48: bad.append(f'{cid}:{r}h')
+if not chains:
+    bad.append('no-chains-in-status')
+for cid,c in chains.items():
+    # key absent  => the disclosed view did not arrive (credential/gating problem)
+    # key present, value null => genuinely unknown for this chain (e.g. no paymaster there)
+    if 'gasWalletRunwayHrs' not in c:
+        bad.append(f'{cid}:runway-not-disclosed')
+    else:
+        r=c.get('gasWalletRunwayHrs')
+        if r is None: bad.append(f'{cid}:runway-unreadable')
+        elif r < 48: bad.append(f'{cid}:{r}h')
     p=c.get('paymasterDepositRunwayHrs')
     if p is not None and p < 48: bad.append(f'{cid}-paymaster:{p}h')
 print(' '.join(bad))
 sys.exit(1 if bad else 0)" >/tmp/.probe_runway 2>/dev/null \
         && ok runway \
-        || bad "runway below 48h: $(cat /tmp/.probe_runway 2>/dev/null)"
+        || bad "runway check failed: $(cat /tmp/.probe_runway 2>/dev/null)"
     fi
 
     # The engine is the piece whose death is invisible from the public surface: the gateway keeps
@@ -113,6 +127,32 @@ sys.exit(1 if bad else 0)" >/tmp/.probe_runway 2>/dev/null \
       ok engine
     else
       bad "OZ relayer engine not answering — relaying is down (intents will self-submit)"
+    fi
+
+    # A LIVE engine can still be STUCK (issue #1648, upstream OpenZeppelin/openzeppelin-relayer#808,
+    # present from v1.4.0 through v1.8.0). Once a gas spike pushes the minimum replacement price
+    # above `gas_price_cap`, the engine logs "bumped gas price does not meet minimum requirement,
+    # skipping resubmission" and returns without repricing. The tx stays `submitted`, /api/v1/health
+    # stays green, and every later tx on that lane queues behind the stuck nonce. That log line is the
+    # ONLY signal. Until #1653 the engine logged to the json-file driver, so the line never reached
+    # Cloud Logging on its own; it now also ships via gcplogs (docker logs keeps working through
+    # Docker's dual-logging cache, which is what this reads). This check stays as the BACKSTOP: it does
+    # not depend on the log shipper or on a log-based metric, and re-emitting the line here puts it on
+    # the probe's FAIL path, which already pages.
+    #
+    # --since 120s overlaps the 60s timer on purpose: a minute lost to a slow `docker exec` above
+    # must not hide a hit. Double-counting is harmless; the alert counts FAIL lines, not hits.
+    # An unreadable log is its own failure, never a pass. Runbook:
+    # docs/runbooks/relayer-operations.md#stuck-transactions
+    if engine_logs="$(docker logs --since 120s fairwins-gateway-engine 2>&1)"; then
+      stuck="$(printf '%s' "$engine_logs" | grep -c 'skipping resubmission' || true)"
+      if [ "${stuck:-0}" -gt 0 ]; then
+        bad "relay lane STUCK at gas_price_cap — engine skipped resubmission ${stuck}x in 120s (runbook: relayer-operations.md#stuck-transactions)"
+      else
+        ok engine-resubmission
+      fi
+    else
+      bad "engine logs unreadable — cannot rule out a stuck lane"
     fi
     ;;
   *) bad "unknown role"; ;;

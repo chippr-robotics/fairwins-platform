@@ -1,9 +1,10 @@
-previous: v1.11.0
-commits:  4
-  [unclassified] Merge pull request #1323 from chippr-robotics/hotfix/networks-e2e-cohort-seams
-  [test -> patch] carry the E2E cohort seams in networks.js to main
-  [unclassified] Merge pull request #1221 from chippr-robotics/release/v1.11.0-changelog
-  [skipped] chore(release): v1.11.0 [skip release]
+previous: v1.19.0
+commits:  5
+  [unclassified] Merge pull request #1645 from chippr-robotics/hotfix/dependency-alerts
+  [fix -> patch] drop the cdp-sdk axios acceptance the override resolves
+  [fix -> patch] patch decompress, axios and grpc-js advisories
+  [unclassified] Merge pull request #1639 from chippr-robotics/release/v1.19.0-changelog
+  [skipped] chore(release): v1.19.0 [skip release]
 bump:     patch
 reason:   computed
-next:     v1.11.1
+next:     v1.19.1

@@ -14,6 +14,1100 @@ production releases are.
 
 <!-- RELEASES:START -->
 
+## v1.19.1 — 2026-10-04
+
+Promoted from: none — released directly from main
+Previous release: v1.19.0 · Range: `v1.19.0..v1.19.1` (5 commits)
+
+### 🐛 Bug Fixes
+
+- fix(deps): drop the cdp-sdk axios acceptance the override resolves
+- fix(deps): patch decompress, axios and grpc-js advisories
+
+### Artifacts
+
+Range: `v1.19.0..v1.19.1`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.19.1)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.19.1.aab` | `da21a78b9ee9cc140f78207f5b7ba2316b77996696cc608ce8c3c2d455780ef2` | yes |
+| ios | `FairWins-v1.19.1-ios.xcarchive.zip` | `1e8d53d40326e7d84ffd1dbe6702ff40bcbbf79a0887ed4195fd676c9b539f76` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
+## v1.19.0 — 2026-09-22
+
+Promoted from: v1.19.0-rc.33
+Previous release: v1.18.0 · Range: `v1.18.0..v1.19.0` (212 commits)
+
+### 🚀 Features
+
+- feat(110): the wager list is the estate, and the action goes to the wager's chain
+- feat(110): the hardware signer on viem, with the emulator as its oracle
+- feat(110): the local-key rail — legacyKeys off ethers, and three divergences
+- feat(110): the ethers-shaped signer, on viem — built and proven, not yet wired
+- feat(110): T027 — the intent rail signs the chain it names
+- feat(110): T024 — submitOn, the one place a write names its chain
+- feat(110): two BIP-39 files leave ethers, and the reason they could not was wrong
+- feat(110): T020 — offline signature recovery leaves ethers, staying synchronous
+- feat(110): the legacy v1 event source scans through logScan
+- feat(110): both custody policy engines read on a named chain
+- feat(110): the liquidity and quote fixtures decode with viem
+- feat(110): the Supply surface and the acceptance page read on a named chain
+- feat(110): bridge status reads both chains through the chain seam
+- feat(110): a vault's queue reads each network by name, not by connection
+- feat(110): the Safe transaction encoders leave ethers
+- feat(110): GMX calldata and the DataStore read leave ethers
+- feat(110): the GMX stuck-order fold reads on a named chain
+- feat(110): the perps entry and position sheets read on a named chain
+- feat(110): convert the Gains venue encoder and the Control Room pause sweep
+- feat(110): the Predict approval check names its chain and keeps its injection seam
+- feat(110): the bridge and supply routers' authority read names its chain
+- feat(110): move the notification sources onto the chain seam
+- feat(110): move the wager registry RPC source and the swap quote onto the seam
+- feat(110): the sanctions pre-check reads a chain it was TOLD, not one it asked the wire for
+- feat(110): move the mini-app registry catalog reads onto the chain seam
+- feat(110): move address screening, membership reads and tier prices onto the seam
+- feat(110): move the Across LP client, curator authority and swap balances onto the seam
+- feat(110): encode and decode the batched balance reads with viem
+- feat(110): move the estate authority read and the stats hooks onto the chain seam
+- feat(110): move staking, platform fees and the tax report onto the chain seam
+- feat(110): convert the registry-metrics, treasury-stats and perps-positions hooks
+- feat(110): convert the liquidity router and Uniswap position libs onto the seam
+- feat(110): convert the bridge router lib onto the seam; normalizeAbi learns ethers tuple syntax
+- feat(110): convert custody transfer building, proposal describing and vault proposal reads
+- feat(110): eventScanHandle — the seam's twin of Contract for logScan callers
+- feat(110): convert the fee estate and earn notification reads onto the seam
+- feat(110): convert perps venue status and portfolio prices onto the read seam
+- feat(110): viem-side test seam + first read-path conversions (callsigns, perps fee units)
+- feat(110): the viem read seam — getPublicClient(chainId) + readContract(chainId, …)
+- feat(110): Phase 0 — pure-util codemod to viem, ethers import ratchet, viem as a host shared module
+- feat(finops): catalogue The Graph, and split the modeller it exposed
+- feat(finops): catalogue Pinata, with a read-scoped key that is not the pinning JWT
+- feat(109): rank the token-news card instead of listing it
+
+### 🐛 Bug Fixes
+
+- fix(1628): the FinOps gate suite races itself across test files
+- fix(1628): subgraph deploy scripts target the slugs that actually serve
+- fix(1628): step 1 of the WIF recovery is a replace, not an additive grant
+- fix(1628): the rename recovery must not widen the apply identity
+- fix(1628): the rename broke GCP Workload Identity Federation — repoint it and document recovery
+- fix(110): the re-entry must be declared after the ref it reads, and read a live signer
+- fix(110): settle on both paths, and arm the re-entry before the await
+- fix(110): never broadcast with the pre-switch signer, and don't read a chain we can't reach
+- fix(110): the modal was filtering the estate back down to the wallet's chain
+- fix(085): argv arrays instead of shell strings, and drop a no-op replace
+- fix(110): the provider is handed to OTHER libraries, so its surface is theirs
+- fix(110): the wallet signer must report the chain it was BUILT for
+- fix(110): the viem transport retried where ethers made one request
+- fix(110): StakingTab's pause and address forms were dead — write() became a function
+- fix(110): a focus assertion that pinned an instant, not an outcome
+- fix(110): a viem error hides the revert bytes behind `cause`
+- fix(110): parseUnits rounded what ethers refused — a silent amount change
+- fix(110): freeze the mnemonic fixtures — the test was flaky 1 run in 15
+- fix(110): restore the mnemonic refusal, and retire a twice-wrong allowlist reason
+- fix(110): divergence 13 — decoded error args lose their names on viem
+- fix(110): T026a follow-up — the unified wrap refusal, pinned where it can fail early
+- fix(110): T026b — sendCalls refuses a chain it cannot be pinned to
+- fix(110): T026a — the fourth settle loop had the check the other three lacked
+- fix(ci): give the fast E2E tier the Cypress binary guard the other tiers have
+- fix(110): a log scan's head must never come from viem's block cache
+- fix(e2e): give FEE-01's deposit confirmation the 90s it was written to have
+- fix(screening): the source list scrolls instead of outgrowing the modal it opens in
+- fix(screening): an unreadable list gives a member a sentence, not a library's diagnostic
+- fix(110): restore parameter names on multi-output reads — an empty list is not "you have none"
+- fix(110): units seam emitted a decimal point at zero decimals, where ethers emits none
+- fix(docs): name the search dialog and adopt the contrast-safe token export
+- fix(finops): bound the boot fan-out, and pace outbound RPC
+- fix(finops): QuickNode reports data.credits_used, which we never asked for
+- fix(finops): C6 matches a parsed HOST, not a substring of the file
+- fix(finops): the exporter never listened, so every panel read "no data"
+- fix(security): a green dry run is not a working credential (X-08)
+- fix(security): only a plan merged on staging may be applied (X-07)
+- fix(security): the #1520 dismissal reasoning was wrong about why
+- fix(address-book): one book per panel, and a status role on the loading tag
+- fix(address-book): export/import in plain text, on every account type
+- fix(1562): point the Cypress ETC stubs at the endpoint the app now resolves
+- fix(1562): hoist the service worker's same-origin check out of the fetch handler
+- fix(1562): four production console defects — dead ETC RPC, SW undefined-Response, unmapped STAKING_ADMIN, aria-hidden over focus
+- fix(087): run the staging services as an account that can do nothing
+
+### ♻️ Refactoring
+
+- refactor(110): ban the ambient chain — 17 useChainId call sites to 0
+- refactor(110): WalletContext hands out the viem-backed signer
+- refactor(110): the endgame is three files, and one of them was never mounted
+- refactor(110): blockchainService off ethers, and four paths nobody calls
+- refactor(110): My Wagers off ethers, and `toMatch(/^0x/)` is not an assertion
+- refactor(110): the acting-account seam and account recovery, with the tests they lacked
+- refactor(110): DexContext off ethers, and a spec-069 bypass on the cross-chain quote
+- refactor(110): the accept modal off ethers, closing the loop on its own test
+- refactor(110): friend-market creation off ethers — 736 lines, five rails, no new divergence
+- refactor(110): open challenges off ethers, and the divergence that costs nine sentences
+- refactor(110): transfers off ethers, on the first money path to use the new read routing
+- refactor(110): vouchers off ethers, and the overload that viem will not name
+- refactor(110): wager pools off ethers — the deferral's trigger, one batch later
+- refactor(110): funding pools off ethers — the deferral's own trigger, fired
+- refactor(110): useNullifierContracts, and the read seam finally gets a test
+- refactor(110): useVaultProposals off ethers, and the custody writes get a test
+- refactor(110): the last three admin tabs, and a history scan that failed silently
+- refactor(110): ProtocolConfigTab + OracleAdaptersTab, and viem refuses Uint8Array for bytes
+- refactor(110): CallsignRegistryAdmin off ethers, and give the read path a test
+- refactor(110): MembershipRevenueApp off ethers, and two flaws in my own new tests
+- refactor(110): AccessControlApp off ethers — the role grants
+- refactor(110): the spec-067 router pair off ethers, and viem is stricter on bool
+- refactor(110): three small admin files, and a spec-069 bypass on two pause dashboards
+- refactor(110): take the FeeRouter cluster off ethers, and fix a two-chain read
+- refactor(110): lift getLogsRange out of the DAO connector it never belonged in
+- refactor(110): T028 batch 10 — SubmitAppPanel, and a mock pattern worth naming
+- refactor(110): T028 batch 9 — CallsignPanel, with both read shapes measured first
+- refactor(110): T028 batch 8 — MiniAppReviewTab, and a mock that had been retired
+- refactor(110): T028 batch 7 — claim-code derivation, and fixtures that freeze it
+- refactor(110): T028 batch 6 — a viem parseError, without touching revertError
+- refactor(110): T028 batch 5 — the passkey envelope, and a primary type that is inferred
+- refactor(110): T028 batch 4 — the other two EIP-3009 paths onto the shared split
+- refactor(110): T028 batch 3 — one signature split, and the money path off ethers
+- refactor(110): T028 batch 2 — proposalHub off ethers, one encoder per call
+- refactor(110): T028 batch 1 — delete a dead crypto module, convert two more
+- refactor(110): T026 — one settle loop, and a personal send that names its chain
+- refactor(110): T025 — the write rail is a chain question, not a custody one
+- refactor(110): encode the group-pay transfers with viem
+- refactor(110): hash the pool payout matrix with viem, and name what cannot be converted
+
+### 📚 Documentation
+
+- docs(1628): run step 2 of the WIF recovery before step 1
+- docs(1628): the MCP config example shows the clone path under its current name
+- docs(1628): finish the Tier B sweep. Close the misses that change behaviour
+- docs(1628): follow the repo rename through — Tier B URLs, and correct the README pin
+- docs(1613,1617): stop claiming these contracts are audited, and name the repo honestly
+- docs(110): record what the T028 endgame actually owes, measured
+- docs(110): record the clearpath connector deferral and why it is different
+- docs(110): divergence 14 — an indexed log topic comes out in the wrong case
+- docs(110): the no-chain E2E tier runs locally in ~90 seconds
+- docs(110): record why keyRegistryService is deferred, not converted
+- docs(110): record the mnemonic-validation trap before T022 is attempted
+- docs(110): actually apply the BIP-39 correction to tasks.md
+- docs(110): close out Phase 1 and record what de-risks T020
+- docs(110): record what blocks the last read-path conversion
+- docs(110): record Phase 1 progress and the two decoder differences in tasks.md
+- docs(site): keep the dark toggle — the export now scopes the palette per scheme
+- docs(site): adopt the Chippr brand tokens and self-hosted faces
+- spec(110): plan and tasks — chain-abstracted writes on a single EVM seam
+- spec(110): name the phase sub-issues in the delivery assumption
+- spec(110): reserve — multichain-write-seam
+- docs(architecture): add the architecture workbook — three views and six annexes
+- docs(architecture): scaffold the architecture workbook index
+- docs: only ONE of the two saved-contact pickers was migrated in #1458
+- docs: spec-021 FR-032 was never missing — it is spec 067's
+
+### 🧪 Tests
+
+- test(110): one refusal sentence, proven across surfaces — and a fifth private copy
+- test(085): drive the hardware signer against real Ledger firmware, and fix what it found
+- test(110): the nonce floor is per (account, CHAIN), asserted rather than read
+- test(110): make the retired-mock class a gate instead of a discovery
+- test(callsigns): re-point the co-located resolveCallsign harness at the read seam
+- test(e2e): widen the DSH-10 banner wait again — the role sweep it depends on tipped 30s
+- test(perps): anchor the phase-0 read-only assertion on the row, not the header
+- test(security): keep a test title out of the import scanner's path
+- test(1562): size DSH-10's wait to the sequential role sweep it actually waits on
+
+### 🏗️ Infrastructure
+
+- ci(085): least-privilege token on the hardware-emulator workflow
+- build(gateway): pin finops-52fdb6e2 — the two fixes the working image exposed
+- build(deps): refresh the lockfile and re-record the mini-app byte baseline
+- build(deps): refresh the lockfile and re-record the mini-app byte baseline
+- build(gateway): pin the first finops image that actually serves
+- ci(finops): smoke the exporter image, and require it to still be alive after
+
+### 🧹 Maintenance
+
+- chore(1628): record bootstrap state after the WIF repoint
+- chore(110): delete useTreasuryVault — dead code for an archived contract
+- chore(security): declare and execute the OpenZeppelin alert dismissals
+- chore(deps): Bump @uniswap/sdk-core from 7.19.1 to 7.19.2
+- chore(deps): Bump viem from 2.56.0 to 2.56.3
+- chore(deps): Bump @capacitor/core from 8.5.0 to 8.5.1
+
+### Artifacts
+
+Range: `v1.18.0..v1.19.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | moved | `api-access` v1.0.2<br>`clearpath` v1.2.1<br>`token-mint` v1.0.3 |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.19.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.19.0.aab` | `5a247ddf5d6a4009774ab967b2bad2b1c6bf7b5bf1c12a08fa1cafbdf3996db0` | yes |
+| ios | `FairWins-v1.19.0-ios.xcarchive.zip` | `5549052aea8ed6cd1c258562bd31d98bc600de32d63039a1b4e0cc4930a495ea` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
+## v1.18.0 — 2026-09-08
+
+Promoted from: v1.18.0-rc.26
+Previous release: v1.17.0 · Range: `v1.17.0..v1.18.0` (100 commits)
+
+### 🚀 Features
+
+- feat(1378): declare the Android upload-key reader, scoped to exactly two secrets
+- feat(finops): the nonce signal actually emits, and gains the demand to read it against
+- feat(109): enable token news on the gateway, and make the rollout order safe
+- feat(109): closers — FinOps entry, e2e coverage, docs (Phase 6)
+- feat(109): assistant get_token_news tool (US3)
+- feat(109): trade-pair news feed (US2)
+- feat(109): portfolio token news card (US1)
+- feat(109): gateway news read-proxy and curated asset-news mapping seam
+- feat(finops): observe the executor's NONCE, because balance cannot see a stall
+- feat(screening): screen an entered address against every list on every cohort chain (#1458)
+- feat(passkey): enumerate creation nonces so leg A can find a retried account
+- feat(108): multi-currency wrap/unwrap — the asset is the entry point
+- feat(ops): measure deploy blocks from public sources, and record accountFactory
+
+### 🐛 Bug Fixes
+
+- fix(screening): make the estate screen readable on testnet, and the notice legible
+- fix(109): report the news module in /status so the pre-pin check can run
+- fix(perps): hold the market controls to the 36px floor the comment claims
+- fix(perps): collapse the market filters so the table gets the viewport
+- fix(109): make the token-news e2e spec actually run
+- fix(passkey): the bundler list finally submits through more than its first entry
+- fix(109): check news liveness before validation, and pin the order
+- fix(payments): withdraw the multi-recipient affordance from the send surfaces
+- fix(bundler): the single-alto gate enforced per-HOST a rule that is per-KEY
+- fix(e2e-matrix): repoint spec-104 recovery rows at open tracker #1514
+- fix(build): a build arg the Dockerfile never declares is silently dropped
+- fix(106): `enforcing` is operator-only, and FR-015 moves to boot where it belongs
+- fix(screening): the Unscreened sentence names uncovered networks even when sources existed
+- fix(e2e-matrix): repoint the spec-104 gap rows at open tracker #1504
+- fix(108): make the local wrapper real, settle on a verified signer, and keep a typed amount
+- fix(ops): validate the address and topic before they reach a URL
+- fix(ops): stop building regexes from --contract (CodeQL, 2 high)
+- fix(e2e): fast/48 tests the cohort the fast build actually resolves
+- fix(e2e-matrix): spec-108 rows use the declared risk enum
+- fix(e2e-matrix): repoint spec-105 partial rows at open tracker #1494
+- fix(ci): gh issue close has no --comment-file flag
+
+### 📚 Documentation
+
+- docs(109): fix two spec comments left describing the replaced stub
+- docs(109): correct why the e2e spec stubs every provider host
+- spec(109): tasks — dependency-ordered task list for token news
+- spec(109): address review — concrete SC-005 bound, story-vs-issue priority note
+- spec(109): specify — token news on portfolio and trade surfaces
+- docs(G-11): the rule was about a service name; the invariant is about a key
+- spec(109): reserve — token-news
+- docs(bundler): three documents that would cause the incident they warn about
+- docs(research): evaluate issue #1465 (token news + agent context) against the estate
+- docs(107): the keyed RPC access runbook, written from the live-fire run
+- docs(108): actor-critic screenshots (round 1 clean) + lint-clean return
+- docs(108): plan, research, data model, quickstart, tasks
+- spec(108): keep matrix.json's original unicode escaping
+- spec(108): reserve — multi-currency-wrap
+
+### 🧪 Tests
+
+- test(recover): keep the real ethers around the Contract stub
+- test(109): the MCP server serves nine tools, not eight
+- test(e2e): MS-06 scrolls the pill's details into view before asserting on them
+- test(108): e2e for the multi-currency picker + cross-chain submit, docs
+- test(api-access): the unreachable arm must leave chain height readable, or nothing ever recovers
+- test(api-access): stub BOTH provider rungs in API-05's unreachable arm
+
+### 🏗️ Infrastructure
+
+- ci: gate dependency vulnerabilities instead of only reporting them
+
+### 🧹 Maintenance
+
+- chore(1378): create the Android upload-key reader identity
+- chore(109): pin the gateway image that actually carries the news module
+- chore(native): sync the shells to v1.17.0 — ported base-branch fix
+- revert(e2e): drop the superseded API-05 alias/wait delta — branch now matches staging
+
+### Artifacts
+
+Range: `v1.17.0..v1.18.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | moved | `amoy-chain80002-v2/membershipManagerImpl` → `0xb6499596703cEE6eA4BE5b5F01DEc4d7ccfe10bD`<br>`amoy-chain80002-v2/wagerRegistryImpl` → `0xa2176F5Fea39888cD1697Be4651415490C78905d`<br>`amoy-chain80002-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`arbitrum-chain42161-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`arbitrum-chain42161-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`arbitrum-chain42161-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`arbitrum-chain42161-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`base-chain8453-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`base-chain8453-v2/bridgeRouterImpl` → `0x41ba6bcA216bd6A4c5A0Bf8F9b2d682ec0a879D5`<br>`base-chain8453-v2/liquidityRouterImpl` → `0x7Af46728e7c969b75723398E3f93b565E968A3bA`<br>`base-chain8453-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`etc-chain61-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mainnet-chain1-v2/feeRouterImpl` → `0x5cCd55D62Ce7Df730c39543B332dD8d6054B5d00`<br>`mainnet-chain1-v2/bridgeRouterImpl` → `0xcA277Cc3485Da12771d6171a9D0A894B8DD159f8`<br>`mainnet-chain1-v2/liquidityRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`mainnet-chain1-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/membershipManagerImpl` → `0x7D38F7Ef26f7E2409d5C04a62c1d9A3Ec002A49e`<br>`mordor-chain63-v2/wagerRegistryImpl` → `0x9FfE701be18Ff033706f2df19cd8730F5CB884B2`<br>`mordor-chain63-v2/tokenFactoryImpl` → `0x135108EB6f81e361b6cF131d2Cb9A01E92Cd8ED9`<br>`mordor-chain63-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`mordor-chain63-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`mordor-chain63-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`mordor-chain63-v2/openERC20V2Impl` → `0x92169007926fBc8Ac90cdD311dD3C2557158C395`<br>`mordor-chain63-v2/openERC721V2Impl` → `0xEeaBC05214FF0C42cbA42b365aB400b7ca4311cE`<br>`mordor-chain63-v2/restrictedERC20V2Impl` → `0x664d87bed13ea4D50Cd3da8e0aC5A8D70A302A0B`<br>`mordor-chain63-v2/externalDAORegistryImpl` → `0x28270cB71E87D2D6C662e61CFE6eD02d05d43B7A`<br>`mordor-chain63-v2/zkWagerPoolFactoryImpl` → `0xd3e851FDDa9D5796D503daFd34b2403D7336d9fD`<br>`mordor-chain63-v2/poolImpl` → `0xd0b94a77DA7Aaa488343CF89978f1Bbf9E72E277`<br>`mordor-chain63-v2/wagerPoolFactoryImpl` → `0xfB6F9F7EfD86a220eE1aD7906278247051B25430`<br>`mordor-chain63-v2/feeRouterImpl` → `0x744b8E56d84bb8D7657b2Bb13426cB882c93B7E6`<br>`mordor-chain63-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/miniAppRegistryImpl` → `0xc8Dd8601b35aDa3AF367C9E41f24Fd0503Ced674`<br>`optimism-chain10-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`optimism-chain10-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`optimism-chain10-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`optimism-chain10-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/membershipManagerImpl` → `0x7177470fE3c5D89CEf965A596540E57cE290C939`<br>`polygon-chain137-v2/wagerRegistryImpl` → `0x9c52C1ef4Bbe65CF19a5C26bebD4A22100964898`<br>`polygon-chain137-v2/tokenFactoryImpl` → `0xE819f7b672D81A8b78d40b1C99Fe5d646513D12C`<br>`polygon-chain137-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`polygon-chain137-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`polygon-chain137-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`polygon-chain137-v2/wagerPoolFactoryImpl` → `0x754d8aa4785Ec4bEE7c921f8d032D5E3a78d9308`<br>`polygon-chain137-v2/poolImpl` → `0xB153e4456FaD1A7E96e35e14094Cf6964348BC40`<br>`polygon-chain137-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/callsignRegistryImpl` → `0xD220D34ed2148B9F4DC65C1bc75169D7DECFBB49`<br>`polygon-chain137-v2/feeRouterImpl` → `0x40ee755246E60f66E7bA425F99C6d704859d38db`<br>`polygon-chain137-v2/bridgeRouterImpl` → `0x8F7A7e7437733326BD2F8045BFceD9B821aF1De1`<br>`polygon-chain137-v2/liquidityRouterImpl` → `0x33818052Ca8B5b8Bb9777Bf6eBbaFCD8Faae6e65`<br>`polygon-chain137-v2/miniAppRegistryImpl` → `0x41858006aD6dd0788b84F9fb17A28d8167C7b331` |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.18.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.18.0.aab` | `c5c94a1ce6687074680c4d07495f4f3cb704329334f7478fe61a0862e7541a89` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+| ios | `FairWins-v1.18.0-ios.xcarchive.zip` | `482b766e650ae967db6471a9a4c55ae03d856424ce15da1576dd6b9d3112a2d4` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
+## v1.17.0 — 2026-09-06
+
+Promoted from: v1.17.0-rc.24
+Previous release: v1.16.1 · Range: `v1.16.1..v1.17.0` (117 commits)
+
+### 🚀 Features
+
+- feat(107): the wagmi rail rides issued access, and degradation gets its sentence
+- feat(107): deliver the issuance credentials, adopt the key, arm observe mode
+- feat(105): usage gets a kind, the catalogue gets the gateway, and a gate catches its author
+- feat(105): say what is enforcing, fail what would publish, write it down
+- feat(105): SIGHUP reloads the operational switches; SIGUSR2 keeps its meaning
+- feat(105): proof of human — a challenge buys throughput, never entry
+- feat(106): the client half — issued access, held in memory, injected per request
+- feat(106): the issuance route, dormant until an endpoint exists
+- feat(ci): close issues on staging merge, and skip the E2E tiers for inert changes
+- feat(process): coordinated multi-agent development flow (#1460)
+- feat(105): bound each upstream before the call, not after
+- feat(105): enforce route minimums, behind a second switch
+- feat(105): prove control of an account without demanding a purchase
+- feat(105): resolve who is calling, and deliberately enforce nothing yet
+- feat(105): queue readability, load-sheet polish, retired wizard, suites migrated
+- feat(105): details is one card — network rows, shared facts with named drift, inline deploy-later
+- feat(105): four-sheet guided creation flow + deployment orchestrator hook
+- feat(105): creation records, semantic rules realization, deployment core, proposal decode
+- feat(assistant): Assistant tab in Tools, provider chooser, GutterToken key surfaces (spec 104 WP-C)
+- feat(assistant): provider seam, GutterToken client, key store and client-side tool loop (spec 104 WP-B)
+- feat(assistant): gateway tool loop, MCP snapshot parity, legal/FinOps/tenant/docs (spec 104 WP-A/WP-D)
+- feat(assistant-contract): prompt, tool table and honest result helpers
+- feat(assistant): scaffold spec 104 — assistant-contract workspace package + spec artifacts
+- feat(104): look a passkey's account up, never derive one and hope
+- feat(passkey): name a saved passkey after the account it signs for (#1425)
+
+### 🐛 Bug Fixes
+
+- fix(e2e): the multi-network coverage rows cite an OPEN tracker again
+- fix(rpc): a FallbackProvider that lost both rails once was dead until reload
+- fix(ci): drop codeql.yml's base-branch filter on pull_request
+- fix(e2e): stub BOTH rpc rails — the drpc failover was answering for a 'failed' chain
+- fix(ci): declare CodeQL's languages instead of letting it infer Swift
+- fix(ansible): converge the legacy Docker repo entry away instead of colliding with it
+- fix(ansible): the per-node playbooks could not see group_vars
+- fix(ci): close-linked-issues used a gh flag that does not exist
+- fix(membership): bound the membership read so "unreadable" is reachable
+- fix(custody): address every propose-mode install call — the hub emit leaked its sendCalls shape
+- fix(107): unused param the full-suite lint caught and scoped runs cannot
+- fix(106): the new spec-registry gate is right, and this branch yields the number
+- fix(ci): a closing keyword only counts at the start of a line
+- fix(docs): a staging merge does not close an issue — closing is deliberate
+- fix(specs): record the 104 collision the gate caught on its first CI run
+- fix(106): the lockout was never real; the capacity ceiling is
+- fix(105): quotas metered nothing, because callers chose their own key
+- fix(pinata): the pin proxy was a wildcard into Pinata with ACAO:*
+- fix(spa-image): copy @fairwins/assistant-contract into both build stages
+- fix(assistant-tests): compare parsed URL origin, not a substring prefix
+- fix(relay-gateway): reword a describe title the dependency scanner misreads
+- fix(relay-gateway): copy @fairwins/assistant-contract into both image stages
+- fix(e2e): drop the mainnet RPC stub — it broke the verify tests it never needed to touch
+- fix(custody): choose the write rail by the signer, and stop the tick waiting on mainnet
+- fix(104): offer a not-yet-deployed account instead of refusing it
+- fix(104): make the recovery spec run, and stop two honesty bugs it exposed
+- fix(release): sync the native shells into the release record (#1424)
+
+### ⚡ Performance
+
+- perf(1459): one multicall per chain, not one request per asset
+
+### ♻️ Refactoring
+
+- refactor(process): drop the status mirror; derive state from the repo (#1460)
+
+### 📚 Documentation
+
+- docs(membership): say what the sub-ceiling guarantees, not an ordering
+- docs(custody): multi-network staging protocol, round-2 screenshot record, and a readable drift disclosure
+- docs: the Projects v2 API is real, and GitHub's built-in workflows already move the board
+- docs(labels): correct the stale labels-sync header (Copilot review)
+- docs(106): the fan-out is the problem, not the plan
+- docs(105): matrix rows + regenerated coverage doc, developer guide, guardrail, screenshots
+- docs(105): T026-T028 done — quota re-keying landed
+- docs(105): track the remaining slices as issues
+- spec(105): research says three of my own assumptions were wrong
+- spec(105): guided multichain vault creation — one vault, chosen networks
+- docs(assistant): actor-critic screenshot record and spec-104 task closure (WP-F)
+- docs(research): answer the GutterToken wallet sign-in question from the live signup flow
+- docs(research): add Part II — the MCP server and a client-side tool loop
+- docs(research): evaluate GutterToken as a member-paid assistant rail
+- spec(105): keyed read capacity is issued at runtime, not compiled in
+- spec(104): add the coverage matrix row for the new spec directory
+- spec(105): authenticate the caller, not the network path
+- spec(104): passkey account recovery — find the account, never guess it
+
+### 🧪 Tests
+
+- test(api-access): port #1484's API-05 fix so this PR can reach green
+- test(membership): assert the ceiling's magnitude, not just its existence
+- test(custody): give loadVault the same 60s card deadline the create flow already has
+- test(custody): count the direct install's two Safe transactions in RL-01's nonce arithmetic
+- test(custody): chain-judged rules-lane legs and the passkey one-batch create (spec 105)
+- test(105): e2e migrated to the guided flow, new create-flow spec, queue/details cases
+- test(e2e): spec-104 coverage rows and the two-rail assistant flows (WP-E)
+
+### 🏗️ Infrastructure
+
+- build(gateway): run the spec-106/107 gateway and finops images
+
+### 🧹 Maintenance
+
+- chore(assistant-contract): drop the hand-written version field
+- chore(deps): bump @scure/bip39 from 2.3.0 to 2.4.0
+
+### Artifacts
+
+Range: `v1.16.1..v1.17.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.17.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.17.0.aab` | `4c7519f3e05d3a8051805914a1f87e39a4f36964435cdc3ee564dbff25a9d752` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+| ios | `FairWins-v1.17.0-ios.xcarchive.zip` | `61dd65c52114185f7bb80daab87f947a795da6f23c04836dfd53c04ef2789219` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
+## v1.16.1 — 2026-09-04
+
+Promoted from: none — released directly from main
+Previous release: v1.16.0 · Range: `v1.16.0..v1.16.1` (8 commits)
+
+### 🐛 Bug Fixes
+
+- fix(passkey): report a credential mismatch out loud, and keep the signal off the bridge
+- fix(passkey): fall back to the platform's own list when a pinned request goes unanswered
+- fix(release): sync the native shells into the release record
+- fix(passkey): never let an unanswered prompt lock a member out
+
+### Artifacts
+
+Range: `v1.16.0..v1.16.1`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.16.1)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.16.1.aab` | `3c0f9c219e78678374b93e233fc7c922e30f9ef51870a4e099f4cabb53966fce` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+| ios | `FairWins-v1.16.1-ios.xcarchive.zip` | `2baafb8aa55aa67611f26c8f1050ff3c31c1b6810adb480a6824b7d5aae309cd` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
+## v1.16.0 — 2026-09-04
+
+Promoted from: v1.16.0-rc.15
+Previous release: v1.15.2 · Range: `v1.15.2..v1.16.0` (93 commits)
+
+### 🚀 Features
+
+- feat(custody): the vault queue can be re-read, and says so (spec 102)
+- feat(custody): compact vault cards and the three-view vault sheet (spec 102)
+- feat(custody): vault groups, cross-chain queue reads, load-all, acting identity follows the wallet (spec 102)
+- feat(wallet): one display formatter for balances in Wrap, Transfer and the asset picker (spec 102 US7)
+- feat(funding-pools): pool money toward a goal from Request ▸ Pool (spec 102)
+- feat(097): provision per-chain QuickNode endpoints for the four EVM mainnets (#1403)
+- feat(061): light up Bitcoin on the production gateway (#1393)
+- feat(native): tenant native-identity proof and onboarding docs (spec 102, T029-T030)
+- feat(native): universal/app links land on the linked surface (spec 102, T027-T028)
+- feat(native): Ledger BLE rung behind the one hardware seam (spec 102, T024-T026)
+- feat(release): native channel artifacts in the release chain (spec 102, T019-T023)
+- feat(native): platform passkey bridge behind the credential seam (spec 102, T016-T018)
+- feat(native): US1+US2 seams — capability notices, support floor, lifecycle app-lock (spec 102, T010-T015)
+- feat(native): foundational seams — runtime, tenant identity, version sync, CSP parity (spec 102, T005-T009)
+- feat(native): add Capacitor platforms and shells for iOS/Android channels (spec 102, T001-T004)
+- feat(infra): adopt the numbered QuickNode multichain endpoints (#1378 E)
+
+### 🐛 Bug Fixes
+
+- fix(native): cold-start deep links, Android smoke as a file, and stale comments (#1421)
+- fix(release): unblock the native channel gate, and check it before main (#1419)
+- fix(custody): one queue row per proposal, whatever the scan returns (spec 102)
+- fix(custody): an instance the list could not read gets an honest queue entry (spec 102)
+- fix(custody): queue reads settle at a ceiling; cards carry a live pending count (spec 102)
+- fix(recovery): give the unlocked legacy signer its own nonce count
+- fix(e2e): passkey full-stack — lazy account reads, remove-by-index, testnet portfolio opt-in
+- fix(funding-pools): judge deadlines by the chain clock; order e2e chain reads after the page renders
+- fix(e2e): CORS front for alto, payment-token decimals in tier prices, RC-04 copy
+- fix: close #1405 #1407 #1408 by implementation, and drive the tranche-1 tiers to green
+- fix(e2e): fund the impersonated CREATE2 deployer by setBalance and cap the proxy tx gas
+- fix(frontend): four production defects reported from the live node (#1392)
+- fix: restore staging's gates — @solana-program/system 0.14.0 + native shells at v1.15.1 (#1396)
+- fix(e2e): settle finite animations before the a11y scan (spec 094/102)
+- fix(lint): repair the two errors the re-resolved eslint plugins surfaced (spec 102)
+- fix(native): drop unused import in passkeyBridge test (eslint)
+- fix(e2e): match the labels the rows actually render, and scroll the resolve control into view
+- fix(api-access): derive introspection invalidation instead of scheduling it per keystroke
+- fix(recovery): pin every sweep leg to one monotone fee schedule and stop trusting ethers' cached balance read
+- fix(backup): settle the pointer write on the passkey rail; pin the e2e pointer read to one block
+
+### 📚 Documentation
+
+- docs(spec-102): round 6 screenshots — the queue's Refresh, both themes and widths
+- docs(spec-102): record the queue re-read and what running the suite found
+- docs(spec-102): actor-critic screenshot record, four rounds
+- docs(097): correct the QuickNode endpoint facts against the Admin API
+- docs(native): honest matrix rows, CLAUDE.md guardrails, verify pass (spec 102, T031-T033)
+- docs(spec): task breakdown for native release channels (spec 102)
+- docs(spec): plan native release channels — research, data model, seam contracts (spec 102)
+- docs(spec): specify native release channels — iOS, Android, web (spec 102)
+
+### 🧪 Tests
+
+- test(custody): wait for the chain before reading CV-02's queue
+- test(e2e): repair the on-chain custody specs against the vault sheet (spec 102)
+- test(e2e): no-chain coverage for the vault sheet — VS-01…VS-10 + a11y (spec 102)
+- test(custody): PolicyBadge suite fakes the card's queue read (spec 102)
+- test(custody): drive the on-chain custody specs through the vault sheet; governance in Details (spec 102)
+- test(funding-pools): reload before asserting the refund count the page could only learn on load
+- test(e2e): compare BigInts explicitly in SU-01/SU-02 too
+- test(e2e): compare BigInts explicitly in CD-01
+- test(e2e): acting-account purchase and refusals (098), voucher send from portfolio (026)
+- test(e2e): passkey full-stack tier (bundler + paymaster), ClearPath, app lock, Bitcoin card, BLE
+- test(e2e): group settlement on chain (058), and every absent row now cites #1400
+- test(e2e): accept the clock-derived 'Pending Resolution' badge on Active wagers
+- test(e2e): match the creator's 'Under Consideration' row label in RES-12
+- test(e2e): api-access console through the real registry path, and the matrix rows for the batch (#1285)
+- test(e2e): establish money-path preconditions instead of snapshotting for them (#1250, #1327 lead 2, #1240)
+
+### 🏗️ Infrastructure
+
+- ci: re-measure the on-chain tier, and stop a timed-out leg reporting green
+- ci(e2e): gate absent matrix rows on an OPEN tracking issue; record the #1400 §B decision
+
+### 🧹 Maintenance
+
+- style(custody): the queue's Refresh stays with its summary on a phone (spec 102)
+- style(custody): sheet forms take the app's chrome; details and queue rows tightened (spec 102)
+- chore(spec): renumber funding pools to spec 103 (102 is capacitor channels on staging)
+- chore: refresh CI merge ref after #1396 (gates restore) landed on staging
+- chore(deps): bump @solana/kit from 7.1.1 to 8.1.0 (#1334)
+- chore(api-access): version 1.0.1 to pair with the introspection-fix bytes
+- chore(miniapps): re-record api-access build digests for the introspection fix
+
+### Artifacts
+
+Range: `v1.15.2..v1.16.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | moved | `amoy-chain80002-v2/membershipManagerImpl` → `0xb6499596703cEE6eA4BE5b5F01DEc4d7ccfe10bD`<br>`amoy-chain80002-v2/wagerRegistryImpl` → `0xa2176F5Fea39888cD1697Be4651415490C78905d`<br>`amoy-chain80002-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`arbitrum-chain42161-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`arbitrum-chain42161-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`arbitrum-chain42161-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`arbitrum-chain42161-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`base-chain8453-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`base-chain8453-v2/bridgeRouterImpl` → `0x41ba6bcA216bd6A4c5A0Bf8F9b2d682ec0a879D5`<br>`base-chain8453-v2/liquidityRouterImpl` → `0x7Af46728e7c969b75723398E3f93b565E968A3bA`<br>`base-chain8453-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`etc-chain61-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mainnet-chain1-v2/feeRouterImpl` → `0x5cCd55D62Ce7Df730c39543B332dD8d6054B5d00`<br>`mainnet-chain1-v2/bridgeRouterImpl` → `0xcA277Cc3485Da12771d6171a9D0A894B8DD159f8`<br>`mainnet-chain1-v2/liquidityRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`mainnet-chain1-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/membershipManagerImpl` → `0x7D38F7Ef26f7E2409d5C04a62c1d9A3Ec002A49e`<br>`mordor-chain63-v2/wagerRegistryImpl` → `0x9FfE701be18Ff033706f2df19cd8730F5CB884B2`<br>`mordor-chain63-v2/tokenFactoryImpl` → `0x135108EB6f81e361b6cF131d2Cb9A01E92Cd8ED9`<br>`mordor-chain63-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`mordor-chain63-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`mordor-chain63-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`mordor-chain63-v2/openERC20V2Impl` → `0x92169007926fBc8Ac90cdD311dD3C2557158C395`<br>`mordor-chain63-v2/openERC721V2Impl` → `0xEeaBC05214FF0C42cbA42b365aB400b7ca4311cE`<br>`mordor-chain63-v2/restrictedERC20V2Impl` → `0x664d87bed13ea4D50Cd3da8e0aC5A8D70A302A0B`<br>`mordor-chain63-v2/externalDAORegistryImpl` → `0x28270cB71E87D2D6C662e61CFE6eD02d05d43B7A`<br>`mordor-chain63-v2/zkWagerPoolFactoryImpl` → `0xd3e851FDDa9D5796D503daFd34b2403D7336d9fD`<br>`mordor-chain63-v2/poolImpl` → `0xd0b94a77DA7Aaa488343CF89978f1Bbf9E72E277`<br>`mordor-chain63-v2/wagerPoolFactoryImpl` → `0xfB6F9F7EfD86a220eE1aD7906278247051B25430`<br>`mordor-chain63-v2/feeRouterImpl` → `0x744b8E56d84bb8D7657b2Bb13426cB882c93B7E6`<br>`mordor-chain63-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/miniAppRegistryImpl` → `0xc8Dd8601b35aDa3AF367C9E41f24Fd0503Ced674`<br>`optimism-chain10-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`optimism-chain10-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`optimism-chain10-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`optimism-chain10-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/membershipManagerImpl` → `0x7177470fE3c5D89CEf965A596540E57cE290C939`<br>`polygon-chain137-v2/wagerRegistryImpl` → `0x9c52C1ef4Bbe65CF19a5C26bebD4A22100964898`<br>`polygon-chain137-v2/tokenFactoryImpl` → `0xE819f7b672D81A8b78d40b1C99Fe5d646513D12C`<br>`polygon-chain137-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`polygon-chain137-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`polygon-chain137-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`polygon-chain137-v2/wagerPoolFactoryImpl` → `0x754d8aa4785Ec4bEE7c921f8d032D5E3a78d9308`<br>`polygon-chain137-v2/poolImpl` → `0xB153e4456FaD1A7E96e35e14094Cf6964348BC40`<br>`polygon-chain137-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/callsignRegistryImpl` → `0xD220D34ed2148B9F4DC65C1bc75169D7DECFBB49`<br>`polygon-chain137-v2/feeRouterImpl` → `0x40ee755246E60f66E7bA425F99C6d704859d38db`<br>`polygon-chain137-v2/bridgeRouterImpl` → `0x8F7A7e7437733326BD2F8045BFceD9B821aF1De1`<br>`polygon-chain137-v2/liquidityRouterImpl` → `0x33818052Ca8B5b8Bb9777Bf6eBbaFCD8Faae6e65`<br>`polygon-chain137-v2/miniAppRegistryImpl` → `0x41858006aD6dd0788b84F9fb17A28d8167C7b331` |
+| Mini-app packages | moved | `api-access` v1.0.1<br>`clearpath` v1.2.0<br>`token-mint` v1.0.2 |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.16.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.16.0.aab` | `33a19c9376412b20b57abf98d784ce86242abc7f58dc1f4a36611eb373166339` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+| ios | `FairWins-v1.16.0-ios.xcarchive.zip` | `044f623e3e8cc5073194142c9950692b953cf7edfd237428a94b59f24d1703ec` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
+## v1.15.2 — 2026-08-30
+
+Promoted from: none — released directly from main
+Previous release: v1.15.1 · Range: `v1.15.1..v1.15.2` (2 commits)
+
+### 🧹 Maintenance
+
+- chore(release): v1.15.1 (#1391)
+
+### Artifacts
+
+Range: `v1.15.1..v1.15.2`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+## v1.15.1 — 2026-08-30
+
+Promoted from: none — released directly from main
+Previous release: v1.15.0 · Range: `v1.15.0..v1.15.1` (5 commits)
+
+### 🐛 Bug Fixes
+
+- fix(087): unblock the converge — dead stdout callback, backwards docker pin
+- fix(087): the ansible inventory could never reach a node
+
+### Artifacts
+
+Range: `v1.15.0..v1.15.1`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+## v1.15.0 — 2026-08-29
+
+Promoted from: v1.15.0-rc.4
+Previous release: v1.13.5 · Range: `v1.13.5..v1.15.0` (51 commits)
+
+### 🚀 Features
+
+- feat(clearpath): native standard DAO creation - spec 030 pillar A (#1268)
+- feat(hardware): Ledger over Bluetooth on phones, behind the one adapter seam
+- feat(networks): complete the POL rename sweep and wrap/voucher test alignment
+- feat(networks): MATIC to POL on Polygon/Amoy, Bitcoin network card
+- feat(nav): account add chooser, wrap as a Trade view, FWMV send from portfolio
+- feat(pay): group pay - N recipients from Home Pay and Transfer
+- feat(custody): vault actions in one sheet, majority threshold + starter policy defaults
+- feat(rpc): QuickNode-ready primaries with distinct public failover on every EVM mainnet
+- feat(applock): optional app lock per the spec 041 amendment
+- feat(membership): purchase lands on the acting account (spec 098)
+- feat(networks): complete the POL rename sweep and wrap/voucher test alignment
+- feat(networks): MATIC to POL on Polygon/Amoy, Bitcoin network card
+- feat(nav): account add chooser, wrap as a Trade view, FWMV send from portfolio
+- feat(096): enable the x402 rail, with the collector that watches it
+
+### 🐛 Bug Fixes
+
+- fix(clearpath): move form helpers out of the CreateStandardDao component file
+- fix(e2e): re-derive local addresses after pillar-A deploy-sequence growth
+- fix(076): the cohort gate checked a filename, not the boundary
+- fix(codegen): the build marker lives beside artifacts/, not inside it
+- fix(ci): write the build marker where CI actually compiles
+- fix: a11y suppression retired, byte gate fails closed on stale artifacts, dead archive scripts removed
+- fix(custody): vault batch proposals pre-flight the guard's own delegatecall answer (#1368)
+- fix(e2e): CV-06 must kill Polygon's failover too, now that one exists
+- fix(pay): drop unused imports from the resolution-loop regression test
+- fix(custody): reset sheet scroll on view change; scroll deep assertions into view
+- fix(pay): kill the resolution-announcement update loop in the recipient rows
+
+### 📚 Documentation
+
+- spec(101): passkey-native Zcash - spec, plan, research, tasks, derivation contract
+- spec(100): passkey-native Solana - spec, plan, tasks, derivation contract
+- spec(098): acting-account membership purchase across every submit rail
+- spec(099): network status mini-app board with bridge/supply CTAs
+- spec(041): amend with optional app-lock (FR-025..FR-028, SC-010)
+- docs(085): commit AND push bootstrap state, every time
+
+### 🧪 Tests
+
+- test(mcp): sample the linearity guard best-of-5 so runner noise cannot fail it
+- test(094): the ClearPath matrix row names what it measures (#1268 part 1)
+- test(095): make the reply-links linearity check robust to runner hiccups
+- test(094): add coverage-matrix rows for specs 098-101
+- test(089): the money-path tests encoded x402's dormancy
+
+### 🧹 Maintenance
+
+- chore(085): record bootstrap state
+
+### Artifacts
+
+Range: `v1.14.0..v1.15.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | moved | `amoy-chain80002-v2/membershipManagerImpl` → `0xb6499596703cEE6eA4BE5b5F01DEc4d7ccfe10bD`<br>`amoy-chain80002-v2/wagerRegistryImpl` → `0xa2176F5Fea39888cD1697Be4651415490C78905d`<br>`amoy-chain80002-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`arbitrum-chain42161-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`arbitrum-chain42161-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`arbitrum-chain42161-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`arbitrum-chain42161-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`base-chain8453-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`base-chain8453-v2/bridgeRouterImpl` → `0x41ba6bcA216bd6A4c5A0Bf8F9b2d682ec0a879D5`<br>`base-chain8453-v2/liquidityRouterImpl` → `0x7Af46728e7c969b75723398E3f93b565E968A3bA`<br>`base-chain8453-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`etc-chain61-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mainnet-chain1-v2/feeRouterImpl` → `0x5cCd55D62Ce7Df730c39543B332dD8d6054B5d00`<br>`mainnet-chain1-v2/bridgeRouterImpl` → `0xcA277Cc3485Da12771d6171a9D0A894B8DD159f8`<br>`mainnet-chain1-v2/liquidityRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`mainnet-chain1-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/membershipManagerImpl` → `0x7D38F7Ef26f7E2409d5C04a62c1d9A3Ec002A49e`<br>`mordor-chain63-v2/wagerRegistryImpl` → `0x9FfE701be18Ff033706f2df19cd8730F5CB884B2`<br>`mordor-chain63-v2/tokenFactoryImpl` → `0x135108EB6f81e361b6cF131d2Cb9A01E92Cd8ED9`<br>`mordor-chain63-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`mordor-chain63-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`mordor-chain63-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`mordor-chain63-v2/openERC20V2Impl` → `0x92169007926fBc8Ac90cdD311dD3C2557158C395`<br>`mordor-chain63-v2/openERC721V2Impl` → `0xEeaBC05214FF0C42cbA42b365aB400b7ca4311cE`<br>`mordor-chain63-v2/restrictedERC20V2Impl` → `0x664d87bed13ea4D50Cd3da8e0aC5A8D70A302A0B`<br>`mordor-chain63-v2/externalDAORegistryImpl` → `0x28270cB71E87D2D6C662e61CFE6eD02d05d43B7A`<br>`mordor-chain63-v2/zkWagerPoolFactoryImpl` → `0xd3e851FDDa9D5796D503daFd34b2403D7336d9fD`<br>`mordor-chain63-v2/poolImpl` → `0xd0b94a77DA7Aaa488343CF89978f1Bbf9E72E277`<br>`mordor-chain63-v2/wagerPoolFactoryImpl` → `0xfB6F9F7EfD86a220eE1aD7906278247051B25430`<br>`mordor-chain63-v2/feeRouterImpl` → `0x744b8E56d84bb8D7657b2Bb13426cB882c93B7E6`<br>`mordor-chain63-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/miniAppRegistryImpl` → `0xc8Dd8601b35aDa3AF367C9E41f24Fd0503Ced674`<br>`optimism-chain10-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`optimism-chain10-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`optimism-chain10-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`optimism-chain10-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/membershipManagerImpl` → `0x7177470fE3c5D89CEf965A596540E57cE290C939`<br>`polygon-chain137-v2/wagerRegistryImpl` → `0x9c52C1ef4Bbe65CF19a5C26bebD4A22100964898`<br>`polygon-chain137-v2/tokenFactoryImpl` → `0xE819f7b672D81A8b78d40b1C99Fe5d646513D12C`<br>`polygon-chain137-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`polygon-chain137-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`polygon-chain137-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`polygon-chain137-v2/wagerPoolFactoryImpl` → `0x754d8aa4785Ec4bEE7c921f8d032D5E3a78d9308`<br>`polygon-chain137-v2/poolImpl` → `0xB153e4456FaD1A7E96e35e14094Cf6964348BC40`<br>`polygon-chain137-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/callsignRegistryImpl` → `0xD220D34ed2148B9F4DC65C1bc75169D7DECFBB49`<br>`polygon-chain137-v2/feeRouterImpl` → `0x40ee755246E60f66E7bA425F99C6d704859d38db`<br>`polygon-chain137-v2/bridgeRouterImpl` → `0x8F7A7e7437733326BD2F8045BFceD9B821aF1De1`<br>`polygon-chain137-v2/liquidityRouterImpl` → `0x33818052Ca8B5b8Bb9777Bf6eBbaFCD8Faae6e65`<br>`polygon-chain137-v2/miniAppRegistryImpl` → `0x41858006aD6dd0788b84F9fb17A28d8167C7b331` |
+| Mini-app packages | moved | `api-access` v1.0.0<br>`clearpath` v1.1.0<br>`token-mint` v1.0.2 |
+| Subgraph endpoint | unchanged | `v0.3.0` |
+
+## v1.13.5 — 2026-08-28
+
+Promoted from: v1.13.5-rc.2
+Previous release: v1.13.4 · Range: `v1.13.4..v1.13.5` (6 commits)
+
+### 🐛 Bug Fixes
+
+- fix(bootstrap): the apply identity could not even read project IAM policy
+
+### Artifacts
+
+Range: `v1.13.4..v1.13.5`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+## v1.13.4 — 2026-08-27
+
+Promoted from: v1.13.4-rc.4
+Previous release: v1.13.3 · Range: `v1.13.3..v1.13.4` (10 commits)
+
+### 🐛 Bug Fixes
+
+- fix(prod): adopt 4 secret containers the failed apply would recreate
+- fix(bundler): the uptime probe proxied INTO the origin lock it documents bypassing
+- fix(bootstrap): the apply identity could adopt but not create
+
+### Artifacts
+
+Range: `v1.13.3..v1.13.4`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+## v1.13.3 — 2026-08-25
+
+Promoted from: none — released directly from main
+Previous release: v1.13.0 · Range: `v1.13.0..v1.13.3` (14 commits)
+
+### 🐛 Bug Fixes
+
+- fix(review): restore readProviderFor's JSDoc to its function; anchor test paths to the file
+- fix(assistant): say why the assistant is unreachable when that is knowable
+- fix(membership): the other two surfaces that stated the wrong account's status
+- fix(membership): read the acting account, and scan on the configured endpoint
+- fix(vouchers): block the buy control when no tier is on sale
+- fix(membership): never offer a tier the contract has switched off
+- fix(paymaster): refuse sponsorship an empty pool cannot pay for; un-strand the AA31 fallback
+
+### 🧪 Tests
+
+- test: wait for the tier-selection repair instead of sampling it
+- test(paymaster): correct the deposit-gate boundary comment
+
+### Artifacts
+
+Range: `v1.13.2..v1.13.3`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | unchanged | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | unchanged | `v0.3.0` |
+
+## v1.13.0 — 2026-08-25
+
+Promoted from: v1.13.0-rc.2
+Previous release: v1.12.0 · Range: `v1.12.0..v1.13.0` (25 commits)
+
+### 🚀 Features
+
+- feat(frontend): acting-account routing for wager refund/resolve; Earn refuses acting accounts
+- feat(frontend): record redemption terms, verify admin write authority, route acting accounts
+
+### 🐛 Bug Fixes
+
+- fix: repair lockfile from the earlier full re-resolve
+- fix: stub the real WalletConnect connector under Cypress
+- fix(e2e): compare BigInt accrued fees as booleans in ADM-05
+- fix(admin): name the actual signing chain in the role header; fix multi-match test query
+- fix(membership): expired-renewal purchase-mode fallback refinements
+
+### 🧪 Tests
+
+- test(e2e): cover admin membership/role writes and voucher purchase on-chain
+
+### 🧹 Maintenance
+
+- chore(deps): bump @google-cloud/bigquery from 7.9.4 to 9.0.2
+- chore(deps): bump @solana-program/system from 0.13.0 to 0.14.0
+- chore(deps-dev): bump @chainlink/contracts in the solidity-sources group
+
+### Artifacts
+
+Range: `v1.12.0..v1.13.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+## v1.12.0 — 2026-08-24
+
+Promoted from: v1.12.0-rc.36
+Previous release: v1.11.1 · Range: `v1.11.1..v1.12.0` (298 commits)
+
+### 🚀 Features
+
+- feat(097): land the workstation secrets estate that prod was already running
+- feat(ops): KMS transaction signer, and a key-compromise runbook
+- feat(096): x402 pay-per-request rail for agents, prod-gateway enablement procedure
+- feat(095): adopt express-rate-limit as the coarse outer bound on flagged routes
+- feat(095): member API with signed capability keys, MCP server, api-access mini-app, agentic chat assistant
+- feat(094/041): run the account-native tier in CI, and stop the matrix over-claiming
+
+### 🐛 Bug Fixes
+
+- fix(deps): declare @google-cloud/kms, which scripts/ops was borrowing
+- fix(infra): staging planned two extra public services, and would have succeeded
+- fix(infra): a clean plan was hiding three ways to break production
+- fix(097): pin ops-workstation to the ref where the module still exists
+- fix(infra): wire the orphaned QuickNode credentials, and guard the wrong-chain hazard they invite
+- fix(095): a stranger could not have denied key revocation, and nothing bounded model spend
+- fix(finops): catalogue x402 + the assistant, and widen C2 past FeeRouter services
+- fix(infra): gate the spec-095 MCP Cloud Run modules off, and stop the comment lying
+- fix(mcp): bind loopback, validate Origin, refuse a shared identity over HTTP
+- fix(bridge): chunk the destination fill scan — it was dead on four of five chains
+- fix(x402): check the balance against the SIGNED value, not the quoted price
+- fix(ci): make contract deploys manual-only
+- fix(a11y): make the disabled fill and label move together (#1260)
+- fix(a11y): label brand fills from the audited token pair, not #fff (#1260, #1247)
+- fix(#1265): the asset catalog is cohort-bounded too, so a testnet build has a bridge destination
+- fix: land the address gate green, and diagnose the right mechanism (#1298)
+- fix: only dismiss an expired offer once its reclaim is confirmed (#1297)
+- fix: say only what the sanctions revert establishes, on all four screened paths (#1292)
+- fix: restore the passkey provider facade, and migrate its test to @noble/curves v2
+- fix(#1298): the address gate could never pass on the tier it guards
+- fix: walk every observed revert-data nesting on the wager paths
+- fix: keep the Bridge form, its copy and its in-flight list on one roster (#1265)
+- fix: bound spec-067 Supply and Bridge rosters to the build cohort (#1265)
+- fix: clear the development banner on every fixed surface, not just the header (#1248)
+- fix: measure the development banner instead of reserving 45px (#1248)
+- fix: make the unread-ledger verdict reachable, and never crash on it (#1280)
+- fix: never render an unread activity ledger as an empty history (#1280)
+- fix: give the Bitcoin gateway its own env var (#1263)
+- fix: re-derive an unchosen passkey chain, and stop a failed key read accusing a member (#1286)
+- fix: resolve the passkey session chain from the build, not wagmi's default (#1286)
+- fix: detect "deployed but unset", and describe the real nonce hazard (#1298)
+- fix: fail the e2e setup loudly when a deploy-order shift repoints the app (#1298)
+- fix: make the expired-offer reclaim reachable by both routes and safe to fail (#1297)
+- fix: restore a reachable route to an expired offer's Reclaim & Clear (#1297)
+- fix: tell a screened member only what is true, on both wager paths (#1292)
+- fix: name sanctions screening on the wager create path (#1292)
+- fix: decode a raw error.data revert so the curator sees StaleProposal (#1267)
+- fix(#1019): a member who disconnects stays disconnected, and four wallet tests that never ran (#1296)
+- fix(#1228): append the backup-pointer deploy, don't insert it mid-order
+- fix(passkey): adapt to @noble/curves v2 — restore cross-device key recovery
+- fix(041): a passkey session reports the build's chain, not wagmi's first (#1288)
+- fix(095): truthful names and linear regexes end the CodeQL alert class
+- fix(095): retire the quadratic trailing-slash trim across all six gateway upstream clients
+- fix(095): unambiguous decimal-amount regex in the keypad e2e helper
+- fix(095): linear-time parsing on attacker-reachable strings, e2e repairs
+- fix(095): drop mcp-server version field (release-computed), clear two eslint errors
+- fix(095): versions track the release, never hand-bumped
+- fix(095): actor-critic screenshot round — 7 UI fixes, 56 shots landed, harness files untracked
+- fix(041/045): passkey reload sign-out and synced-passkey account loss (#1271)
+- fix(041): wagmi never reconnected the passkey connector — every reload signed the member out
+- fix(041/045): an empty credential book is not proof the member is new
+- fix(test): AD-06 read the chain before the pause had been mined
+- fix(test): match the RPC intercepts on hostname, not a regex built from a string
+- fix(093/071): a deep link must not be redirected while the sweep is running
+- fix(071): a chain with nothing deployed is not a chain that answered
+- fix: remove the duplicate callsignRegistry key in HARDHAT_CONTRACTS
+- fix(062): the native sweep's gas reserve must track a RISING fee, not just a falling balance
+- fix(test): sequence multi-step vault changes on the chain, not the queue
+- fix(ui): treat a missing browsers root as 'not here', not as a crash
+- fix(offer): fall back the offer odds multiplier to the declared default, not 100
+- fix(e2e): re-sync browser clock to chain after advancing in POOL-03
+- fix(e2e): stop predicting createPool's now, read the mined block instead
+- fix(034): CI round 2 — auto-close vs explicit close, retry BadDeadlines
+- fix(034): CI failures — stale-checkpoint deadline math and a nonce race
+- fix(ci): the Lighthouse artifact has never uploaded anything
+- fix(e2e): stop a Lighthouse preset blocking on performance, and record the tier that missed its budget
+- fix(deploy): wire the WagerRegistryIntents facet on a fresh deployment
+- fix(membership): derive the purchase action from the member, not the entry point
+- fix(ci): drop the bare `exit 0` from the chain-readiness step
+- fix(admin): derive the denied-access role hint instead of restating it
+
+### ⚡ Performance
+
+- perf(e2e): shard the no-chain tier six ways per profile, and re-measure both tiers (#1284)
+
+### 📚 Documentation
+
+- docs: correct the VITE_BITCOIN_GATEWAY_URL guidance to what the code does
+- docs(094): raise the no-chain budget to 7 minutes, with the reason recorded
+- docs(094): record the two anti-patterns the account-native tier was built on
+- docs(060): correct the open contrast finding's scope and link it to #1260
+- spec(094): e2e coverage expansion — spec, plan, research, tasks
+- docs(e2e): record that the full tier is not hermetic
+
+### 🧪 Tests
+
+- test(094): give spec 097 its coverage-matrix row
+- test(#1250): DEC-02's row assertion waits long enough for a cold wager scan
+- test(#1260): the validateTheme fixture defines the label token it now requires
+- test(#1267): MA-03 asserts the message the curator now actually gets
+- test(e2e): adopt the #1250 settle-wait guard on the post-staging money-path specs
+- test(e2e): MC-02 accepts the disclosure granularity the ledger actually reports
+- test(e2e): CP-02 matches the honest screening copy, not the retired one
+- test(#1292): CP-02 asserts the screening message now that there is one
+- test(e2e): label the seeded expired offer with the test's own id (#1297)
+- test(#1019): DSH-03 and DSH-04 run again — the span was the assertion's, not the app's (#1307)
+- test(#1019): ENC-04 asserts the app's key cache, not the browser's (#1306)
+- test(#1019): A11Y-04 runs again — the backdrop click was aimed at the nav gutter (#1305)
+- test: repair first-run failures surfaced by integration validation
+- test(#1019): WAL-03, UL-02 and UL-04 run again — and UL-04 can now fail (#1304)
+- test(#1019): HMM-02, HMM-04 and HMM-05 run again — the covered switcher is gone (#1303)
+- test(#1019): three more pending markers cleared — ONB-01, ONB-02, DSH-01 (#1302)
+- test(#1228): compliance parity for passkey accounts — three tests that had never run (#1293)
+- test(032): the encrypted backup round trip, the half that costs gas
+- test(095): fast-tier e2e for the assistant and API access, coverage matrix row, undelivered-revocation honesty
+- test(024/035/036/012): on-chain depth for draws, open challenges, relayed intents and wager notifications (#1283)
+- test(#1228): 15 coverage rows closed, 8 product bugs fixed, 2 permanent skips removed (#1282)
+- test(#1245): read-only member surfaces — 12 absent rows closed, 2 gaps named rather than faked (#1281)
+- test(071/093): admin console — three-state estate reads, entry gating, single-chain writes (#1242)
+- test(071/093): the estate's three states, the entry gate's three answers, and a single-chain write (#1242)
+- test(084/069/054/072/007): identity, access and endpoint flows (#1241)
+- test(054): register a %callsign through commit and reveal (#1241)
+- test(054/072): a callsign resolves in address entry, and the tenant brand comes from its manifest (#1241)
+- test(069/054/007): endpoints, the callsign gate and compliance refusal (#1241)
+- test(084/069): Verify's three verdicts and the endpoint credential rules (#1241)
+- test(058/033/026): the three money flows of #1240 — send, swap, redeem
+- test(073/077): browse the app catalogue, in the tier that flow belongs to (#1238)
+- test(030/042): ClearPath registers on chain, and demands a switch instead of signing on the wrong one (#1238)
+- test(028/073): Token Mint deploys through the host, and screening bites inside submit (#1238)
+- test(073): the curator's content-committed approval (#1238)
+- test(073): launch and serving-decision flows against the local registry (#1238)
+- test(073): put the mini-app registry on the local E2E chain (#1238)
+- test(065/066): settle delegated staking and the operator's controls on chain (#1237)
+- test(050-earn): settle the lending vault deposit and withdrawal from chain state (#1237)
+- test(067): settle the two bridge flows from chain state, and close #1236
+- test(067): settle the two supplied-liquidity flows from chain state (#1236)
+- test(067): make the bridge and supply surfaces reachable on the e2e chain
+- test(068): drive vault proposals by their nonce, and make the failure explain itself
+- test(068): one scenario table for the guard, the client twin and the UI
+- test(049,068): cover the multi-chain vault list and v1 enforcement
+- test(068): prove first-match-governs and no-match-denies against the chain
+- test(068): drive v2 guard adoption as the vault's own threshold-approved decision
+- test(043): drive create-vault, propose-and-execute and operate-as-vault on chain
+- test(043,049,068): stand up the Protect custody estate on the e2e chain
+- test(062,063): retier the sweep spec onto the Amoy-shaped chain and record the matrix rows
+- test(062,063): e2e coverage for legacy account recovery, and two sweep defects it found
+- test(060): end-to-end coverage for platform-fee disclosure and the maxFeeBps ceiling (#1233)
+- test(e2e): add unhappy-path assertions to POOL-01 and POOL-02
+- test(e2e): rewrite the 39 vacuous branches in the money-path specs (#1231)
+- test(034): full-tier e2e coverage for Wager Pools
+- test(e2e): CLM-01 must wait for the list, not snapshot for it
+- test(e2e): record the measured shard weights, and keep the on-chain tier on every push
+- test(e2e): fix the harness bugs its own first CI run exposed
+- test(e2e): address the review — passkey leg, route drift, anchored regex, sub-pixel bounds
+- test(e2e): coverage matrix, tiering policy, and the gates that keep them honest (spec 094)
+- test(e2e): CLM-10 must actually freeze the winner
+- test(e2e): ORC-03 asserts the tie rule, not the absence of auto-resolution
+- test(e2e): CRE-12 must pick a side, and a refused submit should say so
+- test(e2e): CRE-12/16 assert the selection, not the pixel
+- test(e2e): RES-10 establishes its own precondition and asserts the real guard
+- test(e2e): the resolve flow has three steps, and the tests only clicked one
+- test(e2e): assert the fact, not the copy — chain state for resolve and reject
+- test(e2e): stop fighting a modal that closes itself, and wait for the Resolve control
+- test(e2e): one acceptance helper, and wait for the modal to decide before branching
+- test(e2e): fix CLM-01's acceptance and E2E-01's tab; name E2E-02's revert
+- test(e2e): select the outcome by the wording the resolve modal renders
+- test(e2e): wait for the accept control instead of snapshotting for it
+- test(e2e): DEC-05 must inspect the wager it claims to be inspecting
+- test(e2e): close the acceptance modal by its own control
+- test(e2e): give spec 05 the acceptance-modal helper 07 already earned
+- test(e2e): name the custom error behind a revert, and judge acceptance on chain
+- test(e2e): register provider wrappers after the mock, and open the card MEM-06 reads
+- test(e2e): make the browser clock track the chain clock
+- test(e2e): reject every spend authorization in MEM-12, not just eth_sendTransaction
+- test(e2e): fail at the acceptance step instead of three commands later
+- test(e2e): register opponent encryption keys in the blocked-case specs
+- test(e2e): assert the decrypt gate in PRV-02, not a placeholder
+- test(e2e): register the arbitrator's key, and make a failed decrypt say why
+- test(e2e): drop the second encryption-toggle copy in attemptCreateWager
+- test(e2e): handle the private-wager decrypt gate, and refresh ADM-01 for spec 093
+- test(e2e): reset the chain between tests in clock-advancing specs
+- test(e2e): repair three dead selectors behind the four near-zero specs
+- test(e2e): scope the confirm-acceptance click to its dialog
+- test(e2e): scroll the acceptance confirm into view — 07's creates now reach it
+- test(e2e): 07 and 10 create wagers too — the interceptIpfs sweep missed their local helpers
+- test(e2e): DEC-01 stops at the proven money path — list staleness is #1019's call
+- test(e2e): assert the declined offer's absence on a REOPENED list
+- test(e2e): a declined wager reads back as None — assert the storage release
+- test(e2e): DEC-01 asserts the decline's OUTCOME, not text on a dialog that closed
+- test(e2e): mock state lives in the closure; the window holds only a pointer
+- test(e2e): one mock provider per page — the before-hook's account was winning
+- test(e2e): the impersonating chain's USDC must be the LOCAL mock, decimals included
+- test(e2e): assert the Membership tab the app renders, not the one imagined
+- test(e2e): fix the lint break and the reconnect race behind MEM-06
+- test(e2e): the E2E dev server is a TESTNET-cohort build
+- test(e2e): target the Review step's controls, not the panel's visibility
+- test(e2e): run the local chain AS the membership home (Amoy-shaped node)
+- test(e2e): rewrite the oracle creates against the flow the product ships
+- test(e2e): fail checkpoint loudly, cover the arbitrator's key, repair CRE-09, restructure 02
+- test(e2e): isolate full-tier specs with a chain checkpoint — run order decided who passed
+- test(e2e): treat an already-connected wallet as valid, not as a failure
+- test(e2e): scroll to the top before asserting the connected account
+- test(e2e): give the full tier an IPFS boundary — the money path could never run
+- test(e2e): fix ENC-03's stale Security-tab navigation
+
+### 🏗️ Infrastructure
+
+- ci(e2e): gate the on-chain money paths — add the Cypress Full E2E job
+
+### 🧹 Maintenance
+
+- chore(ops): repin the gateway to agentic-096
+- chore: retrigger CI
+- chore(deps): hold @openzeppelin/contracts at 5.4.0, with the reason
+- chore(ops): record the Mordor legacy-contract write-off as a decision
+- chore(ops): record the admin Safe on Amoy 80002
+- chore(ops): rotate the admin Safe to KMS + Ledger + Trezor
+- chore(deps): reconcile lockfile and raise the gateway runtime to Node 22
+- chore(096): prod-gateway enablement block (commented until image repin), staging-gateway truth
+- chore(deps): bump @noble/curves from 1.9.7 to 2.3.0
+- chore(095): lockfile with api-access workspace member, miniapp byte baseline, verification fixes
+- chore(095): wire api-access mini-app into build/publish/digest chains, add test:mcp script
+- chore(deps): bump @google-cloud/kms from 5.7.0 to 6.0.0
+- chore(deps): bump @scure/btc-signer from 2.2.0 to 2.3.0
+- chore(deps): bump @noble/post-quantum from 0.6.1 to 0.7.0
+- chore(deps): bump google-github-actions/setup-gcloud from 2 to 3
+- chore(deps): bump actions/setup-node from 4 to 7
+- chore(deps): bump terraform-linters/setup-tflint from 4 to 6
+- chore(config): refresh the stale local-chain (1337) contract defaults
+- chore(git): ignore the local-chain deployment record
+
+### Artifacts
+
+Range: `v1.11.1..v1.12.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | moved | `amoy-chain80002-v2/membershipManagerImpl` → `0xb6499596703cEE6eA4BE5b5F01DEc4d7ccfe10bD`<br>`amoy-chain80002-v2/wagerRegistryImpl` → `0xa2176F5Fea39888cD1697Be4651415490C78905d`<br>`amoy-chain80002-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`arbitrum-chain42161-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`arbitrum-chain42161-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`arbitrum-chain42161-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`arbitrum-chain42161-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`base-chain8453-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`base-chain8453-v2/bridgeRouterImpl` → `0x41ba6bcA216bd6A4c5A0Bf8F9b2d682ec0a879D5`<br>`base-chain8453-v2/liquidityRouterImpl` → `0x7Af46728e7c969b75723398E3f93b565E968A3bA`<br>`base-chain8453-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`etc-chain61-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mainnet-chain1-v2/feeRouterImpl` → `0x5cCd55D62Ce7Df730c39543B332dD8d6054B5d00`<br>`mainnet-chain1-v2/bridgeRouterImpl` → `0xcA277Cc3485Da12771d6171a9D0A894B8DD159f8`<br>`mainnet-chain1-v2/liquidityRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`mainnet-chain1-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/membershipManagerImpl` → `0x7D38F7Ef26f7E2409d5C04a62c1d9A3Ec002A49e`<br>`mordor-chain63-v2/wagerRegistryImpl` → `0x9FfE701be18Ff033706f2df19cd8730F5CB884B2`<br>`mordor-chain63-v2/tokenFactoryImpl` → `0x135108EB6f81e361b6cF131d2Cb9A01E92Cd8ED9`<br>`mordor-chain63-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`mordor-chain63-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`mordor-chain63-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`mordor-chain63-v2/openERC20V2Impl` → `0x92169007926fBc8Ac90cdD311dD3C2557158C395`<br>`mordor-chain63-v2/openERC721V2Impl` → `0xEeaBC05214FF0C42cbA42b365aB400b7ca4311cE`<br>`mordor-chain63-v2/restrictedERC20V2Impl` → `0x664d87bed13ea4D50Cd3da8e0aC5A8D70A302A0B`<br>`mordor-chain63-v2/externalDAORegistryImpl` → `0x28270cB71E87D2D6C662e61CFE6eD02d05d43B7A`<br>`mordor-chain63-v2/zkWagerPoolFactoryImpl` → `0xd3e851FDDa9D5796D503daFd34b2403D7336d9fD`<br>`mordor-chain63-v2/poolImpl` → `0xd0b94a77DA7Aaa488343CF89978f1Bbf9E72E277`<br>`mordor-chain63-v2/wagerPoolFactoryImpl` → `0xfB6F9F7EfD86a220eE1aD7906278247051B25430`<br>`mordor-chain63-v2/feeRouterImpl` → `0x744b8E56d84bb8D7657b2Bb13426cB882c93B7E6`<br>`mordor-chain63-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/miniAppRegistryImpl` → `0xc8Dd8601b35aDa3AF367C9E41f24Fd0503Ced674`<br>`optimism-chain10-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`optimism-chain10-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`optimism-chain10-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`optimism-chain10-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/membershipManagerImpl` → `0x7177470fE3c5D89CEf965A596540E57cE290C939`<br>`polygon-chain137-v2/wagerRegistryImpl` → `0x9c52C1ef4Bbe65CF19a5C26bebD4A22100964898`<br>`polygon-chain137-v2/tokenFactoryImpl` → `0xE819f7b672D81A8b78d40b1C99Fe5d646513D12C`<br>`polygon-chain137-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`polygon-chain137-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`polygon-chain137-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`polygon-chain137-v2/wagerPoolFactoryImpl` → `0x754d8aa4785Ec4bEE7c921f8d032D5E3a78d9308`<br>`polygon-chain137-v2/poolImpl` → `0xB153e4456FaD1A7E96e35e14094Cf6964348BC40`<br>`polygon-chain137-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/callsignRegistryImpl` → `0xD220D34ed2148B9F4DC65C1bc75169D7DECFBB49`<br>`polygon-chain137-v2/feeRouterImpl` → `0x40ee755246E60f66E7bA425F99C6d704859d38db`<br>`polygon-chain137-v2/bridgeRouterImpl` → `0x8F7A7e7437733326BD2F8045BFceD9B821aF1De1`<br>`polygon-chain137-v2/liquidityRouterImpl` → `0x33818052Ca8B5b8Bb9777Bf6eBbaFCD8Faae6e65`<br>`polygon-chain137-v2/miniAppRegistryImpl` → `0x41858006aD6dd0788b84F9fb17A28d8167C7b331` |
+| Mini-app packages | moved | `api-access` v1.0.0<br>`clearpath` v1.0.2<br>`token-mint` v1.0.2 |
+| Subgraph endpoint | moved | `v0.3.0` |
+
 ## v1.11.1 — 2026-08-24
 
 Promoted from: none — released directly from main

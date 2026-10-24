@@ -35,7 +35,7 @@ function feeFromReceipt(receipt) {
  * @param {object} params
  * @param {object} params.reader - { getBlock(blockNumber), getTransactionReceipt(txHash) }
  * @param {string} params.userAddress - the report subject
- * @param {string} [params.nativeSymbol] - e.g. 'MATIC' (for display)
+ * @param {string} [params.nativeSymbol] - e.g. 'POL' (for display)
  * @returns {Promise<object[]>} items with { timestamp, feeNative, feeNativeSymbol, feeUnavailableReason }
  */
 export async function enrichTransfers(preItems, { reader, userAddress, nativeSymbol = 'NATIVE' }) {

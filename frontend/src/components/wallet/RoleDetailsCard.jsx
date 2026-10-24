@@ -8,7 +8,7 @@ const ROLE_DISPLAY_NAMES = {
 }
 
 const ROLE_DESCRIPTIONS = {
-  WAGER_PARTICIPANT: 'Create and accept peer-to-peer wagers in USDC or WMATIC'
+  WAGER_PARTICIPANT: 'Create and accept peer-to-peer wagers in USDC or WPOL'
 }
 
 function formatDate(date) {

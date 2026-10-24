@@ -137,6 +137,21 @@ import {
      * rather than the device's. Now the chooser offers "I already have a passkey".
      */
     choosePasskey({ mode: 'sign-in' })
+
+    /*
+     * ONE EXTRA STEP SINCE SPEC 104, and it is the point rather than friction.
+     *
+     * Device B's book is empty, so the app can only DERIVE where this key's account would be — and
+     * device A never spent, so nothing is deployed there. That state is indistinguishable on chain
+     * from a passkey that was added to somebody else's account, which is the failure spec 104
+     * exists to stop: signing a member into an empty address as though it were confirmed.
+     *
+     * So the app now says which it is and lets the member decide. Accepting is safe precisely
+     * because the address is a deterministic function of the passkey — it is the SAME address
+     * device A showed, which is what the assertion below still proves.
+     */
+    cy.contains('button', /continue to that account/i, { timeout: 30000 }).click()
+
     cy.get('@address').then((address) => {
       // Same on-chain identity: address, funds, roles all follow (FR-009).
       expectConnected()

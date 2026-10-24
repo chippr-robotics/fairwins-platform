@@ -2,6 +2,11 @@
 
 This directory contains custom GitHub Copilot agent configurations that serve as full team members for automated code review and assistance specific to this repository.
 
+> **Coordinating with other agents.** These review agents are one kind of teammate; the coding
+> agents that open the PRs they review are another, and several of those work this repository at
+> once. How they claim issues, reserve spec numbers, delegate to sub-issues and report status is
+> [docs/developer-guide/multi-agent-workflow.md](../../docs/developer-guide/multi-agent-workflow.md).
+
 ## Our Team Members
 
 ### Smart Contract Security Agent

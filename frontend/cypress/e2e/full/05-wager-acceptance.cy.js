@@ -312,17 +312,35 @@ describe('Wager Acceptance', () => {
       connectAndVisit(1)
       cy.openMyWagers('participating')
 
+      /*
+       * OPEN THE ACCEPTED ROW, not whichever happens to be first. This spec deliberately does
+       * not reset the chain between tests, so `participating` also lists the still-open offers
+       * ACC-01..ACC-08 left behind — and a pending offer legitimately DOES carry an Accept
+       * control, so `rows.first()` made the assertion below pass or fail on list ordering.
+       * Matching the row by its own status badge is retryable: if no Active row ever lists, the
+       * test fails HERE naming that, rather than reporting a missing button.
+       */
+      // 'Pending Resolution' is the same on-chain Active wager: row and badge are computed from
+      // the browser clock against the wager's end time (the hazard DEC-05 hit), so match either
+      // label and pin the detail to the id below.
       cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
-        .find('.mm-table-row', { timeout: 20000 })
-        .should('have.length.greaterThan', 0)
-
-      cy.get('.mm-panel, [role="tabpanel"]').find('.mm-table-row').first().click()
+        .contains('.mm-table-row', /active|pending resolution/i, { timeout: 20000 })
+        .click()
       cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
+      cy.get('.mm-detail', { timeout: 10000 }).should('contain.text', `#${wagerId}`)
 
-      cy.get('.mm-detail').then(($detail) => {
-        const acceptBtn = $detail.find('button:contains("Accept"), .mm-action-accept')
-        expect(acceptBtn.length, 'no Accept control on an already-accepted wager').to.equal(0)
-      })
+      /*
+       * ANCHOR THE ABSENCE. `$detail.find(...)` inside `.then()` is a one-shot DOM snapshot
+       * (anti-pattern 3) — taken before the detail's action area renders it reports "no Accept
+       * control" for a reason that has nothing to do with the wager being accepted, and the
+       * test goes green either way. The status badge is rendered by the same detail view from
+       * the same market record, so asserting it first proves the panel is describing an ACTIVE
+       * wager; only then does the missing Accept control mean what this test claims it means.
+       */
+      cy.get('.mm-detail .mm-status-badge').invoke('text')
+        .should('match', /active|pending resolution/i)
+      cy.get('.mm-detail').contains('button', /accept/i).should('not.exist')
+      cy.get('.mm-detail').find('.mm-action-accept').should('not.exist')
 
       cy.task('chainTx', { action: 'wagerInfo', args: { wagerId } }).then((i) => {
         expect(i.status, 'wager is Active on chain').to.equal(2)

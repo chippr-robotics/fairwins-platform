@@ -24,9 +24,9 @@ import { READ, NOT_CONFIGURED, UNREADABLE } from './reading.js'
  *   4. A TOTAL MISSING A SOURCE IS PARTIAL and names what it is missing. Never silently understated.
  */
 export function aggregate(readings, { rateFor = () => null } = {}) {
-  const byKind = { revenue: {}, cost: {} }
-  const missing = { revenue: [], cost: [] }
-  const notConfigured = { revenue: [], cost: [] }
+  const byKind = { revenue: {}, cost: {}, usage: {} }
+  const missing = { revenue: [], cost: [], usage: [] }
+  const notConfigured = { revenue: [], cost: [], usage: [] }
 
   for (const { source, reading } of readings) {
     // Planned and retired sources contribute to nothing (FR-014, invariant 4).
@@ -41,6 +41,11 @@ export function aggregate(readings, { rateFor = () => null } = {}) {
       continue
     }
     if (reading.state !== READ) continue
+
+    // Usage never joins a money total: a request count summed into a dollar figure would be a
+    // category error wearing a currency label (spec 106/#1447). Its per-series values flow through
+    // the vendor_usage family; only its three-state health is tracked above.
+    if (source.kind === 'usage') continue
 
     // Rules 2 and 3: only `revenue_total` is revenue.
     if (source.kind === 'revenue' && source.metric !== 'fairwins_finops_revenue_total') continue

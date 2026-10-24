@@ -42,6 +42,16 @@ export function buildSetupInitializer(owners, threshold, fallbackHandler, policy
   ])
 }
 
+/**
+ * Approvals a vault of `n` owners is offered by default: a simple majority (release 1.14.0).
+ * A default of 1 makes every co-owner decorative — the vault reads as shared control while any
+ * single key still moves everything — and a default of n locks the vault the first time somebody
+ * loses a phone. The member can still set any value the Safe accepts.
+ */
+export function suggestedThreshold(ownerCount) {
+  return Math.max(1, Math.ceil(Math.max(1, Number(ownerCount) || 1) / 2))
+}
+
 /** Validate owners + threshold (FR-005). Throws with a user-facing message on invalid input. */
 export function validateVaultConfig(owners, threshold) {
   const seen = new Set()

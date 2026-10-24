@@ -110,7 +110,7 @@ describe('getPortfolioRegistry', () => {
       expect(native.categoryId).toBe('digital-commodities')
       expect(native.source).toBe('sec-baseline')
     }
-    const wmatic = getPortfolioRegistry(137).find((e) => e.symbol === 'WMATIC')
+    const wmatic = getPortfolioRegistry(137).find((e) => e.symbol === 'WPOL')
     expect(wmatic.categoryId).toBe('digital-commodities')
     expect(wmatic.source).toBe('sec-baseline')
   })

@@ -60,6 +60,32 @@ A ruleset bypass for the bot was the alternative. Opening a PR was chosen instea
 on the branch that deploys to members stays intact with no exception. **The cost is a small
 `chore(release): vX.Y.Z` PR after each release — review and merge it; there is nothing to edit.**
 
+> **⚠️ MERGE THE RECORD PR WITH GITHUB'S DEFAULT COMMIT MESSAGE. Do not retitle it.**
+>
+> The `[skip release]` marker lives in the record *branch* commit, and `release.yml` reads
+> `github.event.head_commit.message` — the **merge** commit, one level above it. So the marker is
+> invisible at that point, and the only thing stopping the train from releasing its own paperwork
+> is that GitHub's default subject (`Merge pull request #N from …/release/vX.Y.Z-changelog`) **fails
+> to classify** and therefore votes for no bump.
+>
+> Retitling the merge to a conventional commit re-arms the loop. `chore(release): v1.15.1 (#1391)`
+> parses as `chore(release)` → **patch**, which is how **v1.15.2 was cut from the merge of the
+> v1.15.1 record** on 2026-08-31 — a release containing nothing but the previous release's
+> paperwork. Same failure as `v1.5.6`/`v1.5.7`. Verify before merging:
+>
+> ```bash
+> # Must FAIL to classify. If it succeeds, the merge will mint a version.
+> node scripts/release/classify.js --title "<the merge subject you are about to use>"
+> ```
+>
+> If you must set a subject, also put `[skip release]` in the merge commit **body** — that
+> short-circuits the whole workflow at its top-level `if`, rather than relying on classification
+> failing. Belt and braces; the body is the only lever that works from the merge commit.
+>
+> Tags are immutable (FR-004), so a version minted this way **cannot be withdrawn**. Merge its
+> record PR too: leaving it out makes `git describe` disagree with every manifest, which breaks the
+> version gate's backfill exemption on every subsequent back-merge.
+
 ### 4. Provision the two staging services (FR-023, FR-026c, T035)
 
 Both are Cloud Run services in the same project as production. See
@@ -95,7 +121,7 @@ worked in a single run, because the grant it assumed was never made.
 gcloud builds triggers create github \
   --name=staging-branch-build \
   --repo-owner=chippr-robotics \
-  --repo-name=prediction-dao-research \
+  --repo-name=fairwins-platform \
   --branch-pattern='^staging$' \
   --build-config=cloudbuild.staging.yaml \
   --description='Build + deploy both staging services on every push to staging'
@@ -269,6 +295,24 @@ its own paperwork rather than any product change, and the fix is in
 `scripts/release/classify.js#carriesSkipMarker` — see contracts/version-scheme.md §2. This happened
 for `v1.5.6` and `v1.5.7`.
 
+**It happened again on 2026-08-31 (`v1.15.2`), by a different route, and the difference matters.**
+`carriesSkipMarker` was working: the record commit did not vote. What voted was the **merge commit's
+own subject**, hand-written as `chore(release): v1.15.1 (#1391)` instead of left as GitHub's default.
+`version.js` runs `git log --format=%s…` over the range with no `--no-merges`, so merge commits are
+classified like any other, and a conventional-commit merge subject is a vote.
+
+So there are two independent ways in, and only one of them is fixed in code:
+
+| Route | Voter | Guarded by |
+| --- | --- | --- |
+| The record commit itself | `chore(release): vX.Y.Z [skip release]` | `carriesSkipMarker` ✅ |
+| The **merge** of the record PR | the merge subject | nothing but the default subject not parsing ⚠️ |
+
+The second is a convention, not a gate. Before merging any `release/*-changelog` PR, run
+`classify.js --title` on the subject you intend to use and confirm it **fails**; or put
+`[skip release]` in the merge body. A mechanical fix would be to have the version gate reject a
+classifiable merge subject on a `release/*` head — that does not exist yet.
+
 The second thing to check is whether the version is the *only* thing that moved:
 
 ```bash
@@ -324,12 +368,27 @@ The check names the offending build arg. Two possibilities:
   the list is a decision about how faithful staging is; it should not be made while unblocking a
   release.
 
-### A promotion is blocked because `networks.js` changed
+### A promotion is blocked because the cohort boundary moved
 
 Staging reaches both cohorts by being two services, never by changing how a build resolves its
-cohort (FR-026b). If the change is genuinely unrelated, split it into its own pull request where it
-gets reviewed as what it is: a change to the testnet/mainnet boundary, which is a constitution III
-concern.
+cohort (FR-026b). The gate names exactly what moved — a chain-id constant, one of the resolver
+functions (`buildIsTestnet`, `cohortChainIds`, `membershipChainId`, `miniAppChainId`, `isInCohort`,
+`listSupportedChainIds`, `getCurrentChainId`), a network's `isTestnet` flag, or a chain entering or
+leaving `NETWORKS`. Split that change into its own pull request where it gets reviewed as what it
+is: a change to the testnet/mainnet boundary, a constitution III concern.
+
+**It no longer fires on ordinary edits to `networks.js`.** It used to fail on ANY change to the
+file, and that proxy was too coarse: the file changed 36 times in 90 days — tickers, RPC failovers,
+explorer links — and each one blocked a release it had nothing to do with. The documented remedy
+(land the file on `main` in its own PR first) only works for a file that changes rarely; for this
+one it became a treadmill, and on 2026-08-29 the file changed again *mid-remedy*, twice in six
+hours. A guard that cries wolf on ordinary configuration gets worked around, and a worked-around
+guard protects nothing.
+
+If the gate reports it **could not locate the cohort machinery**, that is a refusal, not a pass —
+somebody restructured `networks.js` and `COHORT_CONSTANTS`/`COHORT_FUNCTIONS` in
+`scripts/release/check-promotion-config.js` need to follow. It fails closed on purpose: a guard that
+cannot read the file must never report a safety it did not establish.
 
 ### An environment reports `unreleased+<sha>`
 

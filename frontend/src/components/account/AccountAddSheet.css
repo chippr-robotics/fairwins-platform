@@ -1,0 +1,44 @@
+/* Release 1.14.0 — the "+" chooser sheet. Options are full-width rows in the shared ActionSheet
+   shell; every colour is a theme token (spec 090/091 — theme.css is the only file that states
+   a colour). */
+
+.account-add-sheet__intro {
+  margin: 0 0 0.75rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.account-add-sheet__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.account-add-sheet__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg, 12px);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.account-add-sheet__option:hover,
+.account-add-sheet__option:focus-visible {
+  border-color: var(--accent-color);
+}
+
+.account-add-sheet__option-label {
+  font-weight: 700;
+}
+
+.account-add-sheet__option-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}

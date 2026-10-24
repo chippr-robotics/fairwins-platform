@@ -29,7 +29,7 @@ export const ROLES = {
 export const ROLE_INFO = {
   [ROLES.WAGER_PARTICIPANT]: {
     name: 'Wager Participant',
-    description: 'Create and accept peer-to-peer wagers in USDC or WMATIC',
+    description: 'Create and accept peer-to-peer wagers in USDC or WPOL',
     premium: true,
     isAdminRole: false
   },

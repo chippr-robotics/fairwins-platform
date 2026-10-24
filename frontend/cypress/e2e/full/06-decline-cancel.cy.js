@@ -65,6 +65,26 @@ function createWagerForTest(description, opponent = TEST_ACCOUNTS[1]) {
     .click({ force: true })
 }
 
+/**
+ * Poll the registry until `wagerId` reads back as None (0) — the on-chain proof that an exit
+ * from a pending wager landed and the escrow was released.
+ *
+ * Neither exit leaves a Cancelled status behind: WagerRegistryCore RELEASES a declined or
+ * withdrawn Open wager's storage for reuse (the gas-refund pattern), so the record reads back
+ * as None. Paired with a precondition check that the wager was Open (1) beforehand, the
+ * Open(1)→None(0) transition is what says the money moved back.
+ */
+function waitForWagerReleased(wagerId, tries = 45) {
+  const poll = (n) =>
+    cy.task('chainTx', { action: 'wagerInfo', args: { wagerId } }).then((info) => {
+      if (info.ok && Number(info.status) === 0) return cy.wrap(info.status)
+      if (n <= 0) throw new Error(`wager ${wagerId} was never released; last status ${info.status}`)
+      cy.wait(1000)
+      return poll(n - 1)
+    })
+  return poll(tries)
+}
+
 describe('Decline and Cancel Wagers', () => {
   before(() => {
     // Encryption is MANDATORY: FriendMarketsModal refuses to create a wager whose opponent has
@@ -120,16 +140,10 @@ describe('Decline and Cancel Wagers', () => {
        * wager's storage for reuse (the gas-refund pattern), so the record
        * reads back as None (0). The Open(1)→None(0) transition, pinned by the
        * precondition check above, IS the on-chain proof the decline landed
-       * and the escrow was released.
+       * and the escrow was released. (See waitForWagerReleased above — DEC-02
+       * asserts the creator's withdrawal by the same transition.)
        */
-      const pollCleared = (n) =>
-        cy.task('chainTx', { action: 'wagerInfo', args: { wagerId } }).then((info) => {
-          if (info.ok && Number(info.status) === 0) return cy.wrap(info.status)
-          if (n <= 0) throw new Error(`wager ${wagerId} was never released; last status ${info.status}`)
-          cy.wait(1000)
-          return pollCleared(n - 1)
-        })
-      pollCleared(30)
+      waitForWagerReleased(wagerId)
 
       /*
        * DELIBERATELY NOT ASSERTED: the list dropping the declined offer.
@@ -158,10 +172,10 @@ describe('Decline and Cancel Wagers', () => {
     cy.openMyWagers('created')
 
     /*
-     * This test CREATED the wager above, so the row is a precondition, not a probe: assert it
-     * retryably and fail HERE if it never lists, rather than no-oping through a one-shot
-     * snapshot (#1250). That part was right; the WINDOW was too short, and on a fresh chain
-     * this failed against a list that does arrive.
+     * This test CREATED the wager above, so the row is a precondition, not a probe: it is
+     * asserted retryably below and fails HERE if it never lists, rather than no-oping through a
+     * one-shot snapshot (#1250). The WINDOW matters as much as the shape — 20s failed against a
+     * list that does arrive — so the wait below keeps the 60s measured here.
      *
      * Measured on a clean local node: the cache key `friendMarkets:80002` is ALREADY written
      * (~6.4 KB) by the time this line runs — the page's first scan completed back at
@@ -176,41 +190,57 @@ describe('Decline and Cancel Wagers', () => {
      * assertion with a window that actually covers a cold scan is the honest wait, and it
      * still fails here, naming this precondition, if the row never lists at all.
      */
-    cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
-      .find('.mm-table-row', { timeout: 60000 })
-      .should('have.length.greaterThan', 0)
-      .then((rows) => {
-        // Click on the first wager to view details
-        cy.wrap(rows.first()).click()
+    cy.lastWagerId().then((wagerId) => {
+      // Pin the precondition: the wager this test just created is Open (1), so the
+      // Open→None transition asserted at the end can only mean the withdrawal landed.
+      cy.task('chainTx', { action: 'wagerInfo', args: { wagerId } })
+        .its('status').should('eq', 1)
 
-        cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
+      /*
+       * OPEN THE PENDING ROW. Matching on the row's own status badge rather than taking
+       * `rows.first()`: this spec does not reset the chain between tests, and "Withdraw Offer"
+       * is offered only on a PENDING_ACCEPTANCE wager, so an accepted or withdrawn leftover
+       * sitting first in the list would send this test looking for a control that correctly
+       * is not there.
+       *
+       * "Under Consideration", not "Pending": the row VM swaps the status text for the
+       * CREATOR of a pending wager (wagerVm.js#statusText, isCreatorOfPending) — and this test
+       * is the creator. The detail badge below still says "Pending Acceptance" because the
+       * detail view renders getStatusLabel directly; only the row wears the creator-facing
+       * label. /pending/i alone burned the full 60s here without ever matching.
+       */
+      cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
+        .contains('.mm-table-row', /under consideration|pending/i, { timeout: 60000 })
+        .click()
 
-        // Look for "Withdraw Offer" button (creator's cancel action)
-        cy.get('.mm-detail').then(($detail) => {
-          const withdrawBtn = $detail.find('button:contains("Withdraw")')
-          if (withdrawBtn.length > 0) {
-            cy.wrap(withdrawBtn.first()).click()
+      cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
+      cy.get('.mm-detail .mm-status-badge').should('contain.text', 'Pending Acceptance')
 
-            // Wait for TX
-            cy.get('.mm-detail', { timeout: 30000 }).invoke('text').then((text) => {
-              const lower = text.toLowerCase()
-              const validOutcome = lower.includes('withdrawn') ||
-                                  lower.includes('returned') ||
-                                  lower.includes('cancelled') ||
-                                  lower.includes('success') ||
-                                  lower.includes('error') ||
-                                  lower.includes('withdrawing')
-              expect(validOutcome).to.be.true
-            })
-          } else {
-            // Withdraw button not visible — wager may have been already accepted
-            cy.get('.mm-detail').invoke('text').then((text) => {
-              const lower = text.toLowerCase()
-              expect(lower.includes('active') || lower.includes('pending') || lower.includes('resolved')).to.be.true
-            })
-          }
-        })
-      })
+      /*
+       * THE WITHDRAW CONTROL IS GUARANTEED HERE, so assert it — do not snapshot for it.
+       *
+       * MyMarketsModal renders "Withdraw Offer" for `isCreatorView && isCreator &&
+       * PENDING_ACCEPTANCE`, all three of which this test has just arranged. The old
+       * `$detail.find(...)` withdraw lookup was a one-shot DOM snapshot inside
+       * `.then()` (anti-pattern 3) taken the instant `.mm-detail` became visible: when the
+       * action area had not rendered yet it took the else branch, asserted that the panel
+       * contained one of active|pending|resolved — true of the panel it was already looking
+       * at — and reported a PASS having withdrawn nothing. The success branch was barely
+       * better: it accepted `error` alongside `withdrawn`, so it passed whether the
+       * transaction succeeded or failed.
+       */
+      cy.get('.mm-detail').contains('button', /withdraw offer/i, { timeout: 20000 })
+        .should('be.visible')
+        .and('not.be.disabled')
+        .click()
+
+      /*
+       * JUDGE IT BY THE AUTHORITY THAT DECIDES IT. Whether the panel says "Offer withdrawn"
+       * is copy; whether the member got their stake back is the money path, and the registry
+       * releasing the record (Open→None, DEC-01's pattern) is what says it did.
+       */
+      waitForWagerReleased(wagerId)
+    })
   })
 
   // ---------------------------------------------------------------------------
@@ -261,10 +291,23 @@ describe('Decline and Cancel Wagers', () => {
       cy.contains('.mm-panel button, [role="tabpanel"] button', /view offer/i, { timeout: 20000 })
         .click({ force: true })
       cy.get('.ma-modal, [role="dialog"]', { timeout: 5000 }).should('be.visible')
-      cy.get('.ma-modal').then(($modal) => {
-        const withdrawBtn = $modal.find('button:contains("Withdraw"), button:contains("Cancel Wager")')
-        expect(withdrawBtn.length, 'no cancel control offered to the opponent').to.equal(0)
-      })
+
+      /*
+       * ANCHOR THE ABSENCE ON THE MODAL HAVING DECIDED WHAT TO SHOW.
+       *
+       * `.ma-modal` becoming visible does not mean it has rendered its terms or its action row:
+       * every wager here is private, so the modal first has to resolve the decrypt gate. A
+       * one-shot `$modal.find(...)` taken in between (anti-pattern 3) finds no cancel control
+       * for a reason that has nothing to do with permissions, and the assertion passes anyway.
+       *
+       * Wait for one of the modal's terminal states — the same edge cy.acceptOfferInModal()
+       * waits on — and only then assert the control is absent.
+       */
+      cy.get('.ma-modal')
+        .find('.ma-decrypt-prompt, .ma-description, .ma-decrypt-error', { timeout: 20000 })
+        .should('exist')
+      cy.get('.ma-modal').contains('button', /withdraw/i).should('not.exist')
+      cy.get('.ma-modal').contains('button', /cancel wager/i).should('not.exist')
     })
   })
 
@@ -272,44 +315,69 @@ describe('Decline and Cancel Wagers', () => {
   // DEC-05: Cannot cancel/decline after Active
   // ---------------------------------------------------------------------------
   it('[DEC-05] Cannot cancel or decline after wager is Active', () => {
-    // For this test, we need a wager that's been accepted (Active)
-    connectAndVisit(0)
+    /*
+     * ESTABLISH THE ACTIVE WAGER — do not hope one is lying around.
+     *
+     * This test used to connect, snapshot the panel, and filter its rows for an Active one;
+     * when the filter found nothing (the scan not finished, or no earlier test having left an
+     * accepted wager behind) it fell through to an else branch whose assertion ended in
+     * `lower.length > 0` — true of any rendered panel. It reported as coverage for a rule
+     * nobody had checked. Created and accepted on chain here, so the precondition is a fact
+     * this test owns; ACC-09 and RES-12 arrange theirs the same way.
+     */
+    cy.createAndAcceptWager({ stake: 5 }).then((wagerId) => {
+      cy.task('chainTx', { action: 'wagerInfo', args: { wagerId } })
+        .its('status').should('eq', 2) // Active
 
-    cy.openMyWagers('created')
+      connectAndVisit(0)
+      cy.openMyWagers('created')
 
-    // Look for an active wager. This is a genuine probe (the test did not arrange an
-    // ACCEPTED wager), so settle the fetch first — a bare panel snapshot reads the
-    // in-flight empty state as "no active wagers" (#1250).
-    cy.settledWagerPanel().then(($panel) => {
       /*
-       * Open the row that is actually ACTIVE.
-       *
-       * This used to ask whether an Active badge existed ANYWHERE in the panel and then open
-       * `rows.first()` — a different wager whenever the newest row was not the active one. A
-       * pending offer legitimately carries a Cancel button, so the assertion below ("an active
-       * wager offers no Cancel") failed against a row it was never meant to inspect. It passed
-       * for as long as ordering happened to put the active wager first.
+       * OPEN THE ROW THAT IS ACTUALLY ACTIVE, retryably. A pending offer legitimately carries a
+       * Withdraw control, so `rows.first()` made the assertion below pass or fail on list
+       * ordering. `cy.contains` retries until an Active row lists, so a scan that has not
+       * finished is a wait rather than a silently-skipped test (#1250).
        */
-      const activeRows = $panel.find('.mm-table-row').filter((_, el) => /active/i.test(el.textContent || ''))
-      if (activeRows.length > 0) {
-        cy.wrap(activeRows.first()).click()
+      /*
+       * The chain says Active (pinned above); the ROW may already say "Pending Resolution" —
+       * computedStatus is a function of the browser clock against the wager's own end time,
+       * and this spec's earlier tests advance both clocks, so the label depends on where the
+       * shard's clock sits when the scan lands. Either label is this wager; the detail is
+       * then pinned to the id so a stale row matching the same label fails loudly instead of
+       * quietly standing in.
+       */
+      cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
+        .contains('.mm-table-row', /active|pending resolution/i, { timeout: 60000 })
+        .click()
 
-        cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
+      cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
+      cy.get('.mm-detail', { timeout: 10000 }).should('contain.text', `#${wagerId}`)
 
-        // Active wager should NOT have Withdraw or Cancel button
-        cy.get('.mm-detail').then(($detail) => {
-          const withdrawBtn = $detail.find('button:contains("Withdraw")')
-          const cancelBtn = $detail.find('button:contains("Cancel")')
-          // Either no withdraw/cancel buttons, or they should not be for this wager
-          expect(withdrawBtn.length + cancelBtn.length).to.be.lte(0)
-        })
-      } else {
-        // No active wagers — verify at the state level
-        cy.get('.mm-panel').invoke('text').then((text) => {
-          const lower = text.toLowerCase()
-          expect(lower.includes('no wagers') || lower.includes('pending') || lower.includes('empty') || lower.length > 0).to.be.true
-        })
-      }
+      /*
+       * ANCHOR THE ABSENCE on the detail agreeing which wager it is describing, then assert the
+       * exit controls are gone. `$detail.find(...)` inside `.then()` read the action area once
+       * (anti-pattern 3) and would have reported "no Withdraw, no Cancel" of an area that had
+       * simply not rendered.
+       */
+      // The badge is computed from the browser clock against the wager's end time, exactly like
+      // the row above — an on-chain-Active wager reads 'Pending Resolution' once the shard's
+      // clock passes its end time. Either label is on-chain status 2; the id pin above is what
+      // ties the detail to THIS wager.
+      cy.get('.mm-detail .mm-status-badge').invoke('text')
+        .should('match', /active|pending resolution/i)
+      cy.get('.mm-detail').contains('button', /withdraw/i).should('not.exist')
+      cy.get('.mm-detail').contains('button', /cancel/i).should('not.exist')
+
+      // And the chain refuses both exits outright, which is the guarantee the UI is reflecting.
+      cy.task('chainTx', { action: 'cancelOpen', args: { wagerId, callerIndex: 0 } }).then((r) => {
+        expect(r.ok, 'an Active wager can no longer be cancelled by its creator').to.equal(false)
+      })
+      cy.task('chainTx', { action: 'declineWager', args: { wagerId, callerIndex: 1 } }).then((r) => {
+        expect(r.ok, 'an Active wager can no longer be declined by its opponent').to.equal(false)
+      })
+      cy.task('chainTx', { action: 'wagerInfo', args: { wagerId } }).then((i) => {
+        expect(i.status, 'the wager is untouched — still Active').to.equal(2)
+      })
     })
   })
 

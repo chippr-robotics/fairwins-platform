@@ -103,4 +103,42 @@ describe('useDataBackup.backup', () => {
     expect(sendCalls).toHaveBeenCalledWith([{ target: '0xREGISTRY', data: '0xset:bafytest' }])
     expect(h.showNotification).toHaveBeenCalledWith('Your data is backed up.', 'success')
   })
+
+  /*
+   * The write-settles race (#1327). `sendCalls` RESOLVES on a stalled or reverted UserOp rather than
+   * throwing (submission.js#trackToInclusion), so the pointer can be un-recorded at the moment the
+   * hook decides what to tell the member. "Backed up" here would be a claim about chain state that
+   * nothing established, and remoteState 'yes' would keep claiming it on every later render.
+   */
+  it('passkey: a pointer UserOp that stalls is never reported as backed up', async () => {
+    const sendCalls = vi.fn(async () => ({ state: 'stalled', userOpHash: '0xpk', lastKnown: { state: 'pending' } }))
+    h.wallet = { account: ACCT, signer: null, chainId: 137, isConnected: true, switchNetwork: vi.fn(), loginMethod: 'passkey', sendCalls }
+    const { result } = renderHook(() => useDataBackup())
+    let ok
+    await act(async () => { ok = await result.current.backup() })
+    expect(ok).toBe(false)
+    expect(h.showNotification).not.toHaveBeenCalledWith('Your data is backed up.', 'success')
+    expect(result.current.hasRemote).toBe(false)
+  })
+
+  it('passkey: a pointer UserOp that reverted is never reported as backed up', async () => {
+    const sendCalls = vi.fn(async () => ({ state: 'failed', reason: 'execution reverted' }))
+    h.wallet = { account: ACCT, signer: null, chainId: 137, isConnected: true, switchNetwork: vi.fn(), loginMethod: 'passkey', sendCalls }
+    const { result } = renderHook(() => useDataBackup())
+    let ok
+    await act(async () => { ok = await result.current.backup() })
+    expect(ok).toBe(false)
+    expect(h.showNotification).toHaveBeenCalledWith('execution reverted', 'error')
+    expect(result.current.hasRemote).toBe(false)
+  })
+
+  it('passkey: an included pointer UserOp is reported as backed up', async () => {
+    const sendCalls = vi.fn(async () => ({ state: 'included', txHash: '0xpk' }))
+    h.wallet = { account: ACCT, signer: null, chainId: 137, isConnected: true, switchNetwork: vi.fn(), loginMethod: 'passkey', sendCalls }
+    const { result } = renderHook(() => useDataBackup())
+    let ok
+    await act(async () => { ok = await result.current.backup() })
+    expect(ok).toBe(true)
+    expect(h.showNotification).toHaveBeenCalledWith('Your data is backed up.', 'success')
+  })
 })

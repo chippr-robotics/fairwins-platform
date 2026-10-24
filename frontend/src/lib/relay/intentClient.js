@@ -12,7 +12,8 @@
  * PaymentUnsupportedOnChain (FR-020 pre-sign domain check — self-submit),
  * RelayRejected (gateway validation verdict — surface `code`/`reason`).
  */
-import { ethers } from 'ethers'
+import { toHex } from 'viem'
+import { splitSignature } from '../evm/signature'
 import {
   INTENT_ACTIONS,
   INTENT_TYPES,
@@ -36,7 +37,7 @@ export function relayerBaseUrl() {
 
 /** A fresh random 32-byte nonce (2-D replay nonce / EIP-3009 nonce / uniquenessMarker). */
 export function randomNonce() {
-  return ethers.hexlify(ethers.randomBytes(32))
+  return toHex(crypto.getRandomValues(new Uint8Array(32)))
 }
 
 /** Serialize a uint-ish value (bigint/number/string) to a JSON-safe decimal string. */
@@ -195,9 +196,10 @@ export async function signIntent({
       validBefore: before,
       nonce: paymentNonce,
     }
-    const sig = ethers.Signature.from(
-      await signer.signTypedData(tokenDomain, RECEIVE_WITH_AUTHORIZATION_TYPES, authMessage)
-    )
+    // See `lib/evm/signature.js`: viem's parseSignature refuses the compact form and returns a
+    // bigint `v`, and this authorization is JSON-serialized to the relay gateway.
+    const sig = splitSignature(await signer.signTypedData(tokenDomain, RECEIVE_WITH_AUTHORIZATION_TYPES, authMessage))
+    if (!sig) throw new Error('The wallet returned something that is not a signature, so nothing has been authorized.')
     authorization = { ...authMessage, validAfter: toUintString(validAfter), validBefore: toUintString(before), v: sig.v, r: sig.r, s: sig.s }
     if (hasField('paymentNonce')) message.paymentNonce = paymentNonce
   }

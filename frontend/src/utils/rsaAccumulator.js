@@ -15,8 +15,7 @@
  * @module rsaAccumulator
  */
 
-import { keccak256, solidityPacked } from 'ethers'
-
+import { encodePacked, keccak256 } from 'viem'
 // ============================================================================
 // Constants
 // ============================================================================
@@ -333,7 +332,7 @@ export function hashToPrime(hash) {
 export function computeMarketHash(marketData) {
   const { proposalId, collateralToken, conditionId, passPositionId, failPositionId } = marketData
 
-  return keccak256(solidityPacked(
+  return keccak256(encodePacked(
     ['string', 'uint256', 'address', 'bytes32', 'uint256', 'uint256'],
     ['MARKET_V1', proposalId, collateralToken, conditionId, passPositionId, failPositionId]
   ))
@@ -346,7 +345,7 @@ export function computeMarketHash(marketData) {
  * @returns {string} Keccak256 hash
  */
 export function computeMarketHashSimple(marketFactory, marketId) {
-  return keccak256(solidityPacked(
+  return keccak256(encodePacked(
     ['string', 'address', 'uint256'],
     ['MARKET_SIMPLE_V1', marketFactory, marketId]
   ))
@@ -358,7 +357,7 @@ export function computeMarketHashSimple(marketFactory, marketId) {
  * @returns {string} Keccak256 hash
  */
 export function computeAddressHash(address) {
-  return keccak256(solidityPacked(
+  return keccak256(encodePacked(
     ['string', 'address'],
     ['ADDRESS_V1', address]
   ))

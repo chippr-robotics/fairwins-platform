@@ -92,6 +92,27 @@ system like other account events.
   states announced; accordion semantics come from the shared `AccordionSection`
   (`aria-expanded` + `inert` collapsed region).
 
+### Amendment — Ledger over Bluetooth (release 1.14.0)
+
+- **FR-015**: The Ledger transport is chosen **inside the adapter** from what the browser exposes
+  (`ledgerTransportKind`): WebHID where it exists — so a desktop keeps exactly the transport it
+  always used — otherwise Web Bluetooth (`@ledgerhq/hw-transport-web-ble`) where `navigator.bluetooth`
+  exists, otherwise WebUSB. Bluetooth outranks WebUSB only in the WebHID-less case, which is a
+  phone: Android Chrome exposes WebUSB, but reaching a Ledger that way needs an OTG cable while
+  BLE is the rail the device itself offers. Everything above the adapter stays transport-agnostic —
+  `HardwareSigner` must never learn what a transport is.
+- **FR-016**: Member-facing connect copy is **derived from the transport that would be opened**
+  (`connectCopy.js#connectGuidance`), never assumed: the vendor hint, the connect checklist and the
+  reconnect sentence all come from that one function, so a phone pairing over Bluetooth is never
+  told to plug anything in. Trezor has no Bluetooth rail and its copy is unchanged — no vendor may
+  claim a capability it lacks.
+- **FR-017**: A browser with neither rail (iOS Safari, old browsers) refuses honestly and names
+  both: the option renders disabled with the stated reason and the connect step shows that reason
+  in place of a checklist that could not succeed. BLE-specific failures reuse the existing
+  vocabulary — a dismissed pairing chooser is `permission-denied`, a dropped link is
+  `disconnected` — with one addition, `bluetooth-unavailable`, for a radio that is switched off
+  (checked via `navigator.bluetooth.getAvailability()` before any chooser is shown).
+
 ## Out of scope
 
 - Bitcoin/Solana hardware accounts — Ethereum-family accounts only for now (the spec-061

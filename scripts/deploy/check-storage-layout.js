@@ -49,7 +49,9 @@ const UPGRADEABLE_CONTRACTS = [
   { name: "MembershipManager", deploymentsKey: "membershipManager" }, // spec 027 — second adopter of UUPSManaged
   { name: "TokenFactory", deploymentsKey: "tokenFactory" }, // spec 028 — token-issuance authority/registry
   { name: "ExternalDAORegistry", deploymentsKey: "externalDAORegistry" }, // spec 030 — ClearPath external-DAO registry
+  { name: "StandardDAOFactory", deploymentsKey: "standardDaoFactory" }, // spec 030 pillar A — native standard-DAO factory (the DAOs it creates are immutable and have no layout to gate)
   { name: "WagerPoolFactory", deploymentsKey: "wagerPoolFactory" }, // spec 034 — WagerPools factory (address-based)
+  { name: "FundingPoolFactory", deploymentsKey: "fundingPoolFactory" }, // spec 103 — funding pools factory (sibling of the wager-pool factory)
   { name: "CallsignRegistry", deploymentsKey: "callsignRegistry" }, // spec 054 — in-house %callsign naming registry
   { name: "FeeRouter", deploymentsKey: "feeRouter" }, // spec 060 — unified platform-fee registry + wrapper
   { name: "StakingRouter", deploymentsKey: "stakingRouter" }, // spec 066 — staking control surface + liquid fee router

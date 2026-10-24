@@ -49,6 +49,13 @@ export default createMiniAppConfig({
    * source exists on a chain, to decide how much it can say about screening posture. The screening
    * DECISION is the host's, enforced inside `submit`, and this package does not perform it.
    */
-  contracts: ['externalDAORegistry', 'paymentToken', 'sanctionsGuard'],
+  /*
+   * `standardDaoFactory` (spec 030 pillar A) is DECLARED on every chain and DEPLOYED on Cancun ones
+   * only. The two answers differ and the app depends on that: an undeclared name THROWS (a packaging
+   * bug), while a declared-but-absent one returns `null` — a fact about the estate the Launch tab
+   * renders as its own honest unavailable state, naming the reason. Declaring it here is what makes
+   * "not on this chain" expressible at all.
+   */
+  contracts: ['externalDAORegistry', 'standardDaoFactory', 'paymentToken', 'sanctionsGuard'],
   plugins: [react()],
 })

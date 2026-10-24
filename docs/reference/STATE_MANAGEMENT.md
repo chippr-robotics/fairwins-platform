@@ -18,13 +18,16 @@ Manages all Web3-related state including:
 - Provider and signer instances
 - Connection actions (connectWallet, disconnectWallet, switchNetwork)
 
-**Provider Setup:**
-```jsx
-import { Web3Provider } from './contexts/Web3Context'
+**Provider Setup:** there is none to add — `WalletProvider` (mounted in `main.jsx`) IS this
+context, and `useWeb3()` reads it. A separate `Web3Provider` existed until spec 110 and was
+never rendered; this snippet described mounting it, which is why it is gone rather than
+updated.
 
-<Web3Provider>
+```jsx
+// src/main.jsx — the real tree
+<WalletProvider>
   <App />
-</Web3Provider>
+</WalletProvider>
 ```
 
 #### 2. UIContext (`src/contexts/UIContext.jsx`)

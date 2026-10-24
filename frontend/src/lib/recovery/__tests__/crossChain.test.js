@@ -1,14 +1,15 @@
 // Spec 063 (T008/T009) — cross-chain derivation + discovery from a recovered secret.
 
-import { describe, it, expect, vi, beforeAll } from 'vitest'
-import { registerEthersCrypto } from '../../../test/recovery/registerEthersCrypto'
+import { describe, it, expect, vi } from 'vitest'
 import { deriveCrossChainAccounts } from '../crossChainDerive'
 import { discoverCrossChain } from '../crossChainDiscovery'
 import { ledgerStore } from '../../bitcoin/wallet'
 
-// ethers' HDNodeWallet.fromPhrase needs sha256/pbkdf2; under jsdom ethers' default returns a
-// Buffer that breaks BytesLike — register the @noble-backed crypto (same shim spec-062 uses).
-beforeAll(() => registerEthersCrypto())
+// The `registerEthersCrypto` shim was here for `ethers.HDNodeWallet.fromPhrase` under jsdom.
+// Nothing this file reaches derives through ethers any more (spec 110: `crossChainDerive` takes
+// its EVM address from `addressFromSecret`, and the Bitcoin/Solana legs were always @scure), so
+// the shim is gone rather than left as a setup step that reads like it is still protecting
+// something.
 
 const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const SOL0 = 'HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk' // m/44'/501'/0'/0'

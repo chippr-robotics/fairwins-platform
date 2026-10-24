@@ -93,9 +93,12 @@ export const CLASSIFICATION_SOURCES = ['sec-baseline', 'curated-registry', 'app-
 
 // Symbol-level baseline derived from the SEC's public commodity
 // classifications (major L1/L2 assets named by the SEC: BTC, ETH, SOL, XRP)
-// plus the gas assets of the networks this app runs on (MATIC/POL, ETC),
-// which sit in the same functional-network bucket. Wrapped forms inherit the
-// underlying symbol's classification via `baselineSymbol`.
+// plus the gas assets of the networks this app runs on (POL and ETC), which
+// sit in the same functional-network bucket. MATIC stays listed as POL's
+// pre-migration legacy ticker: historical ledger/report entries and the
+// still-live MATIC ERC-20 carry it, and its classification is unchanged.
+// Wrapped forms inherit the underlying symbol's classification via
+// `baselineSymbol`.
 export const SEC_COMMODITY_BASELINE = ['BTC', 'ETH', 'SOL', 'XRP', 'MATIC', 'POL', 'ETC']
 
 const BASELINE_SET = new Set(SEC_COMMODITY_BASELINE)
@@ -112,6 +115,9 @@ const BASELINE_SET = new Set(SEC_COMMODITY_BASELINE)
 export const UNDERLYING_META = {
   ETH: { name: 'Ethereum', homeChainId: 1 },
   BTC: { name: 'Bitcoin', homeChainId: null, homeNetwork: 'bitcoin' },
+  // MATIC is POL's legacy ticker (pre-migration Polygon gas token / the old
+  // ERC-20) — kept so historical entries and un-migrated balances still render
+  // with the Polygon identity. Nothing in current config emits it.
   MATIC: { name: 'Polygon', homeChainId: 137 },
   POL: { name: 'Polygon', homeChainId: 137 },
   ETC: { name: 'Ethereum Classic', homeChainId: 61 },
@@ -432,7 +438,7 @@ export function getPortfolioRegistry(chainId) {
   }
 
   // --- app-config layer ---------------------------------------------------
-  // Native coin. All currently supported natives (MATIC, ETC, ETH) sit on the
+  // Native coin. All currently supported natives (POL, ETC, ETH) sit on the
   // SEC baseline; withBaseline handles any future non-baseline native by
   // leaving it unclassified rather than guessing (FR-012).
   put({

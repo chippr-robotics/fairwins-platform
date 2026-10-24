@@ -15,7 +15,7 @@ describe('Footer', () => {
 
     // every legal link present and pointing at an in-app route
     for (const { label, href } of LEGAL_LINKS) {
-      const link = within(footer).getByRole('link', { name: new RegExp(label.replace('&', '&'), 'i') })
+      const link = within(footer).getByRole('link', { name: new RegExp(label, 'i') })
       expect(link).toHaveAttribute('href', href)
       expect(href.startsWith('/')).toBe(true)
     }

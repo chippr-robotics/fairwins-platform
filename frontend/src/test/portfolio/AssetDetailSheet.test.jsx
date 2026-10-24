@@ -175,6 +175,39 @@ describe('AssetDetailSheet actions', () => {
   })
 })
 
+describe('AssetDetailSheet voucher send (release 1.14.0 task 9)', () => {
+  // FWMV is transferable by design (spec 026: gifted or resold), so the sheet must not leave
+  // the member with four disabled actions. Send / Gift routes into the EXISTING voucher
+  // transfer flow on VouchersPage — no transfer logic is re-implemented here.
+  it('offers Send / Gift on the FWMV voucher asset', () => {
+    renderSheet(VOUCHER_AGG)
+    expect(screen.getByRole('button', { name: 'Send / Gift' })).toBeEnabled()
+  })
+
+  it('activating Send / Gift opens the voucher transfer flow and closes the sheet', () => {
+    const onClose = renderSheet(VOUCHER_AGG)
+    fireEvent.click(screen.getByRole('button', { name: 'Send / Gift' }))
+    expect(mockNavigate).toHaveBeenCalledWith('/vouchers#vch-transfer')
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('does not offer Send / Gift on non-voucher assets', () => {
+    renderSheet(ETH_AGG)
+    expect(screen.queryByRole('button', { name: 'Send / Gift' })).not.toBeInTheDocument()
+  })
+
+  it('does not offer Send / Gift on other NFT aggregates', () => {
+    renderSheet({
+      ...VOUCHER_AGG,
+      id: 'digital-collectibles|COOL',
+      underlying: 'COOL',
+      name: 'Cool Cats',
+      instances: [instance({ symbol: 'COOL', baselineSymbol: undefined, kind: 'nft', chainId: 137, balance: 1, categoryId: 'digital-collectibles', source: 'curated-registry' })],
+    })
+    expect(screen.queryByRole('button', { name: 'Send / Gift' })).not.toBeInTheDocument()
+  })
+})
+
 describe('AssetDetailSheet dismissal', () => {
   it('closes on Escape and on the backdrop scrim', () => {
     const onClose = renderSheet(ETH_AGG)

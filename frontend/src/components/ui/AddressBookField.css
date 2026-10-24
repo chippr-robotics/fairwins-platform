@@ -106,14 +106,22 @@
   color: var(--text-muted);
 }
 
-/* Inline screening notice under an address field. */
+/* Inline screening notice under an address field: pill + one line, then the segmented bar. */
 .ab-screen-notice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  font-size: 0.82rem;
+}
+
+.ab-screen-notice-head {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   flex-wrap: wrap;
-  margin-top: 0.4rem;
-  font-size: 0.82rem;
+  max-width: 100%;
 }
 
 .ab-screen-notice-text {

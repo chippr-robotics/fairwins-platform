@@ -1,0 +1,650 @@
+/* Spec 102 — the vault card list and the vault sheet (Queue / Style / Details). Tokens only
+   (spec 090/091: theme.css is the only file that states a colour). Every button class here is
+   written with a scoping ancestor, because src/index.css carries a global
+   `button { padding: 0.6em 1.2em }` that would otherwise re-pad the icon controls. */
+
+/* --- Card list --------------------------------------------------------------------------- */
+
+.vault-card-list {
+  position: relative;
+  margin: 0.5rem 0 0;
+}
+
+/* The listbox: cards in one column on a phone, 2-up from 640px. */
+.vault-card-list__options {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.75rem;
+}
+
+@media (min-width: 640px) {
+  .vault-card-list__options {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.vault-card-list__item {
+  min-width: 0;
+  display: flex;
+}
+
+.vault-card-list__item .account-card[data-tint] {
+  width: 100%;
+  /* Leave the top-right corner to the "⋯" so the kind tag never sits under it. */
+  padding-right: 3rem;
+}
+
+/* The "⋯" layer sits over the grid as a SIBLING of the listbox (an option may hold no
+   interactive children, and a listbox may own only options). It takes no pointer events itself;
+   each button is positioned from the measured card rect and takes them back. 36×36 floor: a real
+   tap target without dwarfing the card. */
+.vault-card-list__menus {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.vault-card-list__menus .vault-card-menu {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  line-height: 1;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  pointer-events: auto;
+  z-index: 2;
+}
+
+.vault-card-list__menus .vault-card-menu:hover,
+.vault-card-list__menus .vault-card-menu:focus-visible {
+  border-color: var(--brand-primary);
+  color: var(--text-primary);
+}
+
+.vault-card-list__menus .vault-card-menu:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+/* Threshold · policy badge · pending, on one wrapping line inside the card. */
+.vault-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  max-width: 100%;
+}
+
+.vault-card-meta__threshold {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Amber is signal-only (spec 090): the pending count is a live state, and the chip is OPAQUE so
+   its contrast does not depend on the glass behind it. */
+.vault-card-meta__pending {
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-full);
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  color: var(--warning-text);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* --- Sheet ------------------------------------------------------------------------------- */
+
+.vault-sheet__identity {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin: 0 0 0.85rem;
+  min-width: 0;
+}
+
+.vault-sheet__identity .blockies-avatar,
+.vault-sheet__identity .account-avatar--custom {
+  border-radius: 50%;
+  flex: none;
+}
+
+.vault-sheet__identity-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+
+.vault-sheet__label {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vault-sheet__addr {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.vault-sheet__networks {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+/* Tablist — three views of one object. The selected tab is told apart by fill, not by opacity. */
+.vault-sheet__tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0.2rem;
+  margin: 0 0 0.85rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+}
+
+.vault-sheet .vault-sheet__tab {
+  flex: 1;
+  min-height: 36px;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text-secondary);
+  font-weight: 600;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.vault-sheet .vault-sheet__tab[aria-selected='true'] {
+  background: var(--surface-color);
+  border-color: var(--border-color);
+  color: var(--text-primary);
+  box-shadow: var(--shadow-sm);
+}
+
+.vault-sheet .vault-sheet__tab:focus-visible {
+  outline: 2px solid var(--brand-primary);
+  outline-offset: 2px;
+}
+
+.vault-sheet__panel {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+/* --- Queue view -------------------------------------------------------------------------- */
+
+.vault-queue__summary {
+  margin: 0;
+  font-size: 0.9rem;
+  color: var(--text-primary);
+}
+
+.vault-queue__summary.is-partial {
+  color: var(--warning-text);
+}
+
+.vault-queue__rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vault-queue__row {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.vault-queue__row-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vault-queue__facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  word-break: break-all;
+}
+
+.vault-queue__viewonly {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.vault-queue__row-error {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--danger-text);
+}
+
+.vault-queue__chains {
+  list-style: none;
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0 0;
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.vault-queue__chains li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.vault-queue__chains li[data-state='unreadable'] {
+  color: var(--danger-text);
+}
+
+/* --- Details view ------------------------------------------------------------------------ */
+
+.vault-details__section {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.75rem 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.vault-details__section:first-child {
+  border-top: none;
+  padding-top: 0;
+}
+
+.vault-details__section h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.vault-details__address {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.vault-details__address code {
+  font-family: var(--font-mono);
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+  word-break: break-all;
+  flex: 1 1 12rem;
+}
+
+.vault-details__network {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  padding: 0.6rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.vault-details__network-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vault-details__network-facts {
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.vault-details__owners {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.vault-owner-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vault-owner-row__name {
+  font-weight: 600;
+}
+
+.vault-owner-row__source {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  padding: 0.1rem 0.45rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+}
+
+.vault-owner-row__addr {
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
+.vault-sheet .vault-owner-row__add {
+  margin-left: auto;
+  padding: 0.3rem 0.6rem;
+  min-height: 36px;
+  font-size: 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.vault-sheet .vault-owner-row__add:hover:not(:disabled) {
+  border-color: var(--brand-primary);
+}
+
+/* Acting account — a radiogroup of the switcher's list. The entry for THIS vault is emphasised. */
+.vault-details__acting {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.vault-sheet .vault-details__act-as {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.55rem 0.75rem;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.vault-sheet .vault-details__act-as[aria-checked='true'] {
+  border-color: var(--brand-primary);
+  box-shadow: 0 0 0 2px var(--brand-primary);
+}
+
+.vault-sheet .vault-details__act-as.is-this-vault {
+  border-left: 4px solid var(--brand-secondary);
+}
+
+.vault-details__act-as-kind {
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 0.15rem 0.5rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.vault-details__act-as-addr {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  margin-left: auto;
+}
+
+.vault-details__danger {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.vault-sheet .vault-details__danger-btn {
+  border: 1px solid var(--danger-color);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--danger-text);
+  padding: 0.4rem 0.8rem;
+  cursor: pointer;
+}
+
+.vault-sheet .vault-details__danger-btn:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+/* --- Style view -------------------------------------------------------------------------- */
+
+.vault-style__intro {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--text-secondary);
+}
+
+
+/* Spec 102 (actor-critic round 2) */
+.vault-details__address {
+  align-items: flex-start;
+}
+
+.vault-details__address code {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.vault-details__subheading {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+/* The governance panel's own heading would repeat the subheading; the panel keeps its buttons. */
+.vault-details__governance .custody-governance > h5,
+.vault-details__governance .custody-governance > h4 {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  .vault-owner-row {
+    flex-wrap: wrap;
+  }
+
+  .vault-sheet .vault-owner-row__add {
+    margin-left: 0;
+    flex-basis: 100%;
+    justify-content: flex-start;
+  }
+}
+
+/* Spec 102 — the queue's summary line and its Refresh control share a row: the control is about
+   the whole queue, so it sits with the sentence that describes it rather than with any one row. */
+.vault-queue__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+/* The summary takes the room it needs and wraps within itself; Refresh stays pinned to the top
+   right at every width. Allowed to WRAP, the control dropped onto a line of its own under a
+   two-line summary on a phone and read as a stray link rather than this queue's control. */
+.vault-queue__head .vault-queue__summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+}
+
+/* Flush with the rows' right edge: the global `button` padding (index.css) otherwise insets the
+   label from the edge every other element in this panel lines up with. */
+.vault-queue__head .custody-link {
+  flex: none;
+  padding-inline: 0;
+}
+
+/* Spec 105 — Details: one card, compact network rows, shared facts with drift disclosure. */
+.vault-details__net-rows {
+  list-style: none;
+  margin: 0 0 0.6rem;
+  padding: 0;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.vault-details__net-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 0.45rem 0.65rem;
+}
+
+.vault-details__net-status {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.vault-details__net-status.is-unreadable {
+  color: var(--error-color);
+}
+
+.vault-details__net-action {
+  margin-left: auto;
+}
+
+.vault-details__net-here {
+  margin-left: auto;
+  font-size: 0.78rem;
+  color: var(--accent-color);
+}
+
+.vault-details__net-deploy {
+  background: var(--primary-button);
+  color: var(--primary-button-text);
+  border: none;
+  border-radius: 8px;
+}
+
+.vault-details__fact {
+  margin: 0.35rem 0;
+  font-size: 0.9rem;
+}
+
+.vault-details__fact-drift {
+  color: var(--warning-text);
+}
+
+.vault-details__manage-rules {
+  margin-top: 0.6rem;
+}
+
+.vault-details__manage-rules > summary {
+  cursor: pointer;
+  color: var(--accent-color);
+  font-size: 0.9rem;
+}
+
+.vault-details__deploy {
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  padding: 0.6rem 0.8rem;
+  margin: 0.5rem 0;
+}
+
+/* Spec 105 — queue readability: chips, decoded titles, needs-you. */
+.vault-queue__chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0.4rem 0 0.6rem;
+}
+
+.vault-queue .vault-queue__chip {
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  padding: 0.3rem 0.75rem;
+  background: var(--card-bg);
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  min-height: 36px;
+}
+
+.vault-queue .vault-queue__chip.is-active {
+  background: var(--primary-button);
+  color: var(--primary-button-text);
+  border-color: var(--primary-button);
+}
+
+.vault-queue__title {
+  flex-basis: 100%;
+  font-weight: 600;
+}
+
+.vault-queue__title-on {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.vault-queue__signed {
+  margin: 0.15rem 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.vault-queue__signed[data-needs-you='true'] {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.vault-queue .vault-queue__primary-action {
+  background: var(--primary-button);
+  color: var(--primary-button-text);
+  border: none;
+  border-radius: 10px;
+  width: 100%;
+}
+
+.vault-queue__footer {
+  margin-top: 0.6rem;
+  text-align: center;
+}

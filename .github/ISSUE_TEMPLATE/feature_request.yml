@@ -13,6 +13,12 @@ body:
         `spec-template.md` so the team can turn this issue into `specs/<feature>/spec.md` with
         minimal back-and-forth.
 
+        Work on this issue follows the
+        [multi-agent development flow](https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/developer-guide/multi-agent-workflow.md):
+        triage sets Type/Priority/Effort, a spec number is claimed by merging a reservation PR to
+        `staging`, and the issue's assignee and linked pull requests are the record of what stage
+        it is in.
+
   - type: input
     id: problem
     attributes:
@@ -50,6 +56,25 @@ body:
         - P1 — critical path / blocking
         - P2 — important, not blocking
         - P3 — nice to have
+    validations:
+      required: true
+
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size (t-shirt)
+      description: |
+        Rough scale, set at creation so the backlog is plannable. Triage writes this onto the
+        Effort field, which is what the project board reads.
+        XS/S -> Effort Low · M -> Effort Medium · L/XL -> Effort High.
+        XL means "too big to deliver as one issue" — expect it to be split into sub-issues.
+      options:
+        - XS — under an hour
+        - S — a few hours, one surface
+        - M — a day or two, or more than one surface
+        - L — multi-day, needs a spec
+        - XL — too big for one issue, split it
+        - "Not sure — please size during triage"
     validations:
       required: true
 

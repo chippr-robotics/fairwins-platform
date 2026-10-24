@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { useChainId, useSwitchChain } from 'wagmi'
+import { useSwitchChain } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import NetworkPanel from '../../components/account/NetworkPanel'
 import {
   getEndpointSettings,
@@ -11,12 +12,21 @@ import {
 // The network panel, reached from the account button beside Preferences (spec 069). wagmi
 // hooks are mocked globally in test/setup.js; we override per-test for chain state.
 
+// The Bitcoin card deep-links to the Bitcoin wallet surface (release 1.14.0, task 13) —
+// mock the router hook so the panel renders without a Router and the destination is
+// observable.
+const navigate = vi.fn()
+vi.mock('react-router-dom', async (importOriginal) => ({
+  ...(await importOriginal()),
+  useNavigate: () => navigate,
+}))
+
 describe('NetworkPanel — network selector', () => {
   const switchChain = vi.fn()
 
   beforeEach(() => {
     vi.clearAllMocks()
-    useChainId.mockReturnValue(61) // unsupported chain → every network offers "Switch"
+    setWalletChain(61) // unsupported chain → every network offers "Switch"
     useSwitchChain.mockReturnValue({
       switchChain,
       isPending: false,
@@ -52,7 +62,7 @@ describe('NetworkPanel — network selector', () => {
   })
 
   it('marks the connected network instead of offering a switch button', () => {
-    useChainId.mockReturnValue(137)
+    setWalletChain(137)
     render(<NetworkPanel />)
     const polygonCard = screen.getByText('Polygon').closest('.network-card')
     expect(within(polygonCard).getByText('Connected')).toBeInTheDocument()
@@ -119,10 +129,14 @@ describe('NetworkPanel — network selector', () => {
     expect(link).toHaveAttribute('href', expect.stringContaining('app.uniswap.org'))
   })
 
-  // Spec 061 — Bitcoin renders as a DISPLAY-ONLY row (network-registry rule 2):
-  // no wallet chain switch exists for a non-EVM network.
-  describe('Bitcoin display-only rows (spec 061, FR-020)', () => {
-    it('lists Bitcoin mainnet and its testnet pair without any switch affordance', () => {
+  // Spec 061 + release 1.14.0 task 13 — Bitcoin is a first-class network card, but a
+  // non-EVM one (network-registry rule 2): there is still no wagmi chain switch. The
+  // card for the app's CURRENT testnet/mainnet mode carries a "Use" action that
+  // deep-links to the Bitcoin wallet surface (Transfer ▸ Send, where the BTC asset
+  // lives); the other side of the pair stays display-only, so exactly one Bitcoin
+  // network is ever offered (constitution III cohort rule).
+  describe('Bitcoin network cards (spec 061, FR-020 + task 13)', () => {
+    it('lists Bitcoin mainnet and its testnet pair, never with a wagmi switch affordance', () => {
       render(<NetworkPanel />)
       const mainnetCard = screen.getByText('Bitcoin').closest('.network-card')
       const testnetCard = screen.getByText('Bitcoin Testnet4').closest('.network-card')
@@ -131,8 +145,38 @@ describe('NetworkPanel — network selector', () => {
       expect(within(testnetCard).getByText('Testnet')).toBeInTheDocument()
       for (const card of [mainnetCard, testnetCard]) {
         expect(within(card).queryByRole('button', { name: /switch/i })).toBeNull()
-        expect(within(card).getByText('No wallet switch')).toBeInTheDocument()
       }
+    })
+
+    it('offers "Use Bitcoin" on the mainnet card while the app is in mainnet mode (wallet on 61)', () => {
+      render(<NetworkPanel />)
+      const mainnetCard = screen.getByText('Bitcoin').closest('.network-card')
+      const testnetCard = screen.getByText('Bitcoin Testnet4').closest('.network-card')
+      expect(within(mainnetCard).getByRole('button', { name: 'Use Bitcoin' })).toBeInTheDocument()
+      // Exactly one Bitcoin network is offered — the pair's other side stays display-only.
+      expect(within(testnetCard).queryByRole('button', { name: /Use Bitcoin/ })).toBeNull()
+      expect(within(testnetCard).getByText('No wallet switch')).toBeInTheDocument()
+    })
+
+    it('offers the testnet card instead while the app is in testnet mode (wallet on 80002)', () => {
+      setWalletChain(80002)
+      render(<NetworkPanel />)
+      const mainnetCard = screen.getByText('Bitcoin').closest('.network-card')
+      const testnetCard = screen.getByText('Bitcoin Testnet4').closest('.network-card')
+      expect(within(testnetCard).getByRole('button', { name: 'Use Bitcoin Testnet4' })).toBeInTheDocument()
+      expect(within(mainnetCard).queryByRole('button', { name: /Use Bitcoin/ })).toBeNull()
+      expect(within(mainnetCard).getByText('No wallet switch')).toBeInTheDocument()
+    })
+
+    it('activates Bitcoin by deep-linking to the wallet surface — never via wagmi switchChain', () => {
+      render(<NetworkPanel />)
+      const mainnetCard = screen.getByText('Bitcoin').closest('.network-card')
+      fireEvent.click(within(mainnetCard).getByRole('button', { name: 'Use Bitcoin' }))
+      // The Bitcoin surfaces activate per feature (send/receive/portfolio live behind
+      // Transfer) — the app's EVM chain state is untouched and no string id can ever
+      // reach the wagmi switch path.
+      expect(navigate).toHaveBeenCalledWith('/wallet?tab=paytransfer')
+      expect(switchChain).not.toHaveBeenCalled()
     })
 
     it('states supported capabilities truthfully: portfolio, send, receive, Stamps collectibles', () => {
@@ -187,7 +231,7 @@ describe('NetworkPanel — member RPC endpoints (spec 069)', () => {
     vi.clearAllMocks()
     localStorage.clear()
     __resetEndpointStoreForTests()
-    useChainId.mockReturnValue(137)
+    setWalletChain(137)
     useSwitchChain.mockReturnValue({
       switchChain: vi.fn(),
       isPending: false,

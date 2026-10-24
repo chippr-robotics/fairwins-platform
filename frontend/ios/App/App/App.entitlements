@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Spec 102: Universal Links (US5) + passkey web credentials (US2) bound
+	     to the tenant origin. The domain entries are SYNCED fields — written
+	     by scripts/native/sync-native-config.js from the tenant manifest — and
+	     they only take effect once the origin serves the AASA the operator
+	     deploys per docs/runbooks/native-release-operations.md. -->
+	<key>com.apple.developer.associated-domains</key>
+	<array>
+		<string>applinks:fairwins.app</string>
+		<string>webcredentials:fairwins.app</string>
+	</array>
+</dict>
+</plist>

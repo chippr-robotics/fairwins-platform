@@ -99,7 +99,8 @@
     "policyGuardSetup": 16645530,
     "safeProposalHub": 16645531,
     "feeRouter": 16646334,
-    "miniAppRegistry": 16685064
+    "miniAppRegistry": 16685064,
+    "accountFactory": 16650970
   },
   "tokenMintDeployedAt": "2026-06-23T20:29:36.569Z",
   "tokenV2UpgradedAt": "2026-06-23T23:13:49.946Z",

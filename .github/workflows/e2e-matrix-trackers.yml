@@ -1,0 +1,68 @@
+name: E2E Matrix Tracker Hygiene
+
+# Gate for issue #1400: every `absent`/`partial` row in frontend/cypress/coverage/matrix.json must
+# cite a tracking issue that is actually open. #1400 found 11 of the matrix's 15 absent rows citing
+# issues that were already CLOSED — a gap with a dead link to nowhere, which is a recurring class of
+# mistake, not a one-off. scripts/e2e/check-absent-trackers.js is the enforcement; see its header for
+# the full rationale, including why "no token" is a loud non-pass rather than a silent one.
+#
+# No `branches:` filter on pull_request — see subgraph-build.yml for why a base-branch filter is not
+# a decision about whether the matrix needs checking.
+
+on:
+  pull_request:
+    paths:
+      - 'frontend/cypress/coverage/matrix.json'
+      - 'scripts/e2e/check-absent-trackers.js'
+      - 'scripts/e2e/__tests__/check-absent-trackers.test.js'
+      - '.github/workflows/e2e-matrix-trackers.yml'
+  push:
+    branches:
+      - main
+      # spec 076 FR-022: `develop` is defunct; `staging` is the integration branch.
+      - staging
+    paths:
+      - 'frontend/cypress/coverage/matrix.json'
+      - 'scripts/e2e/check-absent-trackers.js'
+      - 'scripts/e2e/__tests__/check-absent-trackers.test.js'
+      - '.github/workflows/e2e-matrix-trackers.yml'
+  # A tracker closes WITHOUT a matrix edit — that is exactly how #1400's 11 orphaned rows appeared —
+  # so the path filters above cannot be the only trigger. Weekly sweep, Monday 06:00 UTC.
+  schedule:
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  # Read-only: the gate only asks GitHub whether a cited issue is open, it never writes one.
+  issues: read
+
+jobs:
+  check-trackers:
+    name: absent/partial rows cite an open tracker
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # node:test is built into Node — this suite needs no dependency install (spec 075 lockfile
+      # hazard) and runs before the gate itself so a broken gate never reports a false pass.
+      - name: Unit tests (injectable fetch, no network)
+        run: node --test scripts/e2e/__tests__/check-absent-trackers.test.js
+
+      # No --allow-offline here: GITHUB_TOKEN is always present in Actions, and a CI run that
+      # cannot verify a tracker must fail loudly, never fall back to skipping (constitution IV — no
+      # continue-on-error on a gate).
+      - name: Every absent/partial row must cite an open tracker
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/e2e/check-absent-trackers.js

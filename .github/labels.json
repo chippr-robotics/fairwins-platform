@@ -1,0 +1,60 @@
+{
+  "$comment": [
+    "Issue #1460 — the classification vocabulary for multi-agent work.",
+    "",
+    "JSON, not YAML, deliberately: labels-sync.yml reads this with plain `node -e`, and the",
+    "alternative was either a marketplace action (a supply-chain dependency for label names) or",
+    "adding js-yaml to a workflow that must not touch the root lockfile (spec 075).",
+    "",
+    "THERE ARE DELIBERATELY NO `status:*` LABELS HERE. An issue's state is already first-class",
+    "GitHub data with exactly one copy: its assignee, its open/closed state, its sub-issue links,",
+    "and the PR that closes it. A status label would be a SECOND copy of that, and a second copy",
+    "drifts — an agent that sets `status:in-progress` and stops leaves an issue that reads as",
+    "actively worked forever, with nothing able to notice. Every label below classifies something",
+    "the repository has no other record of; none of them restates one it does.",
+    "",
+    "See docs/developer-guide/multi-agent-workflow.md."
+  ],
+  "labels": [
+    {
+      "name": "size:xs",
+      "color": "C2E0C6",
+      "description": "T-shirt size XS — under an hour. Maps to the Effort field: Low."
+    },
+    {
+      "name": "size:s",
+      "color": "C2E0C6",
+      "description": "T-shirt size S — a few hours, one surface. Maps to the Effort field: Low."
+    },
+    {
+      "name": "size:m",
+      "color": "FEF2C0",
+      "description": "T-shirt size M — a day or two, or more than one surface. Effort: Medium."
+    },
+    {
+      "name": "size:l",
+      "color": "F9D0C4",
+      "description": "T-shirt size L — multi-day, needs a spec. Effort: High."
+    },
+    {
+      "name": "size:xl",
+      "color": "E99695",
+      "description": "T-shirt size XL — too big to deliver as one issue; split it into sub-issues. Effort: High."
+    },
+    {
+      "name": "blocked",
+      "color": "D93F0B",
+      "description": "Stopped on something outside this issue. The blocker is named in a comment."
+    },
+    {
+      "name": "spec-reservation",
+      "color": "1D76DB",
+      "description": "PR that only claims a spec number on staging. Review for the number, not the design."
+    },
+    {
+      "name": "agent-coordinated",
+      "color": "5319E7",
+      "description": "Worked by an agent following docs/developer-guide/multi-agent-workflow.md."
+    }
+  ]
+}

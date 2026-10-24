@@ -93,6 +93,65 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
+      "type": "table",
+      "title": "Source health — revenue sources — read / unreadable / not-configured",
+      "description": "configured=1 & up=1 → read. configured=1 & up=0 → UNREADABLE (a real problem). configured=0 → not-configured (a feature that has not been wired up; not an outage). This is the panel that tells you which of those a blank panel above is: they look identical everywhere else, and they are not the same thing to act on.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_source_configured{kind=\"revenue\"}"
+        },
+        {
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_source_up{kind=\"revenue\"}"
+        },
+        {
+          "refId": "C",
+          "format": "table",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "time() - (fairwins_finops_source_last_success_timestamp_seconds and on(source) fairwins_finops_source_configured{kind=\"revenue\"})"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "type": "timeseries",
       "title": "Earn — lending fee",
       "description": "Gross platform fee actually charged for `earn.lend`, summed from FeeRouter FeeCharged events over finalized blocks. It is what the treasury RECEIVED, not what was quoted and not what was billed to a member elsewhere. Several of these services ship at a rate of 0 bps, so a genuine 0 here is expected and is NOT the same as an unread source.",
@@ -100,13 +159,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 17
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -144,7 +203,7 @@
       ]
     },
     {
-      "id": 4,
+      "id": 5,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -156,13 +215,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 17
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -200,7 +259,7 @@
       ]
     },
     {
-      "id": 5,
+      "id": 6,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -212,13 +271,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -256,7 +315,7 @@
       ]
     },
     {
-      "id": 6,
+      "id": 7,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -268,13 +327,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -312,7 +371,7 @@
       ]
     },
     {
-      "id": 7,
+      "id": 8,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -324,13 +383,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -368,7 +427,7 @@
       ]
     },
     {
-      "id": 8,
+      "id": 9,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -380,13 +439,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -424,7 +483,7 @@
       ]
     },
     {
-      "id": 9,
+      "id": 10,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -436,13 +495,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 41
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -480,7 +539,7 @@
       ]
     },
     {
-      "id": 10,
+      "id": 11,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -492,13 +551,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 41
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -536,7 +595,7 @@
       ]
     },
     {
-      "id": 11,
+      "id": 12,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -548,13 +607,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 41
+        "y": 49
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -592,7 +651,7 @@
       ]
     },
     {
-      "id": 12,
+      "id": 13,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -604,13 +663,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 41
+        "y": 49
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -648,7 +707,7 @@
       ]
     },
     {
-      "id": 13,
+      "id": 14,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -660,13 +719,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 49
+        "y": 57
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -704,7 +763,7 @@
       ]
     },
     {
-      "id": 14,
+      "id": 15,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -716,13 +775,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 49
+        "y": 57
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -760,7 +819,7 @@
       ]
     },
     {
-      "id": 15,
+      "id": 16,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -772,13 +831,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 57
+        "y": 65
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -816,7 +875,7 @@
       ]
     },
     {
-      "id": 16,
+      "id": 17,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -828,13 +887,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 57
+        "y": 65
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -872,7 +931,7 @@
       ]
     },
     {
-      "id": 17,
+      "id": 18,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -884,13 +943,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 65
+        "y": 73
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -928,41 +987,22 @@
       ]
     },
     {
-      "id": 18,
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "type": "text",
-      "title": "Mini-app licenses — NOT YET LIVE",
-      "gridPos": {
-        "h": 8,
-        "w": 12,
-        "x": 12,
-        "y": 65
-      },
-      "options": {
-        "mode": "markdown",
-        "content": "**Not yet live.** This source is declared, and produces no value on any current deployment, so it is excluded from every total. That covers two different situations — a path that does not exist anywhere, and one that is built but switched off — and the text below says which this is.\n\nPLANNED, NOT LIVE. contracts/apps/MiniAppRegistry.sol has no fee, price or payable function as of spec 089, so there is no licensing revenue to read. Shown as not-yet-live and excluded from every total."
-      }
-    },
-    {
       "id": 19,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "type": "text",
-      "title": "Wager platform fee — NOT YET LIVE",
+      "title": "Assistant — GutterToken referral credit — NOT YET LIVE",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 73
       },
       "options": {
         "mode": "markdown",
-        "content": "**Not yet live.** This source is declared, and produces no value on any current deployment, so it is excluded from every total. That covers two different situations — a path that does not exist anywhere, and one that is built but switched off — and the text below says which this is.\n\nPLANNED, NOT LIVE. WagerRegistry escrows stakes and takes no platform cut, so wagers currently generate volume but no direct revenue. Shown as not-yet-live and excluded from every total."
+        "content": "**Not yet live.** This source is declared, and produces no value on any current deployment, so it is excluded from every total. That covers two different situations — a path that does not exist anywhere, and one that is built but switched off — and the text below says which this is.\n\nPLANNED, NOT LIVE — and NOT CASH. When a member opens and funds a GutterToken account through the referral-coded signup link on the Assistant tab (spec 104), GutterToken credits FairWins’ own GutterToken account with prepaid usage credit (docs: 15% of the referee’s FIRST deposit, capped at $50; non-refundable, non-cashable, self-referral void). It is in-kind credit that can only be spent on model calls from that account, so it is never revenue in USD and must never be summed with the cash sources. No referral code is registered yet and, more fundamentally, nothing can read the figure: GutterToken publishes no balance or referral endpoint, so no collector could ever report it — the honest state is not-yet-live with no metric, and it is excluded from every total. If P3 (a FairWins-owned GutterToken account as the FairWins rail’s upstream) is adopted, this credit accrues on the same account that assistant-model-api would then be billed to, and offsets that cost; the two entries should be promoted together, with this one staying an in-kind offset rather than becoming a revenue line."
       }
     },
     {
@@ -972,17 +1012,92 @@
         "uid": "${datasource}"
       },
       "type": "text",
-      "title": "Member API — x402 agent payments — NOT YET LIVE",
+      "title": "Mini-app licenses — NOT YET LIVE",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 81
+      },
+      "options": {
+        "mode": "markdown",
+        "content": "**Not yet live.** This source is declared, and produces no value on any current deployment, so it is excluded from every total. That covers two different situations — a path that does not exist anywhere, and one that is built but switched off — and the text below says which this is.\n\nPLANNED, NOT LIVE. contracts/apps/MiniAppRegistry.sol has no fee, price or payable function as of spec 089, so there is no licensing revenue to read. Shown as not-yet-live and excluded from every total."
+      }
+    },
+    {
+      "id": 21,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "type": "text",
+      "title": "Wager platform fee — NOT YET LIVE",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 73
+        "y": 81
       },
       "options": {
         "mode": "markdown",
-        "content": "**Not yet live.** This source is declared, and produces no value on any current deployment, so it is excluded from every total. That covers two different situations — a path that does not exist anywhere, and one that is built but switched off — and the text below says which this is.\n\nBUILT, NOT OFFERED. The x402 paid rail (spec 096) lets an agent holding no membership pay per request: it signs an EIP-3009 USDC authorization to the platform treasury (X402_PAY_TO) and the gateway settles it — $0.01 a read, $0.05 a typed-data build, $0.10 an assistant message. Unambiguously revenue, and it routes around the FeeRouter entirely, which is why the coverage gate could not see it until C2 learned to look for configured platform payees. It is enabled on NO deployment: X402_ENABLED and X402_PAY_TO are commented out, the treasury has no default on purpose, and the pinned gateway image predates the module. So no payment has ever been possible and there is no value to read — not a $0, which would claim the rail was offered and ignored. Promoting this to `live` needs a collector that can tell x402 settlements apart from every other USDC arrival at the same treasury; the gate now forces that work to happen BEFORE the first payment, not after."
+        "content": "**Not yet live.** This source is declared, and produces no value on any current deployment, so it is excluded from every total. That covers two different situations — a path that does not exist anywhere, and one that is built but switched off — and the text below says which this is.\n\nPLANNED, NOT LIVE. WagerRegistry escrows stakes and takes no platform cut, so wagers currently generate volume but no direct revenue. Shown as not-yet-live and excluded from every total."
       }
+    },
+    {
+      "id": 22,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "type": "timeseries",
+      "title": "Member API — x402 agent payments",
+      "description": "An agent holding no membership pays per request: it signs an EIP-3009 USDC authorization to the platform treasury (X402_PAY_TO) and the gateway settles it — $0.01 a read, $0.05 a typed-data build, $0.10 an assistant message. Unambiguously revenue, and it routes around the FeeRouter entirely, which is why the coverage gate could not see it until C2 learned to look for configured platform payees. The treasury is the admin Safe, which the FeeRouter also pays into on most chains — so counting arrivals at that address would attribute fee revenue to agents. The collector counts only authorization-settled transfers, which nothing else in this estate produces at this address. Counters are cumulative SINCE EXPORTER START, not all-time: cursors are in memory by design (owning a datastore whose corruption silently understates revenue is the worse failure), and the dashboard states that rather than implying a lifetime total.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 89
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "decimals": 2,
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_revenue_total{source=\"x402-agent-payments\"}",
+          "legendFormat": "{{unit}}"
+        }
+      ]
     }
   ]
 }

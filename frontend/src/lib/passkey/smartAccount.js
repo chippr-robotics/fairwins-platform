@@ -13,6 +13,7 @@
 
 import {
   http,
+  fallback,
   createPublicClient,
   encodeFunctionData,
   encodeAbiParameters,
@@ -28,8 +29,10 @@ import {
   createPaymasterClient,
 } from 'viem/account-abstraction'
 import { getNetwork } from '../../config/networks'
+import { resolveRpcEndpoints } from '../network/rpcEndpoints'
 import { getContractAddressForChain } from '../../config/contracts'
 import { CeremonyCancelled, isTransactComplete } from './credentials'
+import { bundlerTransport } from './bundlerTransport.js'
 
 export class ChainNotSupportedError extends Error {
   constructor(chainId) {
@@ -283,9 +286,39 @@ function toViemChain(net) {
   }
 }
 
+/**
+ * Read client for a chain, honouring the MEMBER's own endpoint (spec 069, spec 104 FR-012).
+ *
+ * This used to build a transport straight from `getNetwork(chainId).rpcUrl`, which spec 069
+ * forbids in as many words: a member who configured their own endpoint had it honoured everywhere
+ * except the passkey read path. That matters most in account recovery, which is read-heavy and so
+ * the flow most likely to be rate-limited off a shared default — and where the cost is not a slow
+ * screen but an `unverified` verdict, i.e. a member turned away from their own account for want of
+ * a request their configured endpoint would have served.
+ *
+ * A member endpoint yields real failover with the build default behind it, so a custom endpoint
+ * going dark degrades rather than taking the chain down.
+ */
 export function defaultPublicClient(chainId) {
   const net = getNetwork(chainId)
-  return createPublicClient({ chain: toViemChain(net), transport: http(net.rpcUrl) })
+  const route = resolveRpcEndpoints(chainId)
+  const primary = route.primary?.url || net.rpcUrl
+  const options = Object.keys(route.primary?.headers || {}).length
+    ? { fetchOptions: { headers: route.primary.headers } }
+    : undefined
+
+  // The member's failover, then the build default behind both. Deduped on the URL rather than on
+  // the transport object: a member on default settings has all three resolve to the same string,
+  // and viem's transport is an opaque callable whose url is not reliably introspectable.
+  const urls = [route.failover?.url, route.defaultUrl].filter((u) => u && u !== primary)
+  const transports = [http(primary, options), ...new Set(urls)].map((t) =>
+    typeof t === 'string' ? http(t) : t
+  )
+
+  return createPublicClient({
+    chain: toViemChain(net),
+    transport: transports.length > 1 ? fallback(transports) : transports[0],
+  })
 }
 
 /**
@@ -413,10 +446,13 @@ export async function buildAccount({ chainId, credential, accountAddress, ownerI
     ? undefined
     : deps.paymaster ?? (sponsorPaymasterUrl ? createPaymasterClient({ transport: http(sponsorPaymasterUrl) }) : undefined)
 
+  // The whole list, not just [0] (#1535). A second entry has always been configurable and was
+  // never able to submit; failover applies to a bundler that did not ANSWER, never to one that
+  // answered and rejected the UserOp — see bundlerTransport.js.
   const bundlerClient = createBundlerClient({
     account,
     client,
-    transport: http(bundlerUrls[0]),
+    transport: bundlerTransport(bundlerUrls),
     ...(paymaster ? { paymaster } : {}),
   })
 
@@ -454,10 +490,26 @@ export function encodeRemoveOwner({ index, ownerBytes, ownerCount }) {
   return encodeFunctionData({ abi: ACCOUNT_ABI, functionName: 'removeOwnerAtIndex', args: [index, ownerBytes] })
 }
 
-/** Read the full on-chain controller list (AccountController projection, data-model). */
-export async function readControllers({ chainId, accountAddress, deps = {} }) {
+/**
+ * Read the full on-chain controller list (AccountController projection, data-model).
+ *
+ * `strict` decides what an UNREADABLE chain means, and the two answers are genuinely different
+ * facts. By default a failed `getCode` is swallowed and reported as `deployed: false`, which suits
+ * the callers that only want to know whether there is anything to sign against and treat "cannot
+ * tell" as "assume not deployed" (`resolveOwnerIndex` falls back to slot 0; `repairPublicKey` gives
+ * up).
+ *
+ * That default is wrong for anyone deciding whether an account EXISTS: it turns "the network did
+ * not answer" into "nothing is there", which is precisely the conflation spec 104 exists to
+ * prevent — one layer below where the resolver could see it. `strict: true` rethrows instead, so
+ * the caller can report `unverified` rather than a fabricated absence.
+ */
+export async function readControllers({ chainId, accountAddress, strict = false, deps = {} }) {
   const client = deps.publicClient ?? defaultPublicClient(chainId)
-  const code = await client.getCode({ address: accountAddress }).catch(() => null)
+  const code = await client.getCode({ address: accountAddress }).catch((err) => {
+    if (strict) throw err
+    return null
+  })
   if (!code || code === '0x') return { deployed: false, controllers: [] }
 
   const next = await client.readContract({

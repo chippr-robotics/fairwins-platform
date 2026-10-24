@@ -14,16 +14,18 @@ vi.mock('../hooks/useTierPrices', () => ({
     getPrice: (_role, tier) => ({ BRONZE: 2, SILVER: 8, GOLD: 25, PLATINUM: 100 }[tier]),
     ROLE_HASHES: { WAGER_PARTICIPANT: '0xrole' },
     TIER_IDS: { BRONZE: 1, SILVER: 2, GOLD: 3, PLATINUM: 4 },
+    isTierActive: () => true,
   }),
 }))
 
 import { useWallet } from '../hooks/useWalletManagement'
 import { useVouchers } from '../hooks/useVouchers'
+import { getCurrentDocument } from '../utils/legalDocs'
 import VouchersPage from '../pages/VouchersPage'
 
-function renderPage() {
+function renderPage(initialEntries = ['/vouchers']) {
   return render(
-    <MemoryRouter>
+    <MemoryRouter initialEntries={initialEntries}>
       <VouchersPage />
     </MemoryRouter>
   )
@@ -137,6 +139,76 @@ describe('VouchersPage (spec 026)', () => {
     await waitFor(() =>
       expect(transferVoucher).toHaveBeenCalledWith('7', '0x2222222222222222222222222222222222222222'),
     )
+  })
+
+  // Spec 026 FR-013/SC-005 (adversarially-verified audit finding): onRedeem used to call
+  // redeemVoucher(id, undefined), so no Terms acceptance was ever recorded on-chain for a
+  // redeemer. Assert the real in-force hash — resolved from the SAME source the purchase flow
+  // uses (getCurrentDocument('terms').hash, see PremiumPurchaseModal.jsx) — is what's passed now.
+  it('redeems with the current in-force Terms hash, not undefined/blank (spec 026 FR-013)', async () => {
+    const redeemVoucher = vi.fn().mockResolvedValue({ txHash: '0xredeem' })
+    const listMyVouchers = vi.fn().mockResolvedValue([
+      { tokenId: '7', tier: 1, durationDays: 30, role: '0xrole' },
+    ])
+    useVouchers.mockReturnValue({ ...baseVouchers, redeemVoucher, listMyVouchers })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('#7')).toBeInTheDocument())
+
+    fireEvent.click(screen.getByRole('radio', { name: /membership|#7/i }))
+    // Tick every eligibility attestation so the Redeem button is enabled (it already gates on
+    // this consent — this fix plumbs that consent into the recorded hash, not new UI).
+    for (const checkbox of screen.getAllByRole('checkbox')) {
+      fireEvent.click(checkbox)
+    }
+    fireEvent.click(screen.getByRole('button', { name: /Redeem to this wallet/i }))
+
+    await waitFor(() => expect(redeemVoucher).toHaveBeenCalledTimes(1))
+    const [tokenId, acceptedTermsHash] = redeemVoucher.mock.calls[0]
+    expect(tokenId).toBe('7')
+    // The exact same hash the purchase rail resolves — one terms-version store, not a second one.
+    expect(acceptedTermsHash).toBe(getCurrentDocument('terms').hash)
+    expect(acceptedTermsHash).toBeTruthy()
+    expect(acceptedTermsHash).not.toBeUndefined()
+    expect(typeof acceptedTermsHash).toBe('string')
+    expect(acceptedTermsHash).toMatch(/^[0-9a-f]{64}$/) // bare hex; useVouchers normalizes to 0x
+  })
+
+  // Release 1.14.0 task 9 — the portfolio FWMV asset sheet deep-links Send / Gift to
+  // `/vouchers#vch-transfer`. The transfer block must be addressable (the page's hash effect
+  // scrolls by element id), and arriving on it with vouchers held preselects the first one so
+  // the member lands on a usable form instead of a disabled Transfer button.
+  it('gives the transfer block the #vch-transfer anchor the asset sheet deep-links to', async () => {
+    const listMyVouchers = vi.fn().mockResolvedValue([
+      { tokenId: '7', tier: 1, durationDays: 30, role: '0xrole' },
+    ])
+    useVouchers.mockReturnValue({ ...baseVouchers, listMyVouchers })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('#7')).toBeInTheDocument())
+    expect(document.getElementById('vch-transfer')).toBeInTheDocument()
+  })
+
+  it('preselects the first held voucher when arriving at #vch-transfer', async () => {
+    const listMyVouchers = vi.fn().mockResolvedValue([
+      { tokenId: '7', tier: 1, durationDays: 30, role: '0xrole' },
+      { tokenId: '9', tier: 3, durationDays: 30, role: '0xrole' },
+    ])
+    useVouchers.mockReturnValue({ ...baseVouchers, listMyVouchers })
+    renderPage(['/vouchers#vch-transfer'])
+    await waitFor(() => expect(screen.getByText('#7')).toBeInTheDocument())
+    await waitFor(() =>
+      expect(document.querySelector('input[name="redeem-voucher"][value="7"]')).toBeChecked(),
+    )
+    expect(document.querySelector('input[name="redeem-voucher"][value="9"]')).not.toBeChecked()
+  })
+
+  it('does not preselect a voucher on a plain visit — selection stays an explicit choice', async () => {
+    const listMyVouchers = vi.fn().mockResolvedValue([
+      { tokenId: '7', tier: 1, durationDays: 30, role: '0xrole' },
+    ])
+    useVouchers.mockReturnValue({ ...baseVouchers, listMyVouchers })
+    renderPage()
+    await waitFor(() => expect(screen.getByText('#7')).toBeInTheDocument())
+    expect(document.querySelector('input[name="redeem-voucher"][value="7"]')).not.toBeChecked()
   })
 
   it('shows an honest "not available on this network" notice when the voucher is undeployed', () => {

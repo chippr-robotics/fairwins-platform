@@ -1,6 +1,6 @@
 {
   "name": "@fairwins/miniapp-api-access",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "description": "API Access — the member developer console, as a mini-app package (spec 095).",

@@ -29,18 +29,32 @@ operate a traditional user-account database.
   versions you acknowledged are stored in your browser (local storage), not on our servers.
 - **Assistant conversations — only while you enable the assistant.** The in-app assistant is
   **off by default**, and while it is off nothing you type is sent to us or to anyone else. If
-  you switch it on, the messages you send in it are transmitted to our gateway and to the AI
-  model provider that generates the reply, and are processed for that purpose only. **We do not
-  use your conversations to train models**, and we do not use or share them for advertising.
-  Your conversation **memory** is kept in your browser on the device you used, not on our
-  servers, and you can clear it at any time from the assistant's settings. Do not enter private
-  keys, recovery phrases, or other secrets into the assistant.
+  you switch it on, you choose which service answers it, and that choice decides where your
+  messages go:
+    - **FairWins assistant (membership).** The messages you send in it, and the name of the screen
+      you are on when you send them, are transmitted to our gateway and to the AI model provider
+      that generates the reply, and are processed for that purpose only.
+    - **GutterToken (your own credits).** The same messages and screen name are sent **by your own
+      device directly to GutterToken**, a third-party service with which you hold your own account,
+      under **your own agreement with GutterToken**. **We do not receive, store, or process them**,
+      GutterToken is **not** acting as our processor for that content, and GutterToken's own privacy
+      terms govern it. The GutterToken key you enter is stored in your browser on the device you
+      used, for the wallet you entered it with, and is never sent to us or included in your backup.
+
+  Whichever service you choose, the assistant may **read your own FairWins data** — your wagers,
+  your membership, and live fee rates — through the member API, under a read-only grant you sign
+  in your wallet, in order to answer your questions. We record those reads as **counts only**,
+  never their content. **We do not use your conversations to train models**, and we do not use or
+  share them for advertising. Your conversation **memory** is kept in your browser on the device
+  you used, not on our servers, and you can clear it at any time from the assistant's settings.
+  Do not enter private keys, recovery phrases, or other secrets into the assistant.
 - **API access grants — only if you create an API key.** If you create a private API key, we
   process the grant you signed — your **public wallet address**, the **key identifier**, the
   **permissions** it carries, and its **issue and expiry times** — in order to verify the key
   when a program presents it, together with any **revocation** you submit. The key itself is
   created by your own wallet signature and shown only to you: **we do not issue, hold, or store
-  it.**
+  it.** The short, read-only grant the assistant uses to read your data is processed in the same
+  way.
 
 We do **not** collect names, government IDs, emails, or payment-card data through the
 Service, and we do not run third-party advertising trackers.
@@ -67,10 +81,14 @@ We share information only: with our infrastructure providers (edge/CDN, hosting,
 pinning) acting on our behalf; with on-chain sanctions-screening sources we read (e.g.,
 the Chainalysis on-chain oracle); and where required by law or to protect our rights.
 
-**Where you have enabled the assistant**, we also share the messages you send in it with the
-**AI model provider** that generates the reply (currently **Anthropic**), acting as our
-processor for that purpose and for no other. This sharing happens **only while you have the
-assistant enabled**, and stops when you turn it off.
+**Where you have enabled the assistant and chosen the FairWins assistant**, we also share the
+messages you send in it, and the name of the screen you are on, with the **AI model provider**
+that generates the reply (currently **Anthropic**), acting as our processor for that purpose and
+for no other. This sharing happens **only while you have the assistant enabled with that service
+selected**, and stops when you turn it off or switch to GutterToken. **Where you have chosen
+GutterToken**, we share nothing: your own device sends your messages directly to GutterToken under
+your own agreement with it, and we are not in that path and do not receive them. Where the
+assistant reads your FairWins data to answer you, that data is returned to your own device only.
 
 ## 6. Your Choices and Rights
 

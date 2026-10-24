@@ -1,0 +1,90 @@
+<mxfile host="app.diagrams.net" agent="FairWins architecture workbook" version="24.7.17">
+  <diagram id="fw-trust" name="Trust boundaries and crypto controls">
+    <mxGraphModel dx="1600" dy="1000" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t" value="FairWins — Trust Boundaries &amp; Cryptographic Controls" style="text;html=1;fontSize=20;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="900" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t2" value="Each numbered boundary names the control that enforces it. Red = an open finding (Annex 09)." style="text;html=1;fontSize=12;fontColor=#5A6B72;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="900" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b1" value="1 — MEMBER DEVICE ↔ EVERYTHING ELSE" style="swimlane;html=1;startSize=30;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=3;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="470" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="b1a" value="Crosses: signed transactions, signed typed data, signed raw BTC txs,&#10;bare addresses. NEVER crosses: any private key, any seed, any xpub,&#10;any passkey secret, a GutterToken sk-…, an RPC credential." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b1">
+          <mxGeometry x="15" y="40" width="440" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="b1b" value="THE THREE ROOTS OF MEMBER-SIDE CRYPTO&#10;&#10;1. Passkey PRF master seed (32 B, per credential)&#10;   PRF('fairwins.prf.salt.v1') → HKDF-SHA256 → AES-GCM-256 wrap&#10;   ↳ X25519 envelope key · X-Wing key · unified backup key&#10;   ↳ HKDF 'fairwins-btc-seed-v1' → L=64 → m/84'|86'/{0|1}'/0'&#10;   FOUR info strings + one PRF salt are WALLET-BREAKING constants.&#10;   No rotation: the seed is a property of the credential.&#10;&#10;2. Device secure enclave — the passkey credentials themselves&#10;   P-256 / ES256, alg -7 only, userVerification required, residentKey required&#10;&#10;3. Member-held credentials — device-scoped, test-asserted ABSENT&#10;   from syncedObjects.js, so they cannot leave the device" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F5F7F8;strokeColor=#2E7D8C;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=6;" vertex="1" parent="b1">
+          <mxGeometry x="15" y="105" width="440" height="205" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b2" value="2 — HOST ↔ MINI-APP PACKAGE (untrusted third-party code)" style="swimlane;html=1;startSize=30;fillColor=#FBEAE6;strokeColor=#8A3324;strokeWidth=3;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="550" y="100" width="470" height="330" as="geometry" />
+        </mxCell>
+        <mxCell id="b2a" value="Control: the host object IS the entire privileged surface.&#10;Wrappers, never handles — no signer, no React context, no storage handle.&#10;Adding a key grants it permanently to every third-party package." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8A3324;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b2">
+          <mxGeometry x="15" y="40" width="440" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="b2b" value="CODE INTEGRITY — nothing unverified ever runs&#10;&#10;· package pinned at an IMMUTABLE IPFS CID&#10;· keccak256(manifest bytes) checked against the CHAIN&#10;· sha256 of EVERY byte executed or injected (entry + declared CSS)&#10;· re-checked after EVERY retrieval — the SW cache is NOT a trust boundary&#10;· blob: in script-src is for verified package bytes ONLY&#10;  → https: must NEVER be added to script-src&#10;&#10;· sanctions screening happens INSIDE wallet.submit, before any rail —&#10;  strictly stronger than an app-side check a package could skip&#10;· wallet.submit resolves at BROADCAST: use wait(), never trust submit&#10;· contracts(name) THROWS for an undeclared name (null would read as&#10;  'not deployed' — a fabricated fact)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#8A3324;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=6;" vertex="1" parent="b2">
+          <mxGeometry x="15" y="105" width="440" height="205" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b3" value="3 — BROWSER ↔ GATEWAY" style="swimlane;html=1;startSize=28;fillColor=#FFF6E6;strokeColor=#A46A21;strokeWidth=2;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="100" width="490" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="b3a" value="Controls, in the order they run:&#10;Cloudflare geo gate (451) → origin lock (X-Origin-Auth, injected at the&#10;edge late-transform phase) → caller-identity tiering → quotas → killswitch&#10;→ screening → module.&#10;&#10;Bearer fw1 token = an off-chain EIP-712 ApiKeyGrant the member signed.&#10;Checked BEFORE the x402 paywall, so a member never pays.&#10;auth_unverifiable and membership_unreadable are RETRYABLE 503s,&#10;never denials — an RPC timeout is not a forged signature.&#10;&#10;CSP note: connect-src carries a bare https: grant BY DESIGN (members&#10;may point the app at their own node). The named hosts document intent;&#10;script-src and frame-src are the ENFORCED directives." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A46A21;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=6;" vertex="1" parent="b3">
+          <mxGeometry x="15" y="36" width="460" height="150" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b4" value="4 — MEMBER ↔ VAULT (a Safe has no key)" style="swimlane;html=1;startSize=28;fillColor=#FFF6E6;strokeColor=#A46A21;strokeWidth=2;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="320" width="490" height="230" as="geometry" />
+        </mxCell>
+        <mxCell id="b4a" value="· Approvals verified against the vault's OWN on-chain approvedHashes&#10;  at nonce()-1 — never a client-side tally&#10;· An approver counts only WHILE STILL AN OWNER&#10;· Policy v2: ordered rules, first-match-governs, one fall-through for an&#10;  unmet approver requirement of strictly identical scope.&#10;  NO MATCHING RULE ⇒ DENIAL. Silence is denial once rules exist.&#10;· matchPreview is a TWIN of on-chain matching — change in lockstep&#10;· The guard is NOT UPGRADEABLE: an upgrade key over a policy guard&#10;  would be a backdoor across every vault. New rule types = new version,&#10;  adopted per vault by threshold-approved setGuard.&#10;· Message signing is REFUSED in vault mode — signing anyway would&#10;  prove control of the member's own account under a 'vault' label.&#10;· Multichain: the initializer must stay chain-independent, so a realized&#10;  policy can never be part of it (it would change the CREATE2 address)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A46A21;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=6;" vertex="1" parent="b4">
+          <mxGeometry x="15" y="36" width="460" height="180" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b5" value="5 — PLATFORM KEY CUSTODY (tiered by blast radius)" style="swimlane;html=1;startSize=28;fillColor=#EDF1F2;strokeColor=#5A6B72;strokeWidth=2;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="450" width="470" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="b5a" value="Cloud KMS — EC_SIGN_SECP256K1_SHA256, NON-EXPORTABLE&#10;relayer gas key · paymaster op signer&#10;A raw PM_SIGNER_PRIVATE_KEY in the env REFUSES BOOT rather than&#10;silently downgrading KMS signing to a hot key." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6B72;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b5">
+          <mxGeometry x="15" y="36" width="440" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="b5b" value="Secret Manager → tmpfs env files only (fetch-secrets.sh refuses&#10;non-tmpfs, refuses set -x, refuses key material in the wrong file)&#10;deployer key · one alto executor EOA PER CHAIN, never shared" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6B72;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b5">
+          <mxGeometry x="15" y="104" width="440" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="b5c" value="Floppy keystore — AIR-GAPPED, physically held&#10;admin mnemonic · paymaster owner. Deliberately outside automation." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6B72;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b5">
+          <mxGeometry x="15" y="162" width="440" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="b5d" value="OPEN: the KMS ring holding the gas + paymaster keys is DECLARED BUT&#10;UNADOPTED, so their IAM is out of band. No key declares a&#10;rotation_period. DEFAULT_ADMIN_ROLE on the routers is 1 hot key (#966).&#10;The historical deployer key is KNOWN-COMPROMISED." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBEAE6;strokeColor=#8A3324;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b5">
+          <mxGeometry x="15" y="212" width="440" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b6" value="6 — WORKSTATION ↔ PRODUCTION / CI ↔ CLOUD" style="swimlane;html=1;startSize=28;fillColor=#EDF1F2;strokeColor=#5A6B72;strokeWidth=2;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="550" y="450" width="470" height="300" as="geometry" />
+        </mxCell>
+        <mxCell id="b6a" value="· NO service-account key file, ever — operators IMPERSONATE, so&#10;  revocation is one list entry and every access names a human.&#10;· serviceAccountTokenCreator is granted ON THE ACCOUNT, never the&#10;  project (which in a SHARED project would grant impersonation of&#10;  every SA in it, including the one holding the hot gas keys).&#10;· No public SSH: :22 from the IAP range only; Ansible tunnels through it.&#10;  If a playbook cannot connect, fix the tunnel — never widen the firewall.&#10;· IAM is ADDITIVE ONLY (_iam_member). _iam_binding / _iam_policy are&#10;  authoritative project-wide and would strip other Chippr workloads.&#10;  Enforced TWICE: check:iac, and the CI identity lacks projectIamAdmin.&#10;· Terraform never declares a secret VERSION (the payload would land in&#10;  state in plaintext). Data-source reads land in state too — 'sensitive'&#10;  hides a value from output, not from state.&#10;· Apply executes the REVIEWED plan, gated on the infra-tree digest." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6B72;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=6;" vertex="1" parent="b6">
+          <mxGeometry x="15" y="36" width="440" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="b6b" value="OPEN: the apply job skips silently when its two repo variables are unset,&#10;and a skipped job satisfies a required check." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBEAE6;strokeColor=#8A3324;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="b6">
+          <mxGeometry x="15" y="244" width="440" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="b7" value="7 — GATEWAY ↔ VENDOR" style="swimlane;html=1;startSize=28;fillColor=#F0EDF5;strokeColor=#41236D;strokeWidth=2;fontStyle=1;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="1060" y="570" width="490" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="b7a" value="· Vendors are READ-PROXIED because most publish no CORS — the gateway&#10;  is a proxy, not a backend, and holds no vendor-side authority over money.&#10;· Every module is optional: absent credential ⇒ 503 &lt;name&gt;_unconfigured&#10;  and the surface hides. Almost nothing is load-bearing.&#10;· Member data that DOES leave: Merkl (address in path), Morpho, OpenSea,&#10;  Polymarket CLOB, The Graph, mempool.space/stampchain (bare BTC&#10;  addresses + signed raw txs), the two assistant rails, Pinata.&#10;· Tool results carry counterparty-authored text ⇒ treated as DATA:&#10;  no build_intent and no navigate in the in-app assistant.&#10;· OPEN: IPFS pinning has NO FALLBACK and a wrongly-SCOPED token&#10;  authenticates while breaking every member write." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=6;" vertex="1" parent="b7">
+          <mxGeometry x="15" y="36" width="460" height="130" as="geometry" />
+        </mxCell>
+
+        <mxCell id="foot" value="CONFIRMED ABSENT (verified, not assumed): no MPC / TSS / Shamir · no live ZK or Semaphore path (Groth16 material is archive-only) · no MD5, SHA-1, DES, RC4 or ECB anywhere · eth_sign appears only inside a refusal list." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=2;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="780" width="1510" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="foot2" value="CRYPTO FINDINGS TO CLOSE BEFORE AN EXTERNAL AUDIT: the X-Wing construction is internally consistent but is NOT the IETF draft (wrong label bytes, ad-hoc component seeds) and cannot interoperate · open-challenge claim codes are ~2^44 and deterministically derive the secp256k1 claimAuthority key · envelope and backup keys are keccak256(signature), so no rotation path preserves the data · two incompatible floppy-keystore MAC schemes coexist at 2^18 vs 2^14 scrypt." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBEAE6;strokeColor=#8A3324;strokeWidth=3;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="40" y="840" width="1510" height="70" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

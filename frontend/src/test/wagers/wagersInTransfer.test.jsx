@@ -36,9 +36,6 @@ vi.mock('../../components/fairwins/Dashboard', () => ({
 vi.mock('../../components/wallet/TransferForm', () => ({
   default: () => <div data-testid="transfer-form">same-chain send</div>,
 }))
-vi.mock('../../components/wallet/WrapView', () => ({
-  default: () => <div data-testid="wrap-view">wrap form</div>,
-}))
 vi.mock('../../components/wallet/BridgeView', () => ({
   default: () => <div data-testid="bridge-view">bridge form</div>,
 }))
@@ -64,8 +61,9 @@ beforeEach(() => {
 describe('Wagers is a view of the Transfer section', () => {
   it('appears last in a row that is now all actions', () => {
     renderPanel()
+    // Wrap left this row for Trade (release 1.14.0, wrapInTrade.test.jsx pins the move).
     expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual([
-      'Transfer', 'Wrap', 'Bridge', 'Wagers',
+      'Transfer', 'Bridge', 'Wagers',
     ])
   })
 
@@ -152,7 +150,7 @@ describe('a tenant without the wagers feature', () => {
         <Panel />
       </MemoryRouter>,
     )
-    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Transfer', 'Wrap', 'Bridge'])
+    expect(screen.getAllByRole('tab').map((t) => t.textContent)).toEqual(['Transfer', 'Bridge'])
   })
 
   it('falls a saved ?view=wagers link back to Transfer rather than an empty panel', async () => {

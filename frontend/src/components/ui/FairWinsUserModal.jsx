@@ -45,7 +45,7 @@ function FairWinsUserModal() {
   const priceContext = usePrice() || {}
   const { showUsd = false, toggleCurrency = () => {} } = priceContext
   const { native: nativeSymbol } = useChainTokens()
-  const symbol = nativeSymbol || 'MATIC'
+  const symbol = nativeSymbol || 'POL'
   const navigate = useNavigate()
 
   const [activeTab, setActiveTab] = useState('profile')
@@ -186,7 +186,7 @@ function FairWinsUserModal() {
                     ? 'Connected to Polygon Mainnet. Transactions use real funds and gas.'
                     : isOtherChain
                       ? `You're on ${activeNetwork?.name || 'an unsupported chain'}. Switch to Testnet (Polygon Amoy) or Mainnet (Polygon).`
-                      : 'Connected to Polygon Amoy testnet. Use a faucet for test MATIC.'}
+                      : 'Connected to Polygon Amoy testnet. Use a faucet for test POL.'}
                 </p>
                 <button
                   onClick={handleToggleNetwork}

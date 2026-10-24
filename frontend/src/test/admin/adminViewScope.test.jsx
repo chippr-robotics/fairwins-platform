@@ -48,16 +48,45 @@ vi.mock('../../lib/chains/estate', async (importOriginal) => {
 })
 
 const CONTRACTS = new Map()
-vi.mock('ethers', async (importOriginal) => {
+const SEAM_READS = []
+/**
+ * Reads and scans through the chain seam (spec 110), routed BY ADDRESS exactly as the
+ * `new ethers.Contract(addr, …)` fake this replaces was — that routing is what makes "the scoped
+ * chain's contract answered" assertable. The chain is recorded too, which the fake could not do:
+ * it was handed a runner and the chain lived inside it.
+ */
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
-  class FakeContract {
-    constructor(address) {
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      SEAM_READS.push({ chainId, address, functionName })
       const impl = CONTRACTS.get(address)
-      Object.assign(this, impl || {})
-    }
+      if (!impl || !impl[functionName]) return undefined
+      return impl[functionName](...args)
+    },
   }
-  return { ...actual, ethers: { ...actual.ethers, Contract: FakeContract } }
 })
+
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    const impl = CONTRACTS.get(address)
+    if (!impl) return null
+    SEAM_READS.push({ chainId, address, functionName: '<scan>' })
+    return {
+      target: address,
+      provider: {
+        getBlockNumber: async () => 100,
+        getLogs: async () => (impl.logs ? impl.logs : []),
+      },
+      filters: new Proxy(
+        {},
+        { get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }) },
+      ),
+      interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
 
 const COHORT = cohortChainIds()
 const HOME = COHORT[0] // where the wallet is
@@ -99,8 +128,7 @@ describe('DenyListAdmin scopes its guard (T062)', () => {
     DEPLOYED[`sanctionsGuard:${chainId}`] = addr
     PROVIDERS[chainId] = { getBlockNumber: async () => 100 }
     CONTRACTS.set(addr, {
-      filters: { DenyListUpdated: () => ({}) },
-      queryFilter: async () => [],
+      logs: [],
       isDenied: async () => false,
       isAllowed: async () => true,
       ...impl,

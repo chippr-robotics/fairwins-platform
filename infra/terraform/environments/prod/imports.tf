@@ -102,42 +102,128 @@
 #
 # ── the QuickNode Multi-Chain RPC credentials ─────────────────────────────────────────────────
 #
-# ADOPTED, NEVER RECREATED. All four were hand-created at the console on 2026-08-21 and carry no
-# `goog-terraform-provisioned` label. Verified 2026-08-23 before writing these blocks: each exists,
-# each has exactly one ENABLED version, and each replicates `automatic` — which is what
-# `google_secret_manager_secret.managed` declares, so adoption is a plain import with no diff. A
-# user-managed replication policy would instead have planned a REPLACEMENT, and replacing a secret
-# container destroys every version it holds (which is what `prevent_destroy` is there to refuse).
+# All four were hand-created at the console on 2026-08-21. On 2026-08-24 the operator DELETED three
+# of them (POLYGON_WSS, AMOY_API, AMOY_WSS) — verified from the Cloud Audit Log, principal
+# cody.w.burns@gmail.com — leaving only QUICKNODE_POLYGON_API, which is the one this estate actually
+# reads (see the bundler module and terraform.tfvars). The v1.12.0 promotion's apply then tried to
+# CREATE all four (the apply identity lacked secretmanager.secrets.create at the time, so every
+# create failed 403 — see docs/runbooks/… incident notes) — had that permission existed, three of
+# those four creates were correct (the secrets are genuinely absent) and the fourth would have failed
+# ALREADY_EXISTS, because QUICKNODE_POLYGON_API is adopted below, not created.
 #
-# All four are imported even though only QUICKNODE_POLYGON_API is granted to anything. An
-# unmanaged secret is invisible; a managed one with a deliberately empty IAM policy is a recorded
-# decision. See terraform.tfvars for why the other three have no reader.
+# QUICKNODE_POLYGON_API is IMPORTED: it exists, has exactly one ENABLED version, and replicates
+# `automatic` — which is what `google_secret_manager_secret.managed` declares, so adoption is a
+# plain import with no diff. A user-managed replication policy would instead plan a REPLACEMENT, and
+# replacing a secret container destroys every version it holds (`prevent_destroy` exists to refuse
+# exactly that).
+#
+# The other three are DELIBERATELY NOT IMPORTED — they do not exist, so importing would fail with
+# "resource does not exist" and creating is the correct plan.
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_POLYGON_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_POLYGON_API"
+}
+#
+# The accessor bindings are NOT imported. QUICKNODE_POLYGON_API's live IAM policy already grants
+# `fairwins-bundler@` and `fairwins-relay-engine@` — a different identity than the one this
+# environment's module.gateway node will use (`fairwins-gateway@`, from `name = "fairwins-gateway"`
+# in main.tf). `google_secret_manager_secret_iam_member` is additive, non-authoritative: creating a
+# binding for a member that does not yet hold the role succeeds regardless of what else already does,
+# so `module.gateway...node["QUICKNODE_POLYGON_API"]` and the bundler twin are genuine creates that
+# ADD an identity rather than collide with the ones already granted.
+#
+# ── the FinOps exporter's vendor credentials (spec 089) ───────────────────────────────────────
+#
+# All three were created out of band during the observability bring-up on 2026-08-16 (no
+# `goog-terraform-provisioned` label) and already carry a live `roles/secretmanager.secretAccessor`
+# grant for `fairwins-relay-engine@`. Like QUICKNODE_POLYGON_API above, they are adopted by
+# IMPORTING THE CONTAINER ONLY — the accessor bindings stay unimported (additive resource, same
+# reasoning) and will simply add `fairwins-gateway@` alongside the identity already granted.
+#
+# Without these three import blocks, the same class of failure that hit QUICKNODE_POLYGON_API
+# recurs here: once the apply identity can create secrets, it will try to create these three that
+# already exist and fail ALREADY_EXISTS instead of adopting them.
+import {
+  to = google_secret_manager_secret.managed["finops-cloudflare-token"]
+  id = "projects/chippr-bots-site-wp/secrets/finops-cloudflare-token"
+}
 
-# import {
-#   to = google_secret_manager_secret.managed["QUICKNODE_POLYGON_API"]
-#   id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_POLYGON_API"
-# }
+import {
+  to = google_secret_manager_secret.managed["finops-grafana-cloud-token"]
+  id = "projects/chippr-bots-site-wp/secrets/finops-grafana-cloud-token"
+}
+
+import {
+  to = google_secret_manager_secret.managed["finops-quicknode-key"]
+  id = "projects/chippr-bots-site-wp/secrets/finops-quicknode-key"
+}
+
+# ── the QuickNode MULTICHAIN endpoints (2026-08-30) ───────────────────────────────────────────
 #
-# import {
-#   to = google_secret_manager_secret.managed["QUICKNODE_POLYGON_WSS"]
-#   id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_POLYGON_WSS"
-# }
+# All nine were hand-created at the console on 2026-08-30 (numbered multichain endpoints 001–005
+# plus the account admin key — the scheme is documented on `managed_secret_ids` in
+# terraform.tfvars). They EXIST, so like QUICKNODE_POLYGON_API above they are adopted by importing
+# the CONTAINER ONLY; without these blocks the next apply tries to create them and fails
+# ALREADY_EXISTS. Console-created secrets replicate `automatic`, matching what
+# `google_secret_manager_secret.managed` declares — if a plan shows a REPLACEMENT here instead of
+# a clean adoption, one of them was created with a user-managed replication policy: STOP (replacing
+# a container destroys its versions; prevent_destroy will refuse) and fix the secret, not the plan.
+# No accessor bindings exist or are created — nothing reads these yet (least privilege, same
+# reasoning as the WSS/AMOY family).
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_ADMIN_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_ADMIN_API"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_001_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_001_API"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_001_WSS"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_001_WSS"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_002_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_002_API"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_002_WSS"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_002_WSS"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_003_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_003_API"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_003_WSS"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_003_WSS"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_004_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_004_API"
+}
+import {
+  to = google_secret_manager_secret.managed["QUICKNODE_RPC_005_API"]
+  id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_005_API"
+}
+
+# ── the PER-CHAIN QuickNode endpoints — CREATES, deliberately not imports ─────────────────────
 #
-# import {
-#   to = google_secret_manager_secret.managed["QUICKNODE_AMOY_API"]
-#   id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_AMOY_API"
-# }
+# `fairwins-quicknode-{ethereum,optimism,base,arbitrum}-url` (chains 1 / 10 / 8453 / 42161) have
+# NO import block, and that absence is the correct declaration rather than an omission: unlike
+# every secret above, they were never hand-created at the console. The apply that adds them to
+# `managed_secret_ids` CREATES the empty containers, and only then does
+# `node scripts/secrets/quicknode-chains.js --provision 1,10,8453,42161` add the first version.
+# An import block for a secret that does not exist fails the plan outright.
 #
-# import {
-#   to = google_secret_manager_secret.managed["QUICKNODE_AMOY_WSS"]
-#   id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_AMOY_WSS"
-# }
+# THAT ORDER IS LOAD-BEARING. The provisioning step derives each URL from the QUICKNODE_RPC_001
+# multichain endpoint by swapping a hostname infix and verifies `eth_chainId` before writing —
+# and a container that does not exist yet cannot receive a verified version, so provisioning
+# first simply fails. Creating them here, empty, is what makes the write target exist.
 #
-# The accessor bindings are deliberately NOT imported: the four secrets have COMPLETELY EMPTY IAM
-# policies today (`gcloud secrets get-iam-policy` returns an etag and nothing else), so
-# `module.gateway.google_secret_manager_secret_iam_member.node["QUICKNODE_POLYGON_API"]` and its
-# bundler twin are genuine CREATES. Importing a binding that does not exist fails the plan.
-#
+# The accessor bindings are creates too: these are granted to the WORKSTATION identity only
+# (`workstation_secret_ids`), never to a node — the gateway does not define those chains.
+
 # import {
 #   to = google_artifact_registry_repository.cloud_run_source_deploy
 #   id = "projects/chippr-bots-site-wp/locations/us-central1/repositories/cloud-run-source-deploy"
@@ -291,3 +377,13 @@ import {
 #   to = module.monitoring[0].google_monitoring_alert_policy.probe_failing[0]
 #   id = "projects/chippr-bots-site-wp/alertPolicies/15034287693947745231"
 # }
+
+# ── Spec 107: keyed RPC issuance signing key ──────────────────────────────────────────────────
+# Created manually during the operator ceremony on #1468 (the key had to exist the moment it was
+# generated — its public half went to the provider in the same session). Adopted rather than
+# recreated: recreating would destroy the container holding the only copy of the private key.
+
+import {
+  to = google_secret_manager_secret.managed["fairwins-rpc-access-signing-key"]
+  id = "projects/chippr-bots-site-wp/secrets/fairwins-rpc-access-signing-key"
+}

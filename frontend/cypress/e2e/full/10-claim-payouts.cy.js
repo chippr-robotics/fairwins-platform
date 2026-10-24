@@ -128,50 +128,55 @@ function createAcceptAndResolve(config = {}) {
   cy.openMyWagers('created')
 
   /*
-   * WAIT FOR THE LIST TO POPULATE BEFORE READING IT.
+   * WAIT FOR THE RESOLVE CONTROL ITSELF — do not snapshot the list and branch on what it holds.
    *
-   * The `$panel.find(...)` below is a one-shot DOM snapshot (anti-pattern 3 in
-   * docs/developer-guide/e2e-testing-policy.md). Taken before the async-gated rows render, it finds
-   * neither a Resolve button nor a row, so every branch no-ops silently (anti-pattern 6) and the
-   * test walks on to `resolveWagerInModal`, which waits 15s for a sub-modal nothing opened and
-   * fails there — far from the cause. That is the CLM-01 flake seen on this PR: the same commit
-   * passed one run and failed the next purely on whether the list had rendered in time.
+   * What this replaces was a `$panel.find(...)` one-shot DOM snapshot (anti-pattern 3 in
+   * docs/developer-guide/e2e-testing-policy.md) wrapped around three nested `if`s. Taken before
+   * the async-gated action column rendered it found neither a Resolve button nor a row, so every
+   * branch no-oped silently (anti-pattern 6), NOTHING WAS CLICKED, and the helper walked on to
+   * `cy.resolveWagerInModal` — which then spent its 15s waiting for a sub-modal that nothing had
+   * opened and failed there, three commands downstream of the cause (#1327 lead 2). That is the
+   * CLM-01/CLM-10 flake: the same commit passed one run and failed the next purely on whether
+   * the list had rendered in time.
    *
-   * This assertion makes the precondition explicit: the wager this test just created and accepted
-   * MUST be listed with something to act on. If it is not, the test fails HERE, saying so.
+   * One retryable assertion on the control replaces all of it, and it is the SAME shape spec 07's
+   * `openResolutionFor()` already uses against this list. The window is generous because the scan
+   * here is cold: `clearLocalStorage` in `beforeEach` and `switchAccount` both drop the
+   * `friendMarkets:<chainId>` cache, so the rows come from a fresh chain scan.
+   *
+   * Note `.mm-action-resolve` is gone with it: no component has ever rendered that class. The
+   * row's control is `.wc-action` labelled "Resolve"; the detail view's is "Resolve Market".
    */
-  cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
-    .find('.mm-action-resolve, .mm-table-row, button:contains("Resolve")', { timeout: 20000 })
-    .should('have.length.greaterThan', 0)
+  cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 }).should('exist')
+  /*
+   * scrollIntoView BEFORE the visibility assertion: the resolve control can sit below the
+   * modal's scrolled fold, and Cypress reports a fixed-position element whose centre is
+   * outside `.mm-content`'s viewport as "covered" — a state the member fixes by scrolling,
+   * so the test does the same rather than failing on it (the CLM-01/CLM-10 red on this PR).
+   * The pattern also matches "Resolve Market" — the label the detail view and the row's
+   * countdown control actually render (ResolveButtonWithCountdown); "resolve wager" is not a
+   * string any component produces.
+   */
+  cy.contains('.mm-panel button, [role="tabpanel"] button', /^resolve$|resolve (wager|market)/i, { timeout: 30000 })
+    .scrollIntoView()
+    .should('be.visible')
+    .and('not.be.disabled')
+    .click({ force: true })
 
-  // The assertion above proved something actable is listed; settle the fetch as well so
-  // the snapshot below reads the final rows rather than a mid-render frame (#1250).
-  cy.settledWagerPanel().then(($panel) => {
-    const resolveBtn = $panel.find('.mm-action-resolve, button:contains("Resolve")')
-    if (resolveBtn.length > 0) {
-      cy.wrap(resolveBtn.first()).click({ force: true })
-    } else {
-      const rows = $panel.find('.mm-table-row')
-      if (rows.length > 0) {
-        cy.wrap(rows.first()).click()
-        cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
-        cy.get('.mm-detail').then(($detail) => {
-          const btn = $detail.find('button:contains("Resolve")')
-          if (btn.length > 0) cy.wrap(btn.first()).click()
-        })
-      }
-    }
-  })
+  /*
+   * ANCHOR THE SUB-MODAL ON THE CLICK THAT OPENS IT (#1327 lead 2). `resolveWagerInModal` waits
+   * for `.mm-sub-modal` too, but it waits INSIDE a custom command, so the 15s and the failure
+   * were both attributed to the resolution flow — "the resolve sub-modal never appeared" — when
+   * the fact worth reporting is that the trigger before it did nothing. Assert it at the call
+   * site and the failure sits next to the click that was supposed to cause it.
+   */
+  cy.get('.mm-sub-modal', { timeout: 15000 }).should('be.visible')
 
   // Select outcome based on who should win
   /*
    * The sub-modal labels outcomes by PARTY — "Creator wins — <name>", "Opponent wins — <name>"
    * (MyMarketsModal's outcomeLabels/labelFor) — not Pass/Fail, so the old strings matched
    * nothing. Match a pattern: each label carries a name or shortened address after the title.
-   *
-   * And wait for the modal rather than snapshotting for it: `if ($modal.length > 0)` around the
-   * whole resolution meant a modal that had not rendered yet was read as "no modal", and the
-   * test carried on without resolving anything.
    */
   cy.resolveWagerInModal(opts.winnerIsCreator ? /creator wins/i : /opponent wins/i)
   cy.lastWagerId().then((id) => cy.waitForWagerResolved(id))

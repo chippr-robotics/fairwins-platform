@@ -58,13 +58,34 @@
  * because refusing new money is correct and trapping existing money is not.
  * `uncertain` is not `restricted`: the guard is not deployed on every bridgeable network,
  * so an unscreenable wallet is disclosed, never blocked on an assumption.
+ *
+ * ── ACTING ACCOUNTS ARE REFUSED, NOT SILENTLY IGNORED (spec 088 FR-001/FR-002) ───────
+ * Every read and every write on this surface belongs to the CONNECTED wallet: the asset
+ * roster, the balance behind Max, the screened address, the `recipient` baked into the
+ * deposit, the ledger entry, and the signature itself (`useEarnSend.sendOnChain` sends
+ * through the wallet's own rail). While the account switcher shows a vault, a recovered,
+ * a hardware or any other non-personal account, that would be a transfer of the connected
+ * wallet's money made under another account's name.
+ *
+ * Routing it through the acting seam is not a small change and is not simply better here:
+ * `submitAsActiveAccount` does not switch networks, while a bridge is defined by starting
+ * on a chain the wallet may not be on and the acting signer binds to the wallet's CURRENT
+ * chain at ceremony time (FR-005) — so an acting bridge would sign against the wrong chain.
+ * And a vault has no owner guarantee at the same address on the DESTINATION chain, so a
+ * bridge "as a vault" can deliver to an address nobody controls. Both are follow-up work
+ * with their own design; neither is a reason to proceed as the connected wallet in the
+ * meantime. So the surface is WITHHELD with the reason stated, the way Verify refuses to
+ * sign a message as a vault (spec 084) — the whole form, because leaving it up would show
+ * the connected wallet's assets under the acting account's name.
+ * ─────────────────────────────────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import UniversalAssetSelect from '../ui/UniversalAssetSelect'
 import InfoTip from '../ui/InfoTip'
 import BridgeQuoteCard from './BridgeQuoteCard'
 import { useWallet } from '../../hooks/useWalletManagement'
+import { useEffectiveAccount } from '../../hooks/useEffectiveAccount'
 import { useSelectableAssets } from '../../hooks/useSelectableAssets'
 import usePortfolio from '../../hooks/usePortfolio'
 import { useEarnSend } from '../../hooks/useEarnSend'
@@ -81,7 +102,8 @@ import {
   readBridgeRoute,
   readBridgeRouterConfig,
 } from '../../lib/bridge/bridgeRouter'
-import { SPOKE_POOL_IFACE } from '../../lib/bridge/bridgeStatus'
+import { decodeEventLog } from 'viem'
+import { SPOKE_POOL_ABI } from '../../lib/bridge/bridgeStatus'
 import {
   BRIDGE_DISCLOSURE,
   BRIDGE_TIPS,
@@ -113,6 +135,29 @@ const DEPOSIT_EVENT_NAMES = ['V3FundsDeposited', 'FundsDeposited']
  */
 const SCREENING_REFUSAL =
   'This wallet is flagged by sanctions screening, so a new transfer cannot be started. Nothing has been sent. Transfers already on their way are unaffected and still shown below.'
+
+/**
+ * Spec 088 FR-001/FR-002 — the refusal a member gets while acting as any non-personal
+ * account. It names the account they are acting as, says plainly that this surface can only
+ * move the connected wallet's own assets, and gives the one action that changes that. It
+ * must never read as an outage: nothing is broken, and the member's own bridging works the
+ * moment they switch back.
+ *
+ * @param {{ type: string, label: string|null }} acting
+ * @returns {string}
+ */
+function actingRefusal(acting) {
+  const named =
+    acting.label ||
+    (acting.type === 'vault'
+      ? 'a vault'
+      : acting.type === 'hardware'
+        ? 'a hardware account'
+        : acting.type === 'legacy' || acting.type === 'derived'
+          ? 'a recovered account'
+          : 'another account')
+  return `You are acting as ${named}. Bridging can only move assets held by the wallet connected to this app, so it is not offered here — showing it would let you start a transfer of your connected wallet's money under ${named}'s name. Switch back to acting as yourself to bridge, or send the assets to your own wallet first and bridge them from there. Nothing has been sent, and transfers already on their way are unaffected and still shown below.`
+}
 
 /** Screening could not run here — stated as unknown, never treated as clear or as flagged. */
 const SCREENING_UNAVAILABLE =
@@ -154,11 +199,11 @@ function depositIdFromReceipt(receipt) {
   for (const log of receipt?.logs || []) {
     let parsed
     try {
-      parsed = SPOKE_POOL_IFACE.parseLog({ topics: [...(log.topics || [])], data: log.data })
+      parsed = decodeEventLog({ abi: SPOKE_POOL_ABI, topics: [...(log.topics || [])], data: log.data ?? '0x' })
     } catch {
       parsed = null // a log from some other contract in the same transaction
     }
-    if (parsed && DEPOSIT_EVENT_NAMES.includes(parsed.name)) return String(parsed.args.depositId)
+    if (parsed && DEPOSIT_EVENT_NAMES.includes(parsed.eventName)) return String(parsed.args.depositId)
   }
   return null
 }
@@ -192,6 +237,9 @@ function quoteErrorCopy(err) {
 
 export default function BridgeView({ onRecorded } = {}) {
   const { address, chainId } = useWallet() || {}
+  // Spec 088 — which account does the switcher say we are? Everything below belongs to the
+  // CONNECTED wallet, so anything other than the personal account is refused (see the header).
+  const acting = useEffectiveAccount()
   // Catalog mode: a destination network is one the member may hold NOTHING on yet, so the
   // list has to include supported-but-unheld assets. Source options are narrowed below.
   const { options } = useSelectableAssets({ activity: 'transfer', catalog: true })
@@ -551,6 +599,9 @@ export default function BridgeView({ onRecorded } = {}) {
 
   const submit = async () => {
     setInputError(null)
+    // Spec 088 FR-002 — belt and braces behind the withheld form above: this surface signs with
+    // the connected wallet, so it must never sign while the switcher shows another account.
+    if (acting.isActingAccount) return setInputError(actingRefusal(acting))
     if (amountRaw === undefined) return setInputError('Enter a valid number.')
     if (amountRaw == null) return setInputError('Enter an amount greater than zero.')
     if (maxRaw != null && amountRaw > maxRaw) {
@@ -667,7 +718,10 @@ export default function BridgeView({ onRecorded } = {}) {
   }
 
   // ── Honest unavailable states (T083). Read top to bottom: the broadest reason wins. ──
+  // The acting account comes FIRST because it is true whatever the network or the gateway is
+  // doing: an account this surface cannot act for is not a bridge outage (spec 088).
   const unavailable = (() => {
+    if (acting.isActingAccount) return actingRefusal(acting)
     if (isBitcoinNetworkId(chainId)) return BRIDGE_UNAVAILABLE.bitcoin
     if (!gatewayReady) return BRIDGE_UNAVAILABLE.gateway
     return null
@@ -676,7 +730,11 @@ export default function BridgeView({ onRecorded } = {}) {
   if (unavailable) {
     return (
       <div className="bridge-root">
-        <p className="bridge-unavailable" role="note">
+        <p
+          className="bridge-unavailable"
+          role="note"
+          data-testid={acting.isActingAccount ? 'bridge-acting-refusal' : undefined}
+        >
           {unavailable}
         </p>
       </div>

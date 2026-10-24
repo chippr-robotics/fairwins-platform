@@ -178,7 +178,7 @@ function ComponentExamples() {
                 value={formData.amount}
                 onChange={(e) => handleChange('amount', e.target.value)}
                 placeholder="0.00"
-                helperText="Amount in MATIC"
+                helperText="Amount in POL"
                 required
                 error={errors.amount}
               />

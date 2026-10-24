@@ -51,7 +51,9 @@ export const CHAIN_DEFS = {
     paymentSupported: false, // USC on ETC is permit-only; no EIP-3009 (research.md §2)
     noBatch: true,
     tokenDomain: null,
-    defaultRpcUrls: ['https://etc.rivet.link', 'https://etc.etcdesktop.com'],
+    // `etc.rivet.link` led this list until it stopped resolving (NXDOMAIN); it was the first
+    // endpoint the gateway dialled for ETC, so every call paid a dead lookup before falling through.
+    defaultRpcUrls: ['https://etc.etcdesktop.com'],
     gasPriceFallbackWei: 300_000_000_000n, // ~300 gwei legacy oracle suggestion (hardhat.config.js)
   },
   63: {

@@ -30,11 +30,297 @@ permissions:
   # (github.rest.pulls.create). With `read` the token 403s at runtime and the release job fails at
   # its last step — the precise failure this PR exists to remove. Reported by review on #1088.
   pull-requests: write
+  # Workload-identity auth for the Android signing secrets (spec 102). Unused
+  # until the ANDROID_SIGNING_SERVICE_ACCOUNT repo variable is set.
+  id-token: write
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # Native release channels (spec 102, contracts/release-artifacts.md).
+  #
+  # ORDER IS THE CONTRACT: the artifact and smoke jobs run BEFORE the tag is
+  # created, and the `release` job `needs` all four — so a record row can only
+  # ever describe an artifact that was built AND smoke-tested (FR-009), and a
+  # failed native build means no tag, no release, loudly. None of these jobs
+  # carries `continue-on-error` (constitution IV).
+  #
+  # The version is computed ONCE here from the same SHA the release job will
+  # read — scripts/release/version.js is deterministic over git state, so the
+  # two agree by construction (FR-015).
+  # ---------------------------------------------------------------------------
+  native-gate:
+    name: Native channels gate
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip release]')"
+    outputs:
+      proceed: ${{ steps.gate.outputs.proceed }}
+      version: ${{ steps.gate.outputs.version }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Compute the release version for the native builds
+        id: gate
+        run: |
+          set -euo pipefail
+          node scripts/release/version.js --json > version.json
+          VERSION=$(node -p "require('./version.json').version || ''")
+          if [ -z "$VERSION" ]; then
+            echo "::notice::No release from this push — native channel builds are not needed."
+            echo "proceed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "proceed=true" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+  android-artifact:
+    name: Android artifact (.aab)
+    runs-on: ubuntu-latest
+    needs: native-gate
+    if: needs.native-gate.outputs.proceed == 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      # The SAME preparation `native-build.yml` runs on every pull request and
+      # push to staging — one definition, so an early check can never pass while
+      # the release it protects fails.
+      - uses: ./.github/actions/native-prepare
+        with:
+          platform: android
+          version: ${{ needs.native-gate.outputs.version }}
+      # JAVA 21, not 17: `capacitor-android` (Capacitor 8) declares source/target
+      # compatibility 21, and javac answers an older toolchain with
+      # `invalid source release: 21` — which is what failed every Android job on
+      # the v1.16.0 attempt, the first time this chain ever ran.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      # Signing is enabled by setting the ANDROID_SIGNING_SERVICE_ACCOUNT repo
+      # variable (one-time operator setup — docs/runbooks/native-release-operations.md).
+      # Once enabled, a missing or unreadable secret FAILS this job naming it;
+      # until enabled, the build is UNSIGNED and the record row says so — the
+      # one thing that never happens is silent half-signing. Key material rides
+      # the ENVIRONMENT into gradle (never argv, never a committed property
+      # file); the keystore is materialised only into the ephemeral runner temp.
+      - name: Authenticate for the upload key
+        if: vars.ANDROID_SIGNING_SERVICE_ACCOUNT != ''
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ vars.WIF_PROVIDER }}
+          service_account: ${{ vars.ANDROID_SIGNING_SERVICE_ACCOUNT }}
+      - name: Build the release bundle
+        run: |
+          set -euo pipefail
+          if [ -n "${{ vars.ANDROID_SIGNING_SERVICE_ACCOUNT }}" ]; then
+            KS="$RUNNER_TEMP/upload-keystore.jks"
+            gcloud secrets versions access latest \
+              --secret=fairwins-android-upload-keystore --out-file="$KS"
+            KS_PASS="$(gcloud secrets versions access latest \
+              --secret=fairwins-android-upload-keystore-password)"
+            echo "::add-mask::$KS_PASS"
+            cd frontend/android
+            ANDROID_UPLOAD_KEYSTORE_FILE="$KS" \
+            ANDROID_UPLOAD_KEYSTORE_PASSWORD="$KS_PASS" \
+              ./gradlew --no-daemon bundleRelease
+            echo "SIGNED=true" >> "$GITHUB_ENV"
+          else
+            echo "::warning::ANDROID_SIGNING_SERVICE_ACCOUNT is not set — building an UNSIGNED bundle. The record row will say signed: false. One-time setup: docs/runbooks/native-release-operations.md."
+            cd frontend/android
+            ./gradlew --no-daemon bundleRelease
+            echo "SIGNED=false" >> "$GITHUB_ENV"
+          fi
+      - name: Record the artifact digest
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.native-gate.outputs.version }}"
+          OUT="FairWins-${VERSION}.aab"
+          cp frontend/android/app/build/outputs/bundle/release/app-release.aab "$OUT"
+          SHA=$(sha256sum "$OUT" | cut -d' ' -f1)
+          printf '{ "channel": "android", "artifact": "%s", "sha256": "%s", "signed": %s }\n' \
+            "$OUT" "$SHA" "$SIGNED" > android.digest.json
+          cat android.digest.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-artifact-android
+          path: FairWins-*.aab
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-digest-android
+          path: android.digest.json
+          if-no-files-found: error
+
+  ios-artifact:
+    name: iOS artifact (unsigned archive)
+    runs-on: macos-latest
+    needs: native-gate
+    if: needs.native-gate.outputs.proceed == 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      # Same shared preparation as the Android jobs and the pre-main check,
+      # including selecting the newest Xcode on the image.
+      - uses: ./.github/actions/native-prepare
+        with:
+          platform: ios
+          version: ${{ needs.native-gate.outputs.version }}
+      # Unsigned by design: the Apple distribution identity is operator-held
+      # and never enters CI (research R8). The archive's digest still pins the
+      # released bytes; signing rewrites the bundle at the operator ceremony.
+      - name: Archive (unsigned)
+        run: |
+          set -euo pipefail
+          xcodebuild archive \
+            -project frontend/ios/App/App.xcodeproj \
+            -scheme App \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$RUNNER_TEMP/App.xcarchive" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+      - name: Record the artifact digest
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.native-gate.outputs.version }}"
+          OUT="FairWins-${VERSION}-ios.xcarchive.zip"
+          ditto -c -k --sequesterRsrc --keepParent "$RUNNER_TEMP/App.xcarchive" "$OUT"
+          SHA=$(shasum -a 256 "$OUT" | cut -d' ' -f1)
+          printf '{ "channel": "ios", "artifact": "%s", "sha256": "%s", "signed": false }\n' \
+            "$OUT" "$SHA" > ios.digest.json
+          cat ios.digest.json
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-artifact-ios
+          path: FairWins-*-ios.xcarchive.zip
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-digest-ios
+          path: ios.digest.json
+          if-no-files-found: error
+
+  native-smoke-android:
+    name: Native smoke (Android emulator)
+    runs-on: ubuntu-latest
+    needs: native-gate
+    if: needs.native-gate.outputs.proceed == 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      # The SAME preparation `native-build.yml` runs on every pull request and
+      # push to staging — one definition, so an early check can never pass while
+      # the release it protects fails.
+      - uses: ./.github/actions/native-prepare
+        with:
+          platform: android
+          version: ${{ needs.native-gate.outputs.version }}
+      # JAVA 21, not 17: `capacitor-android` (Capacitor 8) declares source/target
+      # compatibility 21, and javac answers an older toolchain with
+      # `invalid source release: 21` — which is what failed every Android job on
+      # the v1.16.0 attempt, the first time this chain ever ran.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Enable KVM for the emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      # What this smoke PROVES: the bundled app installs, launches, renders the
+      # shell (the `[fw-smoke] shell-mounted` marker reaches logcat via
+      # Capacitor's console bridge), and survives a background/foreground cycle
+      # without a fatal exception. The app-lock re-prompt itself is pinned at
+      # unit level (src/test/applock) and by the staged manual protocol — a
+      # fresh emulator has no signed-in member to lock, and pretending
+      # otherwise would be coverage that cannot fail (spec 094).
+      - name: Launch and probe the app
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          arch: x86_64
+          disable-animations: true
+          # ONE LINE, deliberately. This action runs its `script:` line by line,
+          # each in its own `sh -c`, so shell variables do not survive between
+          # lines and a multi-line `for`/`if` is split mid-statement. The probe
+          # therefore lives in a file that a real shell reads whole.
+          script: bash scripts/native/android-smoke.sh
+
+  native-smoke-ios:
+    name: Native smoke (iOS simulator)
+    runs-on: macos-latest
+    needs: native-gate
+    if: needs.native-gate.outputs.proceed == 'true'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      # Same shared preparation as the Android jobs and the pre-main check,
+      # including selecting the newest Xcode on the image.
+      - uses: ./.github/actions/native-prepare
+        with:
+          platform: ios
+          version: ${{ needs.native-gate.outputs.version }}
+      # The simulator is CHOSEN FROM THE IMAGE, never named in advance: a hardcoded
+      # `iPhone 15` broke the moment the runner moved to an Xcode 26 image whose
+      # newest simulators are iPhone 17s. Pick the last available iPhone by UDID
+      # and build for exactly that device, so the thing built and the thing booted
+      # cannot disagree.
+      - name: Build for the simulator and probe the app
+        run: |
+          set -euo pipefail
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; \
+                p=[x for r in d.values() for x in r if x['name'].startswith('iPhone')]; \
+                print(p[-1]['udid'] if p else '')")
+          if [ -z "$UDID" ]; then
+            echo "::error::No iPhone simulator is available on this image."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $UDID"
+          xcodebuild \
+            -project frontend/ios/App/App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -destination "id=$UDID" \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
+          BUNDLE_ID=$(grep -oE 'PRODUCT_BUNDLE_IDENTIFIER = [^;]+' frontend/ios/App/App.xcodeproj/project.pbxproj | head -1 | sed 's/.*= //')
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          APP_PATH=$(find "$RUNNER_TEMP/dd/Build/Products" -maxdepth 2 -name 'App.app' | head -1)
+          xcrun simctl install "$UDID" "$APP_PATH"
+          xcrun simctl launch --console-pty "$UDID" "$BUNDLE_ID" > console.log 2>&1 &
+          MOUNTED=false
+          for i in $(seq 1 60); do
+            if grep -q 'fw-smoke.*shell-mounted' console.log; then MOUNTED=true; break; fi
+            sleep 2
+          done
+          if [ "$MOUNTED" != "true" ]; then
+            echo "::error::The app shell never mounted in the simulator WebView — console tail follows."
+            tail -150 console.log || true
+            exit 1
+          fi
+          echo "Smoke passed: built, installed, mounted on the simulator."
   release:
     name: Publish release
     runs-on: ubuntu-latest
+    # Spec 102: the tag and record exist only if every native channel built and
+    # smoked (FR-009). A push that mints no version skips the native jobs and
+    # therefore this job too — same outcome as the internal gate below, one
+    # step earlier.
+    needs: [android-artifact, ios-artifact, native-smoke-android, native-smoke-ios]
     # A cheap short-circuit, and NOT the guard that holds.
     #
     # `head_commit` is the tip of the push. The CHANGELOG commit reaches `main` inside a pull
@@ -145,6 +431,25 @@ jobs:
             --out artifacts.md
           cat artifacts.md >> "$GITHUB_STEP_SUMMARY"
 
+      # Spec 102: fold the native channel digests into the artifact table
+      # BEFORE the changelog is generated, so the record carries them. The
+      # `needs` above guarantees these artifacts were built and smoked.
+      - name: Collect native channel digests
+        if: steps.gate.outputs.proceed == 'true'
+        uses: actions/download-artifact@v7
+        with:
+          pattern: native-digest-*
+          path: native-digests
+      - name: Append native channel rows to the artifact table
+        if: steps.gate.outputs.proceed == 'true'
+        run: |
+          set -euo pipefail
+          node scripts/release/native-artifact-rows.js \
+            --digests native-digests \
+            --version "${{ steps.version.outputs.version }}" \
+            --append artifacts.md
+          tail -12 artifacts.md >> "$GITHUB_STEP_SUMMARY"
+
       # Release Drafter writes the NOTES. The version is supplied, never resolved here (FR-015).
       - name: Publish the release
         if: steps.gate.outputs.proceed == 'true'
@@ -232,6 +537,16 @@ jobs:
           # is DERIVED from the workspace globs, so it cannot fall behind the workspace. Mini-apps
           # version independently and are deliberately untouched (FR-007).
           node scripts/release/sync-manifest-versions.js --version "$VERSION"
+
+          # ...and into the native shells (spec 103). Those version fields are SYNC-ONLY —
+          # `check:native-versions` fails on any value the sync would not have written — so a
+          # record that bumps the manifests without also running this is born unmergeable. It
+          # was: v1.16.0's record failed the gate with drift in build.gradle and project.pbxproj,
+          # because this step predates the native channels and was never extended when they
+          # landed. The shipped artifacts were never affected (`native-prepare` runs the same
+          # sync before building), which is exactly why nothing caught it earlier: the only
+          # place the omission shows up is the committed record.
+          node scripts/native/sync-native-config.js --version "$VERSION"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

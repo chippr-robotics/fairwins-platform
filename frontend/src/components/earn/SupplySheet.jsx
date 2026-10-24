@@ -73,11 +73,11 @@
  * ─────────────────────────────────────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import UniversalAssetSelect from '../ui/UniversalAssetSelect'
 import InfoTip from '../ui/InfoTip'
 import { useWallet } from '../../hooks/useWalletManagement'
-import { useEarnSend } from '../../hooks/useEarnSend'
+import { useEarnSend, earnActingRefusal } from '../../hooks/useEarnSend'
 import { useAddressScreening } from '../../hooks/useAddressScreening'
 import { useActivityOptional } from '../../hooks/useActivity'
 import usePortfolio from '../../hooks/usePortfolio'
@@ -199,7 +199,7 @@ export default function SupplySheet({
   initialMode = 'supply',
 }) {
   const { address, chainId: walletChainId } = useWallet() || {}
-  const { sendOnChain, canTransactOn, cannotTransactReason, isPasskey } = useEarnSend()
+  const { sendOnChain, canTransactOn, cannotTransactReason, isPasskey, isActingAccount, actingAccount } = useEarnSend()
   const { screenOne } = useAddressScreening()
   const activity = useActivityOptional()
   const portfolio = usePortfolio() || {}
@@ -705,7 +705,7 @@ export default function SupplySheet({
       try {
         const provider = makeReadProvider(pool.chainId)
         const pooled = provider
-          ? await readPooledToken({ provider, hubPool: pool.hubPool, l1Token: pool.token0 })
+          ? await readPooledToken({ chainId: pool.chainId, provider, hubPool: pool.hubPool, l1Token: pool.token0 })
           : null
         if (pooled && pooled.isEnabled === false) {
           setTxState({ step: 'error', txUrl: null, note: null, error: RETIRED_POOL_COPY })
@@ -913,6 +913,41 @@ export default function SupplySheet({
       `${fmt(amount0 - maxFee0, decimals0, symbol0)} + ${fmt(amount1 - maxFee1, decimals1, symbol1)}`,
     )
   })()
+
+  // Spec 088 FR-001/FR-002 — every read and write in this sheet belongs to the CONNECTED
+  // wallet (supply/withdraw goes out on useEarnSend.sendOnChain, which signs with whatever the
+  // wallet holds and switches networks on it directly — see the BridgeView template this
+  // mirrors). So while the switcher shows a vault, a recovered, a hardware, or any other
+  // non-personal account, the whole sheet is withheld with the reason, rather than left up with
+  // the connected wallet's own balances and positions shown under the acting account's name.
+  if (isActingAccount) {
+    return (
+      <div className="asset-sheet-backdrop">
+        <button type="button" className="asset-sheet-scrim" aria-label="Close pool details" onClick={onClose} />
+        <div
+          className="asset-sheet earn-vault-sheet supply-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          ref={sheetRef}
+        >
+          <div className="asset-sheet-grabber" aria-hidden="true" />
+          <div className="asset-sheet-header">
+            <div className="asset-sheet-heading">
+              <h3 id={titleId}>{isTrading ? `${symbol0} / ${symbol1}` : symbol0}</h3>
+            </div>
+            <button type="button" className="asset-sheet-close" onClick={onClose}>
+              Close
+            </button>
+          </div>
+          <p className="supply-unavailable" role="note" data-testid="earn-supply-acting-refusal">
+            {earnActingRefusal(actingAccount)}
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="asset-sheet-backdrop">

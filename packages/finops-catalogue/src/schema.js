@@ -13,7 +13,13 @@
 
 /** Metric label enumerations. Adding a value is cheap; adding a LABEL needs a cardinality argument. */
 export const UNITS = ['USDC', 'USD', 'POL', 'ETH', 'ETC']
-export const KINDS = ['revenue', 'cost']
+// 'usage' (spec 106/#1447): a MEASURED consumption fact with no dollar of its own — the gateway's
+// per-tier / per-upstream call counts that contextualise the vendor bills beside it. It exists as
+// a kind because the alternative was an emitted `source` label with no catalogue entry, which
+// breaks the bounded-label promise and is invisible to every coverage gate. A usage source never
+// joins a money total and never carries a basis: basis exists to say whether a DOLLAR figure is an
+// invoice or our arithmetic, and a request count is neither.
+export const KINDS = ['revenue', 'cost', 'usage']
 export const STATUSES = ['live', 'planned', 'retired']
 
 /**
@@ -37,6 +43,13 @@ export const METRIC_FAMILIES = [
   'fairwins_finops_pool_balance',
   'fairwins_finops_pool_burn_rate',
   'fairwins_finops_pool_runway_seconds',
+  // Executor nonce diagnostics (#1539). NOT a value a source declares — these are side series about
+  // an existing pool, emitted beside its balance, and listed here so the allowed-family set stays
+  // the whole truth about what the exporter publishes.
+  'fairwins_finops_executor_nonce',
+  'fairwins_finops_executor_nonce_pending_gap',
+  'fairwins_finops_executor_nonce_stale_seconds',
+  'fairwins_finops_executor_nonce_observed_seconds',
   'fairwins_finops_sponsored_ops_total',
   'fairwins_finops_relayed_intents_total',
 ]
@@ -97,6 +110,17 @@ export function validateSource(src, index) {
   }
   if (src.kind === 'revenue' && src.basis != null) {
     bad(`'basis' is a cost-source field only`)
+  }
+  if (src.kind === 'usage') {
+    if (src.basis != null) {
+      bad(`'basis' is a cost-source field only: a usage count is a measured fact, not a modelled or billed dollar`)
+    }
+    if (src.status !== 'planned' && src.metric !== 'fairwins_finops_vendor_usage') {
+      bad(`a live usage source must emit the 'fairwins_finops_vendor_usage' family — usage never rides a money metric`)
+    }
+    if (src.unit != null) {
+      bad(`'unit' is a currency enumeration and a usage source has no currency — omit it`)
+    }
   }
 
   // The gate's join key back to the platform (FR-019). See moneyPath's comment in sources.js.

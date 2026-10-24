@@ -5,7 +5,7 @@ import './CurrencyToggle.css'
 function CurrencyToggle() {
   const { showUsd, toggleCurrency, nativeUsdRate, loading } = usePrice()
   const { native: nativeSymbol } = useChainTokens()
-  const symbol = nativeSymbol || 'MATIC'
+  const symbol = nativeSymbol || 'POL'
 
   return (
     <button

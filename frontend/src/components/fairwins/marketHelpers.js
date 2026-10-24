@@ -41,7 +41,7 @@ export const getMarketDescription = (market) => {
     return desc
   }
 
-  const stakeInfo = market.stakeAmount ? `${market.stakeAmount} ${market.stakeTokenSymbol || 'MATIC'}` : ''
+  const stakeInfo = market.stakeAmount ? `${market.stakeAmount} ${market.stakeTokenSymbol || 'POL'}` : ''
   // Open challenges (feature 024) have no bound opponent and code-gated terms — label them honestly.
   if (isOpenChallengeMarket(market)) return `Open Challenge${stakeInfo ? ` - ${stakeInfo}` : ''}`
   return `Private Bet${stakeInfo ? ` - ${stakeInfo}` : ''}`
@@ -54,7 +54,7 @@ export const getMarketUrl = (market, fallbackCreator = '') => {
     marketId: market.id,
     creator: market.creator || fallbackCreator || '',
     stake: market.stakeAmount || '0',
-    token: market.stakeTokenSymbol || 'MATIC',
+    token: market.stakeTokenSymbol || 'POL',
     deadline: market.acceptanceDeadline
       ? new Date(market.acceptanceDeadline).getTime().toString()
       : ''

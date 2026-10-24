@@ -19,7 +19,7 @@
     "social": {
       "x": "https://x.com/fairwins_app",
       "discord": "https://discord.gg/rkYvPFdRRr",
-      "github": "https://github.com/chippr-robotics/prediction-dao-research",
+      "github": "https://github.com/chippr-robotics/fairwins-platform",
       "instagram": "https://instagram.com/fairwinsapp"
     },
     "legal": {
@@ -103,7 +103,9 @@
       "token-mint",
       "bitcoin",
       "recovery",
-      "assistant"
+      "assistant",
+      "assistant-byok",
+      "news"
     ],
     "chains": {
       "mainnet": [
@@ -143,5 +145,15 @@
   "contractSet": {
     "mode": "shared",
     "saltPrefix": null
+  },
+  "native": {
+    "ios": {
+      "appId": "app.fairwins.member"
+    },
+    "android": {
+      "appId": "app.fairwins.member"
+    },
+    "displayName": "FairWins",
+    "iconSource": "icons/native/"
   }
 }

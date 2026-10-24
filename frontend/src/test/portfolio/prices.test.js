@@ -1,6 +1,6 @@
 /**
  * lib/portfolio/prices (spec 044 v1.2, FR-022) — on-chain price ladder tests.
- * ethers Contract is stubbed with an address-keyed fixture registry.
+ * The chain read seam (spec 110 Phase 1) is stubbed with an address-keyed fixture registry.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { fetchPortfolioPrices, priceSourceLabel, underlyingSymbolOf } from '../../lib/portfolio/prices'
@@ -12,25 +12,16 @@ import { NETWORKS } from '../../config/networks'
 // transform concatenates this with the vi.mock call below.
 const contracts = vi.hoisted(() => new Map());
 
-vi.mock('ethers', async (importOriginal) => {
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    Contract: class {
-      constructor(address) {
-        const fixture = contracts.get(String(address).toLowerCase())
-        // Returning an object from a constructor substitutes the instance.
-        return (
-          fixture || {
-            latestRoundData: () => Promise.reject(new Error('no fixture')),
-            decimals: () => Promise.reject(new Error('no fixture')),
-            getPool: () => Promise.reject(new Error('no fixture')),
-            slot0: () => Promise.reject(new Error('no fixture')),
-            token0: () => Promise.reject(new Error('no fixture')),
-            liquidity: () => Promise.reject(new Error('no fixture')),
-          }
-        )
+    readContract: async (_chainId, { address, functionName, args = [] }) => {
+      const fixture = contracts.get(String(address).toLowerCase())
+      if (!fixture || typeof fixture[functionName] !== 'function') {
+        throw new Error('no fixture')
       }
+      return fixture[functionName](...args)
     },
   }
 })
@@ -93,20 +84,20 @@ describe('underlyingSymbolOf', () => {
 
 describe('fetchPortfolioPrices', () => {
   it('prices baseline assets from Chainlink feeds (highest trust)', async () => {
-    setFeed(137, 'MATIC', feedFixture(0.52))
+    setFeed(137, 'POL', feedFixture(0.52))
     setFeed(137, 'ETH', feedFixture(2358.22))
     setFeed(137, 'BTC', feedFixture(64000))
     setFeed(137, 'LINK', feedFixture(14.5))
 
     const prices = await fetchPortfolioPrices(providers, registry, NOW)
-    expect(prices.get('MATIC')).toMatchObject({ usd: 0.52, source: 'chainlink', chainId: 137 })
+    expect(prices.get('POL')).toMatchObject({ usd: 0.52, source: 'chainlink', chainId: 137 })
     expect(prices.get('ETH').usd).toBeCloseTo(2358.22)
     expect(prices.get('BTC').usd).toBeCloseTo(64000)
     expect(prices.get('LINK').usd).toBeCloseTo(14.5)
   })
 
   it('never prices stablecoins or collectibles', async () => {
-    setFeed(137, 'MATIC', feedFixture(0.52))
+    setFeed(137, 'POL', feedFixture(0.52))
     const prices = await fetchPortfolioPrices(providers, registry, NOW)
     for (const symbol of ['USDC', 'USDT', 'USC', 'FWMV']) {
       expect(prices.has(symbol)).toBe(false)

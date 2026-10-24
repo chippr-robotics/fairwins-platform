@@ -1148,12 +1148,14 @@ function predictAddresses(options = {}) {
      * This used to copy four stats fields and discard the rest. The salt registry reports its own
      * limits honestly — parse failures, module fallbacks, indeterminate salt groups, unresolved
      * contract names — and dropping them here meant this tool printed a confident list of "every
-     * deterministic address" while one identifier was invisible to it, because a file it depends on
-     * (scripts/deploy/archive/deploy-correlation-registry.js, issue #1108) is not parseable
-     * JavaScript. The registry said so. This tool did not pass it on.
+     * deterministic address" while an identifier could be invisible to it, e.g. (until issue
+     * #1108/#1109 deleted it) scripts/deploy/archive/deploy-correlation-registry.js, which was not
+     * parseable JavaScript. The registry said so. This tool did not pass it on.
      *
      * That is honesty lost at a consumer boundary, which is worse than never having had it: the
-     * upstream check looks diligent and the downstream output looks complete.
+     * upstream check looks diligent and the downstream output looks complete. Keep carrying these
+     * through even now that the known offender is gone — the next broken archive script (or a live
+     * one someone breaks) needs the same honesty, not a special case for this one file.
      */
     saltRegistry: {
       identifiers: registry.stats.identifiers,

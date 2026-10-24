@@ -12,10 +12,12 @@ import PropTypes from 'prop-types'
 import { WalletContext } from '../../contexts/WalletContext'
 // Strict lookup, deliberately not getNetwork() — no default-network fallback (specs 068/071).
 import { NETWORKS } from '../../config/networks'
-import { getReadProvider } from '../../utils/rpcProvider'
 import { connectHardwareAccount } from '../../lib/hardware/connectAccount'
 import { reportHardwareError } from '../../lib/hardware/errors'
 import { VENDOR_LABELS } from '../../lib/hardware/adapters'
+// The ceremony hint follows the transport the adapter would open, so a phone member pairing over
+// Bluetooth is never told to plug in a cable (spec 085 follow-up).
+import { connectGuidance } from '../../lib/hardware/connectCopy'
 import ActionSheet from './ActionSheet'
 import './LegacyKeyRecoveryPanel.css'
 
@@ -27,6 +29,7 @@ export default function HardwareConnectDialog({ open, entry, onClose, onConnecte
   const [error, setError] = useState(null)
 
   const vendorLabel = VENDOR_LABELS[entry?.vendor] || 'hardware wallet'
+  const guidance = deps.guidance ?? connectGuidance
   const networkName = (chainId != null && NETWORKS[chainId]?.name) || 'this network'
 
   const close = useCallback(() => {
@@ -41,8 +44,10 @@ export default function HardwareConnectDialog({ open, entry, onClose, onConnecte
     setPhase('connecting')
     try {
       const connect = deps.connectAccount ?? connectHardwareAccount
-      const provider = deps.provider ?? (chainId != null ? getReadProvider(chainId) : null)
-      const signer = await connect({ entry, provider })
+      // Spec 110 T028 — the signer is bound to the wallet's CURRENT chain by id and resolves its
+      // own client, exactly as the legacy unlock does; `attachActingSigner` records the same id
+      // beside it, which is what makes a stale binding detectable later.
+      const signer = await connect({ entry, chainId })
       setPhase('idle')
       onConnected?.(signer)
     } catch (e) {
@@ -54,17 +59,21 @@ export default function HardwareConnectDialog({ open, entry, onClose, onConnecte
   const busy = phase === 'connecting'
 
   return (
-    <ActionSheet open={open} onClose={close} title="Connect your device" closeDisabled={busy}>
+    <ActionSheet open={open} onClose={close} title="Connect your device" closeDisabled={busy} tier="ceremony">
       <div className="recover-step">
-        <p>
-          Act as <code>{shortAddr(entry?.address)}</code> — every action will be confirmed on your{' '}
-          {vendorLabel} screen while the app signs with this account on {networkName}.
-        </p>
-        <p className="recover-step__hint">
-          {entry?.vendor === 'ledger'
-            ? 'Plug in the device, unlock it, and open the Ethereum app.'
-            : 'Plug in the device and approve the connection in the Trezor window.'}
-        </p>
+        {entry?.vendor === 'sigil' ? (
+          // Sigil has no screen: its consent is the disk in the drive, one presignature per signature.
+          <p>
+            Act as <code>{shortAddr(entry?.address)}</code> — every signature needs this account&apos;s Sigil disk in
+            the drive and uses one of its presignatures while the app signs with this account on {networkName}.
+          </p>
+        ) : (
+          <p>
+            Act as <code>{shortAddr(entry?.address)}</code> — every action will be confirmed on your{' '}
+            {vendorLabel} screen while the app signs with this account on {networkName}.
+          </p>
+        )}
+        <p className="recover-step__hint">{entry?.vendor ? guidance(entry.vendor).reconnectHint : ''}</p>
         {error && (
           <p role="alert" className="lkr-notice lkr-notice--error">
             {error}
@@ -88,6 +97,6 @@ HardwareConnectDialog.propTypes = {
   entry: PropTypes.object,
   onClose: PropTypes.func,
   onConnected: PropTypes.func,
-  /** Test seam: { connectAccount, provider } */
+  /** Test seam: { connectAccount, guidance } */
   deps: PropTypes.object,
 }

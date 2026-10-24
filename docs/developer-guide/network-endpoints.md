@@ -44,6 +44,64 @@ endpoint itself and cannot be called with a URL that contradicts the member's se
 member's route, and the bypass is invisible in review. Go through `makeReadProvider` /
 `getReadProvider`, or `getRpcUrlForChain(chainId)` when a service client needs a bare URL.
 
+### Build-curated failover (`NETWORKS[chainId].rpcFailoverUrl`)
+
+A chain can also declare its own failover at build time, independent of any member
+configuration — `defaultRpcFailoverUrlForChain(chainId)` reads `NETWORKS[chainId].rpcFailoverUrl`.
+On a member's default settings this participates as:
+
+```
+build default (rpcUrl)  →  build failover (rpcFailoverUrl, if declared and distinct)
+```
+
+Ethereum Classic (61) was the only chain with one until release 1.14.0 task 8 generalized the
+pattern to every EVM mainnet the app supports (1, 10, 137, 8453, 42161): each now pairs a
+`VITE_RPC_URL_<CHAIN>` primary (defaulting to a public `publicnode.com` endpoint — a deploy-time
+override may point it at a keyed QuickNode endpoint instead, see `frontend/.env.example`) with a
+distinct `VITE_RPC_URL_<CHAIN>_FAILOVER` (defaulting to a second independent public provider,
+`drpc.org`, mirroring the relay-gateway's own Polygon pair in
+`services/relay-gateway/src/config/chains.js`) — so a keyed primary going dark still leaves the
+chain readable. **Both `makeReadProvider` (ethers reads) and `wagmi.js`'s `transportFor` (wallet
+reads) consume this** — a chain-declared failover with no member override still wires viem's
+`fallback([...])` transport, not just the ethers path, so a member who has configured nothing
+gets the same redundancy on every read surface.
+
+This layer is orthogonal to a member's own `failoverUrl` (above): once a member sets their own
+primary endpoint, `rpcFailoverUrl` stops participating directly — the member's failover, or the
+build's `rpcUrl` default behind it, takes over instead (unchanged by this generalization).
+
+## QuickNode per-chain endpoints
+
+There are **two unrelated QuickNode credentials per chain**, and the difference is the whole of
+this section: one is a secret, one cannot be.
+
+| | Archive endpoint | SPA endpoint |
+|---|---|---|
+| Lives in | Secret Manager (`fairwins-quicknode-<chain>-url`) | a Cloud Build **trigger** substitution |
+| Reaches | the workstation (`MAINNET_RPC_URL`, …) | the bundle, as `VITE_RPC_URL_<CHAIN>` |
+| Who can read it | operators who can impersonate `fairwins-ops@` | **anyone who loads the app** |
+| Restriction | none — it is protected by being secret | referrer/origin allow-list on the endpoint itself |
+
+`VITE_` values compile into the client bundle, so the SPA's endpoint is public the moment it ships
+(spec 097 rule 5). That is not a leak to be plugged — it is a property of build-time configuration.
+The correct response is a QuickNode endpoint whose *own* settings restrict it to the app's origins,
+which is safe to publish. **Never pass an archive URL to the SPA build**: moving a credential into
+`VITE_` does not hide it, it publishes it.
+
+Neither is committed. `cloudbuild.yaml` and `cloudbuild.staging.yaml` declare four substitutions —
+`_RPC_URL_MAINNET`, `_RPC_URL_OPTIMISM`, `_RPC_URL_BASE`, `_RPC_URL_ARBITRUM` — that **default to
+empty** and are set on the trigger. Empty falls through to the committed `publicnode.com` primary
+(`'' || 'https://…'`), so an unset trigger reproduces the previous bundle exactly. They ride the
+**mainnet-cohort image only**; the `staging-testnet` build deliberately gets none of them, because
+chains 1/10/8453/42161 are mainnet and constitution III forbids a testnet build carrying a route to
+mainnet state.
+
+Polygon 137 is not in that set — it is the app's own chain and rides the existing global
+`VITE_RPC_URL` build arg.
+
+Provisioning and rotating the archive side is documented in
+`docs/developer-guide/workstation-secrets.md` §"QuickNode endpoints are PER-CHAIN".
+
 ## Rules that are not negotiable
 
 - **Credentials never enter a URL that could be logged.** Header/bearer keys ride on an

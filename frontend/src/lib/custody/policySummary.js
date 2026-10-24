@@ -2,7 +2,7 @@
 // encodeConfigureRules), used by the vault-creation wizard before anything is on-chain.
 // Deployed policies are summarized from live state by policy.js#describeRules instead.
 
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../evm/units'
 import { formatDuration } from './policy'
 
 /**

@@ -7,6 +7,7 @@ import { usePwaInstall } from '../hooks/usePwaInstall'
 import { usePwaUpdate } from '../hooks/usePwaUpdate'
 import { useChainTokens } from '../hooks/useChainTokens'
 import { useModal } from '../hooks/useUI'
+import { useRoleDetails } from '../hooks/useRoleDetails'
 import { ROLES, ROLE_INFO } from '../contexts/RoleContext'
 import { hasRegisteredKey } from '../utils/keyRegistryService'
 import TradeSection from '../components/fairwins/TradeSection'
@@ -25,9 +26,9 @@ import HomePreferencesPanel from '../components/account/HomePreferencesPanel'
 import WalletDisplayPreferencesPanel from '../components/account/WalletDisplayPreferencesPanel'
 import PortfolioPreferencesPanel from '../components/account/PortfolioPreferencesPanel'
 import PrivacyPreferencesPanel from '../components/account/PrivacyPreferencesPanel'
+import AppLockPreferencesPanel from '../components/account/AppLockPreferencesPanel'
 import NavigationPreferencesPanel from '../components/account/NavigationPreferencesPanel'
-import ApiAccessPanel from '../components/account/ApiAccessPanel'
-import AssistantPreferencesPanel from '../components/account/AssistantPreferencesPanel'
+import AssistantToolsPanel from '../components/assistant/AssistantToolsPanel'
 import AddressBookPanel from '../components/account/AddressBookPanel'
 import CallsignPanel from '../components/account/CallsignPanel'
 import BackupPanel from '../components/account/BackupPanel'
@@ -96,6 +97,8 @@ const WALLET_TABS = [
   // Apps (spec 073) — the mini-app catalog, and the only Apps nav item. ClearPath and Token
   // Mint stay listed below because their tabs still RENDER: they left the menu, not the app.
   { id: 'apps', label: 'Apps' },
+  // Assistant (spec 104) — the agent controls: which rail answers, the GutterToken key, API access.
+  { id: 'assistant', label: 'Assistant' },
 ]
 
 // Legacy deep-link aliases live in config/appNav.js — the drawer resolves the same
@@ -142,6 +145,19 @@ function WalletPage() {
   const isPasskey = loginMethod === 'passkey'
   const { showModal, hideModal } = useModal()
   const { roles, hasRole } = useWalletRoles()
+  /*
+   * Membership status is the ACTING account's, so it comes from `useRoleDetails` rather than
+   * `hasRole` (which reads the connected wallet and cannot see an acting account —
+   * CustodyProvider nests inside WalletProvider). Saying "Active — you have access to create
+   * wagers" off the wrong account is a claim the contract would refuse.
+   *
+   * `readable === false`, or no answer yet, is UNKNOWN — neither "Active" nor "get one". A
+   * separate branch says so instead of picking one and being confidently wrong.
+   */
+  const { getRoleDetails: getMembershipDetails } = useRoleDetails()
+  const membershipDetails = getMembershipDetails('WAGER_PARTICIPANT')
+  const membershipUnknown = !membershipDetails || membershipDetails.readable === false
+  const membershipActive = Boolean(membershipDetails?.isActive)
   const { isInitialized, isInitializing, registerKeyNow } = useEncryption()
   const { preferences, setPolymarketCategories } = useUserPreferences()
   const { capabilities } = useChainTokens()
@@ -163,6 +179,10 @@ function WalletPage() {
   // redirect landing on the catalog's honest unavailable state is a better answer than a tab that
   // silently falls back to Account.
   const miniAppsEnabled = isNavItemEnabledForTenant('apps')
+  // Assistant (spec 104): gated the same way and for the same reason — the launcher already reads
+  // the `assistant` tenant feature, and a tab reachable by URL on a tenant with no assistant would
+  // offer controls for a thing that does not exist there.
+  const assistantEnabled = isNavItemEnabledForTenant('assistant')
   const {
     isStandalone: pwaStandalone,
     canPrompt: pwaCanPrompt,
@@ -189,12 +209,32 @@ function WalletPage() {
     if (redirectTo) navigate(redirectTo, { replace: true })
   }, [redirectTo, navigate])
 
+  /*
+   * Spec 104. The Assistant and API access cards left Settings for the Assistant tab, but their
+   * card ids did not change — so the old `?tab=settings#assistant-prefs` / `#api-access` links (the
+   * update toast idiom, support answers, bookmarks) still name a real card, just on another tab.
+   * Rather than a second hash map here, ask the ONE hash→section seam whether the assistant tab
+   * owns the hash: a card that moves in `navSearchIndex.js` moves its redirect with it. Every other
+   * query param is carried (the menu search's `focus=` marker in particular), only `tab` changes.
+   */
+  const settingsHashMovedToAssistant =
+    (TAB_ALIASES[requestedTab] || requestedTab) === 'settings' &&
+    assistantEnabled &&
+    Boolean(accordionSectionForHash('assistant', location.hash))
+  useEffect(() => {
+    if (!settingsHashMovedToAssistant) return
+    const next = new URLSearchParams(location.search)
+    next.set('tab', 'assistant')
+    navigate(`/wallet?${next.toString()}${location.hash}`, { replace: true })
+  }, [settingsHashMovedToAssistant, location.search, location.hash, navigate])
+
   const [activeTab, setActiveTab] = useState(() => {
     const requested = requestedTab
     const resolved = TAB_ALIASES[requested] || requested
     if (resolved === 'collectibles' && !collectiblesEnabled) return 'account'
     if (resolved === 'predict' && !predictEnabled) return 'account'
     if (resolved === 'apps' && !miniAppsEnabled) return 'account'
+    if (resolved === 'assistant' && !assistantEnabled) return 'account'
     return WALLET_TABS.some((t) => t.id === resolved) ? resolved : 'account'
   })
   const [keyRegistered, setKeyRegistered] = useState(null)
@@ -286,9 +326,10 @@ function WalletPage() {
     const available =
       (resolved !== 'collectibles' || collectiblesEnabled) &&
       (resolved !== 'predict' || predictEnabled) &&
-      (resolved !== 'apps' || miniAppsEnabled)
+      (resolved !== 'apps' || miniAppsEnabled) &&
+      (resolved !== 'assistant' || assistantEnabled)
     setActiveTab(known && available ? resolved : 'account')
-  }, [searchParams, collectiblesEnabled, predictEnabled, miniAppsEnabled])
+  }, [searchParams, collectiblesEnabled, predictEnabled, miniAppsEnabled, assistantEnabled])
 
   const handleCheckForUpdate = useCallback(async () => {
     setPwaChecking(true)
@@ -462,7 +503,15 @@ function WalletPage() {
 
                     <div className="section">
                       <h3>Membership</h3>
-                      {hasRole(ROLES.WAGER_PARTICIPANT) ? (
+                      {membershipUnknown ? (
+                        <div className="membership-inactive">
+                          <p>
+                            Your membership could not be read right now, so this may be out of
+                            date. It is not a sign that you have none — check back in a moment.
+                          </p>
+                          <button onClick={handleOpenPurchaseModal} className="get-roles-btn">View Membership</button>
+                        </div>
+                      ) : membershipActive ? (
                         <div className="membership-active">
                           <div className="membership-status-badge active">Active</div>
                           <p>You have access to create and accept P2P wagers.</p>
@@ -589,12 +638,14 @@ function WalletPage() {
                       <WalletDisplayPreferencesPanel address={address} />
                       <PortfolioPreferencesPanel />
                       <PrivacyPreferencesPanel />
+                      {/* Spec 041 amendment: the optional app lock. Renders NOTHING for a classic
+                          wallet — there is no WebAuthn re-prompt that could reopen it, so the
+                          setting is not offered where the lock could never be lifted. */}
+                      <AppLockPreferencesPanel />
                       <NotificationProfilesPanel />
-                      {/* Spec 095 — programmatic access and the opt-in assistant. Both sit with the
-                          other privacy-shaped preferences: one decides what can reach this account,
-                          the other what leaves this device. */}
-                      <AssistantPreferencesPanel />
-                      <ApiAccessPanel />
+                      {/* The Assistant and API access cards (spec 095) moved to the Assistant tab in
+                          Tools (spec 104): they are agent controls, not appearance. Their old
+                          `#assistant-prefs` / `#api-access` hashes on this tab redirect there. */}
 
                       <AccordionSection
                         id="markets"
@@ -764,6 +815,13 @@ function WalletPage() {
                 {activeTab === 'apps' && miniAppsEnabled && (
                   <div className="apps-section" role="tabpanel">
                     <CatalogPanel />
+                  </div>
+                )}
+                {/* Assistant (spec 104) — the agent controls. The panel is an accordion like
+                    Settings, so the hash picks the card that lands open. */}
+                {activeTab === 'assistant' && assistantEnabled && (
+                  <div className="assistant-section" role="tabpanel">
+                    <AssistantToolsPanel openSection={hashOpenSection} />
                   </div>
                 )}
                 {activeTab === 'trade' && (

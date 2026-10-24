@@ -29,8 +29,12 @@ describe('makeReadProvider', () => {
     expect(p._getOption('batchMaxCount')).toBe(1)
   })
 
-  it('keeps default batching for Polygon', () => {
-    const p = makeReadProvider('https://polygon-bor-rpc.publicnode.com', 137)
+  it('keeps default batching for Polygon-family chains', () => {
+    // Amoy (80002), not Polygon mainnet: 137 now declares a build-curated rpcFailoverUrl
+    // (release 1.14.0 task 8, generalizing beyond ETC), so makeReadProvider(137) legitimately
+    // returns a FallbackProvider — this assertion is about the batch-cap OPTION, which needs a
+    // plain JsonRpcProvider with `_getOption` to inspect directly.
+    const p = makeReadProvider('https://rpc-amoy.polygon.technology', 80002)
     expect(p._getOption('batchMaxCount')).toBeGreaterThan(1)
   })
 })

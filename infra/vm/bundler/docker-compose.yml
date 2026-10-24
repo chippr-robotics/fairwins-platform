@@ -24,6 +24,12 @@ services:
     pull_policy: missing          # boot must not depend on the registry being reachable
     ports:
       - "127.0.0.1:8080:8080"     # host nginx -> nginx sidecar (which proxies to :3000 in-namespace)
+      # Loopback-published so the host nginx's /__probe/health can reach alto DIRECTLY. The probe's
+      # own comment says it must bypass the origin lock, but until this line the only host-reachable
+      # path was :8080 — the origin-lock sidecar itself — which 403s the headerless probe. Result:
+      # the uptime check read 0% for 14 days over a healthy alto. Loopback only; nothing binds a
+      # VPC-reachable interface, and every other caller still goes through the sidecar on :8080.
+      - "127.0.0.1:3000:3000"
     env_file:
       # ALTO_EXECUTOR_PRIVATE_KEYS + ALTO_UTILITY_PRIVATE_KEY + ALTO_RPC_URL.
       - /run/fairwins/alto.env
@@ -42,6 +48,17 @@ services:
       # It is fetched as REQUIRED: alto takes one endpoint, has no failover and no default, so an
       # unavailable secret must abort the boot with a diagnosis rather than crash-loop without one.
       #
+      # ⚠ RELEASE 1.14.0 TASK 8 generalized "QuickNode primary, publicnode failover" across the
+      # frontend (NETWORKS[chainId].rpcFailoverUrl, every EVM mainnet) and the relay gateway
+      # (RPC_URL_PRIMARY_<chainId> prepended to a public RPC_URLS_<chainId> list) — alto is the
+      # DELIBERATE exception, not an oversight. alto v1.2.7 has no multi-URL / failover config
+      # surface at all: ALTO_RPC_URL is a single value, full stop. A "publicnode fallback" here
+      # would need either a second alto process behind a proxy (new machinery on the write path,
+      # not undertaken for a problem not yet observed — see the rate-limit note below) or an alto
+      # version bump, neither of which is a config/docs change. If alto ever gains multi-endpoint
+      # support, wire it the same way — keyed primary via Secret Manager, public failover written
+      # in the clear here — and update this comment.
+      #
       # ⚠ 50 req/s, SHARED. The endpoint's rate limit is per ENDPOINT, not per consumer, and three
       # processes now sit behind it: alto (here), the gateway and the FinOps exporter. alto is both
       # the heaviest — a continuous block-poll plus receipt polling, independent of UserOp volume —
@@ -57,6 +74,12 @@ services:
       ALTO_PORT: "3000"
       ALTO_API_VERSION: "v1,v2"
       ALTO_NETWORK_NAME: "polygon"
+      # Which chain THIS instance serves. Not an alto setting — ours, and load-bearing:
+      # single-alto-gate.sh attributes each running alto to a chain by this value, because the
+      # invariant it enforces is "at most one alto per (chain, executor EOA)" and a container NAME
+      # is just a label somebody chose. An alto with no FW_CHAIN_ID is REFUSED rather than assumed
+      # safe — an instance the gate cannot reason about is the condition it exists to catch.
+      FW_CHAIN_ID: "137"
       # MUST stay "true" on Polygon (verified 2026-07-12). With false, alto v1.2.7's filterOps
       # references a simulations contract that isn't deployed and throws a swallowed error BEFORE any
       # broadcast — ops validate but the executor never sends, its nonce freezes, every UserOp times

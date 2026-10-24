@@ -6,18 +6,23 @@
 // every chain are always listed with their chain identity (FR-003), and only creation/load are
 // restricted to networks where custody is deployed (FR-005). Actions on a vault whose chain is not
 // the connected one are withheld behind a switch prompt (FR-004).
+//
+// Spec 102 — ONE card per vault ADDRESS (VaultCardList over `groups`), and every per-vault action
+// behind the VaultSheet (Queue / Style / Details). `?vault=<address>` deep-links to a vault's sheet
+// (FR-017) — address only, never a chain; the param is removed again when the sheet closes.
 
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import PropTypes from 'prop-types'
+import { useSearchParams } from 'react-router-dom'
 import { useWallet } from '../../hooks'
 import { useCustody } from '../../hooks/useCustody'
 import { useCustodyVaults } from '../../hooks/useCustodyVaults'
 import { useVaultProposals } from '../../hooks/useVaultProposals'
 import { isCustodySupported, CUSTODY_SUPPORTED_CHAIN_IDS } from '../../config/safeContracts'
 import { NETWORKS } from '../../config/networks'
-import VaultList from './VaultList'
-import CreateVaultWizard from './CreateVaultWizard'
-import LoadVaultForm from './LoadVaultForm'
+import VaultCardList from './VaultCardList'
+import VaultSheet from './VaultSheet'
+import VaultActionSheet from './VaultActionSheet'
 import VerifySection from './VerifySection'
 import HardwareWalletSection from './HardwareWalletSection'
 import AccordionGroup from '../account/AccordionGroup'
@@ -25,77 +30,90 @@ import AccordionSection from '../account/AccordionSection'
 import { useHardwareAccounts } from '../../hooks/useHardwareAccounts'
 import './Custody.css'
 
-/** Custody chains other than the connected one, for the "create elsewhere" affordance (FR-005). */
-function otherCustodyChains(chainId) {
-  return CUSTODY_SUPPORTED_CHAIN_IDS.filter((id) => id !== Number(chainId)).map((id) => ({
-    chainId: id,
-    name: NETWORKS[id]?.name || `Chain ${id}`,
-  }))
-}
-
 function OnChainSection() {
-  const { address, chainId, switchNetwork } = useWallet()
+  const { address, chainId } = useWallet()
   const { active } = useCustody()
   const {
-    vaults,
+    groups,
     activeVault,
-    activeAddress,
     selectVault,
     loading,
     error,
+    refresh,
     loadByAddress,
-    createVault,
-    previewVaultAddress,
-    forget,
   } = useCustodyVaults()
-  const [mode, setMode] = useState(null) // null | 'create' | 'load'
+  // Release 1.14.0 — the four vault actions live in one bottom sheet (VaultActionSheet) instead of
+  // two inline toggles plus two flows buried inside the open vault's card. `sheet` is null when
+  // closed; `{ action }` names the view it should land on (null ⇒ the chooser).
+  const [sheet, setSheet] = useState(null)
+  // Spec 102 — the per-vault sheet: `{ address, view }` or null.
+  const [vaultSheet, setVaultSheet] = useState(null)
   // Spec 049 — one shared proposal-queue instance for the active vault, so policy-change proposals
   // (VaultDetail → PolicyPanel) land in the same queue the VaultProposalsPanel renders.
   const proposals = useVaultProposals(activeVault)
   const canCreateHere = isCustodySupported(chainId)
-  const elsewhere = otherCustodyChains(chainId)
+  const [searchParams, setSearchParams] = useSearchParams()
+
+  const openVault = useCallback(
+    (vaultAddress, view = 'queue') => {
+      // VaultActionSheet's propose/approve read `activeVault`, so selecting a card also selects it.
+      selectVault?.(vaultAddress)
+      setVaultSheet({ address: vaultAddress, view })
+    },
+    [selectVault],
+  )
+
+  const closeVault = useCallback(() => {
+    setVaultSheet(null)
+    if (searchParams.has('vault')) {
+      const next = new URLSearchParams(searchParams)
+      next.delete('vault')
+      setSearchParams(next, { replace: true })
+    }
+  }, [searchParams, setSearchParams])
+
+  // FR-017 — `?vault=<address>` opens that vault's sheet on Queue once the list knows it.
+  const requestedVault = searchParams.get('vault')
+  const groupList = groups || []
+  const requestedGroup = requestedVault
+    ? groupList.find((g) => String(g.address).toLowerCase() === String(requestedVault).toLowerCase())
+    : null
+  const requestedAddress = requestedGroup?.address ?? null
+  useEffect(() => {
+    if (!requestedAddress) return
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- URL → UI sync: the param is the request
+    setVaultSheet((prev) => (prev?.address === requestedAddress ? prev : { address: requestedAddress, view: 'queue' }))
+    selectVault?.(requestedAddress)
+  }, [requestedAddress, selectVault])
 
   return (
     <div className="custody-onchain" role="region" aria-label="On-chain vaults">
-      {canCreateHere ? (
-        <div className="custody-actions">
-          <button type="button" onClick={() => setMode(mode === 'create' ? null : 'create')}>
-            Create vault
-          </button>
-          <button type="button" onClick={() => setMode(mode === 'load' ? null : 'load')}>
-            Load existing
-          </button>
-        </div>
-      ) : (
-        // FR-005: creation is honestly unavailable here, but the member's existing vaults on other
-        // chains stay listed below — the estate never disappears because of the connected network.
-        <div className="custody-unavailable" role="status">
-          <p>New vaults cannot be created on this network.</p>
-          {elsewhere.length > 0 && (
-            <p className="custody-hint">
-              Custody is available on {elsewhere.map((c) => c.name).join(', ')}.{' '}
-              {switchNetwork && (
-                <button type="button" className="custody-link" onClick={() => { Promise.resolve(switchNetwork(elsewhere[0].chainId)).catch(() => {}) }}>
-                  Switch to {elsewhere[0].name}
-                </button>
-              )}
-            </p>
-          )}
-        </div>
-      )}
+      {/* One door. The sheet itself decides which of the four actions can be taken right now and
+          says why for the rest — a control that is closed is still shown, because a control that
+          has vanished reads as a broken app rather than as an unavailable network. */}
+      <div className="custody-actions">
+        <button type="button" data-testid="custody-open-vault-actions" onClick={() => setSheet({ action: null })}>
+          Vault actions
+        </button>
+      </div>
 
-      {canCreateHere && mode === 'create' && (
-        <CreateVaultWizard
-          connectedAddress={address}
-          chainId={chainId}
-          onCreate={createVault}
-          onPreview={previewVaultAddress}
-          onDone={() => setMode(null)}
-        />
-      )}
-      {canCreateHere && mode === 'load' && (
-        <LoadVaultForm onLoad={loadByAddress} chainId={chainId} onDone={() => setMode(null)} />
-      )}
+      <VaultActionSheet
+        open={Boolean(sheet)}
+        onClose={() => setSheet(null)}
+        initialAction={sheet?.action ?? null}
+        chainId={chainId}
+        connectedAddress={address}
+        canCreateHere={canCreateHere}
+        onCreated={async (createdAddress) => {
+          // Spec 105 — the guided flow deployed (or found) the vault itself; refresh the list and
+          // land the member on its card once the Done sheet closes.
+          await refresh?.()
+          if (createdAddress) selectVault?.(createdAddress)
+        }}
+        onLoad={loadByAddress}
+        vault={activeVault}
+        proposals={proposals}
+      />
 
       {loading && <p className="custody-hint">Loading vaults…</p>}
       {error && (
@@ -104,16 +122,19 @@ function OnChainSection() {
         </p>
       )}
 
-      {/* Spec 074/protect-accordion-refresh — one vault expanded at a time, its detail inline in the
-          card body, the same collapsible pattern as the Recovery tab (AccordionSection). */}
-      <VaultList
-        vaults={vaults}
-        activeAddress={activeAddress}
-        onSelect={selectVault}
-        onForget={forget}
-        onSwitchNetwork={switchNetwork}
-        proposals={proposals}
-        isActiveIdentity={(v) => active.mode === 'vault' && active.vaultAddress === v.address}
+      {/* Spec 102 — one compact card per vault; the card and its "⋯" open the vault sheet. */}
+      <VaultCardList
+        groups={groupList}
+        actingAddress={active?.mode === 'vault' ? active.vaultAddress : null}
+        onOpen={openVault}
+      />
+
+      <VaultSheet
+        open={Boolean(vaultSheet)}
+        address={vaultSheet?.address}
+        initialView={vaultSheet?.view ?? 'queue'}
+        onClose={closeVault}
+        onVaultsChanged={refresh}
       />
     </div>
   )

@@ -1,0 +1,68 @@
+/* Release 1.14.0 — the vault action chooser, inside the shared ActionSheet shell. Every colour is
+   a theme token (spec 090/091: theme.css is the only file that states a colour), and a disabled
+   option moves its FILL and its LABEL together, because an unreadable label on a live-looking
+   surface is worse than the control simply reading as off. */
+
+.vault-action-sheet__options {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+.vault-action-sheet__option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.85rem 1rem;
+  text-align: left;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.vault-action-sheet__option:hover:not(:disabled),
+.vault-action-sheet__option:focus-visible {
+  border-color: var(--accent-color);
+}
+
+.vault-action-sheet__option:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+  border-color: var(--border-color);
+  cursor: not-allowed;
+}
+
+.vault-action-sheet__option-label {
+  font-weight: 700;
+}
+
+.vault-action-sheet__option-desc {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+/* The reason an option is closed must stay readable on the disabled fill — inheriting keeps it on
+   the matched --disabled-text rather than the secondary token, which is tuned for the live one. */
+.vault-action-sheet__option:disabled .vault-action-sheet__option-desc {
+  color: inherit;
+}
+
+.vault-action-sheet__back {
+  padding: 0.25rem 0;
+  margin-bottom: 0.5rem;
+  border: none;
+  background: none;
+  color: var(--accent-color);
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.vault-action-sheet__scope {
+  margin: 0 0 0.75rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}

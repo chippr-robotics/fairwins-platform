@@ -186,6 +186,27 @@ resource "google_secret_manager_secret" "managed" {
   }
 }
 
+# The Android upload key's reader (#1378 H2). ADDITIVE `_iam_member`, never `_iam_binding` — this
+# project is SHARED (guardrail 1), and the authoritative form would strip the role from every other
+# principal on these secrets while showing an unremarkable plan diff.
+#
+# Scoped to EXACTLY the two upload-key secrets, by name rather than by a list variable, because the
+# blast radius of this grant is the whole point: an identity that can read one more secret than it
+# needs is a signing key reader that is quietly something else. The SA itself is declared in
+# infra/terraform/bootstrap (it belongs with the other CI identities and the WIF pool) and is
+# referenced here by email so the grant sits beside the containers it applies to.
+resource "google_secret_manager_secret_iam_member" "android_signing_reader" {
+  for_each = toset([
+    "fairwins-android-upload-keystore",
+    "fairwins-android-upload-keystore-password",
+  ])
+
+  project   = var.project_id
+  secret_id = google_secret_manager_secret.managed[each.value].secret_id
+  role      = "roles/secretmanager.secretAccessor"
+  member    = "serviceAccount:${var.android_signing_service_account}"
+}
+
 # ── artifact registry ─────────────────────────────────────────────────────────────────────────
 
 resource "google_artifact_registry_repository" "cloud_run_source_deploy" {
@@ -311,10 +332,22 @@ module "spa" {
  *   - no `secret_env`. There is nothing to wire, and wiring something would give a public service
  *     a credential worth stealing — the whole point of a member-signed token is that the platform
  *     never holds one.
- *   - no `service_account_email`. The Cloud Run default account is deliberate: this service needs
- *     no GCP permission at all, and a dedicated runtime account would have to be added to the
- *     enumerated actAs list `fairwins-tf-apply@` holds (bootstrap/main.tf) — a widening of the
- *     apply identity bought for nothing.
+ *   - `service_account_email` = the permission-less `run_noperm` account. This paragraph used to
+ *     argue the opposite — that the Cloud Run default account was deliberate, because "a dedicated
+ *     runtime account would have to be added to the enumerated actAs list `fairwins-tf-apply@`
+ *     holds (bootstrap/main.tf) — a widening of the apply identity bought for nothing". That was
+ *     WRONG, and in the expensive direction.
+ *
+ *     Terraform cannot manage a Cloud Run service without `actAs` on THAT SERVICE'S runtime
+ *     account. The default account therefore needs the same list entry a dedicated one does — and
+ *     `266380754692-compute@` carries roles/editor, run.admin and iam.serviceAccountUser
+ *     project-wide, in a project shared with unrelated workloads. So the "no widening" option was
+ *     the one that hands CI an Editor to attach to anything it deploys.
+ *
+ *     Nothing caught it here because `manage_mcp_server` is false and this module has never
+ *     applied. The two staging SPAs, which are the same shape, hit the 403 the first time
+ *     `Apply staging` ran to completion (2026-09-08). Needing no permission is still the reason —
+ *     it is now the reason the account HAS none, rather than a reason to borrow one that does.
  *
  * `allow_unauthenticated = true` is therefore not a hole. An invoker check proves only that the
  * caller holds a Google identity, which says nothing about WHICH FairWins member is asking; the
@@ -336,6 +369,11 @@ module "mcp_server" {
   project_id = var.project_id
   region     = var.region
   name       = "fairwins-mcp-server"
+
+  # Set BEFORE this module is ever ungated, so that flipping `manage_mcp_server` is a flag flip and
+  # not a 403. See the paragraph above for why the permission-less account is the cheap grant and
+  # the default compute account is the expensive one.
+  service_account_email = var.run_noperm_service_account
 
   # Required by the provider, then ignored — the module's `ignore_changes` covers the image, so
   # after the first create this value never moves the service again (G-07: Terraform owns SHAPE,

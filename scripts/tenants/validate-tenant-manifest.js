@@ -20,12 +20,20 @@ const TENANTS_DIR = path.join(REPO_ROOT, "tenants");
 const DEPLOYMENTS_DIR = path.join(REPO_ROOT, "deployments");
 
 const ID_PATTERN = /^[a-z][a-z0-9-]{1,30}$/;
+// Reverse-DNS app identity (spec 102): iOS bundle id / Android application id.
+// Segments start with a letter; at least two segments.
+const APP_ID_PATTERN = /^[A-Za-z][A-Za-z0-9]*(\.[A-Za-z][A-Za-z0-9_-]*)+$/;
 const HEX_COLOR = /^#[0-9A-Fa-f]{6}$/;
 const CSS_VAR = /^--[a-z][a-z0-9-]*$/;
 const DOMAIN_PATTERN = /^[a-z0-9.-]+$/;
 
 const LIFECYCLES = ["draft", "live", "suspended", "retired"];
 const CONTRACT_MODES = ["shared", "dedicated"];
+
+// Spec 104: a GutterToken referral code is public config appended to a signup
+// URL. Bounded charset so a manifest cannot smuggle a query string or a path
+// into the link it is interpolated into.
+const REFERRAL_CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
 // Platform fee caps in bps (spec 057 + spec 060). Anything not named falls
 // under the wrapped-service cap.
@@ -160,12 +168,47 @@ function validateManifest(id, manifest, knownFeatures) {
   if (!isPlainObject(settings)) {
     err("settings is required");
   } else {
+    const features = Array.isArray(settings.features) ? settings.features : [];
     if (!Array.isArray(settings.features)) {
       err("settings.features must be an array");
     } else {
       for (const feature of settings.features) {
         if (!knownFeatures.has(feature)) {
           err(`settings.features: "${feature}" is not in tenants/features.json`);
+        }
+      }
+      // Spec 104: the bring-your-own-key rail is a PROVIDER for the assistant,
+      // not a surface of its own. Enabled without the assistant it would gate a
+      // radio inside a card that does not exist.
+      if (features.includes("assistant-byok") && !features.includes("assistant")) {
+        err('settings.features: "assistant-byok" requires "assistant" (it is a provider option inside the Assistant tab)');
+      }
+    }
+
+    // --- settings.assistant (spec 104) ---
+    // OPTIONAL. Absence means the plain GutterToken signup link with no
+    // referral code. When present, the code is a bounded identifier and the
+    // rail it belongs to must actually be offered — a referral code for a
+    // provider the tenant does not enable is dead config that would still
+    // read, in the FinOps catalogue, as a live referral arrangement.
+    const assistant = settings.assistant;
+    if (assistant !== undefined) {
+      if (!isPlainObject(assistant)) {
+        err("settings.assistant must be an object when present");
+      } else {
+        for (const key of Object.keys(assistant)) {
+          if (key !== "guttertokenReferralCode") {
+            err(`settings.assistant: unknown key "${key}"`);
+          }
+        }
+        const code = assistant.guttertokenReferralCode;
+        if (code !== undefined) {
+          if (typeof code !== "string" || !REFERRAL_CODE_PATTERN.test(code)) {
+            err("settings.assistant.guttertokenReferralCode must match /^[A-Za-z0-9_-]{1,64}$/ (it is interpolated into a URL)");
+          }
+          if (!features.includes("assistant-byok")) {
+            err('settings.assistant.guttertokenReferralCode is set but "assistant-byok" is not enabled — the link it decorates is never rendered');
+          }
         }
       }
     }
@@ -227,6 +270,62 @@ function validateManifest(id, manifest, knownFeatures) {
     }
   }
 
+  // --- native (spec 102) ---
+  // OPTIONAL: absence means the tenant has no native channel — the native
+  // build then fails loudly naming the tenant, never borrowing another
+  // tenant's identity. When present, every field is required: a partial
+  // identity would ship an app that is half one tenant.
+  const native = manifest.native;
+  if (native !== undefined) {
+    if (!isPlainObject(native)) {
+      err("native must be an object when present");
+    } else {
+      for (const platform of ["ios", "android"]) {
+        const entry = native[platform];
+        if (!isPlainObject(entry) || typeof entry.appId !== "string") {
+          err(`native.${platform}.appId is required`);
+        } else if (!APP_ID_PATTERN.test(entry.appId)) {
+          err(`native.${platform}.appId "${entry.appId}" is not a valid reverse-DNS app id`);
+        }
+      }
+      if (typeof native.displayName !== "string" || native.displayName.trim() === "") {
+        err("native.displayName is required");
+      }
+      if (typeof native.iconSource !== "string" || native.iconSource.trim() === "") {
+        err("native.iconSource is required");
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
+ * Cross-manifest rule (spec 102): a native appId belongs to exactly ONE
+ * tenant. The same tenant may reuse one id across its own two platforms —
+ * two TENANTS sharing an id would install as the same app, which is the
+ * identity collision Story 6 forbids.
+ *
+ * @param {Array<{id: string, manifest: object}>} manifests
+ * @returns {string[]} error messages
+ */
+function checkNativeAppIdUniqueness(manifests) {
+  const errors = [];
+  const owners = new Map();
+  for (const { id, manifest } of manifests) {
+    const native = manifest?.native;
+    if (!isPlainObject(native)) continue;
+    for (const platform of ["ios", "android"]) {
+      const appId = native[platform]?.appId;
+      if (typeof appId !== "string") continue;
+      const owner = owners.get(appId);
+      if (owner && owner !== id) {
+        errors.push(`native appId "${appId}" is claimed by both "${owner}" and "${id}"`);
+      } else {
+        owners.set(appId, id);
+      }
+    }
+  }
   return errors;
 }
 
@@ -266,13 +365,14 @@ function main() {
     manifests.push({ id, manifest });
   }
 
-  // Cross-manifest rule: domains are globally unique. Checked over ALL
-  // manifests even when a subset was requested, so a collision cannot hide
-  // behind a partial run.
+  // Cross-manifest rules: domains and native appIds are globally unique.
+  // Checked over ALL manifests even when a subset was requested, so a
+  // collision cannot hide behind a partial run.
   const allDirs = fs
     .readdirSync(TENANTS_DIR, { withFileTypes: true })
     .filter((entry) => entry.isDirectory())
     .map((entry) => entry.name);
+  const allManifests = [];
   for (const id of allDirs) {
     const manifestPath = path.join(TENANTS_DIR, id, "manifest.json");
     if (!fs.existsSync(manifestPath)) continue;
@@ -282,6 +382,7 @@ function main() {
     } catch {
       continue; // parse failures already reported for requested tenants
     }
+    allManifests.push({ id, manifest });
     for (const domain of manifest?.identity?.domains || []) {
       const owner = domainOwners.get(domain);
       if (owner && owner !== id) {
@@ -291,6 +392,10 @@ function main() {
         domainOwners.set(domain, id);
       }
     }
+  }
+  for (const message of checkNativeAppIdUniqueness(allManifests)) {
+    console.error(`✖ ${message}`);
+    failed = true;
   }
 
   for (const { id, manifest } of manifests) {
@@ -311,4 +416,8 @@ function main() {
   console.log(`\n${manifests.length} tenant manifest(s) valid.`);
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = { validateManifest, checkNativeAppIdUniqueness };

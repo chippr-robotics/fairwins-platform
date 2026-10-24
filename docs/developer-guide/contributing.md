@@ -10,7 +10,7 @@ Be respectful, inclusive, and collaborative. We're building something important 
 
 ### Reporting Bugs
 
-1. Check if the bug is already reported in [GitHub Issues](https://github.com/chippr-robotics/prediction-dao-research/issues)
+1. Check if the bug is already reported in [GitHub Issues](https://github.com/chippr-robotics/fairwins-platform/issues)
 2. If not, create a new issue with:
    - Clear title and description
    - Steps to reproduce
@@ -29,23 +29,43 @@ Be respectful, inclusive, and collaborative. We're building something important 
 ### Pull Requests
 
 1. **Fork** the repository
-2. **Create a branch** from `main`:
+2. **Create a branch** from `staging` — never from `main`:
    ```bash
-   git checkout -b feature/my-feature
+   git fetch origin staging
+   git checkout -b feature/my-feature origin/staging
    ```
+   `main` is the production branch (spec 076): everything on it is deployed to members, and the
+   only ways onto it are a promotion from `staging` or a declared hotfix. `branch-policy.yml`
+   enforces that as a merge-blocking check.
 3. **Make your changes** with clear commits
 4. **Write tests** for new functionality
 5. **Update documentation** as needed
 6. **Run tests** to ensure everything passes
 7. **Submit a pull request** with clear description
 
+### Working alongside agents
+
+Several agents work this repository concurrently, and the coordination protocol they follow is
+binding on humans too — most of all the two rules that exist because they were broken:
+
+- **A spec number is claimed by MERGING a reservation PR to `staging`**, not by computing it or by
+  opening a draft. `npm run check:specs` fails a PR that claims a number already taken.
+- **Assign yourself before starting.** The assignee is the claim — it is how an agent scanning for
+  work knows not to start the same thing. There is deliberately no status label to set: state is
+  read from the assignee, the linked PRs and whether the issue is closed, and closure comes from
+  `Closes #N` in the PR body. GitHub only honours closing keywords on the default branch, so
+  `close-linked-issues.yml` applies them on the `staging` merge — check the issue actually closed.
+
+The full protocol — triage, sizing, sub-issues, reviewing delegated work — is in
+[Multi-Agent Development Flow](multi-agent-workflow.md).
+
 ## Development Workflow
 
 ### Setup
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/prediction-dao-research.git
-cd prediction-dao-research
+git clone https://github.com/YOUR_USERNAME/fairwins-platform.git
+cd fairwins-platform
 npm install
 # (spec 075) one root `npm install` covers frontend and every other workspace
 ```
@@ -53,8 +73,9 @@ npm install
 ### Making Changes
 
 ```bash
-# Create feature branch
-git checkout -b feature/my-feature
+# Create feature branch (from staging, see above)
+git fetch origin staging
+git checkout -b feature/my-feature origin/staging
 
 # Make changes
 # ... edit files ...

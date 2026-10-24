@@ -157,6 +157,15 @@ export async function sendPasskeyBatch({
  */
 export function isSponsorshipUnavailable(err) {
   const msg = String(err?.details || err?.shortMessage || err?.message || err || '').toLowerCase()
+  // PAYMASTER errors (the EntryPoint's AA3x range) are checked FIRST, because the bundler phrases
+  // them as simulation reverts: AA31's full message is "UserOperation reverted during simulation
+  // with reason: AA31 paymaster deposit too low", which the generic revert patterns below would
+  // otherwise swallow — stranding the member on exactly the failure this fallback exists for
+  // (the 2026-08-26 empty-deposit incident). Every AA3x means the SPONSORSHIP path is the
+  // problem, never the member's operation, so a self-funded retry is always the right move.
+  if (/aa3[0-9]|paymaster deposit too low/.test(msg)) {
+    return true
+  }
   // An op that reverts in bundler simulation (e.g. "reverted during simulation ... transfer amount
   // exceeds balance") is a USER-OP problem: a self-funded retry reverts identically and only masks the
   // real reason behind a confusing AA21. Surface it. Only genuine sponsorship/transport failures below

@@ -275,10 +275,40 @@ missing rows showed up as 161s of "unattributed overhead"; with them, it is 9s.
 ## Adding coverage
 
 1. Add or update the flow's row in `frontend/cypress/coverage/matrix.json`.
-2. Run `npm run e2e:matrix` and commit the regenerated document.
-3. Write the test in the tier the admission rules choose.
-4. Run `npm run test:frontend -- --run src/test/e2e-policy` before pushing.
+2. If the row's status is `absent` or `partial`, its `issue` field MUST cite a tracking issue that
+   is actually **OPEN** right now — present is not enough. #1400 found 11 of the matrix's 15 absent
+   rows citing issues that had already been closed: a gap pointing at a dead link, and on
+   inspection, a repeat of the same mistake rather than a one-off. `npm run check:e2e-trackers`
+   (`scripts/e2e/check-absent-trackers.js`) enforces this in CI
+   (`.github/workflows/e2e-matrix-trackers.yml`): it reads every `absent`/`partial` row, resolves
+   its `issue` field against the GitHub API, and fails naming any row whose tracker is closed,
+   missing, malformed, or could not be verified at all — an unverifiable reference is never treated
+   as a pass, closed or open.
+3. Run `npm run e2e:matrix` and commit the regenerated document.
+4. Write the test in the tier the admission rules choose.
+5. Run `npm run test:frontend -- --run src/test/e2e-policy` before pushing.
 
 **Do not add a dependency for any of this without reading spec 075's lockfile hazard first.** The
 accessibility scan injects the already-installed `axe-core` rather than adding `cypress-axe` for
 exactly that reason.
+
+## Decision records
+
+Dated entries for calls this policy had to make explicit. They live here rather than only in a
+closed issue or a merged PR description, because a decision nobody can find the next time the same
+question comes up gets re-litigated instead of read.
+
+**2026-09-01 — Decision (#1400 §B): the merge gate carries a local hardhat + alto stack.** The
+account-native full-stack job (`cypress-passkey-full-stack` in `test.yml`) runs the
+`PASSKEY_FULL_STACK`-gated specs against a local chain, the deployed account stack + verifying
+paymaster, a pinned alto container and the relay-gateway paymaster endpoint on a hardhat test key;
+`paymaster.sponsored-userop`, `passkey.controllers`, `passkey.recover-account` are covered there.
+
+The three `102-capacitor-channels` native rows — `native.passkey-signin`, `native.lifecycle-lock`,
+`native.deep-link-entry` (tracked by #1389) — are deliberately **not** covered by that job, or by
+any browser-based tier: they need a real emulator/simulator shell (Android's Credential Manager
+test authenticator, an `appUrlOpen` intent, an instrumented background/foreground transition), which
+neither Cypress tier can host no matter how it is configured. Their home is the native release lane
+(see `docs/developer-guide/native-channels.md`, spec 102), not `fast/`, `full/` or `passkey/` — the
+tier for those three rows is deliberately not a browser tier at all, and #1389 tracks what still
+needs to land there.

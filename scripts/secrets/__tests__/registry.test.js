@@ -69,6 +69,32 @@ test('the three QuickNode URL aliases resolve to one secret', () => {
   assert.equal(owners[0], 'fairwins-quicknode-polygon-url')
 })
 
+test('a derived secret names the command that produces it, and is not a json bundle', () => {
+  // `derived` is what stops migrate.js uploading whatever stand-in sits in a local .env. A blank or
+  // vague value would leave an operator reading "derived, not migrated" with nowhere to go, and the
+  // json expansion path has no meaning for a computed single-value payload.
+  for (const s of SECRETS.filter((x) => x.derived)) {
+    assert.match(s.derived, /quicknode-chains\.js --provision \d+/, `${s.id} names no usable command`)
+    assert.equal(s.json, undefined, `${s.id} cannot be both derived and a json bundle`)
+  }
+})
+
+test('the four per-chain QuickNode endpoints are all derived', () => {
+  // The regression this guards: adding a fifth chain, forgetting `derived`, and having the next
+  // `secrets:migrate --apply` quietly upload a PUBLIC RPC URL into a container everything downstream
+  // trusts as the keyed archive endpoint. It reads back byte-exact forever, so nothing ever errors.
+  for (const id of [
+    'fairwins-quicknode-ethereum-url',
+    'fairwins-quicknode-optimism-url',
+    'fairwins-quicknode-base-url',
+    'fairwins-quicknode-arbitrum-url',
+  ]) {
+    const entry = SECRETS.find((s) => s.id === id)
+    assert.ok(entry, `${id} is missing from the registry`)
+    assert.ok(entry.derived, `${id} must declare how its payload is produced`)
+  }
+})
+
 test('managed names and public names do not overlap', () => {
   const managed = new Set(allManagedEnvNames())
   for (const k of PUBLIC_ENV_KEYS) {

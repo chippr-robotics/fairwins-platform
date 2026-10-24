@@ -70,8 +70,8 @@ describe('getSwapTokens / getSwapTokenMeta', () => {
     const tokens = getSwapTokens(137)
     expect(tokens.length).toBeGreaterThan(1)
     expect(tokens.every((t) => Boolean(t.address))).toBe(true)
-    expect(tokens.some((t) => t.symbol === 'MATIC')).toBe(false)
-    expect(tokens.some((t) => t.symbol === 'WMATIC')).toBe(true)
+    expect(tokens.some((t) => t.symbol === 'POL')).toBe(false)
+    expect(tokens.some((t) => t.symbol === 'WPOL')).toBe(true)
     expect(tokens.some((t) => t.symbol === 'USDC')).toBe(true)
     // NFT credentials are not tradeable legs.
     expect(tokens.some((t) => t.symbol === 'FWMV')).toBe(false)

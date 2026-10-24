@@ -4,8 +4,8 @@ import { useWallet, useWalletRoles, useWalletConnection } from '../../hooks'
 import { useChainTokens } from '../../hooks/useChainTokens'
 import { useUserPreferences } from '../../hooks/useUserPreferences'
 import { useModal } from '../../hooks/useUI'
+import { useRoleDetails } from '../../hooks/useRoleDetails'
 import { useWagerActivityOptional } from '../../hooks/useWagerActivity'
-import { ROLES } from '../../contexts/RoleContext'
 import { SHOW_ALL_ORACLE_MODELS } from '../../constants/wagerDefaults'
 import FriendMarketsModal from './FriendMarketsModal'
 import OpenChallengeModal from './OpenChallengeModal'
@@ -466,7 +466,17 @@ function Dashboard() {
   const { address: receiveAddress } = useEffectiveAccount()
   const { connectWallet } = useWalletConnection()
   const { preferences: _preferences } = useUserPreferences()
-  const { hasRole, blockchainSynced } = useWalletRoles()
+  const { blockchainSynced } = useWalletRoles()
+  // The banner offers a membership, so it must judge the ACTING account's — `hasRole` reads the
+  // connected wallet and cannot see one (CustodyProvider nests inside WalletProvider). Only a
+  // DEFINITE absence pitches: an unread membership is unknown, and pushing "buy" at a paid-up
+  // member sends them to a purchase that reverts AlreadyActive after their approval lands.
+  const { getRoleDetails: getMembershipDetails } = useRoleDetails()
+  const membershipDetails = getMembershipDetails('WAGER_PARTICIPANT')
+  const needsMembership =
+    Boolean(membershipDetails) &&
+    membershipDetails.readable !== false &&
+    !membershipDetails.isActive
   const { showModal, hideModal } = useModal()
   const navigate = useNavigate()
   const location = useLocation()
@@ -658,7 +668,7 @@ function Dashboard() {
           confirmed on-chain (blockchainSynced) so it doesn't linger for members
           on networks where the role read is still resolving (e.g. the RPC-only
           Mordor network, which has no subgraph). */}
-      {isConnected && blockchainSynced && !bannerDismissed && !hasRole(ROLES.WAGER_PARTICIPANT) && (
+      {isConnected && blockchainSynced && !bannerDismissed && needsMembership && (
         <div className="dashboard-cta-banner">
           <div className="cta-banner-content">
             <strong>Get access to create and accept peer-to-peer wagers</strong>

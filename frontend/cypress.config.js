@@ -4,6 +4,8 @@ import { existsSync, readdirSync, readFileSync, unlinkSync } from 'fs'
 import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
+import clearpathTasks from './cypress/support/tasks/clearpath.js'
+import sigilTasks from './cypress/support/tasks/sigil.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -126,13 +128,44 @@ const POOL_FACTORY_ABI = [
   'function createPool((address token,uint256 buyIn,uint32 maxMembers,uint16 thresholdBips,uint64 acceptDeadline,uint64 resolveDeadline) p) returns (uint256 poolId, address pool)',
   'event PoolCreated(uint256 indexed poolId, address indexed pool, address indexed creator, uint32[4] wordIndices, address token, uint256 buyIn, uint32 maxMembers, uint16 thresholdBips, uint64 acceptDeadline, uint64 resolveDeadline)',
 ]
+// Spec 102 funding pools — minimal ABIs for the full-tier funding-pools spec's setup/drive transactions
+// (create/contribute/vote/close/cancel/claim/poke) and its chain-state reads. Addresses come from the
+// deployment record's `fundingPoolFactory` key, appended by `deploy-funding-pool-factory.js` (never part
+// of `deploy:local` itself; last in `setup:e2e`).
+const FUNDING_FACTORY_ABI = [
+  'function createPool((address token,uint256 goal,string purpose,uint64 contributeDeadline,uint64 settleDeadline) p) returns (uint256 poolId, address pool)',
+  'function phraseOfPool(address pool) view returns (uint32[4])',
+  'event PoolCreated(uint256 indexed poolId, address indexed pool, address indexed organizer, uint32[4] wordIndices, address token, uint256 goal, string purpose, uint64 contributeDeadline, uint64 settleDeadline)',
+]
+const FUNDING_POOL_ABI = [
+  'function contribute(uint256 amount)',
+  'function close()',
+  'function cancel()',
+  'function voteRefund()',
+  'function claimRefund()',
+  'function pokeDeadline()',
+  'function state() view returns (uint8)',
+  'function organizer() view returns (address)',
+  'function purpose() view returns (string)',
+  'function goal() view returns (uint256)',
+  'function totalRaised() view returns (uint256)',
+  'function contributorCount() view returns (uint32)',
+  'function refundVotes() view returns (uint32)',
+  'function refundedCount() view returns (uint32)',
+  'function refundReason() view returns (uint8)',
+  'function contributeDeadline() view returns (uint64)',
+  'function settleDeadline() view returns (uint64)',
+  'function contributed(address) view returns (uint256)',
+  'function votedRefund(address) view returns (bool)',
+  'function refunded(address) view returns (bool)',
+]
 const POOL_ABI = [
   'function join()',
   'function joinWithAuthorization(address from, uint256 value, uint256 validAfter, uint256 validBefore, bytes32 nonce, uint8 v, bytes32 r, bytes32 s)',
   'function closeJoining()',
   'function cancel()',
   'function proposeOutcome((address winner,uint256 amount)[] entries)',
-  'function approve()',
+  'function approve(bytes32 proposalId)',
   'function claim((address winner,uint256 amount)[] entries, uint256 index, address recipient)',
   'function refund()',
   'function state() view returns (uint8)',
@@ -348,6 +381,178 @@ export default defineConfig({
           } catch (e) {
             console.error('axeSource: could not resolve axe-core —', e.message)
             return null
+          }
+        },
+
+        /*
+         * ── PASSKEY FULL-STACK TIER (specs 041 + 050) ────────────────────────────────────────
+         * These three tasks serve `cypress/e2e/passkey/**` when the job in
+         * .github/workflows/test.yml (cypress-passkey-full-stack) has brought up the local chain,
+         * the ERC-4337 EntryPoint, the account factory, the verifying paymaster, an alto bundler
+         * and the relay gateway. Every one of them either arranges a precondition the flow cannot
+         * reach through the UI, or reads a fact back from the CHAIN — never from a dialog.
+         */
+
+        /**
+         * Fund a passkey smart account so its first action has something to move.
+         *
+         * NAMED for the flow it serves but it takes the ADDRESS explicitly: a Node task has no view
+         * of the browser, so "the active session" has to be read in the spec (the header account
+         * control publishes it) and handed over. The alternative — a task that guessed — would fund
+         * some other account and the failure would look like a broken transfer.
+         *
+         * `native` defaults to ZERO on purpose. An account holding no native token is what makes a
+         * sponsored UserOp provable: it is the only funding state in which the operation cannot
+         * have paid for itself.
+         */
+        async seedUsdcForActiveSession({ address, usdc = '1000', native = '0', ownerBytes = null } = {}) {
+          if (!/^0x[0-9a-fA-F]{40}$/.test(address || '')) {
+            throw new Error(`seedUsdcForActiveSession: needs the session address, got ${JSON.stringify(address)}`)
+          }
+          const rpcUrl = config.env.RPC_URL || 'http://localhost:8545'
+          const provider = new ethers.JsonRpcProvider(rpcUrl, E2E_CHAIN_ID, { staticNetwork: true })
+          const admin = new ethers.NonceManager(new ethers.Wallet(config.env.PRIVATE_KEY, provider))
+          const d = loadLocalDeployment()
+          const token = new ethers.Contract(d.paymentToken, TOKEN_ABI, admin)
+          // 18-dec mock stablecoin on the local chain (see VITE_AMOY_USDC_DECIMALS in dev:e2e).
+          await (await token.mint(address, ethers.parseUnits(String(usdc), 18))).wait(1)
+          if (native !== '0' && native !== 0) {
+            await provider.send('hardhat_setBalance', [address, '0x' + ethers.parseEther(String(native)).toString(16)])
+          }
+          /*
+           * ACTIVATION. A counterfactual account has no code until its first UserOp deploys it, and
+           * the controllers panel disables every mutation until it does — so a spec about adding and
+           * removing controllers cannot reach its own subject without one. `createAccount` on the
+           * factory is permissionless and CREATE2-deterministic on the initial owner set, so calling
+           * it here deploys EXACTLY the address the browser derived; it is the same first-use deploy
+           * the sponsored path performs, arranged rather than driven. The sponsored spec drives the
+           * real one. Idempotent: the factory returns the existing account if it is already deployed.
+           */
+          if (ownerBytes) {
+            const factory = new ethers.Contract(
+              d.contracts.accountFactory,
+              ['function createAccount(bytes[] owners, uint256 nonce) payable returns (address)'],
+              admin,
+            )
+            await (await factory.createAccount([ownerBytes], 0)).wait(1)
+            if ((await provider.getCode(address)) === '0x') {
+              throw new Error(
+                `seedUsdcForActiveSession: createAccount left no code at ${address} — the browser's derived ` +
+                  'address and the factory disagree, so nothing this account signs could ever land.',
+              )
+            }
+          }
+          return {
+            ok: true,
+            address,
+            deployed: (await provider.getCode(address)) !== '0x',
+            usdc: (await token.balanceOf(address)).toString(),
+            native: (await provider.getBalance(address)).toString(),
+          }
+        },
+
+        /**
+         * Flag an address on the LOCAL SanctionsGuard — the same contract the app's own
+         * `screenController` reads, so the refusal under test is the product's, not a stub's.
+         * Takes a bare address string because that is how the controllers spec calls it.
+         */
+        async flagAddress(address) {
+          const target = typeof address === 'string' ? address : address?.address
+          if (!/^0x[0-9a-fA-F]{40}$/.test(target || '')) {
+            throw new Error(`flagAddress: expected an address, got ${JSON.stringify(address)}`)
+          }
+          const rpcUrl = config.env.RPC_URL || 'http://localhost:8545'
+          const provider = new ethers.JsonRpcProvider(rpcUrl, E2E_CHAIN_ID, { staticNetwork: true })
+          const admin = new ethers.NonceManager(new ethers.Wallet(config.env.PRIVATE_KEY, provider))
+          const d = loadLocalDeployment()
+          const guard = new ethers.Contract(
+            d.contracts.sanctionsGuard,
+            [
+              'function setDenied(address account, bool denied, string reason)',
+              'function isDenied(address account) view returns (bool)',
+            ],
+            admin,
+          )
+          if (!(await guard.isDenied(target))) {
+            await (await guard.setDenied(target, true, 'e2e passkey fixture')).wait(1)
+          }
+          const denied = await guard.isDenied(target)
+          // Read back rather than trusting the send: a flag that did not take would make the
+          // refusal test pass for the wrong reason (nothing to refuse).
+          if (!denied) throw new Error(`flagAddress: ${target} is still not denied after setDenied`)
+          return { ok: true, address: target, denied }
+        },
+
+        /**
+         * Chain and service state for the sponsored-UserOp flow.
+         *
+         * action ∈ deposit | balances | ownerCount | deployed | setSponsorship
+         *
+         * `setSponsorship` drives the REAL gateway rather than intercepting the request in the
+         * browser: SIGUSR2 toggles its kill switch (server.js bootstrap), and the task then polls
+         * /status until the gateway AGREES it changed. A stub would prove the client can handle a
+         * refusal it was handed; this proves it handles the refusal the deployment actually issues.
+         */
+        async passkeyStack({ action, args = {} }) {
+          const rpcUrl = config.env.RPC_URL || 'http://localhost:8545'
+          const provider = new ethers.JsonRpcProvider(rpcUrl, E2E_CHAIN_ID, { staticNetwork: true })
+          const d = loadLocalDeployment()
+          const entryPoint = d.contracts.entryPoint
+          const paymaster = d.contracts.verifyingPaymaster
+          const gatewayUrl = config.env.GATEWAY_URL || 'http://127.0.0.1:8788'
+
+          switch (action) {
+            case 'deposit': {
+              // EntryPoint.balanceOf(paymaster) — the sponsorship pool. It going DOWN across a send
+              // is the only direct evidence that the paymaster, and not the member, paid.
+              const ep = new ethers.Contract(entryPoint, ['function balanceOf(address) view returns (uint256)'], provider)
+              return { ok: true, paymaster, deposit: (await ep.balanceOf(paymaster)).toString() }
+            }
+            case 'balances': {
+              const token = new ethers.Contract(d.paymentToken, TOKEN_ABI, provider)
+              return {
+                ok: true,
+                native: (await provider.getBalance(args.address)).toString(),
+                usdc: (await token.balanceOf(args.address)).toString(),
+              }
+            }
+            case 'fundNative': {
+              const wei = ethers.parseEther(String(args.amount ?? '1'))
+              await provider.send('hardhat_setBalance', [args.address, '0x' + wei.toString(16)])
+              return { ok: true, native: (await provider.getBalance(args.address)).toString() }
+            }
+            case 'deployed':
+              return { ok: true, deployed: (await provider.getCode(args.address)) !== '0x' }
+            case 'ownerCount': {
+              // MultiOwnable.ownerCount() on the smart account — the chain's own answer to "how many
+              // keys can move this money", which is what a controller add/remove is FOR.
+              const acct = new ethers.Contract(args.address, ['function ownerCount() view returns (uint256)'], provider)
+              try {
+                return { ok: true, ownerCount: Number(await acct.ownerCount()) }
+              } catch (e) {
+                return { ok: false, error: e.shortMessage || e.message }
+              }
+            }
+            case 'setSponsorship': {
+              const want = Boolean(args.enabled)
+              const read = async () => {
+                const res = await fetch(`${gatewayUrl}/status`)
+                const body = await res.json()
+                return body.killSwitch === false // sponsorship is offered when the switch is OFF
+              }
+              if ((await read()) === want) return { ok: true, sponsorship: want, toggled: false }
+              const pidFile = config.env.GATEWAY_PID_FILE || '/tmp/fairwins-passkey-stack/gateway.pid'
+              const pid = Number(readFileSync(pidFile, 'utf8').trim())
+              if (!Number.isInteger(pid) || pid <= 0) throw new Error(`setSponsorship: no gateway pid in ${pidFile}`)
+              globalThis.process.kill(pid, 'SIGUSR2')
+              for (let i = 0; i < 40; i++) {
+                if ((await read()) === want) return { ok: true, sponsorship: want, toggled: true }
+                await new Promise((r) => setTimeout(r, 250))
+              }
+              throw new Error(`setSponsorship: gateway did not report sponsorship=${want} after SIGUSR2`)
+            }
+            default:
+              throw new Error(`passkeyStack: unknown action '${action}'`)
           }
         },
 
@@ -596,7 +801,20 @@ export default defineConfig({
               const addr = d.contracts.backupPointerRegistry
               if (!addr) return { ok: false, error: 'backupPointerRegistry is not in the local deployment record' }
               const bp = new ethers.Contract(addr, BACKUP_POINTER_ABI, provider)
-              return { ok: true, cid: await bp.getPointer(args.address), has: await bp.hasPointer(args.address) }
+              /*
+               * ONE BLOCK FOR BOTH READS. `hasPointer` IS `getPointer().length != 0` on chain, so
+               * the two can only disagree across block heights — and unpinned they are two separate
+               * eth_calls, which a `setPointer` landing between them straddles. That returns
+               * `{ has: true, cid: '' }`: a state the contract cannot be in, which a poll waiting on
+               * `has` reads as settled and then asserts against the pre-write CID (#1327).
+               */
+              const blockTag = await provider.getBlockNumber()
+              return {
+                ok: true,
+                blockTag,
+                cid: await bp.getPointer(args.address, { blockTag }),
+                has: await bp.hasPointer(args.address, { blockTag }),
+              }
             }
             case 'tokenBalance': {
               const t = new ethers.Contract(args.token || d.paymentToken, TOKEN_ABI, provider)
@@ -685,7 +903,8 @@ export default defineConfig({
             }
             case 'approvePoolOutcome': {
               const apw = new ethers.Wallet(ACCOUNT_KEYS[args.callerIndex ?? 0], provider)
-              tx = await new ethers.Contract(args.pool, POOL_ABI, apw).approve()
+              const apool = new ethers.Contract(args.pool, POOL_ABI, apw)
+              tx = await apool.approve(await apool.currentProposalId())
               break
             }
             case 'claimPool': {
@@ -757,6 +976,81 @@ export default defineConfig({
                 args.from, BigInt(args.value), args.validAfter, args.validBefore, args.nonce, args.v, args.r, args.s
               )
               break
+            }
+            case 'createFundingPool': {
+              if (!d.contracts.fundingPoolFactory) {
+                return { ok: false, error: 'fundingPoolFactory is not deployed — run deploy-funding-pool-factory.js --network localhost' }
+              }
+              const fw = new ethers.Wallet(ACCOUNT_KEYS[args.organizerIndex ?? 0], provider)
+              const ff = new ethers.Contract(d.contracts.fundingPoolFactory, FUNDING_FACTORY_ABI, fw)
+              // Same anchoring rule as createPool above: read the timestamp Hardhat actually assigned.
+              await provider.send('evm_mine', [])
+              const fnow = (await provider.getBlock('latest')).timestamp
+              const fparams = {
+                token: args.token || d.paymentToken,
+                goal: BigInt(args.goal ?? 100n * 10n ** 18n),
+                purpose: args.purpose ?? 'E2E funding pool',
+                contributeDeadline: fnow + (args.contributeIn ?? 3600),
+                settleDeadline: fnow + (args.settleIn ?? 7200),
+              }
+              const fsent = await ff.createPool(fparams)
+              const frc = await fsent.wait(1)
+              const fev = frc.logs
+                .map((l) => { try { return ff.interface.parseLog(l) } catch { return null } })
+                .find((e) => e && e.name === 'PoolCreated')
+              if (!fev) return { ok: false, error: 'PoolCreated event not found in receipt' }
+              const wordIndices = [...fev.args.wordIndices].map(Number)
+              return { ok: frc.status === 1, poolId: Number(fev.args.poolId), pool: fev.args.pool, wordIndices }
+            }
+            case 'contributeFunding': {
+              // Approve-then-contribute as account #index — mirrors useFundingPools.contribute's self-submit path.
+              const cw = new ethers.Wallet(ACCOUNT_KEYS[args.index ?? 1], provider)
+              const cTok = new ethers.Contract(args.token || d.paymentToken, TOKEN_ABI, cw)
+              const cPool = new ethers.Contract(args.pool, FUNDING_POOL_ABI, cw)
+              const amount = BigInt(args.amount)
+              let cNonce = await provider.getTransactionCount(cw.address, 'latest')
+              const cAllow = await cTok.allowance(cw.address, args.pool)
+              if (cAllow < amount) await (await cTok.approve(args.pool, amount, { nonce: cNonce++ })).wait(1)
+              tx = await cPool.contribute(amount, { nonce: cNonce++ })
+              break
+            }
+            case 'fundingAction': {
+              // close | cancel | voteRefund | claimRefund | pokeDeadline as account #callerIndex.
+              const fa = new ethers.Wallet(ACCOUNT_KEYS[args.callerIndex ?? 0], provider)
+              const faPool = new ethers.Contract(args.pool, FUNDING_POOL_ABI, fa)
+              if (!['close', 'cancel', 'voteRefund', 'claimRefund', 'pokeDeadline'].includes(args.fn)) {
+                return { ok: false, error: `fundingAction: unknown fn ${args.fn}` }
+              }
+              tx = await faPool[args.fn]()
+              break
+            }
+            case 'fundingInfo': {
+              const fi = new ethers.Contract(args.pool, FUNDING_POOL_ABI, provider)
+              const [fstate, forg, fpurpose, fgoal, fraised, fcount, fvotes, frefunded, freason, fcd, fsd] = await Promise.all([
+                fi.state(), fi.organizer(), fi.purpose(), fi.goal(), fi.totalRaised(), fi.contributorCount(),
+                fi.refundVotes(), fi.refundedCount(), fi.refundReason(), fi.contributeDeadline(), fi.settleDeadline(),
+              ])
+              return {
+                ok: true,
+                state: Number(fstate),
+                organizer: forg,
+                purpose: fpurpose,
+                goal: fgoal.toString(),
+                totalRaised: fraised.toString(),
+                contributorCount: Number(fcount),
+                refundVotes: Number(fvotes),
+                refundedCount: Number(frefunded),
+                refundReason: Number(freason),
+                contributeDeadline: Number(fcd),
+                settleDeadline: Number(fsd),
+              }
+            }
+            case 'fundingMemberInfo': {
+              const fm = new ethers.Contract(args.pool, FUNDING_POOL_ABI, provider)
+              const [contributed, voted, refunded] = await Promise.all([
+                fm.contributed(args.address), fm.votedRefund(args.address), fm.refunded(args.address),
+              ])
+              return { ok: true, contributed: contributed.toString(), voted, refunded }
             }
             case 'isFrozen': {
               const reg3 = new ethers.Contract(d.contracts.wagerRegistry, REGISTRY_ABI, provider)
@@ -885,6 +1179,37 @@ export default defineConfig({
                 shares: shares.toString(),
                 assets: (await vault.convertToAssets(shares)).toString(),
                 totalAssets: (await vault.totalAssets()).toString(),
+              }
+            }
+            // ------------------------------------------------- membership/role admin e2e (#1228)
+            case 'hasAdminRole': {
+              // The role registry the AccessControlApp grants on: the WagerRegistry for
+              // operator roles, the MembershipManager for ROLE_MANAGER.
+              const target = args.contract === 'membershipManager'
+                ? d.contracts.membershipManager
+                : d.contracts.wagerRegistry
+              const c = new ethers.Contract(
+                target,
+                ['function hasRole(bytes32 role, address account) view returns (bool)'],
+                provider,
+              )
+              return { ok: true, held: await c.hasRole(ethers.id(args.role), args.address) }
+            }
+            case 'membershipAdminState': {
+              // Compiled ABI for the same reason voucherFixture spells out: TierConfig is a
+              // nested tuple and a hand-written one decodes to garbage without throwing.
+              const managerAbi = loadArtifact('access/MembershipManager.sol', 'MembershipManager').abi
+              const m = new ethers.Contract(d.contracts.membershipManager, managerAbi, provider)
+              const cfg = await m.getTierConfig(WAGER_PARTICIPANT_ROLE, args.tier ?? 1)
+              return {
+                ok: true,
+                manager: d.contracts.membershipManager,
+                paymentToken: d.paymentToken,
+                treasury: await m.treasury(),
+                accruedFees: (await m.accruedFees()).toString(),
+                tierPriceUSDC: cfg.priceUSDC.toString(),
+                tierDurationDays: Number(cfg.durationDays),
+                tierActive: Boolean(cfg.active),
               }
             }
             case 'blockNumber':
@@ -1834,6 +2159,49 @@ export default defineConfig({
                 const held = await ownedVouchers(new ethers.Contract(voucherAddress, VOUCHER_ABI, provider), buyerAddress)
                 return { ok: rc.status === 1, address: buyerAddress, tier, held, priceUSDC: cfg.priceUSDC.toString() }
               }
+              /*
+               * USDC for a UI voucher purchase — and only the balance. The Buy section sends
+               * its own `approve` before the mint (useVouchers' EOA rail), so approving here
+               * would leave that half of the flow untested.
+               */
+              case 'fundBuyer': {
+                const manager = new ethers.Contract(d.contracts.membershipManager, MANAGER_ABI, provider)
+                const cfg = await manager.getTierConfig(WAGER_PARTICIPANT_ROLE, args.tier ?? 1)
+                if (!cfg.active) return { ok: false, error: `tier ${args.tier ?? 1} is not active for WAGER_PARTICIPANT_ROLE` }
+                const token = new ethers.Contract(d.paymentToken, TOKEN, admin)
+                await (await token.mint(args.address, cfg.priceUSDC * 4n)).wait(1)
+                return { ok: true, priceUSDC: cfg.priceUSDC.toString() }
+              }
+              /*
+               * A real purchaseTier by a fresh derived account, so `accruedFees` is non-zero —
+               * the treasury-withdrawal flow's precondition. Purchases (not grants, not voucher
+               * mints) are what accrue into MembershipManager.accruedFees, so ARRANGING accrued
+               * money means buying a membership. Walks for an inactive account the same way
+               * freshRedeemer does, from the top of the range so the two never race each other.
+               */
+              case 'purchaseTier': {
+                const managerRead = new ethers.Contract(d.contracts.membershipManager, MANAGER_ABI, provider)
+                let buyer = null
+                for (let i = args.startIndex ?? 19; i >= (args.endIndex ?? 10); i -= 1) {
+                  const w = ethers.HDNodeWallet.fromPhrase(HARDHAT_MNEMONIC, undefined, `m/44'/60'/0'/0/${i}`)
+                  if (Number(await managerRead.getActiveTier(w.address, WAGER_PARTICIPANT_ROLE)) === 0) {
+                    buyer = new ethers.NonceManager(w.connect(provider))
+                    break
+                  }
+                }
+                if (!buyer) {
+                  return { ok: false, error: 'no derived account without an active membership left in 10..19 — restart the node' }
+                }
+                const buyerAddress = await buyer.getAddress()
+                const tier = args.tier ?? 1
+                const cfg = await managerRead.getTierConfig(WAGER_PARTICIPANT_ROLE, tier)
+                if (!cfg.active) return { ok: false, error: `tier ${tier} is not active for WAGER_PARTICIPANT_ROLE` }
+                const token = new ethers.Contract(d.paymentToken, TOKEN, admin)
+                await (await token.mint(buyerAddress, cfg.priceUSDC * 2n)).wait(1)
+                await (await new ethers.Contract(d.paymentToken, TOKEN, buyer).approve(d.contracts.membershipManager, cfg.priceUSDC * 2n)).wait(1)
+                const rc = await (await new ethers.Contract(d.contracts.membershipManager, MANAGER_ABI, buyer).purchaseTier(WAGER_PARTICIPANT_ROLE, tier)).wait(1)
+                return { ok: rc.status === 1, address: buyerAddress, priceUSDC: cfg.priceUSDC.toString() }
+              }
               case 'vouchersOf': {
                 const v = new ethers.Contract(voucherAddress, VOUCHER_ABI, provider)
                 return { ok: true, held: await ownedVouchers(v, args.address) }
@@ -2222,6 +2590,46 @@ export default defineConfig({
               }
               case 'nativeBalance':
                 return { ok: true, balance: (await provider.getBalance(args.address)).toString() }
+              case 'mintToken': {
+                // Fund a vault with the LOCAL stable (the deployment's paymentToken — the same
+                // address the app's 80002 seam resolves), so a spec can drive the spec-105
+                // everyday/big-send lanes, which are realized in the chain's stable token.
+                const d = loadLocalDeployment()
+                const token = new ethers.Contract(args.token || d.paymentToken, TOKEN_ABI, funder)
+                const rc = await (await token.mint(args.address, BigInt(args.amount))).wait(1)
+                return { ok: rc.status === 1, token: await token.getAddress() }
+              }
+              case 'tokenBalance': {
+                const d = loadLocalDeployment()
+                const token = new ethers.Contract(args.token || d.paymentToken, TOKEN_ABI, provider)
+                return { ok: true, balance: (await token.balanceOf(args.address)).toString() }
+              }
+              case 'policyRules': {
+                /*
+                 * Read the ordered rules the GUARD holds for this vault — the on-chain truth the
+                 * spec-105 realization (`vaultRulesConfig.realizeRules`) must match. Tuple shape
+                 * copied from frontend/src/abis/SafePolicyGuardV2.js (field order is load-bearing).
+                 */
+                const guard = new ethers.Contract(
+                  args.guard,
+                  ['function getRules(address safe) view returns ((address asset, uint128 perTxLimit, uint128 windowLimit, uint8 approvalsRequired, bool banded, address[] approvers, address[] targets)[] rules, uint32 cooldown)'],
+                  provider,
+                )
+                const [rules, cooldown] = await guard.getRules(args.address)
+                return {
+                  ok: true,
+                  cooldown: Number(cooldown),
+                  rules: rules.map((r) => ({
+                    asset: String(r.asset),
+                    perTxLimit: r.perTxLimit.toString(),
+                    windowLimit: r.windowLimit.toString(),
+                    approvalsRequired: Number(r.approvalsRequired),
+                    banded: Boolean(r.banded),
+                    approvers: r.approvers.map((a) => String(a)),
+                    targets: r.targets.map((t) => String(t)),
+                  })),
+                }
+              }
               case 'proposalCount': {
                 // Count what the HUB actually recorded for this vault. A queue that renders
                 // nothing is either a vault with no proposals or a discovery problem, and only
@@ -2424,6 +2832,14 @@ export default defineConfig({
           chainSnapshotId = await provider.send('evm_snapshot', [])
           return { snapshotId: chainSnapshotId }
         },
+        /*
+         * ClearPath native standard DAOs (spec 030 pillar A). `clearpathDao` reads the local
+         * chain for full/42-clearpath-native-dao.cy.js; `clearpathRegistryWorld` ABI-encodes a
+         * registry record for the no-chain fast/46-clearpath-unavailable.cy.js and touches no
+         * chain. See frontend/cypress/support/tasks/clearpath.js.
+         */
+        ...clearpathTasks(config),
+        ...sigilTasks(config),
       })
 
       /*

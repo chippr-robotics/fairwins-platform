@@ -54,6 +54,38 @@ You **MUST** consider the user input before proceeding (if not empty).
     ```
 - If no hooks are registered or `.specify/extensions.yml` does not exist, skip silently
 
+## Multi-agent preflight (REQUIRED — read before the Outline)
+
+This repository is worked by several agents at once, and `specs/` is a shared namespace. The full
+protocol is `docs/developer-guide/multi-agent-workflow.md`; three rules bind this command:
+
+1. **A spec number is claimed by MERGING a reservation PR into `staging`, not by computing one.**
+   The number this command derives is a *proposal*. `max(existing) + 1` is correct exactly once per
+   merge — another agent asking the same question before you merge gets the same answer and is
+   equally entitled to it. That is how `017`, `041`, `050`, `102` and `104` each came to name two
+   unrelated features — `104` on 2026-09-04/05, while the gate that catches this was in review.
+
+   So: as soon as the spec directory and its skeleton exist, open a PR into `staging` containing
+   **only the reservation** — `specs/<NNN>-<slug>/spec.md`, its row in
+   `frontend/cypress/coverage/matrix.json`, and the regenerated
+   `docs/developer-guide/e2e-coverage-matrix.md` (`npm run e2e:matrix`). Label it
+   `spec-reservation`, title it `spec(<NNN>): reserve — <slug>`, and get it merged before doing
+   the design work. Small on purpose: the collision window is however long that PR sits open.
+
+2. **Verify before you write.** Run `npm run check:specs` after creating the directory. It fails if
+   the number is already claimed, if the directory is not `NNN-kebab-case`, or if a reserved number
+   carries no `spec.md`. If it fails on the number, take the next free one — do not add an
+   exemption.
+
+3. **Branch from `staging`, never from `main`.** `main` is the production branch (spec 076);
+   `branch-policy.yml` blocks anything else merging into it.
+
+The matrix row is not an optional extra: `check:e2e-matrix` fails a spec directory that has none, and
+the generated doc is diff-gated. At reservation time the row is usually one `planned` flow, or — for
+a spec with no member surface — a *reason* instead of flows. See
+`docs/developer-guide/e2e-testing-policy.md`. Note also that `specs/**` is its own CI change filter,
+so a reservation PR actually runs the gates rather than merging on zero jobs.
+
 ## Outline
 
 The text the user typed after `/speckit-specify` in the triggering message **is** the feature description. Assume you always have it available in this conversation even if `$ARGUMENTS` appears literally below. Do not ask the user to repeat it unless they provided an empty command.

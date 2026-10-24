@@ -5,12 +5,11 @@
  * reports {supported:false} and performs NO fetches (FR-018). Browsing needs no connected wallet.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
-import { getCurrentChainId } from '../config/networks'
+import { useWalletChainId } from './useWalletChainId'
 import { predictAvailable, fetchMarkets } from '../lib/predict/predictClient'
 
 export function usePredictMarkets({ q = '', category = '' } = {}) {
-  const chainId = useChainId() || getCurrentChainId()
+  const chainId = useWalletChainId()
   const supported = predictAvailable(chainId)
 
   const [pages, setPages] = useState([]) // [{markets, next, fetchedAt, stale}]

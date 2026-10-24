@@ -81,6 +81,23 @@ for (const rel of SCANNED) {
 
     const shape = SHAPES.find((s) => s.re.test(value))
     if (shape && !CLASSIFIED.has(key)) {
+      // Spec 106/106 (T038): an RPC endpoint variable carrying a credential SHAPE is a FAILURE,
+      // not a note — even under VITE_. The general VITE_ rule below is right for most values
+      // ("public once shipped; get a scoped credential"), but for RPC endpoints the platform has
+      // an explicit design that makes any credentialed value here a mistake by construction:
+      // keyed read capacity is ISSUED at runtime (spec 107) precisely so nothing keyed is ever a
+      // build-time constant, and an unrestricted archive URL pasted into one of these slots would
+      // ship to every visitor with nothing else firing. This is that gate.
+      if (/^VITE_RPC_URL/.test(key) || /^VITE_BUNDLER_URLS/.test(key)) {
+        problems.push(
+          `${rel}:${line}  ${key} looks like a ${shape.name}. RPC endpoint variables must NEVER `
+            + 'carry a credential: keyed read capacity is issued at runtime (spec 107, '
+            + 'specs/107-keyed-rpc-access/) so nothing keyed is ever compiled into a build, and a '
+            + 'keyed URL here would publish the credential to every visitor. Use the public '
+            + 'default, or leave it unset.',
+        )
+        continue
+      }
       if (key.startsWith('VITE_')) {
         notes.push(
           `${rel}:${line}  ${key} looks like a ${shape.name} and is a VITE_ variable, so it is `

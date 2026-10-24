@@ -17,9 +17,11 @@
  * and lifetime tallies / revenue are honestly "within the scanned window", not all-time.
  */
 import { useCallback, useState } from 'react'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
+import { formatUnits } from '../lib/evm/units'
+import { eventScanHandle } from '../lib/chains/eventScan'
 import { MEMBERSHIP_MANAGER_ABI } from '../abis/MembershipManager'
-import { getLogsRange } from '../lib/clearpath/connectors/ozGovernor'
+import { getLogsRange } from '../lib/chains/logRange'
 
 const CHUNK = 45_000
 const MAX_SPAN = 3_000_000
@@ -31,7 +33,34 @@ const cacheByKey = new Map() // `${chainId}:${address}` -> { at, data }
 
 // Format a USDC (6-decimal) bigint as a plain decimal string for display.
 function fmtUsdc(v) {
-  return ethers.formatUnits(v ?? 0n, USDC_DECIMALS)
+  return formatUnits(v ?? 0n, USDC_DECIMALS)
+}
+
+/**
+ * Turn a provider failure into something an operator can act on.
+ *
+ * A pruned-history refusal arrives as a raw JSON-RPC dump — the error object, the whole
+ * `eth_getLogs` payload, hex block numbers, and the vendor's own upsell link — which tells an
+ * operator nothing about what to DO. It is also not a bug in the scan: the endpoint simply does
+ * not keep the blocks, and the fix is to point the chain at an archival endpoint, which spec 069
+ * puts in the member's hands (Settings ▸ Network). Say that instead.
+ *
+ * The raw text is still appended, because a failure nobody can diagnose is its own problem.
+ */
+export function describeScanFailure(err) {
+  const raw = err?.message || String(err || '')
+  // -32701 is the code seen from Polygon public nodes; the phrasing varies by vendor, so match
+  // the condition rather than any one provider's wording.
+  const pruned =
+    /has been pruned|missing trie node|state is not available|older than \d+ blocks|archive (node|data)/i.test(raw) ||
+    String(err?.error?.code || err?.code || '') === '-32701'
+  if (!pruned) return raw
+  return (
+    'This endpoint does not keep enough history for the scan — it has pruned the blocks the ' +
+    'lifetime tallies are read from. Point this chain at an archival RPC endpoint under ' +
+    'Settings ▸ Network, then run the scan again. ' +
+    `(Endpoint said: ${raw})`
+  )
 }
 
 /**
@@ -179,7 +208,13 @@ export function useMembershipTreasuryStats({ provider, chainId, address } = {}) 
 
   const refresh = useCallback(
     async ({ force = false } = {}) => {
-      if (!provider || !address || !ethers.isAddress(address)) {
+      // Spec 110 Phase 1: the scan reads through the chain seam; `provider` stays the
+      // caller-side availability gate until callers convert.
+      const handle =
+        chainId != null && address && isAddress(address)
+          ? eventScanHandle(chainId, { address, abi: MEMBERSHIP_MANAGER_ABI })
+          : null
+      if (!provider || !handle) {
         setState({ loading: false, error: null, data: null, truncated: false })
         return
       }
@@ -191,15 +226,14 @@ export function useMembershipTreasuryStats({ provider, chainId, address } = {}) 
       }
       setState((s) => ({ ...s, loading: true, error: null }))
       try {
-        const iface = new ethers.Interface(MEMBERSHIP_MANAGER_ABI)
-        const latest = await provider.getBlockNumber()
+        const latest = await handle.provider.getBlockNumber()
         const floor = Math.max(0, latest - MAX_SPAN)
         const rawLogs = []
         let to = latest
         while (to >= floor) {
           const from = Math.max(floor, to - CHUNK + 1)
           // No topic filter → all MembershipManager events in the range; getLogsRange bisects on RPC caps.
-          const batch = await getLogsRange(provider, address, from, to, 2000, [])
+          const batch = await getLogsRange(handle.provider, address, from, to, 2000, [])
           rawLogs.push(...batch)
           if (from === floor) break
           to = from - 1
@@ -207,7 +241,7 @@ export function useMembershipTreasuryStats({ provider, chainId, address } = {}) 
         const parsed = []
         for (const log of rawLogs) {
           try {
-            const p = iface.parseLog({ topics: log.topics, data: log.data })
+            const p = handle.interface.parseLog({ topics: log.topics, data: log.data })
             if (p) parsed.push({ name: p.name, args: p.args, blockNumber: log.blockNumber, logIndex: log.index ?? log.logIndex })
           } catch {
             /* not one of our events — skip */
@@ -218,7 +252,7 @@ export function useMembershipTreasuryStats({ provider, chainId, address } = {}) 
         cacheByKey.set(key, { at: Date.now(), data })
         setState({ loading: false, error: null, data, truncated: data.truncated })
       } catch (err) {
-        setState({ loading: false, error: err?.message || String(err), data: null, truncated: false })
+        setState({ loading: false, error: describeScanFailure(err), data: null, truncated: false })
       }
     },
     [provider, chainId, address],

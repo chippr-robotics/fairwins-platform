@@ -65,6 +65,37 @@
   color: var(--text-primary);
 }
 
+/* Release 1.14.0 — the "+" add-account control, pinned to the viewport's top-right corner
+   (about the LIST, not any one card — unlike the "⋯", it never tracks a card). Two-class
+   selector for the same App.css tap-target-rule reason as the card placement above. */
+.account-cards-viewport .account-cards-add {
+  position: absolute;
+  top: 8px;
+  right: 6px;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.2rem;
+  line-height: 1;
+  border-radius: var(--radius-full, 9999px);
+  border: 1px solid var(--border-color);
+  background: var(--glass-bg);
+  color: var(--text-secondary);
+  cursor: pointer;
+  z-index: 2;
+}
+
+.account-cards-viewport .account-cards-add:hover,
+.account-cards-viewport .account-cards-add:focus-visible {
+  border-color: var(--accent-color);
+  color: var(--text-primary);
+}
+
 /* Arrows — desktop/keyboard affordance; hidden on touch-first small screens
    where swiping is the natural gesture. */
 .account-cards-arrow {

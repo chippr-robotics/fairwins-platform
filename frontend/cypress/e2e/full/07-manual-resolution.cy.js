@@ -571,14 +571,20 @@ describe('Manual Resolution', () => {
       connectAndVisit(0)
       cy.openMyWagers('history')
       cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
-        .find('.mm-table-row', { timeout: 20000 })
-        .should('have.length.greaterThan', 0)
-      cy.get('.mm-panel, [role="tabpanel"]').find('.mm-table-row').first().click()
+        .contains('.mm-table-row', /resolved/i, { timeout: 20000 })
+        .click()
       cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
-      cy.get('.mm-detail').then(($detail) => {
-        const resolveBtn = $detail.find('button:contains("Resolve")')
-        expect(resolveBtn.length, 'no Resolve control on an already-resolved wager').to.equal(0)
-      })
+
+      /*
+       * ANCHOR THE ABSENCE. `$detail.find(...)` inside `.then()` is a one-shot DOM snapshot
+       * (anti-pattern 3): taken before the detail's action area renders it finds no Resolve
+       * control whatever the wager's state, and the assertion passes for the wrong reason.
+       * The status badge comes from the same detail view and the same market record, so
+       * asserting it first is what makes "no Resolve control" a statement about a RESOLVED
+       * wager rather than about render timing.
+       */
+      cy.get('.mm-detail .mm-status-badge').should('contain.text', 'Resolved')
+      cy.get('.mm-detail').contains('button', /resolve/i).should('not.exist')
     })
   })
 
@@ -601,15 +607,22 @@ describe('Manual Resolution', () => {
       // And the UI does not show a resolve control on it either.
       connectAndVisit(0)
       cy.openMyWagers('created')
+      // 'Under Consideration', not 'Pending': the row VM swaps the status text for the CREATOR of
+      // a pending wager (wagerVm.js#statusText, isCreatorOfPending) — and this test is the
+      // creator. The detail badge below still says 'Pending Acceptance' (it renders
+      // getStatusLabel directly, without the swap).
       cy.get('.mm-panel, [role="tabpanel"]', { timeout: 10000 })
-        .find('.mm-table-row', { timeout: 20000 })
-        .should('have.length.greaterThan', 0)
-      cy.get('.mm-panel, [role="tabpanel"]').find('.mm-table-row').first().click()
+        .contains('.mm-table-row', /under consideration|pending/i, { timeout: 20000 })
+        .click()
       cy.get('.mm-detail', { timeout: 5000 }).should('be.visible')
-      cy.get('.mm-detail').then(($detail) => {
-        const resolveBtn = $detail.find('button:contains("Resolve Market")')
-        expect(resolveBtn.length, 'no Resolve control on a pending wager').to.equal(0)
-      })
+
+      /*
+       * ANCHOR THE ABSENCE — see RES-11. The badge proves the detail is describing the wager
+       * this test left pending acceptance; the snapshot it replaces would have reported "no
+       * Resolve control" of an action area that had not rendered yet (anti-pattern 3).
+       */
+      cy.get('.mm-detail .mm-status-badge').should('contain.text', 'Pending Acceptance')
+      cy.get('.mm-detail').contains('button', /resolve market/i).should('not.exist')
     })
   })
 

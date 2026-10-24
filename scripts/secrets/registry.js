@@ -62,6 +62,11 @@ export const CLASS = /** @type {const} */ ({
  * @property {string}   note      Why it exists / what breaks without it. Shown by `secrets:doctor`.
  * @property {boolean} [json]     Payload is a JSON document expanded into several variables.
  * @property {string[]} [expand]  For json entries: the variable names produced, in order.
+ * @property {string}  [derived]  The payload is COMPUTED by a named command, not copied from a
+ *                                local `.env`. `migrate.js` refuses to upload or prune these: the
+ *                                value sitting on disk is a stand-in (a public endpoint), and
+ *                                uploading it would fill a container labelled "archive endpoint"
+ *                                with a public URL that then reads back as correct forever.
  */
 
 /** @type {SecretEntry[]} */
@@ -170,6 +175,69 @@ export const SECRETS = [
     note: 'QuickNode Polygon archive endpoint with the token in the path. Archive reads matter: the '
       + 'public RPC 403s on eth_getLogs, which is what stalled the bundler UI (see ops memory).',
   },
+
+  // ---- PER-CHAIN archive endpoints for the four EVM mainnets that had none ------------------
+  //
+  // ONE CONTAINER PER CHAIN, deliberately, and this is the opposite of invariant 2 rather than a
+  // violation of it. Invariant 2 collapses aliases of the SAME payload; these are four DIFFERENT
+  // payloads. They are derived from one QuickNode multichain endpoint (QUICKNODE_RPC_001_API,
+  // base network eth) by swapping a hostname infix — `<name>.<slug>.quiknode.pro/<token>`, with
+  // Ethereum mainnet omitting the infix entirely — so a single container holding "the multichain
+  // URL" would leave every reader to re-derive its own chain's URL. That derivation is precisely
+  // the step with the bad failure mode: A WRONG INFIX ANSWERS 200 WITH ANOTHER CHAIN'S STATE, not
+  // 401. Deriving once, verifying eth_chainId, and storing the verified per-chain URL moves that
+  // risk to a single audited moment — `node scripts/secrets/quicknode-chains.js --provision`,
+  // which refuses to write a chain that did not verify.
+  //
+  // Until these were provisioned, MAINNET_RPC_URL / OPTIMISM_RPC_URL / BASE_RPC_URL /
+  // ARBITRUM_RPC_URL were PUBLIC endpoints listed in PUBLIC_ENV_KEYS below and pasted into a local
+  // `.env`. They are hard requirements of hardhat.config.js (`requiredRpcUrl`), so a deploy or a
+  // fork test on any of these four chains ran on a public node with no archive depth and no rate
+  // limit worth the name. Moving them here is what makes `npm run sec -- --profile deploy` deliver
+  // a real endpoint instead of the operator remembering to keep four URLs in a file.
+  //
+  // Polygon 137 is the fifth EVM mainnet and is NOT in this group: it already had
+  // `fairwins-quicknode-polygon-url` above, and its node-facing twin is alto's ONLY RPC endpoint.
+  // Amoy 80002 has no per-chain endpoint at all (no Amoy-cohort node; fork tests use the public
+  // RPC), which is recorded as `secretId: null` in quicknode-chains.js rather than left implicit.
+  {
+    id: 'fairwins-quicknode-ethereum-url',
+    version: 'latest',
+    derived: 'node scripts/secrets/quicknode-chains.js --provision 1',
+    env: ['MAINNET_RPC_URL'],
+    class: CLASS.ENDPOINT,
+    profiles: ['rpc', 'deploy'],
+    note: 'QuickNode Ethereum mainnet (1) archive endpoint. Required by hardhat.config.js for the '
+      + '`mainnet` network; note ops memory — L1 deploys go through scripts/ops/*-direct.js.',
+  },
+  {
+    id: 'fairwins-quicknode-optimism-url',
+    version: 'latest',
+    derived: 'node scripts/secrets/quicknode-chains.js --provision 10',
+    env: ['OPTIMISM_RPC_URL'],
+    class: CLASS.ENDPOINT,
+    profiles: ['rpc', 'deploy'],
+    note: 'QuickNode Optimism (10) archive endpoint. Spec 067 bridge/liquidity routers live here.',
+  },
+  {
+    id: 'fairwins-quicknode-base-url',
+    version: 'latest',
+    derived: 'node scripts/secrets/quicknode-chains.js --provision 8453',
+    env: ['BASE_RPC_URL'],
+    class: CLASS.ENDPOINT,
+    profiles: ['rpc', 'deploy'],
+    note: 'QuickNode Base (8453) archive endpoint. Base serves stale reads after writes on public '
+      + 'nodes (ops memory) — an archive endpoint is what makes a post-deploy verify trustworthy.',
+  },
+  {
+    id: 'fairwins-quicknode-arbitrum-url',
+    version: 'latest',
+    derived: 'node scripts/secrets/quicknode-chains.js --provision 42161',
+    env: ['ARBITRUM_RPC_URL'],
+    class: CLASS.ENDPOINT,
+    profiles: ['rpc', 'deploy'],
+    note: 'QuickNode Arbitrum One (42161) archive endpoint. Spec 067 routers live here.',
+  },
 ]
 
 /** Every profile name that appears in the registry, sorted. */
@@ -207,10 +275,10 @@ export const PUBLIC_ENV_KEYS = [
   'FLOPPY_MORDOR_ADDRESS',
   'FLOPPY_NAZGUL_PRIME_ADDRESS',
   'MARKET_FACTORY_ADDRESS',
-  'MAINNET_RPC_URL',
-  'OPTIMISM_RPC_URL',
-  'BASE_RPC_URL',
-  'ARBITRUM_RPC_URL',
+  // MAINNET_RPC_URL / OPTIMISM_RPC_URL / BASE_RPC_URL / ARBITRUM_RPC_URL were listed here while
+  // they held public endpoints. They are now managed per-chain QuickNode endpoints above, so they
+  // must NOT appear here as well — `check:env-hygiene` will report a value for any of them left in
+  // a local `.env`, which is the intended migration prompt, not a false positive.
   'SEED_INTERVAL_MS',
   'SEED_MARKETS_PER_CYCLE',
   'SEED_TRADES_PER_CYCLE',

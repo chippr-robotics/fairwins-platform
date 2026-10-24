@@ -41,6 +41,12 @@ vi.mock('../../../config/networks', () => ({
     }
     return { chainId, capabilities: { passkeyAccounts: false }, passkey: null }
   }),
+  // `defaultPublicClient` now resolves its route through the spec-069 seam (spec 104 FR-012),
+  // and `rpcEndpoints` reads the build default off this map.
+  NETWORKS: {
+    80002: { chainId: 80002, rpcUrl: 'https://rpc.example' },
+    137: { chainId: 137, rpcUrl: 'https://rpc.example' },
+  },
 }))
 
 vi.mock('../../../config/contracts', () => ({
@@ -143,6 +149,24 @@ describe('defaultPublicClient (issue #854 — client.chain.id crash)', () => {
   it('is reused as-is by buildAccount/deriveAddress/readControllers (no separate bare client)', () => {
     const client = defaultPublicClient(137)
     expect(client.chain.id).toBe(137)
+  })
+
+  it("honours the MEMBER's own endpoint rather than the build default (spec 069 / spec 104 FR-012)", async () => {
+    // This path used to build its transport straight from NETWORKS[chainId].rpcUrl, which spec 069
+    // forbids: a member who configured their own endpoint had it honoured everywhere except the
+    // one read path that decides whether they can reach their account. Recovery is read-heavy, so
+    // it is also the path most likely to be rate-limited off a shared default — and the cost there
+    // is not a slow screen, it is an `unverified` verdict on a member's own account.
+    const { saveEndpointSettings, resetEndpointSettings } = await import('../../network/endpointStore')
+    saveEndpointSettings(80002, { url: 'https://member.example/rpc' })
+    try {
+      const client = defaultPublicClient(80002)
+      // A member route yields a fallback stack (their endpoint, then the build default behind it),
+      // so a custom endpoint going dark degrades instead of taking the chain down with it.
+      expect(JSON.stringify(client.transport)).toContain('member.example')
+    } finally {
+      resetEndpointSettings(80002)
+    }
   })
 })
 

@@ -71,6 +71,17 @@ export function loadConfig(env = process.env) {
       42161: num(env.FINOPS_CONFIRMATIONS_42161, 20),
     },
 
+    /**
+     * Outbound RPC pacing and boot fan-out (#1585).
+     *
+     * `rpcMaxPerSec` defaults to 25 — HALF the keyed Polygon endpoint's 50 req/s, because that
+     * budget is SHARED with the gateway and the bundler. A reporting service must not be able to
+     * spend a value path's headroom, and taking half by construction is a cheaper guarantee than
+     * measuring whether it happened to. 0 disables pacing.
+     */
+    rpcMaxPerSec: num(env.FINOPS_RPC_MAX_PER_SEC, 25),
+    bootConcurrency: num(env.FINOPS_BOOT_CONCURRENCY, 4),
+
     // How far back a cold start scans for revenue events. Bounded so a boot cannot walk the chain
     // from genesis; the counter is cumulative-since-start, which the dashboard states.
     lookbackBlocks: num(env.FINOPS_LOOKBACK_BLOCKS, 50_000),
@@ -80,6 +91,22 @@ export function loadConfig(env = process.env) {
       membershipManager: env.MEMBERSHIP_MANAGER_ADDRESS || null,
       paymaster: env.PAYMASTER_ADDRESS_137 || null,
       entryPoint: env.ENTRYPOINT_ADDRESS || '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+    },
+
+    /**
+     * x402 agent payments (spec 096). READ-ONLY, like everything else here — the treasury the rail
+     * pays INTO and the token it pays IN, which is all the collector needs to find settlements on
+     * chain. The exporter never holds a key and never settles anything.
+     *
+     * Unset `payTo` is the honest signal that the rail is not offered, and the collector reports
+     * `not-configured` rather than $0 for exactly that reason. These deliberately mirror the
+     * gateway's own X402_PAY_TO / X402_CHAIN_ID rather than inferring either: two services reading
+     * one address from one name is what stops them disagreeing about where money went.
+     */
+    x402: {
+      payTo: env.X402_PAY_TO || null,
+      chainId: num(env.X402_CHAIN_ID, 137),
+      paymentToken: env.X402_PAYMENT_TOKEN || null,
     },
 
     /** Prepaid pool owners. Balances only — the exporter never holds a key (FR-026). */
@@ -116,6 +143,32 @@ export function loadConfig(env = process.env) {
       planMonthlyUsd: num(env.FINOPS_CLOUDFLARE_PLAN_USD, null),
     },
 
+    // Spec 106/#1447: the relay-gateway's counters endpoint — an UNPUBLISHED compose-network
+    // port (e.g. http://gateway:9091/counters). Unset => the gateway-upstream-usage source reads
+    // not-configured, which is the honest state for a deployment that has not wired it.
+    gateway: {
+      metricsUrl: env.FINOPS_GATEWAY_METRICS_URL || null,
+    },
+    /**
+     * Pinata / IPFS.
+     *
+     * `readJwt` is deliberately NOT `PINATA_JWT`. That variable (and its `VITE_` twin on the SPA)
+     * authorises `pinJSONToIPFS`/`pinFileToIPFS` — a WRITE credential to a member-facing store, in
+     * a service whose whole guarantee is that it holds nothing that can change anything (FR-026).
+     * This wants a second Pinata key scoped to `data/userPinnedDataTotal` and nothing else.
+     *
+     * The name is distinct on purpose: `fetch-secrets.sh` emits by name, so two similar variables
+     * are two audit trails, and nobody wires the wrong one by reaching for the one that is already
+     * in the environment.
+     */
+    pinata: {
+      readJwt: env.FINOPS_PINATA_READ_JWT || null,
+      endpoint: env.PINATA_API_URL || 'https://api.pinata.cloud',
+      // Unset ⇒ `not-configured`, never 0. Pinata is a PAID vendor — a defaulted zero here would
+      // not be a cautious placeholder, it would be an assertion that is known to be false.
+      planMonthlyUsd: num(env.FINOPS_PINATA_PLAN_USD, null),
+    },
+
     quicknode: {
       apiKey: env.QUICKNODE_API_KEY || null,
       endpoint: env.QUICKNODE_API_URL || 'https://api.quicknode.com/v0',
@@ -130,14 +183,32 @@ export function loadConfig(env = process.env) {
     /**
      * Flat, declared subscriptions with no vendor API at all.
      *
-     * Defaults to null, NOT 0. Grafana Cloud's free tier really does cost $0, but "the operator
+     * EVERY SOURCE WHOSE CATALOGUE ENTRY NAMES THE `quicknode` COLLECTOR AS ITS FLAT-SUBSCRIPTION
+     * MODELLER MUST APPEAR HERE. A missing key is not a missing price — it falls through to the
+     * QuickNode credit path and reports `not-configured` citing `QUICKNODE_API_KEY`, a message
+     * about a vendor the source has nothing to do with. `alphaday-news-api` shipped that way with
+     * spec 109 and read as an unwired QuickNode account for its whole life.
+     *
+     * Grafana Cloud defaults to null, NOT 0. Its free tier really does cost $0, but "the operator
      * confirmed we are on the free tier" and "nobody ever set this" are different facts, and a
-     * defaulted 0 renders as the former while meaning the latter. Set
-     * `FINOPS_GRAFANA_PLAN_USD=0` explicitly to assert the free tier; until then the source reports
-     * `not-configured`, consistent with how every other unset plan price behaves.
+     * defaulted 0 renders as the former while meaning the latter. Set `FINOPS_GRAFANA_PLAN_USD=0`
+     * explicitly to assert the free tier; until then the source reports `not-configured`,
+     * consistent with how every other unset plan price behaves.
+     *
+     * Alphaday is the one case where the default IS 0, and the reason is that the assertion has
+     * nowhere else to live: spec 109's vendor is KEYLESS by construction — there is no account,
+     * so there is no tier it could silently be on, and the catalogue entry itself declares the free
+     * tier. "Nobody set this" and "we are on the free tier" collapse into the same fact when the
+     * integration has no credential to configure.
      */
     flatSubscriptions: {
       'grafana-cloud': num(env.FINOPS_GRAFANA_PLAN_USD, null),
+      'alphaday-news-api': num(env.FINOPS_ALPHADAY_PLAN_USD, 0),
+      // The Graph. Null by default like everything else: the free tier here is a property of WHICH
+      // ENDPOINT the app calls (Studio vs. the decentralized gateway), and that can change in a
+      // one-line edit to networks.js, so it must be asserted rather than assumed. `check:finops` C6
+      // refuses a zero assertion once a gateway.thegraph.com URL exists.
+      thegraph: num(env.FINOPS_THEGRAPH_PLAN_USD, null),
     },
 
     referral: {
@@ -175,6 +246,7 @@ export function describeConfig(config) {
     credentials: {
       cloudflare: Boolean(config.cloudflare.apiToken && config.cloudflare.zoneTag),
       quicknode: Boolean(config.quicknode.apiKey || config.quicknode.prometheusUrl),
+      pinata: Boolean(config.pinata?.readJwt),
       gcpBilling: Boolean(config.gcp.projectId),
       polymarket: Boolean(config.referral.polymarketApiKey),
     },

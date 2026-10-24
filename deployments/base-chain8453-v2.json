@@ -25,7 +25,8 @@
   "deployBlocks": {
     "safePolicyGuardV2": 49158464,
     "policyGuardSetup": 49158466,
-    "safeProposalHub": 49158472
+    "safeProposalHub": 49158472,
+    "accountFactory": 49192332
   },
   "treasury": "0x8cc564E3dF4003c2F0a33C679c8DfE6237c5c3fa",
   "deployer": "0x52502d049571C7893447b86c4d8B38e6184bF6e1",

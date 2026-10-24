@@ -56,7 +56,7 @@ import TradePanel from '../components/fairwins/TradePanel'
 
 // Real config addresses — the pair universe is built from networks.js itself.
 const POLYGON = {
-  WMATIC: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
+  WPOL: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
   USDC: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
   WBTC: '0x1BFD67037B42Cf73acF2047067bd4F2C47D9BfD6',
   SWAP_ROUTER_02: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
@@ -81,7 +81,7 @@ const SAMPLE_QUOTE = {
   minimumReceived: '1.22385',
   minimumReceivedWei: 1223850n,
   priceImpactPercent: 0.42,
-  tokenInSymbol: 'WMATIC',
+  tokenInSymbol: 'WPOL',
   tokenOutSymbol: 'USDC',
 }
 
@@ -140,7 +140,7 @@ beforeEach(() => {
   mockUseActiveAccount.mockReturnValue(personalAccount())
   mockUseSwapBalances.mockReturnValue({
     balances: balancesFor({
-      [POLYGON.WMATIC]: '5',
+      [POLYGON.WPOL]: '5',
       [POLYGON.USDC]: '100',
       [POLYGON.WBTC]: '0.25',
       [BASE.WETH]: '2',
@@ -213,7 +213,7 @@ describe('TradePanel — multi-network pair selection', () => {
 
     const sellList = openSelector('Token to sell')
     // The connected network's own legs…
-    expect(within(sellList).getByRole('option', { name: 'WMATIC on Polygon' })).toBeInTheDocument()
+    expect(within(sellList).getByRole('option', { name: 'WPOL on Polygon' })).toBeInTheDocument()
     expect(within(sellList).getByRole('option', { name: 'WBTC on Polygon' })).toBeInTheDocument()
     // …plus other networks', which the single-chain ticket could never show.
     expect(within(sellList).getByRole('option', { name: 'WETH on Base' })).toBeInTheDocument()
@@ -247,7 +247,7 @@ describe('TradePanel — multi-network pair selection', () => {
     fireEvent.change(search, { target: { value: 'base' } })
     let list = screen.getByRole('listbox')
     expect(within(list).getByRole('option', { name: 'WETH on Base' })).toBeInTheDocument()
-    expect(within(list).queryByRole('option', { name: 'WMATIC on Polygon' })).toBeNull()
+    expect(within(list).queryByRole('option', { name: 'WPOL on Polygon' })).toBeNull()
 
     fireEvent.change(search, { target: { value: 'wrapped btc' } })
     list = screen.getByRole('listbox')
@@ -343,7 +343,7 @@ describe('TradePanel — multi-network pair selection', () => {
       screen.getByText(/Ethereum Classic Mordor has no DEX deployment/),
     ).toBeInTheDocument()
     const sellList = openSelector('Token to sell')
-    expect(within(sellList).getByRole('option', { name: 'WMATIC on Polygon' })).toBeInTheDocument()
+    expect(within(sellList).getByRole('option', { name: 'WPOL on Polygon' })).toBeInTheDocument()
     expect(within(sellList).queryByRole('option', { name: /on Ethereum Classic Mordor/ })).toBeNull()
   })
 })
@@ -378,7 +378,7 @@ describe('TradePanel — balances live on the pair cards', () => {
         chainId: 137,
         address: '0x1111222233334444555566667777888899990000',
         tokens: [
-          { address: POLYGON.WMATIC, decimals: 18 },
+          { address: POLYGON.WPOL, decimals: 18 },
           { address: POLYGON.USDC, decimals: 6 },
         ],
       }),
@@ -415,13 +415,13 @@ describe('TradePanel — SDK-driven trade read-out', () => {
     fireEvent.change(screen.getByLabelText('You pay'), { target: { value: '1' } })
 
     await waitFor(() =>
-      expect(getBestQuoteOn).toHaveBeenCalledWith(137, POLYGON.WMATIC, POLYGON.USDC, '1'),
+      expect(getBestQuoteOn).toHaveBeenCalledWith(137, POLYGON.WPOL, POLYGON.USDC, '1'),
     )
 
     // Best-execution output is shown on the receive leg.
     expect(await screen.findByText('1.23')).toBeInTheDocument()
     // Rate, price impact, minimum received, and the routed fee-tier pool.
-    expect(screen.getByText(/1 WMATIC = 1.23 USDC/)).toBeInTheDocument()
+    expect(screen.getByText(/1 WPOL = 1.23 USDC/)).toBeInTheDocument()
     expect(screen.getByText('0.42%')).toBeInTheDocument()
     // The minimum-received amount is wrapped in <SensitiveValue> for tilt-to-hide
     // (spec 047), so assert against the row that holds both amount and symbol.
@@ -437,9 +437,9 @@ describe('TradePanel — SDK-driven trade read-out', () => {
     render(<TradePanel />)
 
     fireEvent.change(screen.getByLabelText('You pay'), { target: { value: '1' } })
-    const rate = await screen.findByText(/1 WMATIC = 1.23 USDC/)
+    const rate = await screen.findByText(/1 WPOL = 1.23 USDC/)
     fireEvent.click(rate)
-    expect(screen.getByText(/1 USDC = 0.813008 WMATIC/)).toBeInTheDocument()
+    expect(screen.getByText(/1 USDC = 0.813008 WPOL/)).toBeInTheDocument()
   })
 
   it('executes the swap through the DEX swap(), pinned to the pair’s network', async () => {
@@ -448,11 +448,11 @@ describe('TradePanel — SDK-driven trade read-out', () => {
     render(<TradePanel />)
 
     fireEvent.change(screen.getByLabelText('You pay'), { target: { value: '1' } })
-    const execBtn = await screen.findByRole('button', { name: /Swap WMATIC for USDC/ })
+    const execBtn = await screen.findByRole('button', { name: /Swap WPOL for USDC/ })
     fireEvent.click(execBtn)
 
     await waitFor(() =>
-      expect(swap).toHaveBeenCalledWith(POLYGON.WMATIC, POLYGON.USDC, '1', { chainId: 137 }),
+      expect(swap).toHaveBeenCalledWith(POLYGON.WPOL, POLYGON.USDC, '1', { chainId: 137 }),
     )
   })
 
@@ -549,13 +549,13 @@ describe('TradePanel — order & price types', () => {
     mockUseDex.mockReturnValue(polygonDex())
     render(<TradePanel />)
 
-    // Default direction WMATIC → USDC reads as Sell.
+    // Default direction WPOL → USDC reads as Sell.
     expect(screen.getByLabelText(/Order Type/).value).toBe('sell')
 
     fireEvent.change(screen.getByLabelText(/Order Type/), { target: { value: 'buy' } })
     // Buy pays the stablecoin to receive the wrapped-native asset.
     expect(screen.getByRole('button', { name: 'Token to sell' })).toHaveTextContent('USDC')
-    expect(screen.getByRole('button', { name: 'Token to buy' })).toHaveTextContent('WMATIC')
+    expect(screen.getByRole('button', { name: 'Token to buy' })).toHaveTextContent('WPOL')
 
     // Flipping the pair back flips the order type too.
     fireEvent.click(screen.getByRole('button', { name: 'Switch direction' }))
@@ -593,7 +593,7 @@ describe('TradePanel — order & price types', () => {
 
     // 1 × 1.3 at 6 stable decimals → 1300000n enforced as amountOutMinimum.
     await waitFor(() =>
-      expect(swap).toHaveBeenCalledWith(POLYGON.WMATIC, POLYGON.USDC, '1', {
+      expect(swap).toHaveBeenCalledWith(POLYGON.WPOL, POLYGON.USDC, '1', {
         chainId: 137,
         limitMinOutWei: 1300000n,
       }),

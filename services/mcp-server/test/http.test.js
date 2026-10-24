@@ -149,8 +149,13 @@ test('bearerFrom stays linear on a hostile header rather than backtracking over 
     return Number(process.hrtime.bigint() - started)
   }
   elapsed(1000) // warm the function up so the first measurement is not the compile
-  const small = Math.max(elapsed(20_000), 1)
-  const large = elapsed(80_000)
+  // One sample per size is at the mercy of a GC pause or scheduler preemption on a shared CI
+  // runner (observed: 54µs -> 453µs, 8.4x on 4x input, against a function that is linear).
+  // Noise only ever ADDS time, so the minimum over a few runs is the honest estimate of the
+  // curve's shape at each size.
+  const best = (n) => Math.min(...Array.from({ length: 5 }, () => elapsed(n)))
+  const small = Math.max(best(20_000), 1)
+  const large = best(80_000)
   // Four times the input. Quadratic would be ~16x; the generous ceiling here is about proving the
   // shape of the curve, not about timing precision on a shared runner.
   assert.ok(large < small * 8, `expected linear-ish growth, got ${small}ns -> ${large}ns`)

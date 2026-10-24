@@ -1,8 +1,9 @@
 /**
- * ScreeningInfoButton (Spec 021 iteration 2) — an info (ⓘ) button that explains
- * how address screening works: it is an advisory pre-check, the on-chain guard
- * is the real enforcement, results fail closed, and they are network-scoped.
- * Links to the detailed user-guide doc.
+ * ScreeningInfoButton (Spec 021 iteration 2; issue #1458 amendment) — an info (ⓘ)
+ * button that explains how address screening works: every list on every cohort
+ * network, green only when all of them answered clear, advisory pre-check, the
+ * on-chain guard is the real enforcement, results fail closed. Links to the
+ * detailed user-guide doc.
  *
  * Spec 039 rebased it on the shared InfoTip toggletip; the rich content keeps
  * dialog semantics.
@@ -21,28 +22,29 @@ export default function ScreeningInfoButton({ className = '' }) {
       <h4>How address screening works</h4>
       <ul>
         <li>
-          <strong>Advisory only.</strong> The warning tags are a convenience pre-check. They
-          do <em>not</em> block anything by themselves.
+          <strong>Every list, every network.</strong> An address is checked against the FairWins
+          sanctions guard, the Chainalysis sanctions oracle and the USDC / USDT issuer freeze
+          lists on every network this build can read. Expand the pill to see each answer.
         </li>
         <li>
-          <strong>On-chain guard enforces.</strong> The smart contracts independently screen
-          every participant, so a restricted address is blocked on-chain even if the app shows
-          no warning.
+          <strong>Green means all of them answered clear.</strong> One flag from any list is
+          <em> Flagged</em>. One list that could not be read is <em>Partly screened</em> — never
+          green, because a missing answer is not a clear one.
         </li>
         <li>
-          <strong>Fails closed.</strong> If an address can&apos;t be screened (the guard isn&apos;t
-          configured on the network, or the check fails), it shows as
+          <strong>Advisory only.</strong> The pill is a pre-check. It does <em>not</em> block
+          anything by itself; the on-chain guard screens every participant independently, and an
+          issuer freeze is enforced by the token itself.
+        </li>
+        <li>
+          <strong>Fails closed.</strong> If no list can be reached, the address shows as
           <em> Unscreened</em> — never as clear.
-        </li>
-        <li>
-          <strong>Network-scoped.</strong> A result applies only to the network it was checked
-          on; the same address may screen differently on another network.
         </li>
       </ul>
       <p className="ab-info-doc">
         See the{' '}
         <a
-          href="https://chippr-robotics.github.io/prediction-dao-research/user-guide/address-book/"
+          href="https://docs.fairwins.app/user-guide/address-book/"
           target="_blank"
           rel="noopener noreferrer"
         >

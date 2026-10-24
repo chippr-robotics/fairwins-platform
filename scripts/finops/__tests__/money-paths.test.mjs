@@ -15,7 +15,7 @@ import assert from 'node:assert'
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { join, dirname, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { execFileSync } from 'node:child_process'
+import { execFileSync, spawnSync } from 'node:child_process'
 
 import {
   discoverMoneyPaths,
@@ -199,8 +199,21 @@ test('findEnvAssignment finds a real assignment, in compose and in env-file form
 })
 
 test('dormantPathsSwitchedOn FIRES when a deployment configures a planned path’s treasury', () => {
+  // The payee branch is asserted against a CONSTRUCTED planned source rather than a real one. It
+  // used to use x402, and broke the moment x402 was promoted to `live` — which is the rule working,
+  // not the rule failing, but it left the branch uncovered at exactly the wrong time. No real source
+  // is both `planned` and payee-bearing today, and pinning a rule's only test to whichever source
+  // happens to be dormant means the test disappears each time one graduates.
+  const plannedWithPayee = [
+    {
+      ...SOURCES.find((s) => s.id === 'x402-agent-payments'),
+      status: 'planned',
+      metric: null,
+      collector: 'none',
+    },
+  ]
   const switchedOn = [{ path: 'infra/vm/gateway/docker-compose.yml', text: '      X402_PAY_TO: "0x3333333333333333333333333333333333333333"' }]
-  const hits = dormantPathsSwitchedOn(SOURCES, switchedOn)
+  const hits = dormantPathsSwitchedOn(plannedWithPayee, switchedOn)
   assert.deepStrictEqual(hits.map((h) => h.source.id), ['x402-agent-payments'])
   assert.match(hits[0].what, /X402_PAY_TO is configured/)
 })
@@ -228,14 +241,16 @@ test('no dormant money path is switched on in any committed deployment today', (
 
 // ── the catalogue entries this rule exists to protect ────────────────────────────────────────
 
-test('x402 is catalogued as revenue, planned, and emits no value', () => {
+test('x402 is catalogued as LIVE revenue that emits a value', () => {
   const x402 = SOURCES.find((s) => s.id === 'x402-agent-payments')
   assert.ok(x402, 'the x402 paid rail must be catalogued: it takes USDC to the platform treasury')
   assert.strictEqual(x402.kind, 'revenue')
-  assert.strictEqual(x402.status, 'planned')
-  // FR-014: a planned source declaring a metric could publish a 0, which reads as "offered, and
-  // nobody paid" — untrue while the rail is offered on no deployment at all.
-  assert.strictEqual(x402.metric, null)
+  // Promoted when the rail was switched on, which is the sequencing C2b forces: the deployment that
+  // offers a revenue path and the collector that watches it land together. This assertion is the
+  // other half of that — a live source MUST emit, or the dashboard has a source it never shows.
+  assert.strictEqual(x402.status, 'live')
+  assert.strictEqual(x402.metric, 'fairwins_finops_revenue_total')
+  assert.notStrictEqual(x402.collector, 'none')
   assert.strictEqual(x402.moneyPath.payeeEnv, 'X402_PAY_TO')
   assert.deepStrictEqual(validateSource(x402, 0), [])
 })
@@ -268,10 +283,15 @@ test('the schema rejects a basis that is not a basis, on a planned cost too', ()
 // ── the gate as a whole ──────────────────────────────────────────────────────────────────────
 
 test('npm run check:finops passes on this tree', () => {
-  const out = execFileSync('node', [join(ROOT, 'scripts/finops/check-finops-coverage.js'), '--json'], {
+  // spawnSync, not execFileSync: the gate exits non-zero on a violation, and a throwing call
+  // loses the --json payload it just printed. The failure then reads `Command failed: node
+  // .../check-finops-coverage.js --json` and names none of the violations, which is the one
+  // thing this assertion exists to tell you.
+  const run = spawnSync('node', [join(ROOT, 'scripts/finops/check-finops-coverage.js'), '--json'], {
     cwd: ROOT,
     encoding: 'utf8',
   })
-  const { ok, violations } = JSON.parse(out)
+  assert.ok(run.stdout, `the gate printed no JSON (status ${run.status}): ${run.stderr || run.error}`)
+  const { ok, violations } = JSON.parse(run.stdout)
   assert.strictEqual(ok, true, violations.map((v) => `[${v.check}] ${v.message}`).join('\n'))
 })

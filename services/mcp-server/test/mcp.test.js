@@ -66,7 +66,7 @@ test('ping answers with an empty result and an unknown method is -32601', async 
   })
 })
 
-test('tools/list returns eight named tools, each with a JSON Schema input', async () => {
+test('tools/list returns nine named tools, each with a JSON Schema input', async () => {
   await withServer({}, async ({ handler }) => {
     const { tools } = (await handler.handle(rpc(1, 'tools/list'))).result
     assert.deepEqual(
@@ -79,6 +79,7 @@ test('tools/list returns eight named tools, each with a JSON Schema input', asyn
         'get_perps_pairs',
         'get_prediction_markets',
         'get_profile',
+        'get_token_news',
         'get_wagers',
       ]
     )

@@ -17,7 +17,11 @@ const readState = vi.fn()
 const refs = vi.fn()
 const policyCount = vi.fn()
 
-vi.mock('../../utils/blockchainService', () => ({ getProvider: () => ({}) }))
+// Mutable so a test can decide what `getCode` answers. The default is a bare object — `getCode`
+// is then undefined and calling it throws, which is the "could not even ask" path and keeps a
+// failed read classified as unreadable, exactly as before this stub gained a knob.
+const providerStub = { current: {} }
+vi.mock('../../utils/blockchainService', () => ({ getProvider: () => providerStub.current }))
 vi.mock('../../config/safeContracts', () => ({ getSafeContracts: () => ({ multiSendCallOnly: VAULT }) }))
 vi.mock('../../config/contracts', () => ({
   getContractAddressForChain: () => '0x000000000000000000000000000000000000abcd',
@@ -37,6 +41,7 @@ const pendingNeedingMe = {
 }
 
 beforeEach(() => {
+  providerStub.current = {}
   refs.mockReturnValue([{ chainId: 63, address: VAULT, label: 'Coop', role: 'owner' }])
   readState.mockReset()
   policyCount.mockReset()
@@ -87,6 +92,32 @@ describe('custodySource', () => {
   it('degrades to ok:false when the only vault read fails', async () => {
     readState.mockRejectedValue(new Error('rpc down'))
     const out = await custodySource.detect({ account: OWNER, chainId: 63, nowMs: NOW, prior: {} })
+    expect(out.ok).toBe(false)
+  })
+
+  /*
+   * ABSENCE IS NOT AN OUTAGE. A saved reference whose address holds no code on the connected chain
+   * is stale or belongs to another chain — it will never resolve, so announcing "will keep
+   * retrying" about it is a promise the app cannot keep. The read still fails (a Safe call against
+   * a codeless address throws), so the only thing separating the two is the code check.
+   */
+  it('treats a vault with no code on this chain as absence, not a failure', async () => {
+    readState.mockRejectedValue(new Error('could not decode result data'))
+    providerStub.current = { getCode: vi.fn().mockResolvedValue('0x') }
+
+    const out = await custodySource.detect({ account: OWNER, chainId: 63, nowMs: NOW, prior: {} })
+
+    expect(out.ok).toBe(true)
+    expect(out.entries).toEqual([])
+    expect(providerStub.current.getCode).toHaveBeenCalledWith(VAULT)
+  })
+
+  it('still reports ok:false when the address IS a contract and the read failed', async () => {
+    readState.mockRejectedValue(new Error('rpc down'))
+    providerStub.current = { getCode: vi.fn().mockResolvedValue('0x6080604052') }
+
+    const out = await custodySource.detect({ account: OWNER, chainId: 63, nowMs: NOW, prior: {} })
+
     expect(out.ok).toBe(false)
   })
 

@@ -390,17 +390,25 @@ export const uploadJson = async (data, options = {}) => {
     if (!response.ok) {
       const responseText = await response.text()
       let errorMessage
+      let details = ''
       try {
         const errorData = JSON.parse(responseText)
         errorMessage = errorData?.error?.reason || errorData?.error?.message || errorData?.message || null
+        // Pinata puts the ACTIONABLE half in `details` — `reason` alone is an opaque token.
+        // `NO_SCOPES_FOUND` (a valid key with no permitted scopes, i.e. the wrong key for this
+        // endpoint) reads as a generic app error without it, and the operator has nothing to act
+        // on. Same for the status: 401/403 says "credential", 429 says "wait", 5xx says "Pinata".
+        const rawDetails = errorData?.error?.details || errorData?.details
+        if (typeof rawDetails === 'string' && rawDetails) details = ` — ${rawDetails}`
       } catch {
         errorMessage = null
       }
       if (!errorMessage) {
         const bodySnippet = responseText ? responseText.slice(0, 200) : ''
         errorMessage = `Pinata upload failed with status ${response.status}` + (bodySnippet ? `. Response: ${bodySnippet}` : '')
+        throw new Error(errorMessage)
       }
-      throw new Error(errorMessage)
+      throw new Error(`${errorMessage}${details} (HTTP ${response.status})`)
     }
 
     const result = await response.json()

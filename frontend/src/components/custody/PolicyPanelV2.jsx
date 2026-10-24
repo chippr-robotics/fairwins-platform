@@ -8,7 +8,7 @@
 //   • Only ONE policy change may be pending per vault (FR-019). A second staged change while a
 //     guard-targeted proposal sits in the queue would leave owners approving two different futures.
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState } from 'react'
 import {
   analyzeShadowing,
   buildAdoptV2Txs,
@@ -29,6 +29,8 @@ import RuleComposer from './RuleComposer'
 import './Policy.css'
 
 export default function PolicyPanelV2({ vault, onPropose, queue = [] }) {
+  // Spec 102: the vault sheet mounts one panel PER NETWORK, so the heading id must be unique per instance.
+  const titleId = useId()
   const chainId = vault?.chainId
   const [status, setStatus] = useState(null)
   const [policy, setPolicy] = useState(null)
@@ -128,8 +130,8 @@ export default function PolicyPanelV2({ vault, onPropose, queue = [] }) {
 
   if (!supported) {
     return (
-      <section className="custody-policy" aria-labelledby="policy-title">
-        <h5 id="policy-title">Policy</h5>
+      <section className="custody-policy" aria-labelledby={titleId}>
+        <h5 id={titleId}>Policy</h5>
         <p className="custody-hint" role="status">
           Ordered policy rules aren’t available on this network yet.
         </p>
@@ -138,8 +140,8 @@ export default function PolicyPanelV2({ vault, onPropose, queue = [] }) {
   }
 
   return (
-    <section className="custody-policy" aria-labelledby="policy-title">
-      <h5 id="policy-title">Policy</h5>
+    <section className="custody-policy" aria-labelledby={titleId}>
+      <h5 id={titleId}>Policy</h5>
 
       {readError && (
         <p className="custody-error" role="alert">

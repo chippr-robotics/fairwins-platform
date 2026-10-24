@@ -34,8 +34,28 @@ hostnames:
 compose:
   # IAP tunnels to the instance by NAME, so the connection never depends on a public address.
   ansible_host: name
-  ansible_user: "'ansible'"
+  # NO `ansible_user`. There is no `ansible` account on these nodes and there never was — nothing in
+  # Terraform, the startup script, or infra/vm creates one, so naming it here produced
+  # `Permission denied (publickey)` from a host the tunnel had already reached.
+  #
+  # These nodes do not use OS Login; `ssh-keys` metadata is OWNED by gcloud, which injects a
+  # short-lived key for the CALLING operator's own local username on every `gcloud compute ssh`.
+  # Ansible therefore connects as that same operator — which is also the property worth keeping:
+  # a converge run is attributed to a named human, where a shared `ansible` account would attribute
+  # every run to nobody. Leaving the user unset makes Ansible use the local username, which is
+  # exactly the name gcloud injects the key under.
+  #
+  # The key must be named explicitly: gcloud writes it to a path ssh does not try by default, so
+  # without this the agent offers the wrong identities and the node answers `publickey`.
+  ansible_ssh_private_key_file: "'~/.ssh/google_compute_engine'"
+  # ONE layer of quoting, not two. A `compose` value is a Jinja EXPRESSION, so the outer quotes
+  # here are the string literal itself — they are not YAML quoting, and nothing strips them. Wrapping
+  # the args in a second pair (`"'-o ...'"`) makes those single quotes part of the VALUE, and the ssh
+  # connection plugin shlex-splits that into a single token: ssh then sees one giant argument and
+  # answers `keyword stricthostkeychecking extra arguments at end of line`. The ProxyCommand never
+  # runs, so the failure reads as "the node is unreachable" rather than "the args are misquoted".
+  # The inner double quotes must stay: they hold the ProxyCommand's spaces together through shlex.
   ansible_ssh_common_args: >-
-    "'-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
-    -o ProxyCommand=\"gcloud compute start-iap-tunnel %h 22
-    --listen-on-stdin --project=chippr-bots-site-wp --zone=us-central1-a\"'"
+    '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null
+    -o ProxyCommand="gcloud compute start-iap-tunnel %h 22
+    --listen-on-stdin --project=chippr-bots-site-wp --zone=us-central1-a"'

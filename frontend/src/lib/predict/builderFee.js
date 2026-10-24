@@ -6,8 +6,7 @@
  * REAL cost to the taker (unlike OpenSea's no-cost referral). It is therefore always surfaced as its
  * own visible line. Makers pay no builder fee (bps resolve to 0 upstream).
  */
-import { formatUnits } from 'ethers'
-
+import { formatUnits } from '../evm/units'
 /** USDC has 6 decimals. */
 export const USDC_DECIMALS = 6
 

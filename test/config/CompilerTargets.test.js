@@ -34,6 +34,46 @@ const REPO_ROOT = path.join(__dirname, "..", "..");
  */
 const REQUIRED_EVM_VERSION = "paris";
 
+/**
+ * THE ONE DOCUMENTED EXCEPTION (spec 030 pillar A, issue #1268).
+ *
+ * OpenZeppelin 5.4.0's `Governor` closure reaches `utils/Bytes.sol`, which uses the Cancun `mcopy`
+ * opcode; there is no compiler flag that emulates it, so native DAO creation cannot be compiled for
+ * `paris` at all. The maintainer's decision is to take the latest OZ Governor and DROP pre-Cancun
+ * chains FOR THAT CONTRACT ONLY: `StandardDAOFactory` and the contracts it deploys ship on the
+ * Cancun EVM chains and are absent, by decision, on ETC 61 and Mordor 63. Pillar B's
+ * `ExternalDAORegistry` imports only the `IGovernor` INTERFACE, stays `paris`, and still serves them.
+ *
+ * THIS SET IS PINNED IN BOTH DIRECTIONS BELOW, and that is the whole point of writing it down. A file
+ * added here silently becomes undeployable on ETC/Mordor — the exact regression the paris pin exists
+ * to prevent — and a file removed here stops compiling. Neither is something a reviewer should have to
+ * notice unaided, and neither shows up as a test failure anywhere else: an over-broad cancun target
+ * produces a perfectly successful build.
+ *
+ * Two kinds of entry, for two different reasons:
+ *   - reaches `utils/Bytes.sol` transitively, so it CANNOT compile at paris. Hardhat roots a
+ *     compilation job at every RESOLVED file, dependencies included, so this covers the OZ governance
+ *     files too — not only the first-party contracts that import them.
+ *   - is DEPLOYED BY `StandardDAOFactory` (`TimelockController`, `StandardDAOToken`), so its creation
+ *     code is embedded from the factory's cancun job. Left on paris its committed artifact would
+ *     describe bytes that are not the bytes on chain, breaking source verification of a live treasury.
+ */
+const CANCUN_TARGETED = [
+  "contracts/clearpath/StandardDAOFactory.sol",
+  "contracts/clearpath/StandardDAODeployers.sol",
+  "contracts/clearpath/StandardDAOGovernor.sol",
+  "contracts/clearpath/StandardDAOToken.sol",
+  "@openzeppelin/contracts/governance/Governor.sol",
+  "@openzeppelin/contracts/governance/TimelockController.sol",
+  "@openzeppelin/contracts/governance/extensions/GovernorCountingSimple.sol",
+  "@openzeppelin/contracts/governance/extensions/GovernorSettings.sol",
+  "@openzeppelin/contracts/governance/extensions/GovernorTimelockControl.sol",
+  "@openzeppelin/contracts/governance/extensions/GovernorVotes.sol",
+  "@openzeppelin/contracts/governance/extensions/GovernorVotesQuorumFraction.sol",
+  "@openzeppelin/contracts/utils/Bytes.sol",
+  "@openzeppelin/contracts/utils/cryptography/SignatureChecker.sol",
+];
+
 describe("Compiler configuration: EVM target is declared, not inherited", function () {
   describe("declared by this repository (hre.userConfig)", function () {
     it("declares an explicit evmVersion on every compiler entry", function () {
@@ -126,13 +166,50 @@ describe("Compiler configuration: EVM target is declared, not inherited", functi
       }
     });
 
-    it("pins every per-file override to the deployable target", function () {
+    it("pins every per-file override to the deployable target, except the declared Cancun set", function () {
+      const cancun = new Set(CANCUN_TARGETED);
       for (const [file, cfg] of Object.entries(hre.config.solidity.overrides || {})) {
+        if (cancun.has(file)) continue;
         expect(
           cfg.settings.evmVersion,
-          `override for ${file} targets "${cfg.settings.evmVersion}", expected "${REQUIRED_EVM_VERSION}"`
+          `override for ${file} targets "${cfg.settings.evmVersion}", expected "${REQUIRED_EVM_VERSION}". ` +
+            "Only the spec-030 pillar-A closure listed in CANCUN_TARGETED may leave paris, and adding " +
+            "a file to that list makes it undeployable on ETC 61 / Mordor 63."
         ).to.equal(REQUIRED_EVM_VERSION);
       }
+    });
+
+    /*
+     * Both directions, because each failure mode is silent on its own:
+     *   - a file targeting cancun WITHOUT being declared here is a chain-support decision nobody made;
+     *   - a file declared here that is NOT actually targeting cancun makes this list read broader than
+     *     the build, which is how an exception quietly becomes the rule.
+     */
+    it("the Cancun exception is exactly the declared set — no more, no less", function () {
+      const overrides = hre.config.solidity.overrides || {};
+      const actualCancun = Object.entries(overrides)
+        .filter(([, cfg]) => cfg.settings.evmVersion === "cancun")
+        .map(([file]) => file)
+        .sort();
+
+      expect(
+        actualCancun,
+        "the set of cancun-targeted overrides drifted from CANCUN_TARGETED in test/config/" +
+          "CompilerTargets.test.js. Every entry is a deliberate decision that a contract does not run " +
+          "on ETC 61 / Mordor 63 (issue #1268) — reconcile the list, do not widen it to make this pass."
+      ).to.deep.equal([...CANCUN_TARGETED].sort());
+    });
+
+    it("declares no EVM target other than paris or the documented cancun", function () {
+      const allowed = new Set([REQUIRED_EVM_VERSION, "cancun"]);
+      const stray = Object.entries(hre.config.solidity.overrides || {})
+        .filter(([, cfg]) => !allowed.has(cfg.settings.evmVersion))
+        .map(([file, cfg]) => `${file} (${cfg.settings.evmVersion})`);
+      expect(
+        stray,
+        `override(s) targeting an undocumented EVM version: ${stray.join(", ")}. ` +
+          "`shanghai` emits PUSH0 and every later target emits more; neither is a target this repo has chosen."
+      ).to.deep.equal([]);
     });
   });
 });

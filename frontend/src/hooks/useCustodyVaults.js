@@ -6,8 +6,13 @@
 // regardless of which network the wallet is on, each enriched through a read provider for ITS chain.
 // Enrichment failures are isolated per vault — one unreachable network must never blank the list —
 // and `onVaultChain` gates every state-changing action so nothing can be submitted to the wrong chain.
+//
+// Spec 102 — a vault is an ADDRESS. `vaults` stays the per-chain instance list (the policy panels and
+// propose/approve still need instances), and `groups` is the one-card-per-address view over it
+// (`lib/custody/vaultGroups`). Loading an address adds EVERY network it is a Safe on; forgetting a
+// vault forgets every network; the member is never asked to pick a chain.
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useWallet } from '.'
 import { isCustodySupported, CUSTODY_SUPPORTED_CHAIN_IDS } from '../config/safeContracts'
 import { NETWORKS } from '../config/networks'
@@ -29,6 +34,7 @@ import { readPolicy, summarizeRules } from '../lib/custody/policy'
 import { ensureVaultContact, vaultDisplayName } from '../lib/custody/vaultAddressBook'
 import { loadAddressBook, ADDRESS_BOOK_CHANGED } from '../lib/addressBook/addressBookStore'
 import { getPolicyStatus as getPolicyStatusV2, readPolicyV2 } from '../lib/custody/policyV2'
+import { groupVaults, pickVaultChain } from '../lib/custody/vaultGroups'
 
 /**
  * Spec 049 (US2/FR-006) — per-vault policy badge data for the list. Resilient by design: any
@@ -36,16 +42,16 @@ import { getPolicyStatus as getPolicyStatusV2, readPolicyV2 } from '../lib/custo
  * Spec 068 adds the ordered engine: a `managed-v2` vault carries its rule count instead of a v1
  * rule summary.
  */
-async function readPolicyBadge(vaultAddress, chainId, provider) {
+async function readPolicyBadge(vaultAddress, chainId) {
   try {
-    const policyStatus = await getPolicyStatusV2(vaultAddress, chainId, provider)
+    const policyStatus = await getPolicyStatusV2(vaultAddress, chainId)
     if (policyStatus === 'managed-v2') {
-      const policy = await readPolicyV2(vaultAddress, chainId, provider)
+      const policy = await readPolicyV2(vaultAddress, chainId)
       const count = policy?.rules?.length ?? 0
       return { policyStatus, policySummary: `${count} ordered rule${count === 1 ? '' : 's'}` }
     }
     if (policyStatus !== 'managed') return { policyStatus }
-    const policy = await readPolicy(vaultAddress, chainId, provider)
+    const policy = await readPolicy(vaultAddress, chainId)
     return { policyStatus, policySummary: summarizeRules(policy) }
   } catch {
     return {}
@@ -101,7 +107,7 @@ export function useCustodyVaults() {
             // usable when it is already on that chain; otherwise fall back to the chain's own RPC.
             const reader = onVaultChain ? provider : getProvider(refChainId)
             const state = await loadVault(ref.address, refChainId, reader)
-            const badge = state.isSafe ? await readPolicyBadge(ref.address, refChainId, reader) : {}
+            const badge = state.isSafe ? await readPolicyBadge(ref.address, refChainId) : {}
             return {
               ...ref,
               ...identity,
@@ -151,12 +157,17 @@ export function useCustodyVaults() {
   }, [refresh])
 
   /**
-   * Load a vault by address and persist a reference.
+   * Load a vault by address and persist a reference for EVERY network it is a Safe on.
    *
    * Spec 068 — searches EVERY custody chain, not just the connected one. A member with a vault
    * address rarely knows (or should have to know) which chain it is on; making them switch networks
-   * until one sticks is not a discovery mechanism. `preferredChainId` pins the choice when the same
-   * address is a Safe on more than one chain.
+   * until one sticks is not a discovery mechanism.
+   *
+   * Spec 102 (US2/FR-003) — every match is stored, so the same Safe on six networks becomes ONE
+   * card with six instances rather than a "pick another network" prompt. The returned object keeps
+   * the spec-068 `picked` semantics (an explicit `preferredChainId`, else the pasted EIP-3770 prefix,
+   * else the connected chain, else the first hit) so existing callers still get one instance to
+   * confirm against, plus `added` (every chain stored) and `unreachable` (named, re-probeable).
    *
    * The error distinguishes "no Safe anywhere we could reach" from "some chains were unreachable",
    * so a dead RPC never reads as "your vault does not exist".
@@ -188,27 +199,67 @@ export function useCustodyVaults() {
         throw err
       }
 
-      // Same address, multiple chains: honour an explicit choice, else the pasted prefix's chain,
-      // else prefer the connected chain, else the first hit. All matches are returned so the
-      // caller can offer the rest.
       const picked =
         matches.find((m) => Number(m.chainId) === Number(preferredChainId)) ||
         (chainHint != null && matches.find((m) => Number(m.chainId) === Number(chainHint))) ||
         matches.find((m) => Number(m.chainId) === Number(chainId)) ||
         matches[0]
 
-      const owner = isVaultOwner(picked, address)
-      upsertVaultReference(
-        address,
-        { chainId: Number(picked.chainId), address: picked.address, label, role: owner ? 'owner' : 'watch' },
-        nowMs || Date.now(),
-      )
-      // The vault joins the address book, so it is renamed and managed like any other address.
-      // Non-destructive: an entry the member already renamed is left alone.
-      ensureVaultContact(address, { ...picked, label })
+      // Every match is stored, role computed PER INSTANCE — owner sets can differ by chain.
+      const stamp = nowMs || Date.now()
+      const added = []
+      for (const m of matches) {
+        const owner = isVaultOwner(m, address)
+        upsertVaultReference(
+          address,
+          { chainId: Number(m.chainId), address: m.address, label, role: owner ? 'owner' : 'watch' },
+          stamp,
+        )
+        // The vault joins the address book on each of its networks, so it is renamed and managed
+        // like any other address. Non-destructive: an entry the member already renamed is left alone.
+        ensureVaultContact(address, { ...m, label })
+        added.push(Number(m.chainId))
+      }
       await refresh()
       setActiveAddress(picked.address)
-      return { ...picked, owner, matches, unreachable }
+      return { ...picked, owner: isVaultOwner(picked, address), matches, unreachable, added }
+    },
+    [address, chainId, provider, refresh],
+  )
+
+  /**
+   * Spec 102 (US2 scenario 4) — re-run the cross-chain probe for a vault the member already holds
+   * and add ONLY the networks that are new. Existing references are untouched (their labels and
+   * roles are the member's), so a "Check again" after an RPC outage can never rewrite what is there.
+   * Returns the chains added and the chains still unreachable; never throws for "found nowhere new".
+   */
+  const probeVault = useCallback(
+    async (vaultAddress, nowMs = 0) => {
+      setError(null)
+      const { address: cleanAddress } = parseVaultAddressInput(vaultAddress)
+      const held = new Set(
+        loadVaultReferences(address)
+          .filter((r) => String(r.address).toLowerCase() === String(cleanAddress).toLowerCase())
+          .map((r) => Number(r.chainId)),
+      )
+      const { matches, unreachable } = await findVaultAcrossChains(cleanAddress, CUSTODY_SUPPORTED_CHAIN_IDS, {
+        providerFor: (id) => (Number(id) === Number(chainId) ? provider : getProvider(id)),
+      })
+      const fresh = matches.filter((m) => !held.has(Number(m.chainId)))
+      const stamp = nowMs || Date.now()
+      const added = []
+      for (const m of fresh) {
+        const owner = isVaultOwner(m, address)
+        upsertVaultReference(
+          address,
+          { chainId: Number(m.chainId), address: m.address, label: '', role: owner ? 'owner' : 'watch' },
+          stamp,
+        )
+        ensureVaultContact(address, m)
+        added.push(Number(m.chainId))
+      }
+      if (added.length > 0) await refresh()
+      return { added, unreachable }
     },
     [address, chainId, provider, refresh],
   )
@@ -275,11 +326,40 @@ export function useCustodyVaults() {
     [address, chainId, activeAddress, refresh],
   )
 
-  const activeVault = vaults.find((v) => v.address === activeAddress) || null
+  /**
+   * Spec 102 (FR-015) — "Remove from Protect" forgets the vault on EVERY network. The store is the
+   * source of truth for which references exist (not the enriched list, which may be mid-refresh).
+   */
+  const forgetVault = useCallback(
+    async (vaultAddress) => {
+      const target = String(vaultAddress || '').toLowerCase()
+      for (const r of loadVaultReferences(address)) {
+        if (String(r.address).toLowerCase() === target) removeVaultReference(address, r.chainId, r.address)
+      }
+      if (String(activeAddress || '').toLowerCase() === target) setActiveAddress(null)
+      await refresh()
+    },
+    [address, activeAddress, refresh],
+  )
+
+  // Spec 102 (D1) — the one-card-per-address view. Memoised so consumers can use it as an effect
+  // dependency without spinning; `vaults` only changes identity when a refresh commits.
+  const groups = useMemo(() => groupVaults(vaults, { walletChainId: chainId }), [vaults, chainId])
+
+  // The selected vault's instance on the CONNECTED chain when it has one there, else its pinned
+  // instance — so a propose/approve always has a concrete (chainId, address) to act against.
+  const activeVault = useMemo(() => {
+    if (!activeAddress) return null
+    const own = vaults.filter((v) => String(v.address).toLowerCase() === String(activeAddress).toLowerCase())
+    if (own.length === 0) return null
+    const pinned = pickVaultChain({ chainIds: own.map((v) => v.chainId), walletChainId: chainId })
+    return own.find((v) => Number(v.chainId) === pinned) || own[0]
+  }, [vaults, activeAddress, chainId])
 
   return {
     supported,
     vaults,
+    groups,
     activeVault,
     activeAddress,
     selectVault: setActiveAddress,
@@ -287,9 +367,11 @@ export function useCustodyVaults() {
     error,
     refresh,
     loadByAddress,
+    probeVault,
     createVault,
     previewVaultAddress,
     forget,
+    forgetVault,
   }
 }
 

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import MembershipAttestation, { ATTESTATIONS } from '../components/compliance/MembershipAttestation'
+import MembershipAttestation from '../components/compliance/MembershipAttestation'
+import { ATTESTATIONS } from '../components/compliance/attestations'
 
 describe('MembershipAttestation (T043)', () => {
   it('renders all required attestations un-ticked by default', () => {

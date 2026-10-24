@@ -43,11 +43,11 @@ const PASSPHRASE = 'correct-horse-battery'
  * is built with and what the chain was seeded with is NAMED — rather than discovered as "the
  * sweep only found one token", which reads like a bug in the sweep.
  */
-const APP_WRAPPED_NATIVE = '0x007e106a5664D48e02f571b58694B74c9D5c22a1'
+const APP_WRAPPED_NATIVE = '0x637914a81B4F67BeA3acd94fc5a233656f8C08f7'
 const APP_STABLECOIN = '0xbc4D54AE49ED9C6075770CD6acA930A728dcf526'
-const WRAPPED_SYMBOL = 'WMATIC'
+const WRAPPED_SYMBOL = 'WPOL'
 const STABLE_SYMBOL = 'USDC'
-const NATIVE_SYMBOL = 'MATIC'
+const NATIVE_SYMBOL = 'POL'
 // Registry order: the wrapped coin, then the stablecoin, then the coin itself (native last —
 // it pays for every transfer, so it can only go last).
 const ASSET_ORDER = [WRAPPED_SYMBOL, STABLE_SYMBOL, NATIVE_SYMBOL]
@@ -70,6 +70,70 @@ const isLess = (a, b) => BigInt(a) < BigInt(b)
 
 const balancesOf = (address) =>
   fixture('balances', { address, tokens: [APP_WRAPPED_NATIVE, APP_STABLECOIN] })
+
+/*
+ * ---------------------------------------------------------------------------
+ * Seeding the fresh legacy account (#1327)
+ * ---------------------------------------------------------------------------
+ * What each test needs on the account before it starts, and how to read that holding back off the
+ * chain. The read is the point: a seeding send can be refused or dropped for reasons that have
+ * nothing to do with the code under test — the funder EOA is shared with every other fixture in
+ * the run — and a spec that assumed its arrangement then died somewhere unrelated, with a message
+ * about a fixture rather than about the sweep.
+ *
+ * Retrying blindly would be the wrong fix: a mint whose receipt was lost still MINTED, and a second
+ * attempt would leave twice the balance the per-asset assertions are written against. So the retry
+ * is driven by the CHAIN — send, read what the account actually holds, and go again only while it
+ * is still short. Nothing here is weakened: the seed now ASSERTS its arrangement (exactly this
+ * much, on a brand-new account that started at zero) where it previously assumed it, and a
+ * double-seed is named here instead of surfacing later as a transfer that moved the wrong amount.
+ */
+const SEED_ATTEMPTS = 3
+const SEED_PLAN = [
+  {
+    label: NATIVE_SYMBOL,
+    action: 'fundNative',
+    want: ONE_COIN,
+    held: (b) => b.native,
+    args: (address) => ({ address, amount: ONE_COIN }),
+  },
+  {
+    label: WRAPPED_SYMBOL,
+    action: 'mintToken',
+    want: TOKEN_AMOUNT,
+    held: (b) => b.tokens[0],
+    args: (address) => ({ address, amount: TOKEN_AMOUNT, token: APP_WRAPPED_NATIVE }),
+  },
+  {
+    label: STABLE_SYMBOL,
+    action: 'mintToken',
+    want: TOKEN_AMOUNT,
+    held: (b) => b.tokens[1],
+    args: (address) => ({ address, amount: TOKEN_AMOUNT, token: APP_STABLECOIN }),
+  },
+]
+
+/** Send one seeding transaction and confirm on chain that it landed; retry only while short. */
+function seedStep(address, step, attempt = 1) {
+  cy.task('legacyFixture', { action: step.action, args: step.args(address) }).then((r) => {
+    // A refused send is not fatal on its own — the read below is what decides.
+    if (!r.ok) cy.log(`seed ${step.label} attempt ${attempt}: ${r.error || 'no error message returned'}`)
+    balancesOf(address).then((balances) => {
+      const got = BigInt(step.held(balances))
+      const want = BigInt(step.want)
+      if (got === want) return
+      if (got > want) {
+        throw new Error(`seed ${step.label}: landed more than once — holds ${got}, wants ${want}`)
+      }
+      if (attempt >= SEED_ATTEMPTS) {
+        throw new Error(
+          `seed ${step.label}: never landed after ${attempt} attempts — holds ${got}, wants ${want}`,
+        )
+      }
+      seedStep(address, step, attempt + 1)
+    })
+  })
+}
 
 /** Import the legacy key and land on the transfer step with a destination entered. */
 function openTransferFor(privateKey, destination = DEST) {
@@ -137,9 +201,8 @@ describe('Legacy account recovery — moving the funds (spec 062)', () => {
 
     fixture('newAccount').then((account) => {
       legacy = account
-      fixture('fundNative', { address: account.address, amount: ONE_COIN })
-      fixture('mintToken', { address: account.address, amount: TOKEN_AMOUNT, token: APP_WRAPPED_NATIVE })
-      fixture('mintToken', { address: account.address, amount: TOKEN_AMOUNT, token: APP_STABLECOIN })
+      // One send per asset, each confirmed on chain before the next is enqueued (#1327).
+      SEED_PLAN.forEach((step) => seedStep(account.address, step))
     })
 
     /*

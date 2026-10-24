@@ -6,6 +6,11 @@
 
 **Status**: Draft
 
+**Amended**: 2026-08-29 — release 1.14.0 adds an optional, off-by-default
+**app lock** (User Story 7, FR-025–FR-028, SC-010). The amendment is additive:
+no existing FR is renumbered or reworded, and FR-003 / clarification Q4
+(sessions never self-expire) stand exactly as written.
+
 **Input**: User description: "our apps login currently relies on a third party plug-in to allow a user to connect to a browser wallet or wallet connect. with the latest update on ethereum and rip7212 in place on polygon network, we need to offer users the ability to create passkey wallets to interact with the blockchain and manage their accounts. this will enable the highest user adoption for our app. we do not have a relayer deployed yet. explore options and then use /speckit-specify to define a site wide login management which enables passkey accounts for the users"
 
 ## Summary
@@ -78,6 +83,12 @@ planning starts from the same decisions:
 - Q: When the stablecoin-denominated fee path is unavailable, what fallback does a passkey user get? → A: Native-token fallback + retry — the user may pay that action's fee in the native gas token if their account holds any (with guidance on acquiring it), or wait and retry the stablecoin path. Funds are never inaccessible solely because a third-party fee service is down.
 - Q: Does a passkey login session ever expire on its own? → A: No — it persists until explicit sign-out, matching classic wallet-connection behavior; the per-transaction passkey ceremony (FR-008) is the security boundary for anything value-moving.
 - Q: Must a passkey account have the same address on every platform network? → A: Yes — hard requirement: one deterministic address per account across all current and future platform networks (including ETC/Mordor when they arrive), so a user's address is chain-independent exactly like a classic EOA and cross-chain sends still land at an address the user controls.
+
+### Session 2026-08-29 — Amendment (release 1.14.0): optional app lock
+
+- Q: Does the optional app lock change the answer to Q4 (does a session ever expire on its own)? → A: No — Q4 and FR-003 stand exactly as written. The lock is a **UI gate over an intact session**: the session cookie stays; the screen goes dark. Nothing about the persisted session, account, credential, or cached-role state is expired, cleared, or altered by locking or by the passage of locked time. Unlock is not sign-in, and locking is not sign-out — explicit sign-out remains the only way to clear the session.
+- Q: Is unlocking ever a substitute for the per-transaction ceremony (FR-008)? → A: No — the unlock ceremony authorizes nothing; it only lifts the overlay. Any value-moving action still requires its own fresh FR-008 ceremony afterwards.
+- Q: Is the app lock offered to every login method? → A: It is offered wherever a WebAuthn re-prompt is actually possible (a usable passkey credential on a capable authenticator, per the FR-004 capability-detection posture); where it is not possible the setting is hidden or disabled with an honest explanation, never silently non-functional.
 
 ## User Scenarios & Testing *(mandatory)*
 
@@ -307,6 +318,66 @@ outcomes to a classic wallet account.
 
 ---
 
+### User Story 7 - Optional app lock: the screen goes dark, the session stays (Priority: P3) — *Amendment, release 1.14.0*
+
+A member who shares a device (or just wants defense-in-depth against
+shoulder-surfing an unattended browser) enables the optional **app lock**
+setting. From then on, after 15 minutes of inactivity — or immediately when
+the app is backgrounded or exited (`visibilitychange`/`pagehide`) — the UI is
+covered by a lock overlay that obscures all account content, and a successful
+WebAuthn ceremony is required before the UI is usable again. Underneath the
+overlay nothing has changed: the session persists exactly as FR-003
+guarantees, and after unlocking the member is precisely where they left off.
+A member who never enables the setting sees today's behavior, unchanged.
+
+**Why this priority**: Pure additive hardening for members who opt in. It
+cannot outrank the launch stories because the security boundary for value is
+already the per-transaction ceremony (FR-008); the lock protects *visibility
+and casual use* of an unattended signed-in UI, not funds.
+
+**Independent Test**: Enable the setting; verify the overlay appears after 15
+minutes idle and immediately on tab hide/background; verify unlock requires a
+successful WebAuthn ceremony and restores the exact prior UI state; verify
+throughout (via storage/session inspection) that no session, credential, or
+cached-role state was cleared or expired; verify a fresh profile with the
+setting off shows no lock behavior at all.
+
+**Acceptance Scenarios**:
+
+1. **Given** any member who has not enabled the app lock, **When** they idle
+   for any duration, background the app, or exit and return, **Then** no lock
+   overlay ever appears and session behavior is byte-for-byte today's
+   (FR-003) behavior.
+2. **Given** a member with the app lock enabled, **When** 15 minutes pass
+   with no interaction, **Then** the lock overlay covers the UI, obscuring
+   account content (balances, addresses, history), and no interaction with
+   the app is possible except unlocking and signing out.
+3. **Given** a member with the app lock enabled, **When** the app is
+   backgrounded or the page is hidden/exited (`visibilitychange`/`pagehide`),
+   **Then** the app is locked immediately, without waiting for the idle
+   timer.
+4. **Given** a locked app, **When** the member completes a successful
+   WebAuthn ceremony, **Then** the overlay lifts and the UI resumes exactly
+   where it was — same route, same connected account, same session — with no
+   re-login and no state loss.
+5. **Given** a locked app, **When** the underlying session is inspected,
+   **Then** it is intact and unexpired: locking, and any amount of time spent
+   locked, MUST NOT clear or expire session, account, or cached-role state
+   (FR-003 unchanged — the session cookie stays; the screen goes dark).
+6. **Given** a locked app, **When** the WebAuthn prompt is cancelled or
+   fails, **Then** the app stays locked with a clear retry option — never a
+   sign-out, never a cleared session, never a partially usable UI.
+7. **Given** a locked app, **When** the member chooses sign-out from the
+   lock overlay instead of unlocking, **Then** the full FR-003 sign-out runs
+   (all locally persisted session/account state cleared) — sign-out remains
+   the only way to clear the session.
+8. **Given** a member who just unlocked, **When** they perform a
+   value-moving action, **Then** that action still requires its own fresh
+   FR-008 ceremony — the unlock ceremony never doubles as transaction
+   authorization.
+
+---
+
 ### Edge Cases
 
 - **No passkey support**: Browser/device lacks passkey capability → the
@@ -351,6 +422,34 @@ outcomes to a classic wallet account.
   signatures off-chain (e.g. signed intents later, message-based proofs) must
   accept contract-account signatures for passkey accounts or exclude them
   explicitly — never fail ambiguously.
+- **App lock — unlock prompt fails or is cancelled** *(release 1.14.0
+  amendment)*: The WebAuthn ceremony errors, times out, or the member
+  cancels → the app stays locked and offers retry; repeated failure never
+  degrades to an unlocked UI and never clears the session. Sign-out remains
+  reachable from the overlay as the explicit escape hatch.
+- **App lock — authenticator unavailable at unlock time** *(release 1.14.0
+  amendment)*: The credential that would unlock is not usable on this
+  device/context (authenticator removed, capability lost, non-PRF/no-platform-
+  authenticator environment) → the overlay says so honestly and offers
+  sign-out; it never silently unlocks and never pretends a retry will
+  succeed. Correspondingly, the setting is only offered where a WebAuthn
+  re-prompt is possible (FR-004 posture), so a member cannot enable a lock
+  they could never open.
+- **App lock — lock fires while a transaction confirmation is open**
+  *(release 1.14.0 amendment)*: The idle timer or a background event triggers
+  while an FR-008 confirmation modal (or any in-flight action UI) is
+  showing → the overlay covers it; nothing is confirmed, submitted, or
+  silently dropped by the act of locking. After unlock the pending
+  confirmation is either re-presented or cleanly aborted per the existing
+  "prompt declined / interrupted" edge case (no partial state, action
+  re-attemptable) — and confirming still requires its own fresh FR-008
+  ceremony. A transaction already broadcast before the lock proceeds
+  on-chain normally; locking gates the UI, not the chain.
+- **App lock — multiple tabs** *(release 1.14.0 amendment)*: Several tabs
+  share the same session → lock state is consistent across them: a lock
+  event locks every tab of that session, and one successful unlock ceremony
+  unlocks them all (never one ceremony per tab, and never a locked tab
+  sitting beside an unlocked one exposing the same account).
 
 ## Requirements *(mandatory)*
 
@@ -487,6 +586,45 @@ outcomes to a classic wallet account.
   from this feature, and a user with both account types MUST be able to
   switch the active identity cleanly with no cross-account state leakage.
 
+**App lock (optional) — Amendment, release 1.14.0**
+
+- **FR-025**: The platform MUST offer an optional **app lock** setting,
+  **off by default**. When enabled, the platform MUST present a lock
+  overlay — obscuring all account content and blocking all interaction
+  except unlock and sign-out — (a) after **15 minutes** without member
+  interaction, and (b) immediately when the app is backgrounded or exited
+  (page `visibilitychange` to hidden / `pagehide`). A successful WebAuthn
+  ceremony MUST be required before the UI is usable again. A member who
+  never enables the setting MUST see today's behavior, unchanged. The
+  setting MUST only be offered where a WebAuthn re-prompt is actually
+  possible (per the FR-004 capability-detection posture); elsewhere it is
+  hidden or disabled with an honest explanation.
+- **FR-026**: Locking is a UI gate over an intact session and MUST NOT
+  interact with session lifetime: engaging the lock, remaining locked for
+  any duration, unlocking, or failing to unlock MUST NOT expire, clear, or
+  modify the persisted session, account, credential, or cached-role state.
+  **FR-003 and clarification Q4 stand unchanged** — sessions still never
+  self-expire, and explicit sign-out remains the only way to clear the
+  session; the session cookie stays, the screen goes dark. Unlock is not
+  sign-in, and the lock MUST NOT be presented to the member as session
+  expiry (no "session expired" language).
+- **FR-027**: A failed or cancelled unlock ceremony MUST leave the app
+  locked with a clear retry path — never an unlocked UI, never a cleared
+  session, never a stuck state without options. The lock overlay MUST
+  always offer explicit sign-out (which performs the full FR-003 sign-out),
+  including when the unlocking credential is unavailable on the device. The
+  unlock ceremony authorizes nothing beyond lifting the overlay: any
+  value-moving action after unlock still requires its own fresh FR-008
+  ceremony, and a lock firing over an in-flight confirmation MUST NOT
+  confirm, submit, or silently drop it (post-unlock, the pending action is
+  re-presented or cleanly aborted per the existing interrupted-prompt edge
+  case). A transaction already broadcast before locking proceeds on-chain
+  normally.
+- **FR-028**: Lock state MUST be consistent across all tabs/windows sharing
+  the same session: a lock event locks all of them, and a single successful
+  unlock ceremony unlocks all of them — never one ceremony per tab, and
+  never a locked and an unlocked view of the same account coexisting.
+
 ### Key Entities
 
 - **Passkey Credential**: A device/platform-held P-256 keypair guarded by
@@ -548,6 +686,14 @@ outcomes to a classic wallet account.
 - **SC-009**: The platform operates v1 passkey login with zero new
   FairWins-operated always-on services (no relayer, no key custody, no
   session backend).
+- **SC-010** *(release 1.14.0 amendment)*: With the app lock **disabled**
+  (the default), 100% of the pre-amendment session/connect test suite passes
+  unchanged and no lock overlay is ever shown. With it **enabled**, the
+  overlay appears within the specified triggers (15-minute idle;
+  hide/background) in 100% of trials, every failed/cancelled unlock leaves
+  the app locked with retry available, and zero trials show any session,
+  account, or cached-role state cleared or expired by locking or unlocking
+  — sign-out remains the only observed path that clears session state.
 
 ## Assumptions
 

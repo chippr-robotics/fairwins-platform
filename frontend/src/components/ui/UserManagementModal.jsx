@@ -171,7 +171,7 @@ function UserManagementModal({ onScanMarket }) {
                 <p className="network-toggle-description">
                   {isMainnet
                     ? <><span aria-hidden="true">🌐</span> Mainnet: Connected to Polygon. Transactions use real funds and gas.</>
-                    : <><span aria-hidden="true">🧪</span> Testnet: Connected to Polygon Amoy. Use a faucet for test MATIC.</>}
+                    : <><span aria-hidden="true">🧪</span> Testnet: Connected to Polygon Amoy. Use a faucet for test POL.</>}
                 </p>
               </div>
             </div>

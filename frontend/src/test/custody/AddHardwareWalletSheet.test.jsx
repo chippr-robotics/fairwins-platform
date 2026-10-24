@@ -34,6 +34,8 @@ vi.mock('../../data/ledger/sources/hardwareWalletSource', () => ({
 
 import { UIContext } from '../../contexts/UIContext'
 import { HardwareWalletError, HW_ERROR_CODES } from '../../lib/hardware/errors'
+import { vendorAvailability } from '../../lib/hardware/adapters'
+import { connectGuidance } from '../../lib/hardware/connectCopy'
 import { hardwareWalletVault } from '../../lib/hardware/hardwareAccounts'
 import { captureHardwareAccountAdded } from '../../data/ledger/sources/hardwareWalletSource'
 import AddHardwareWalletSheet from '../../components/custody/AddHardwareWalletSheet'
@@ -102,12 +104,13 @@ describe('AddHardwareWalletSheet', () => {
       deps: {
         availability: (v) =>
           v === 'ledger'
-            ? { available: false, reason: 'Ledger needs WebHID or WebUSB, which this browser does not offer. Use a Chromium-based browser.' }
-            : { available: true, reason: null },
+            ? // the real refusal sentence, so this cannot pass on copy the app no longer produces
+              vendorAvailability('ledger', { webhid: false, webusb: false, webble: false })
+            : { available: true, reason: null, transport: null },
       },
     })
     expect(screen.getByTestId('hw-vendor-ledger')).toBeDisabled()
-    expect(screen.getByText(/needs WebHID or WebUSB/i)).toBeInTheDocument()
+    expect(screen.getByText(/cannot reach the device over USB or Bluetooth/i)).toBeInTheDocument()
   })
 
   it('renders a connect failure as the typed human sentence (FR-012)', async () => {
@@ -136,7 +139,7 @@ describe('AddHardwareWalletSheet', () => {
       "m/44'/60'/4'/0/0",
     ])
     expect(screen.getAllByRole('checkbox')).toHaveLength(5)
-    expect(screen.getAllByText('1.5 MATIC').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('1.5 POL').length).toBeGreaterThan(0)
   })
 
   it('switches derivation scheme and reloads from the device (FR-004)', async () => {
@@ -201,5 +204,55 @@ describe('AddHardwareWalletSheet', () => {
   it('has no axe violations on the picker step', async () => {
     const { container } = await reachPickStep()
     expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+// Spec 085 follow-up — the connect ceremony is described from the transport the adapter would
+// actually open. "Plug the device into this computer" is false on a phone pairing over Bluetooth,
+// and a member who follows it concludes the feature is broken.
+describe('AddHardwareWalletSheet transport-aware copy', () => {
+  const guidanceFor = (transports) => (vendor) => connectGuidance(vendor, transports)
+  const DESKTOP = { webhid: true, webusb: true, webble: false }
+  const PHONE = { webhid: false, webusb: true, webble: true }
+  const NEITHER = { webhid: false, webusb: false, webble: false }
+
+  it('says plug in over a USB rail', () => {
+    renderSheet({ deps: { guidance: guidanceFor(DESKTOP) } })
+    expect(screen.getByTestId('hw-vendor-ledger')).toHaveTextContent(/connect over usb/i)
+    fireEvent.click(screen.getByTestId('hw-vendor-ledger'))
+    expect(screen.getByTestId('hw-step-connect')).toHaveTextContent(/plug the device/i)
+  })
+
+  it('describes Bluetooth pairing — and never "plug in" — when BLE is the rail', () => {
+    renderSheet({ deps: { guidance: guidanceFor(PHONE) } })
+    expect(screen.getByTestId('hw-vendor-ledger')).toHaveTextContent(/pair over bluetooth/i)
+    fireEvent.click(screen.getByTestId('hw-vendor-ledger'))
+    const step = screen.getByTestId('hw-step-connect')
+    expect(step).toHaveTextContent(/bluetooth pairing prompt/i)
+    expect(step).toHaveTextContent(/ethereum/i)
+    expect(step.textContent).not.toMatch(/plug/i)
+  })
+
+  it('leaves the Trezor ceremony exactly as it was on that same phone', () => {
+    renderSheet({ deps: { guidance: guidanceFor(PHONE) } })
+    fireEvent.click(screen.getByTestId('hw-vendor-trezor'))
+    const step = screen.getByTestId('hw-step-connect')
+    expect(step).toHaveTextContent(/approve the connection in the trezor window/i)
+    expect(step.textContent).not.toMatch(/bluetooth/i)
+  })
+
+  it('states the reason instead of a checklist when the browser has no rail (FR-003)', () => {
+    renderSheet({
+      deps: {
+        guidance: guidanceFor(NEITHER),
+        availability: (v) =>
+          v === 'ledger'
+            ? { available: false, reason: connectGuidance('ledger', NEITHER).optionHint, transport: null }
+            : { available: true, reason: null, transport: null },
+      },
+    })
+    const option = screen.getByTestId('hw-vendor-ledger')
+    expect(option).toBeDisabled()
+    expect(option).toHaveTextContent(/usb or bluetooth/i)
   })
 })

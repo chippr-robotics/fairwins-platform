@@ -29,7 +29,9 @@ function pmConfig(extra = {}) {
 
 function build({ config = pmConfig(), providers, killSwitch = createKillSwitch(false) } = {}) {
   const { app } = createApp(config, {
-    providers: providers ?? mockProviders(config),
+    // Deposit defaults AMPLE here so the grant-path tests keep testing what they test; the
+    // deposit-gate describe below covers empty/low/unreadable pools explicitly.
+    providers: providers ?? mockProviders(config, { depositWei: 10n ** 18n }),
     engineClient: mockEngine(),
     now,
     killSwitch,
@@ -147,5 +149,91 @@ describe('POST /v1/paymaster (spec 050)', () => {
     expect(res.body.chains['137'].paymasterDepositRunwayHrs).to.equal(100)
     // a chain WITHOUT a configured paymaster reports null
     expect(res.body.chains['80002'].paymasterDepositRunwayHrs).to.equal(null)
+  })
+})
+
+/**
+ * Deposit gate (the 2026-08-26 incident): production's EntryPoint deposit was ZERO and the grant
+ * path signed anyway — members hit the bundler's raw AA31 mid-purchase. The gate refuses at the
+ * endpoint (whose refusal the SPA answers by self-funding), with estate-rule semantics: definite
+ * shortfall refuses, unreadable does not.
+ */
+describe('POST /v1/paymaster — deposit gate', () => {
+  it('refuses with paymaster_deposit_low when the pool cannot cover the worst-case prefund', async () => {
+    // The production state verbatim: balanceOf(paymaster) = 0.
+    const config = pmConfig()
+    const app = build({ config, providers: mockProviders(config, { depositWei: 0n }) })
+    const res = await rpc(app, 'pm_getPaymasterData', [userOp(), ENTRYPOINT, '0x89'])
+    expect(res.body.error.data.code).to.equal('paymaster_deposit_low')
+    expect(res.body.error.message).to.match(/self-submit/)
+  })
+
+  it('signs when the deposit covers the v0.6 worst-case prefund (verification counted three times)', async () => {
+    // userOp(): cgl 100k, vgl 200k, pvg 50k, maxFee 1 gwei → prefund = (100k + 3×200k + 50k) gas
+    // = 750k gas × 1 gwei = 7.5e14 wei. EXACTLY the prefund must pass (the gate refuses strictly
+    // below it); one wei below must refuse — proving the gate uses the ×3 prefund the EntryPoint
+    // charges, not the flat totalGas sum.
+    const need = 750_000n * 10n ** 9n
+    const config = pmConfig()
+    const ok = await rpc(
+      build({ config, providers: mockProviders(config, { depositWei: need }) }),
+      'pm_getPaymasterData', [userOp(), ENTRYPOINT, '0x89'],
+    )
+    expect(ok.body.result?.paymasterAndData, 'exact prefund sponsors').to.be.a('string')
+    const low = await rpc(
+      build({ config, providers: mockProviders(config, { depositWei: need - 1n }) }),
+      'pm_getPaymasterData', [userOp(), ENTRYPOINT, '0x89'],
+    )
+    expect(low.body.error.data.code).to.equal('paymaster_deposit_low')
+  })
+
+  it('an UNREADABLE deposit does not refuse — an RPC blip is not an empty pool', async () => {
+    const config = pmConfig()
+    const providers = mockProviders(config, { depositWei: 10n ** 18n })
+    const original = providers[137].call.bind(providers[137])
+    providers[137].call = async (tx) => {
+      if (String(tx.data).startsWith('0x70a08231')) throw new Error('rpc timeout')
+      return original(tx)
+    }
+    const res = await rpc(build({ config, providers }), 'pm_getPaymasterData', [userOp(), ENTRYPOINT, '0x89'])
+    expect(res.body.result?.paymasterAndData, 'sponsorship stays offered on an unconfirmed read').to.be.a('string')
+  })
+
+  it('a pool-empty refusal does not consume the member sponsorship quota', async () => {
+    // ONE app, ONE quota store (3/min): three refused-for-deposit attempts, then the pool is
+    // topped up (the balanceOf answer flips) — the grant must succeed. If the refusals had
+    // burned quota, this fourth call would be quota_exceeded, so the test can actually fail.
+    // The gate caches deposit reads for 30s of its injected clock; TEST_NOW is frozen, so the
+    // flip must bust the cache by answering differently at the provider, and the cache window
+    // is why the refusals themselves cost at most one read.
+    const config = pmConfig()
+    let depositAnswer = 0n
+    const providers = mockProviders(config, { depositWei: 0n })
+    const original = providers[137].call.bind(providers[137])
+    providers[137].call = async (tx) => {
+      if (String(tx.data).startsWith('0x70a08231')) {
+        return '0x' + depositAnswer.toString(16).padStart(64, '0')
+      }
+      return original(tx)
+    }
+    let t = 0
+    const clockNow = () => TEST_NOW + t
+    const { app } = createApp(config, {
+      providers,
+      engineClient: mockEngine(),
+      now: clockNow,
+      killSwitch: createKillSwitch(false),
+      auditSink: () => {},
+    })
+    for (let i = 0; i < 3; i += 1) {
+      const r = await rpc(app, 'pm_getPaymasterData', [userOp(), ENTRYPOINT, '0x89'])
+      expect(r.body.error.data.code).to.equal('paymaster_deposit_low')
+    }
+    depositAnswer = 10n ** 18n
+    // 31s: past the gate's 30s read cache but INSIDE the 60s quota window — so if the three
+    // refusals had burned quota, this call would be quota_exceeded, not a fresh window.
+    t += 31
+    const res = await rpc(app, 'pm_getPaymasterData', [userOp(), ENTRYPOINT, '0x89'])
+    expect(res.body.result?.paymasterAndData, 'refusals must not have consumed the quota').to.be.a('string')
   })
 })

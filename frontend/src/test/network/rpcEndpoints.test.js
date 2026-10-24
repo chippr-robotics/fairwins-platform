@@ -34,7 +34,9 @@ describe('resolveRpcEndpoints', () => {
     const route = resolveRpcEndpoints(137)
     expect(route.source).toBe('default')
     expect(route.primary.url).toBe(NETWORKS[137].rpcUrl)
-    expect(route.failover).toBeNull()
+    // 137 now declares its own build-curated rpcFailoverUrl too (generalized beyond ETC — see
+    // test/network/rpcFailover.test.js), so a member on default settings gets it automatically.
+    expect(route.failover.url).toBe(NETWORKS[137].rpcFailoverUrl)
     expect(getRpcUrlForChain(137)).toBe(defaultRpcUrlForChain(137))
   })
 

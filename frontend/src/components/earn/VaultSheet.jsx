@@ -20,9 +20,9 @@
  * activity feed with its transaction link (FR-010).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import { useWallet } from '../../hooks/useWalletManagement'
-import { useEarnSend } from '../../hooks/useEarnSend'
+import { useEarnSend, earnActingRefusal } from '../../hooks/useEarnSend'
 import { useActivityOptional } from '../../hooks/useActivity'
 import { getBlockscoutUrl } from '../../config/blockExplorer'
 import { NETWORKS } from '../../config/networks'
@@ -48,7 +48,7 @@ function fmt(amountBig, decimals, symbol) {
 
 export default function VaultSheet({ vault, userState, onClose, onActionComplete }) {
   const { address } = useWallet() || {}
-  const { sendOnChain, canTransactOn, cannotTransactReason, isPasskey } = useEarnSend()
+  const { sendOnChain, canTransactOn, cannotTransactReason, isPasskey, isActingAccount, actingAccount } = useEarnSend()
   const activity = useActivityOptional()
   const sheetRef = useRef(null)
   const restoreFocusRef = useRef(null)
@@ -263,6 +263,41 @@ export default function VaultSheet({ vault, userState, onClose, onActionComplete
 
   const busy = txState.step === 'approving' || txState.step === 'confirming' || txState.step === 'switching'
   const titleId = 'earn-vault-sheet-title'
+
+  // Spec 088 FR-001/FR-002 — every read and write in this sheet belongs to the CONNECTED
+  // wallet (deposits/withdrawals go out on useEarnSend.sendOnChain, which signs with whatever
+  // the wallet holds and switches networks on it directly — see the BridgeView template this
+  // mirrors). So while the switcher shows a vault, a recovered, a hardware, or any other
+  // non-personal account, the whole sheet is withheld with the reason, rather than left up with
+  // the connected wallet's own balances shown under the acting account's name.
+  if (isActingAccount) {
+    return (
+      <div className="asset-sheet-backdrop">
+        <button type="button" className="asset-sheet-scrim" aria-label="Close vault details" onClick={onClose} />
+        <div
+          className="asset-sheet earn-vault-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          ref={sheetRef}
+        >
+          <div className="asset-sheet-grabber" aria-hidden="true" />
+          <div className="asset-sheet-header">
+            <div className="asset-sheet-heading">
+              <h3 id={titleId}>{vault.name}</h3>
+            </div>
+            <button type="button" className="asset-sheet-close" onClick={onClose}>
+              Close
+            </button>
+          </div>
+          <p className="earn-unavailable" role="note" data-testid="earn-vault-acting-refusal">
+            {earnActingRefusal(actingAccount)}
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="asset-sheet-backdrop">

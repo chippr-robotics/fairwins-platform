@@ -33,7 +33,15 @@ export const CHAINLINK_FEEDS = {
     ENS: import.meta.env?.VITE_FEED_MAINNET_ENS_USD || '0x5C00128d4d1c2F4f652C267d7bcdD7aC99C16E16',
   },
   137: {
-    MATIC: import.meta.env?.VITE_FEED_POLYGON_MATIC_USD || '0xAB594600376Ec9fD91F8e885dADF0CE036862dE0',
+    // POL/USD. This is the aggregator Chainlink originally listed as MATIC/USD;
+    // since Polygon's MATIC → POL migration it serves the POL price at the SAME
+    // address, so only the symbol key moved (the portfolio's Polygon native
+    // underlying is POL now and must resolve here). Legacy env override name
+    // still honoured so an existing deployment's pin keeps working.
+    POL:
+      import.meta.env?.VITE_FEED_POLYGON_POL_USD ||
+      import.meta.env?.VITE_FEED_POLYGON_MATIC_USD ||
+      '0xAB594600376Ec9fD91F8e885dADF0CE036862dE0',
     ETH: import.meta.env?.VITE_FEED_POLYGON_ETH_USD || '0xF9680D99D6C9589e2a93a78A04A279e509205945',
     BTC: import.meta.env?.VITE_FEED_POLYGON_BTC_USD || '0xc907E116054Ad103354f2D350FD2514433D57F6f',
     LINK: import.meta.env?.VITE_FEED_POLYGON_LINK_USD || '0xd9FFdb71EbE7496cC440152d43986Aae0AB76665',

@@ -1,5 +1,8 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { formatEther, parseEther } from '../../lib/evm/units'
+import { readContract as readOnChain, normalizeAbi } from '../../lib/chains/readContract'
+import { getAddress } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { NETWORKS } from '../../config/networks'
 import { estateNetworks, networkName, readProviderFor } from '../../lib/chains/estate'
@@ -13,7 +16,7 @@ import { useNotification } from '../../hooks/useUI'
 // the whole control plane — normalize to null and let callers surface it.
 function safeParseEther(value) {
   try {
-    const parsed = ethers.parseEther(String(value || '0'))
+    const parsed = parseEther(String(value || '0'))
     return parsed > 0n ? parsed : null
   } catch {
     return null
@@ -59,6 +62,15 @@ const paymasterAt = (id) => getContractAddressForChain('verifyingPaymaster', id)
 
 function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, runTx, pendingTx }) {
   const paymasterNetworks = useMemo(() => estateNetworks(), [])
+  // The networks that DO have a configured paymaster, derived from the same config the reads
+  // use — never hardcoded ("Polygon-only" outlived the Amoy deployment record it contradicted).
+  const sponsoredNetworkNames = useMemo(
+    () =>
+      paymasterNetworks
+        .filter((net) => Boolean(paymasterAt(net.chainId)))
+        .map((net) => networkName(net.chainId)),
+    [paymasterNetworks],
+  )
   const { scopeChainId, setScopeChainId } = useScopedChain(paymasterNetworks, chainId)
   const onScopeNetwork = Number(scopeChainId) === Number(chainId)
   const paymasterAddr = paymasterAt(scopeChainId)
@@ -81,26 +93,28 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
     [scopeChainId, chainId, provider],
   )
 
-  const readContract = useMemo(() => {
+  // Bound to the SCOPED chain. `readProvider` stays the availability gate.
+  const readPaymaster = useMemo(() => {
     if (!paymasterAddr || !readProvider) return null
-    return new ethers.Contract(paymasterAddr, PAYMASTER_ABI, readProvider)
-  }, [paymasterAddr, readProvider])
+    return (functionName) =>
+      readOnChain(scopeChainId, { address: paymasterAddr, abi: PAYMASTER_ABI, functionName })
+  }, [paymasterAddr, readProvider, scopeChainId])
 
   const fetchInfo = useCallback(async () => {
-    if (!readContract) return
+    if (!readPaymaster) return
     const readChainId = scopeChainId
     try {
       const [deposit, vSigner, owner] = await Promise.all([
-        readContract.getDeposit(),
-        readContract.verifyingSigner(),
-        readContract.owner(),
+        readPaymaster('getDeposit'),
+        readPaymaster('verifyingSigner'),
+        readPaymaster('owner'),
       ])
       setInfo({ chainId: readChainId, deposit, verifyingSigner: vSigner, owner, readable: true, reason: '' })
     } catch (err) {
       console.warn('[PaymasterOpsCard] read failed:', err)
       setInfo({ chainId: readChainId, deposit: null, verifyingSigner: '', owner: '', readable: false, reason: err?.shortMessage || err?.message || 'read failed' })
     }
-  }, [readContract, scopeChainId])
+  }, [readPaymaster, scopeChainId])
 
   useEffect(() => {
     fetchInfo()
@@ -129,7 +143,17 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
   const chainGate = { deployed: Boolean(paymasterAddr), onWalletChain: onScopeNetwork, scopeChainId }
   const ownerGate = { ...chainGate, readable: state.readable !== false }
 
-  const write = () => new ethers.Contract(paymasterAddr, PAYMASTER_ABI, signer)
+  /**
+   * One write. `value` carries the native amount for the PAYABLE `deposit()` — with an ethers
+   * Contract that rode in an overrides object as the last argument; here it is a field on the
+   * transaction itself, which is what it always was on the wire.
+   */
+  const write = (functionName, args = [], value) =>
+    signer.sendTransaction({
+      to: paymasterAddr,
+      data: encodeFunctionData({ abi: normalizeAbi(PAYMASTER_ABI), functionName, args }),
+      ...(value === undefined ? {} : { value }),
+    })
   // Re-checked at the call site so a stale render cannot sign for the wrong network.
   const requireScopeChain = () => {
     if (!onScopeNetwork) {
@@ -144,7 +168,7 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
     const value = safeParseEther(depositAmount)
     if (value == null) return showNotification(`Enter a valid ${scopeSymbol} amount`, 'error')
     runTx(
-      () => write().deposit({ value }),
+      () => write('deposit', [], value),
       `Deposited ${depositAmount} ${scopeSymbol} to the paymaster's EntryPoint balance on ${networkName(scopeChainId)}`
     ).then(fetchInfo)
   }
@@ -155,7 +179,7 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
     const amount = safeParseEther(withdrawForm.amount)
     if (amount == null) return showNotification(`Enter a valid ${scopeSymbol} amount`, 'error')
     runTx(
-      () => write().withdrawTo(withdrawForm.to, amount),
+      () => write('withdrawTo', [getAddress(withdrawForm.to.trim()), amount]),
       `Withdrew ${withdrawForm.amount} ${scopeSymbol} from the paymaster deposit on ${networkName(scopeChainId)}`
     ).then(fetchInfo)
   }
@@ -164,7 +188,7 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
     if (!requireScopeChain()) return
     if (!isValidEthereumAddress(newSigner)) return showNotification('Invalid signer address', 'error')
     runTx(
-      () => write().setVerifyingSigner(newSigner),
+      () => write('setVerifyingSigner', [getAddress(newSigner.trim())]),
       `Verifying signer rotated to ${shortAddr(newSigner)} on ${networkName(scopeChainId)}`
     ).then(fetchInfo)
   }
@@ -173,7 +197,7 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
     if (!paymasterAddr) return null
     if (state.readable === false) return `Could not be read — ${state.reason}`
     if (state.deposit == null) return 'Reading…'
-    return `${ethers.formatEther(state.deposit)} ${scopeSymbol}`
+    return `${formatEther(state.deposit)} ${scopeSymbol}`
   }
 
   return (
@@ -195,8 +219,10 @@ function PaymasterOpsCard({ signer, account, provider, chainId, nativeSymbol, ru
         <div className="admin-card">
           <div className="admin-card-header"><h3>{networkName(scopeChainId)}</h3></div>
           <p className="card-info">
-            No verifying paymaster is deployed on {networkName(scopeChainId)}. Sponsorship (spec 050)
-            is Polygon-only; the passkey path self-funds elsewhere.
+            No verifying paymaster is deployed on {networkName(scopeChainId)}.{' '}
+            {sponsoredNetworkNames.length > 0
+              ? `Sponsorship (spec 050) is configured on ${sponsoredNetworkNames.join(', ')}; the passkey path self-funds elsewhere.`
+              : 'No network in this build has a configured paymaster; the passkey path self-funds everywhere.'}
           </p>
         </div>
       ) : (

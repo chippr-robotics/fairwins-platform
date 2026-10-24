@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, waitFor, act } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import { WalletContext } from '../../contexts'
 import { useBitcoinStamps } from '../../hooks/useBitcoinStamps'
 
@@ -42,7 +42,7 @@ async function renderHook({ gateway, store, wallet } = {}) {
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useChainId.mockReturnValue(137)
+  setWalletChain(137)
   latest = undefined
 })
 
@@ -68,7 +68,7 @@ describe('useBitcoinStamps', () => {
   })
 
   it('scopes to bitcoin-testnet when the app is in testnet mode (FR-021)', async () => {
-    useChainId.mockReturnValue(80002) // Polygon Amoy → testnet mode
+    setWalletChain(80002) // Polygon Amoy → testnet mode
     const getStamps = vi.fn().mockResolvedValue({ ok: true, degraded: false, stamps: [] })
     const store = makeStore({
       [`${ACCOUNT.toLowerCase()}:bitcoin-testnet`]: {

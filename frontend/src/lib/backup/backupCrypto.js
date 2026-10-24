@@ -1,9 +1,13 @@
 // Spec 032 — encryption for the unified data backup. Reuses the audited primitives + the wallet-signature
-// key-derivation pattern from addressBookCrypto (keccak256 of a domain-separated signMessage). The domain
-// message is DISTINCT from the wager/address-book messages so the backup key can never coincide with another
-// key the wallet derives. The envelope mirrors the address-book backup shape; header is bound via AEAD AAD.
+// key-derivation pattern (keccak256 of a domain-separated signMessage). The domain message is DISTINCT from
+// the wager/address-book messages so the backup key can never coincide with another key the wallet derives.
+// Header is bound via AEAD AAD.
+//
+// NOTE: this channel is still encrypted, and stays that way. The MANUAL address-book export file went to
+// plain text in issue #1550 (lib/addressBook/addressBookFile.js) because it is meant to be read and shared;
+// this bundle is not, and it carries recovery-code envelopes and legacy private-key blobs besides.
 
-import { concat, getBytes, keccak256, toUtf8Bytes } from 'ethers'
+import { concat, keccak256, stringToBytes, toBytes } from 'viem'
 import { encryptJson, decryptJson, utf8ToBytes } from '../../utils/crypto/primitives'
 
 export const DATA_BACKUP_MESSAGE_V1 = 'FairWins Data Backup v1'
@@ -14,7 +18,7 @@ const AAD = utf8ToBytes(`${BACKUP_FORMAT}:${BACKUP_VERSION}`)
 
 /** Derive the 32-byte symmetric key from a signature string (no wallet prompt). Pure + deterministic. */
 export function deriveKeyFromSignature(signature) {
-  return getBytes(keccak256(toUtf8Bytes(signature)))
+  return toBytes(keccak256(stringToBytes(signature)))
 }
 
 /** Derive the backup key by asking the wallet to sign the fixed domain message (one prompt; cache upstream). */
@@ -32,7 +36,7 @@ export async function deriveKey(signer) {
  * @param {Uint8Array} seed - 32-byte master seed
  */
 export function deriveKeyFromSeed(seed) {
-  return getBytes(keccak256(concat([seed, toUtf8Bytes(DATA_BACKUP_MESSAGE_V1)])))
+  return toBytes(keccak256(concat([seed, stringToBytes(DATA_BACKUP_MESSAGE_V1)])))
 }
 
 /** Encrypt a bundle object into the storable envelope. */

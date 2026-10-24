@@ -5,6 +5,8 @@ import { NETWORKS } from '../../config/networks'
 import { priceSourceLabel } from '../../lib/portfolio/prices'
 import { isHomeInstance, instanceFormLabel, formatAssetAmount } from '../../lib/portfolio/aggregate'
 import SensitiveValue from '../common/SensitiveValue'
+import TokenNewsCard from '../news/TokenNewsCard'
+import { isFeatureEnabled } from '../../config/tenant'
 import './AssetDetailSheet.css'
 
 // Member-facing names for the classification provenance (FR-006).
@@ -49,6 +51,14 @@ function bitcoinInstanceNotes(holding) {
   return notes
 }
 
+// The FairWins membership voucher (spec 026) — the one NFT with a first-party send flow.
+// Matched on the app-config identity the taxonomy stamps on it (assetTaxonomy.js registers
+// FWMV with source 'app-config'), never on symbol alone: a third-party token calling itself
+// FWMV must not be handed a deep link into the voucher transfer flow.
+function isMembershipVoucher(asset) {
+  return asset.kind === 'nft' && asset.symbol === 'FWMV' && asset.source === 'app-config'
+}
+
 // Action eligibility per instance — actions the app cannot perform render
 // disabled with a reason, never as dead buttons (constitution III).
 function actionsFor(instance) {
@@ -56,6 +66,20 @@ function actionsFor(instance) {
   const { asset } = instance
   const net = NETWORKS[asset.chainId]
   return [
+    // Send / Gift (release 1.14.0 task 9): vouchers are transferable BY DESIGN (gifted or
+    // resold — spec 026), so the sheet must not present one as four disabled actions. The
+    // action only NAVIGATES into the existing VouchersPage transfer flow (`#vch-transfer`
+    // scrolls to it and preselects the first held voucher) — no transfer logic lives here.
+    ...(isMembershipVoucher(asset)
+      ? [
+          {
+            id: 'send-voucher',
+            label: 'Send / Gift',
+            enabled: true,
+            to: '/vouchers#vch-transfer',
+          },
+        ]
+      : []),
     {
       id: 'trade',
       label: 'Trade',
@@ -247,7 +271,7 @@ export default function AssetDetailSheet({ aggregate, onClose }) {
             <button
               key={action.id}
               type="button"
-              className={`asset-sheet-action ${action.id === 'trade' ? 'primary' : ''}`}
+              className={`asset-sheet-action ${['trade', 'send-voucher'].includes(action.id) ? 'primary' : ''}`}
               disabled={!action.enabled}
               title={action.enabled ? undefined : action.reason}
               onClick={() => runAction(action)}
@@ -264,6 +288,16 @@ export default function AssetDetailSheet({ aggregate, onClose }) {
               .join('. ')}
             .
           </p>
+        )}
+
+        {/* Token news (spec 109) — advisory only, mounted AFTER the actions it never gates.
+            Tenant-flagged; NFTs are out of scope (news identity is a fungible-asset fact). */}
+        {isFeatureEnabled('news') && selected && selected.asset.kind !== 'nft' && (
+          <TokenNewsCard
+            chainId={selected.asset.chainId}
+            address={selected.asset.kind === 'native' ? null : selected.asset.address}
+            assetLabel={selected.asset.symbol}
+          />
         )}
       </div>
     </div>

@@ -1,7 +1,7 @@
 {
-  "name": "prediction-dao-research",
-  "version": "1.11.1",
-  "description": "Futarchy Prediction DAO with privacy-preserving mechanisms",
+  "name": "fairwins-platform",
+  "version": "1.19.1",
+  "description": "FairWins — self-custody digital asset infrastructure: embedded wallets, policy-governed custody, payments, markets connectivity and compliance, available white-label",
   "private": true,
   "workspaces": [
     "frontend",
@@ -15,6 +15,7 @@
   "main": "index.js",
   "scripts": {
     "compile": "hardhat compile",
+    "postcompile": "node scripts/codegen/write-build-marker.js",
     "test": "hardhat test",
     "test:unit": "hardhat test test/*.test.js",
     "test:integration": "hardhat test test/integration/**/*.test.js",
@@ -37,6 +38,8 @@
     "verify:passkey-support": "node scripts/ops/verify-passkey-support.js",
     "check:storage-layout": "hardhat run scripts/deploy/check-storage-layout.js",
     "tenants:validate": "node scripts/tenants/validate-tenant-manifest.js",
+    "test:tenants": "node --test \"scripts/tenants/__tests__/*.test.js\"",
+    "check:native-versions": "node scripts/native/check-native-versions.js",
     "sync:frontend-contracts": "node scripts/utils/sync-frontend-contracts.js --network mordor --chainId 63",
     "sync:frontend-contracts:amoy": "node scripts/utils/sync-frontend-contracts.js --network amoy --chainId 80002",
     "sync:frontend-contracts:polygon": "node scripts/utils/sync-frontend-contracts.js --network polygon --chainId 137",
@@ -48,6 +51,7 @@
     "seed:testnet": "hardhat run scripts/operations/seed-testnet.js --network mordor",
     "seed:local": "hardhat run scripts/operations/seed-local.js --network localhost",
     "deploy:local:pools": "hardhat run scripts/deploy/deploy-wager-pool-factory.js --network localhost",
+    "deploy:local:funding": "hardhat run scripts/deploy/deploy-funding-pool-factory.js --network localhost",
     "deploy:local:fees": "hardhat run scripts/deploy/deploy-fee-router.js --network localhost",
     "deploy:local:earn-vault": "hardhat run scripts/deploy/deploy-local-earn-vault.js --network localhost",
     "deploy:local:staking": "hardhat run scripts/deploy/deploy-staking-router.js --network localhost",
@@ -59,11 +63,12 @@
     "deploy:local:swap": "hardhat run scripts/deploy/deploy-local-swap.js --network localhost",
     "publish:local:miniapps": "node scripts/miniapps/publish.js --app token-mint --dev && node scripts/miniapps/publish.js --app clearpath --dev && node scripts/miniapps/publish.js --app api-access --dev",
     "_comment:setup-order": "THE ORDER OF THE TARGETED DEPLOYS IS LOAD-BEARING. Each uses plain CREATE, so every address below the insertion point is a function of the deployer's nonce, and both wagerPoolFactory (spec 034) and feeRouter (spec 060) are HARDCODED in frontend/src/config/contracts.js because the E2E tier deliberately does not sync. Inserting or reordering a deploy here silently repoints the app at an address nothing was deployed to. Append new ones at the END, then re-derive and update the constant.",
-    "setup:local": "npm run deploy:local && npm run deploy:local:pools && npm run deploy:local:fees && npm run deploy:local:earn-vault && npm run sync:frontend-contracts:local && npm run check:e2e-addresses && npm run seed:local",
+    "setup:local": "npm run deploy:local && npm run deploy:local:pools && npm run deploy:local:fees && npm run deploy:local:earn-vault && npm run deploy:local:funding && npm run sync:frontend-contracts:local && npm run check:e2e-addresses && npm run seed:local",
     "node:e2e": "HARDHAT_LOCAL_CHAIN_ID=80002 hardhat node",
     "check:e2e-addresses": "node scripts/e2e/check-local-addresses.js",
     "test:e2e-addresses": "node --test \"scripts/e2e/__tests__/*.test.js\"",
-    "setup:e2e": "E2E_AMOY_LOCAL=1 npm run deploy:local && npm run deploy:local:pools && E2E_AMOY_LOCAL=1 npm run deploy:local:fees && E2E_AMOY_LOCAL=1 npm run deploy:local:earn-vault && npm run setup:e2e:custody && npm run deploy:local:bridge-liquidity && npm run deploy:local:staking && npm run deploy:local:miniapps && E2E_AMOY_LOCAL=1 npm run seed:local && npm run deploy:local:clearpath && npm run deploy:local:token-v2 && npm run deploy:local:swap && npm run deploy:local:callsigns && npm run publish:local:miniapps && npm run deploy:local:backup-pointer && npm run check:e2e-addresses -- --chainId 80002 --e2e",
+    "test:build-marker": "node --test \"scripts/codegen/__tests__/*.test.js\"",
+    "setup:e2e": "E2E_AMOY_LOCAL=1 npm run deploy:local && npm run deploy:local:pools && E2E_AMOY_LOCAL=1 npm run deploy:local:fees && E2E_AMOY_LOCAL=1 npm run deploy:local:earn-vault && npm run setup:e2e:custody && npm run deploy:local:bridge-liquidity && npm run deploy:local:staking && npm run deploy:local:miniapps && E2E_AMOY_LOCAL=1 npm run seed:local && npm run deploy:local:clearpath && npm run deploy:local:token-v2 && npm run deploy:local:swap && npm run deploy:local:callsigns && npm run publish:local:miniapps && npm run deploy:local:backup-pointer && npm run deploy:local:funding && npm run check:e2e-addresses -- --chainId 80002 --e2e",
     "deploy:local:bridge-liquidity": "hardhat run scripts/deploy/deploy-bridge-liquidity.js --network localhost",
     "setup:e2e:custody": "hardhat run scripts/e2e/setup-custody-fixtures.js --network localhost",
     "node": "hardhat node",
@@ -78,17 +83,27 @@
     "purchase:friend-market": "npx hardhat run ./scripts/operations/purchase-friend-market-membership.js --network mordor",
     "create:friend-bet": "npx hardhat run ./scripts/operations/create-friend-market-bet.js --network mordor",
     "check:deps": "node scripts/deps/check-dependency-hygiene.js",
+    "check:docs-warnings": "node scripts/docs/check-docs-warnings.mjs",
+    "test:docs-warnings": "node --test \"scripts/docs/__tests__/*.test.mjs\"",
+    "check:chainlink-closure": "node scripts/security/chainlink-closure.js",
+    "dismiss:alerts": "node scripts/security/dismiss-alerts.js",
     "check:iac": "node scripts/infra/check-iac-guardrails.js",
     "check:finops": "node scripts/finops/check-finops-coverage.js",
     "e2e:matrix": "node scripts/e2e/generate-coverage-matrix.js",
     "check:e2e-matrix": "node scripts/e2e/generate-coverage-matrix.js --check",
+    "check:e2e-trackers": "node scripts/e2e/check-absent-trackers.js",
+    "check:specs": "node scripts/specs/check-spec-registry.js",
+    "check:ci-gating": "node scripts/ci/check-ci-gating.js",
+    "check:build-args": "node scripts/ci/check-build-args.js && node --test scripts/ci/__tests__/check-build-args.test.js",
+    "test:ci": "node --test \"scripts/ci/__tests__/*.test.js\"",
+    "test:specs": "node --test \"scripts/specs/__tests__/*.test.js\"",
     "e2e:split": "node scripts/e2e/split-full-tier.js",
     "e2e:split:fast": "node scripts/e2e/split-fast-tier.js",
     "finops:generate": "node scripts/finops/generate-dashboards.js",
     "finops:provision": "node scripts/finops/provision-grafana.js",
     "test:finops": "npm test --workspace fairwins-finops-exporter",
     "test:iac-guardrails": "node --test \"scripts/infra/__tests__/*.test.js\"",
-    "test:finops-gate": "node --test \"scripts/finops/__tests__/*.test.mjs\"",
+    "test:finops-gate": "node --test --test-concurrency=1 \"scripts/finops/__tests__/*.test.mjs\"",
     "test:mcp": "node --test \"services/mcp-server/test/*.test.js\"",
     "build:miniapps": "npm run build --workspace @fairwins/miniapp-token-mint && npm run build --workspace @fairwins/miniapp-clearpath && npm run build --workspace @fairwins/miniapp-api-access",
     "deps:reinstall": "bash scripts/deps/reinstall.sh",
@@ -103,6 +118,12 @@
     "secrets:doctor": "node scripts/secrets/doctor.js",
     "secrets:migrate": "node scripts/secrets/migrate.js",
     "check:env-hygiene": "node scripts/secrets/check-env-hygiene.js",
+    "check:dep-alerts": "node scripts/security/check-dependency-alerts.js",
+    "check:dep-alerts:live": "node scripts/security/check-dependency-alerts.js --live",
+    "check:version-pins": "node scripts/deps/check-version-pins.js",
+    "check:version-pins:live": "node scripts/deps/check-version-pins.js --live",
+    "test:version-pins": "node --test \"scripts/deps/__tests__/*.test.js\"",
+    "test:dep-alerts": "node --test \"scripts/security/__tests__/*.test.js\"",
     "test:secrets": "node --test \"scripts/secrets/__tests__/*.test.js\""
   },
   "keywords": [
@@ -119,7 +140,7 @@
   "author": "",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@chainlink/contracts": "1.3.0",
+    "@chainlink/contracts": "1.5.0",
     "@fairwins/intent-types": "*",
     "@google-cloud/kms": "^6.0.0",
     "@nomicfoundation/hardhat-chai-matchers": "^2.1.0",
@@ -159,6 +180,12 @@
     "@safe-global/safe-contracts": {
       "ethers": "$ethers"
     },
+    "@coinbase/cdp-sdk": {
+      "axios": "^1.19.0"
+    },
+    "@stellar/stellar-sdk": {
+      "toml": "^4.2.0"
+    },
     "@ledgerhq/hw-app-eth": {
       "axios": "^1.19.0"
     },
@@ -173,7 +200,8 @@
       "immutable": "^5.1.9",
       "js-yaml": "^4.3.1",
       "undici": "^7.29.0",
-      "yaml": "^2.9.0"
+      "yaml": "^2.9.0",
+      "decompress": "npm:@xhmikosr/decompress@^11.1.4"
     },
     "gluegun": {
       "cross-spawn": "^7.0.6",
@@ -188,7 +216,11 @@
     "protobufjs": "^7.5.6",
     "ipfs-unixfs": {
       "protobufjs": "^6.11.4"
-    }
+    },
+    "@coinbase/cdp-sdk": {
+      "axios": "^1.20.0"
+    },
+    "@grpc/grpc-js": "^1.14.5"
   },
   "engines": {
     "node": ">=22.0.0"

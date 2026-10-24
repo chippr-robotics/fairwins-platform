@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback } from 'react'
 import logger from '../utils/logger'
 
 /**
- * Hook to fetch and manage MATIC/USD exchange rate.
+ * Hook to fetch and manage POL/USD exchange rate.
  *
- * Polygon Amoy is the only supported testnet, so the native token tracked
- * here is MATIC. Uses CoinGecko's public API; falls back to
- * VITE_MATIC_USD_FALLBACK (or 0.5) when the request fails.
+ * The Polygon pair (137 / Amoy 80002) is the app's home network, so the
+ * native token tracked here is POL (Polygon's gas token since the MATIC → POL
+ * migration). Uses CoinGecko's public API; falls back to
+ * VITE_POL_USD_FALLBACK (legacy VITE_MATIC_USD_FALLBACK still honoured, else
+ * 0.5) when the request fails.
  */
 function usePriceConversion() {
   const [nativeUsdRate, setNativeUsdRate] = useState(null)
@@ -27,9 +29,10 @@ function usePriceConversion() {
       setLoading(true)
       setError(null)
 
-      // MATIC's CoinGecko ID is 'matic-network'.
+      // POL's CoinGecko ID is 'polygon-ecosystem-token' ('matic-network' is
+      // the deprecated pre-migration token and no longer tracks the gas coin).
       const response = await fetch(
-        'https://api.coingecko.com/api/v3/simple/price?ids=matic-network&vs_currencies=usd',
+        'https://api.coingecko.com/api/v3/simple/price?ids=polygon-ecosystem-token&vs_currencies=usd',
         {
           method: 'GET',
           headers: {
@@ -44,16 +47,17 @@ function usePriceConversion() {
 
       const data = await response.json()
 
-      if (data['matic-network'] && data['matic-network'].usd) {
-        setNativeUsdRate(data['matic-network'].usd)
+      if (data['polygon-ecosystem-token'] && data['polygon-ecosystem-token'].usd) {
+        setNativeUsdRate(data['polygon-ecosystem-token'].usd)
         setLastUpdate(new Date())
       } else {
         throw new Error('Invalid response format')
       }
     } catch (err) {
-      logger.error('Error fetching MATIC price:', err)
+      logger.error('Error fetching POL price:', err)
       setError(err.message)
-      const fallbackRate = import.meta.env.VITE_MATIC_USD_FALLBACK || 0.5
+      const fallbackRate =
+        import.meta.env.VITE_POL_USD_FALLBACK || import.meta.env.VITE_MATIC_USD_FALLBACK || 0.5
       setNativeUsdRate(fallbackRate)
     } finally {
       setLoading(false)
@@ -81,7 +85,7 @@ function usePriceConversion() {
       showBoth = false,
       decimals = 2,
       compact = false,
-      symbol = 'MATIC',
+      symbol = 'POL',
     } = options
 
     const amount = parseFloat(nativeAmount) || 0

@@ -317,3 +317,171 @@ describe('ConnectModal — returning members unlock in one tap', () => {
     expect(screen.queryByTestId('passkey-picker')).not.toBeInTheDocument()
   })
 })
+
+/**
+ * Spec 104 — a ceremony that succeeds but leaves the ACCOUNT unconfirmed.
+ *
+ * The property under test is that the dialog offers a way forward instead of a red sentence over
+ * a dead end, and that it keeps the resolver's three verdicts apart all the way to the member.
+ */
+describe('ConnectModal — recovery when the account cannot be confirmed (spec 104)', () => {
+  const unresolved = (outcome, reason, extra = {}) =>
+    Object.assign(new Error(reason), { name: 'AccountUnresolved', outcome, ...extra })
+
+  it('offers recovery rather than an error when nothing on chain lists the passkey', async () => {
+    mockWallet.connectWallet = vi
+      .fn()
+      .mockRejectedValue(
+        unresolved('none-found', 'No account on this network lists this passkey as an owner.', {
+          credentialId: 'cred-phone',
+        })
+      )
+    markExplainerSeen() // the explainer has its own tests; this suite is about what follows it
+    const user = userEvent.setup()
+    render(<ConnectModal />)
+
+    await user.click(screen.getByText('Passkey').closest('button'))
+    await user.click(screen.getByText('I already have a passkey'))
+
+    await waitFor(() => expect(screen.getByTestId('recover-account')).toBeInTheDocument())
+    // The reason is shown as guidance, not as the dialog's error banner — the member has
+    // something to do here.
+    expect(screen.getByTestId('recover-reason')).toHaveTextContent(/lists this passkey/i)
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+  })
+
+  it('an unreachable network leads with RETRY and never reads as "no account"', async () => {
+    // The distinction constitution III exists for: `unverified` is not `none-found`. Rendering
+    // them alike tells a member with a perfectly good account that they have none.
+    mockWallet.connectWallet = vi
+      .fn()
+      .mockRejectedValue(
+        unresolved(
+          'unverified',
+          'We could not reach the network to check. This does not mean you have no account.',
+          { credentialId: 'cred-phone' }
+        )
+      )
+    markExplainerSeen() // the explainer has its own tests; this suite is about what follows it
+    const user = userEvent.setup()
+    render(<ConnectModal />)
+
+    await user.click(screen.getByText('Passkey').closest('button'))
+    await user.click(screen.getByText('I already have a passkey'))
+
+    await waitFor(() => expect(screen.getByTestId('recover-account')).toBeInTheDocument())
+    expect(screen.getByText('Try again')).toBeInTheDocument()
+    expect(screen.getByTestId('recover-reason')).toHaveTextContent(/does not mean you have no account/i)
+    expect(screen.getByLabelText(/or enter your account address/i)).toBeInTheDocument()
+  })
+
+  it('passes the member’s address BACK THROUGH the connector, pinned to the same passkey', async () => {
+    // The address never becomes an account on the client's say-so: it is handed to the connector,
+    // which checks it against the chain. What this asserts is only that it is carried, and that
+    // the retry is pinned to the credential the ceremony already identified.
+    mockWallet.connectWallet = vi
+      .fn()
+      .mockRejectedValue(unresolved('none-found', 'Nothing found.', { credentialId: 'cred-phone' }))
+    markExplainerSeen() // the explainer has its own tests; this suite is about what follows it
+    const user = userEvent.setup()
+    render(<ConnectModal />)
+
+    await user.click(screen.getByText('Passkey').closest('button'))
+    await user.click(screen.getByText('I already have a passkey'))
+    await waitFor(() => expect(screen.getByTestId('recover-account')).toBeInTheDocument())
+
+    const ADDR = '0x' + 'b'.repeat(40)
+    await user.type(screen.getByLabelText(/enter your account address/i), ADDR)
+    await user.click(screen.getByText('Find my account').closest('button'))
+
+    await waitFor(() =>
+      expect(mockWallet.connectWallet).toHaveBeenLastCalledWith('fairwinsPasskey', {
+        mode: 'sign-in',
+        credentialId: 'cred-phone',
+        discoverable: undefined,
+        accountAddress: ADDR,
+      })
+    )
+  })
+
+  it('offers a not-yet-deployed account as its own labelled choice, and takes it only when pressed', async () => {
+    // The member this protects is the one who signed up on another device and has not spent yet:
+    // their account is real and simply holds no code. It is offered rather than opened, because
+    // US2's rule is that an unverified address is never presented as though the app confirmed it —
+    // and offered rather than refused, because they cannot type an address nobody has shown them.
+    const CF = '0x' + 'c'.repeat(40)
+    mockWallet.connectWallet = vi
+      .fn()
+      .mockRejectedValue(
+        unresolved('none-found', 'No account on this network lists this passkey as an owner.', {
+          credentialId: 'cred-phone',
+          counterfactualAddress: CF,
+        })
+      )
+    markExplainerSeen()
+    const user = userEvent.setup()
+    render(<ConnectModal />)
+
+    await user.click(screen.getByText('Passkey').closest('button'))
+    await user.click(screen.getByText('I already have a passkey'))
+    await waitFor(() => expect(screen.getByTestId('recover-account')).toBeInTheDocument())
+
+    // Shown, with what it is stated — not opened behind the member's back.
+    expect(screen.getByText(CF)).toBeInTheDocument()
+    expect(screen.getByText(/has not been used on the network/i)).toBeInTheDocument()
+
+    mockWallet.connectWallet.mockClear()
+    await user.click(screen.getByText('Continue to that account').closest('button'))
+    await waitFor(() =>
+      expect(mockWallet.connectWallet).toHaveBeenLastCalledWith('fairwinsPasskey', {
+        mode: 'sign-in',
+        credentialId: 'cred-phone',
+        discoverable: undefined,
+        acceptCounterfactual: true,
+      })
+    )
+  })
+
+  it('offers NO such choice when the chain was merely unreadable', async () => {
+    // An unreachable network says nothing about whether an account exists, so inviting the member
+    // to "continue to a new one" here would be inviting them to walk away from a real one.
+    mockWallet.connectWallet = vi
+      .fn()
+      .mockRejectedValue(
+        unresolved('unverified', 'We could not reach the network to check.', {
+          credentialId: 'cred-phone',
+          counterfactualAddress: null,
+        })
+      )
+    markExplainerSeen()
+    const user = userEvent.setup()
+    render(<ConnectModal />)
+
+    await user.click(screen.getByText('Passkey').closest('button'))
+    await user.click(screen.getByText('I already have a passkey'))
+    await waitFor(() => expect(screen.getByTestId('recover-account')).toBeInTheDocument())
+
+    expect(screen.queryByText(/continue to that account/i)).not.toBeInTheDocument()
+    expect(screen.getByText('Try again')).toBeInTheDocument()
+  })
+
+  it('refuses to submit a malformed address, in words rather than colour alone', async () => {
+    mockWallet.connectWallet = vi
+      .fn()
+      .mockRejectedValue(unresolved('none-found', 'Nothing found.', { credentialId: 'cred-phone' }))
+    markExplainerSeen() // the explainer has its own tests; this suite is about what follows it
+    const user = userEvent.setup()
+    render(<ConnectModal />)
+
+    await user.click(screen.getByText('Passkey').closest('button'))
+    await user.click(screen.getByText('I already have a passkey'))
+    await waitFor(() => expect(screen.getByTestId('recover-account')).toBeInTheDocument())
+
+    mockWallet.connectWallet.mockClear()
+    await user.type(screen.getByLabelText(/enter your account address/i), '0xnotanaddress')
+    await user.click(screen.getByText('Find my account').closest('button'))
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/should start with 0x/i)
+    expect(mockWallet.connectWallet).not.toHaveBeenCalled()
+  })
+})

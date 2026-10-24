@@ -2,7 +2,7 @@
 ---
 fairwins_project: chippr-bots-site-wp
 fairwins_region: us-central1
-fairwins_repo_url: https://github.com/chippr-robotics/prediction-dao-research.git
+fairwins_repo_url: https://github.com/chippr-robotics/fairwins-platform.git
 fairwins_repo_dir: /opt/fairwins/repo
 fairwins_root: /opt/fairwins
 fairwins_run_dir: /run/fairwins
@@ -24,7 +24,15 @@ fairwins_base_packages:
 
 # Pin the engine. An unpinned docker-ce is the single most disruptive thing an unattended converge
 # run can change on these nodes.
-fairwins_docker_version: "5:27.5.1-1~debian.12~bookworm"
+#
+# This pin tracks what the nodes ALREADY RUN. It drifted up to 29.7.1 out of band while the pin
+# still said 27.5.1, which made the pin worse than useless: `apt` refused the converge outright
+# (`Packages were downgraded and -y was used without --allow-downgrades`), so site.yml could not
+# reach the nginx, secrets, or stack roles on either node. A pin that points BACKWARDS does not
+# hold a version — it asks to restart the container engine underneath a running bundler and
+# gateway, which is the exact event this pin exists to prevent. Raise it to match the nodes when
+# it drifts; never add --allow-downgrades to make a rollback go through unattended.
+fairwins_docker_version: "5:29.7.1-1~debian.12~bookworm"
 
 fairwins_ssl_dir: /etc/ssl/fairwins
 fairwins_nginx_conf_dir: /etc/nginx/fairwins

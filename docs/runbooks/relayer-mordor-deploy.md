@@ -25,6 +25,10 @@ Project `chippr-bots-site-wp`, region/KMS location `us-central1` (matches
 > the steps below:
 > - **Engine image is built from source** — OZ Relayer publishes no pullable image (§6 of the arch
 >   doc). Build `Dockerfile.production` @`v1.4.0` → `fairwins-relay-engine-base:v1.4.0` in AR.
+> - **Pin re-evaluated 2026-10-09 and HELD at the v1.4.0 base** (#1648): 1.5+ adds an RPC-receipt
+>   regression (upstream #817) that our multi-endpoint failover would hit, and nothing up to 1.8.0
+>   fixes the stuck-at-cap bug (#808) or adds KMS ADC (#757). Rationale, watch list and upgrade
+>   checklist: `services/oz-relayer/README.md` § Version pin.
 > - **KMS signer needs an explicit SA key** (no ADC) → secret `relay-engine-gcp-private-key`; the
 >   config `service_account` uses `private_key`/`client_email`/`private_key_id`.
 > - **One Cloud Run service, 3 sidecar containers** (gateway+engine+redis over localhost) — *not* a

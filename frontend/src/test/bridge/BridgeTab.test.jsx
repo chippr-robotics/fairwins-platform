@@ -54,9 +54,6 @@ vi.mock('../../components/wallet/BridgeStatusList', () => ({
 vi.mock('../../components/wallet/TransferForm', () => ({
   default: () => <div data-testid="transfer-form">same-chain send</div>,
 }))
-vi.mock('../../components/wallet/WrapView', () => ({
-  default: () => <div data-testid="wrap-view">wrap form</div>,
-}))
 // Wagers joined this tab row (spec 073). Stubbed like every other sibling — a real Dashboard would
 // drag the whole wager tree, its providers and its chain reads into a test about tab placement.
 vi.mock('../../components/fairwins/Dashboard', () => ({
@@ -88,12 +85,13 @@ beforeEach(() => {
 })
 
 describe('Bridge tab placement (FR-004)', () => {
-  it('sits beside Transfer and Wrap without displacing the send flow', async () => {
+  it('sits beside Transfer without displacing the send flow', async () => {
     renderPanel()
     const tabs = screen.getAllByRole('tab')
-    // Every tab in this row is now an ACTION: send it, wrap it, move it across networks, stake it.
+    // Every tab in this row is an ACTION: send it, move it across networks, stake it.
     // Activity is gone from here — the ledger feed lives in My Account ▸ Activity.
-    expect(tabs.map((t) => t.textContent)).toEqual(['Transfer', 'Wrap', 'Bridge', 'Wagers'])
+    // Wrap left for Trade (release 1.14.0, wrapInTrade.test.jsx pins the move).
+    expect(tabs.map((t) => t.textContent)).toEqual(['Transfer', 'Bridge', 'Wagers'])
     // Default tab is unchanged: the same-chain send flow.
     expect(screen.getByTestId('transfer-form')).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Transfer' })).toHaveAttribute('aria-selected', 'true')

@@ -30,7 +30,6 @@ vi.mock('wagmi', () => ({
   useDisconnect: vi.fn(() => ({
     disconnect: vi.fn()
   })),
-  useChainId: vi.fn(() => 61),
   useWalletClient: vi.fn(() => ({
     data: {
       account: { address: '0x1234567890123456789012345678901234567890' },
@@ -48,6 +47,34 @@ vi.mock('../hooks', () => ({
   useWeb3: vi.fn(() => ({ signer: {}, isCorrectNetwork: true, switchNetwork: vi.fn() })),
   useWallet: vi.fn(() => ({ isConnected: true, account: '0x1234567890123456789012345678901234567890' })),
 }))
+
+/*
+ * Membership in this dropdown is decided by `useRoleDetails` — the ACTING account's membership —
+ * NOT by `useWalletRoles().hasRole`, which reads the connected wallet and cannot see an acting
+ * account (CustodyProvider nests inside WalletProvider). The card and the upsell must agree, so
+ * they read one source; these tests drive that source.
+ *
+ * Note the third state: `undefined` here means the read has not answered, which is UNKNOWN and
+ * must NOT render as "you have no membership" — see the dedicated test below.
+ */
+const roleDetailsMock = vi.hoisted(() => ({ membership: undefined }))
+vi.mock('../hooks/useRoleDetails', () => ({
+  useRoleDetails: () => ({
+    roleDetails: roleDetailsMock.membership ? { WAGER_PARTICIPANT: roleDetailsMock.membership } : {},
+    loading: false,
+    error: null,
+    refresh: vi.fn(),
+    getRoleDetails: () => roleDetailsMock.membership || null,
+    getActiveRoles: () => [],
+    getExpiringSoonRoles: () => [],
+    getRolesAtLimit: () => [],
+  }),
+  TIER_NAMES: { 0: 'None', 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Platinum' },
+  default: () => ({}),
+}))
+
+const NO_MEMBERSHIP = { roleName: 'WAGER_PARTICIPANT', tier: 0, tierName: 'None', isActive: false, hasRole: false, readable: true }
+const ACTIVE_MEMBERSHIP = { roleName: 'WAGER_PARTICIPANT', tier: 3, tierName: 'Gold', isActive: true, hasRole: true, readable: true }
 
 vi.mock('../hooks/useDex', () => ({
   useDex: vi.fn(() => ({
@@ -97,7 +124,7 @@ vi.mock('../components/ui/AddressQRModal', () => ({
   )
 }))
 
-import { useAccount, useConnect, useDisconnect, useChainId } from 'wagmi'
+import { useAccount, useConnect, useDisconnect } from 'wagmi'
 import { useWalletRoles, useWeb3 } from '../hooks'
 import { useDex } from '../hooks/useDex'
 import { useUserPreferences } from '../hooks/useUserPreferences'
@@ -187,12 +214,12 @@ describe('WalletButton Component - Wagers', () => {
     useDisconnect.mockReturnValue({
       disconnect: vi.fn()
     })
-    useChainId.mockReturnValue(61)
     useWalletRoles.mockReturnValue({
       roles: [],
       hasRole: vi.fn(() => false)
     })
     useWeb3.mockReturnValue({ signer: {} })
+    roleDetailsMock.membership = NO_MEMBERSHIP
     useDex.mockReturnValue({
       balances: { usc: '100.00' },
       loading: false
@@ -225,6 +252,7 @@ describe('WalletButton Component - Wagers', () => {
         roles: [ROLES.WAGER_PARTICIPANT],
         hasRole: vi.fn((role) => role === ROLES.WAGER_PARTICIPANT)
       })
+      roleDetailsMock.membership = ACTIVE_MEMBERSHIP
 
       renderWithProviders(<WalletButton />)
 
@@ -252,8 +280,13 @@ describe('WalletButton Component - Wagers', () => {
       await user.click(button)
 
       await waitFor(() => {
-        expect(screen.getByText(/Get Access - from \$2 USDC \/ month/)).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: /get access/i })).toBeInTheDocument()
       })
+      // And it quotes NO price: the old "from $2 USDC / month" was hardcoded, and on the live
+      // ladder Bronze ($2) is inactive while the term is 30 days, not a recurring month. A price
+      // belongs only where it is read from the contract (the purchase modal's grid).
+      expect(screen.queryByText(/\$\d/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/\/ month/i)).not.toBeInTheDocument()
     })
 
     it('no longer shows the "My Wagers" entry in the dropdown', async () => {
@@ -302,6 +335,7 @@ describe('WalletButton Component - Wagers', () => {
         roles: [ROLES.WAGER_PARTICIPANT],
         hasRole: vi.fn((role) => role === ROLES.WAGER_PARTICIPANT)
       })
+      roleDetailsMock.membership = ACTIVE_MEMBERSHIP
       const { unmount } = renderWithProviders(<WalletButton />)
       await user.click(screen.getByRole('button', { name: /wallet account/i }))
       await screen.findByRole('menu')
@@ -309,16 +343,41 @@ describe('WalletButton Component - Wagers', () => {
       expect(screen.queryByText('Purchase Membership')).not.toBeInTheDocument()
       unmount()
 
-      // Non-member: purchase upsell only, no manage-membership entry.
+      // Non-member: purchase upsell only, no manage-membership entry. A DEFINITE non-member —
+      // an unread membership is a third state and deliberately takes the member branch instead.
       useWalletRoles.mockReturnValue({
         roles: [],
         hasRole: vi.fn(() => false)
       })
+      roleDetailsMock.membership = NO_MEMBERSHIP
       renderWithProviders(<WalletButton />)
       await user.click(screen.getByRole('button', { name: /wallet account/i }))
       await screen.findByRole('menu')
       expect(screen.getByText('Purchase Membership')).toBeInTheDocument()
       expect(screen.queryByText('Membership')).not.toBeInTheDocument()
+    })
+
+    it('an UNREAD membership is not rendered as "you have none" (three states, not two)', async () => {
+      /*
+       * The card and the upsell read `useRoleDetails`, whose `readable: false` means the
+       * reference chain would not answer — UNKNOWN, not tier 0. Offering "Get Access" there
+       * tells a paid-up member they own nothing and invites a purchase the contract rejects
+       * (`purchaseTier` reverts AlreadyActive for an active member, after their approval lands).
+       * The manage entry is the safe branch: it leads somewhere that can re-read and, if they
+       * genuinely have nothing, sell them a membership.
+       */
+      const user = userEvent.setup()
+      useWalletRoles.mockReturnValue({ roles: [], hasRole: vi.fn(() => false) })
+
+      for (const unknown of [undefined, { ...NO_MEMBERSHIP, readable: false }]) {
+        roleDetailsMock.membership = unknown
+        const { unmount } = renderWithProviders(<WalletButton />)
+        await user.click(screen.getByRole('button', { name: /wallet account/i }))
+        await screen.findByRole('menu')
+        expect(screen.getByText('Membership')).toBeInTheDocument()
+        expect(screen.queryByText('Purchase Membership')).not.toBeInTheDocument()
+        unmount()
+      }
     })
 
     it('no longer shows the Get USDC action in the dropdown', async () => {

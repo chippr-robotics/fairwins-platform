@@ -57,6 +57,8 @@ jobs:
       tenants: ${{ steps.filter.outputs.tenants }}
       tooling: ${{ steps.filter.outputs.tooling }}
       subgraph: ${{ steps.filter.outputs.subgraph }}
+      specs: ${{ steps.filter.outputs.specs }}
+      app: ${{ steps.filter.outputs.app }}
       ops: ${{ steps.filter.outputs.ops }}
       any_code_changed: ${{ steps.check.outputs.any_code_changed }}
     
@@ -118,6 +120,43 @@ jobs:
               - 'test/**'
             subgraph:
               - 'subgraph/**'
+            # Issue #1460: `specs/**` matched NO filter, so a PR that only reserved a spec number
+            # ran zero jobs — and with required checks in force `skipped` SATISFIES them. The one
+            # PR type whose entire purpose is to claim a number was the one type the number gate
+            # could never see.
+            specs:
+              - 'specs/**'
+              - '.specify/**'
+              - '.claude/skills/**'
+            # THE E2E BYPASS (issue #1460). True when the diff touches anything that can reach the
+            # running app; false only for changes that provably cannot. `test.yml` skips the
+            # Cypress tiers — 12 fast legs, 4 on-chain shards, the passkey full stack — when this
+            # is false, because a docs-only pull request was paying all of that to prove that
+            # markdown does not change a pixel.
+            #
+            # THE SHAPE IS THE SAFETY, AND IT IS NOT NEGOTIABLE. This is a NEGATIVE list: it
+            # starts at `'**'` and subtracts. A path nobody has thought about — a new top-level
+            # directory, a new config file — matches `**`, makes this true, and RUNS the suite.
+            #
+            # A positive allowlist would look equivalent and behave as the opposite: everything
+            # unlisted would skip, and a SKIPPED job satisfies a required status check, so the
+            # change would merge green having tested nothing. That is spec 075's hole exactly, and
+            # `npm run check:ci-gating` fails the build if this is ever inverted.
+            #
+            # Adding an exclusion is therefore a real decision: it asserts those bytes cannot
+            # affect the built app, the local chain, the gateway, or a Cypress run.
+            app:
+              - '**'
+              - '!**/*.md'
+              - '!docs/**'
+              - '!specs/**'
+              - '!.specify/**'
+              - '!.claude/**'
+              - '!.github/ISSUE_TEMPLATE/**'
+              - '!.github/agents/**'
+              - '!.github/labels.json'
+              - '!.github/CODEOWNERS'
+              - '!LICENSE'
             ops:
               - 'deployments/**'
               - 'infra/**'
@@ -208,6 +247,20 @@ jobs:
           if [[ $test_count -eq 0 ]]; then
             echo "- None (Documentation-only changes)" >> $GITHUB_STEP_SUMMARY
           fi
+
+          # A skipped E2E tier must be VISIBLE. A skipped job satisfies a required check, so the
+          # difference between "the suite passed" and "the suite did not run" is otherwise
+          # invisible on the PR — which is the failure mode this bypass would otherwise create.
+          app="${{ steps.filter.outputs.app }}"
+          app="${app:-true}"
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [[ "$app" == "true" ]]; then
+            echo "🧪 **End-to-end suites will run** — this change can reach the running app." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "⏭️ **End-to-end suites SKIPPED** — nothing in this diff can reach the running app" >> $GITHUB_STEP_SUMMARY
+            echo "(docs, specs, agent config, markdown only). 12 fast legs + 4 on-chain shards +" >> $GITHUB_STEP_SUMMARY
+            echo "the passkey full stack were not run. See \`app\` in .github/workflows/ci-manager.yml." >> $GITHUB_STEP_SUMMARY
+          fi
           
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Total test suites to run:** $test_count" >> $GITHUB_STEP_SUMMARY
@@ -228,8 +281,14 @@ jobs:
       needs.detect-changes.outputs.tenants == 'true' ||
       needs.detect-changes.outputs.tooling == 'true' ||
       needs.detect-changes.outputs.subgraph == 'true' ||
-      needs.detect-changes.outputs.ops == 'true'
+      needs.detect-changes.outputs.ops == 'true' ||
+      needs.detect-changes.outputs.specs == 'true'
     uses: ./.github/workflows/test.yml
+    with:
+      # Skips the Cypress tiers for a change that cannot reach the running app (issue #1460).
+      # `app` is a NEGATIVE path filter, so anything unrecognised runs the suite — see its
+      # definition above before touching this.
+      run_e2e: ${{ needs.detect-changes.outputs.app == 'true' }}
 
   frontend-tests:
     name: Frontend Tests
@@ -298,6 +357,24 @@ jobs:
       # upload-pages-artifact — it never reads this one. At 9.4 MB it was the single
       # largest per-push artifact after the Cypress videos.
 
+      # The step above proves the site BUILDS. It says nothing about whether its links
+      # resolve, because it runs without `--strict` — so 102 broken cross-references have
+      # been shipping green (issue #1617). `--strict` cannot simply be switched on: it
+      # exits on the first warning, so it would fail every PR and be reverted the same day.
+      #
+      # This is the ratchet instead: the count may fall and may never rise. Node is set up
+      # here rather than at the job level because these two steps are the only thing in the
+      # job that needs it.
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Docs warning ratchet
+        run: |
+          node --test "scripts/docs/__tests__/*.test.mjs"
+          npm run check:docs-warnings
+
   security-analysis:
     name: Security Analysis
     needs: detect-changes
@@ -316,7 +393,12 @@ jobs:
       - frontend-tests
       - docs-build
       - security-analysis
-    if: always()
+    # `always()` alone would ALSO run this after the whole run is cancelled — which is what
+    # `cancel-in-progress` does to the previous run on every new push — and the cancelled-counts-as-
+    # failure rule below would then paint a superseded commit red for no reason. `!cancelled()`
+    # excludes exactly that: a cancelled RUN skips the summary, while a single leg killed by its own
+    # `timeout-minutes` (which does not cancel the run) still reaches it and still fails.
+    if: always() && !cancelled()
     
     steps:
       - name: Generate final summary
@@ -370,13 +452,28 @@ jobs:
           echo "💡 **Tip:** This CI Manager optimizes test execution by only running tests" >> $GITHUB_STEP_SUMMARY
           echo "for components that have changed. This saves time and resources!" >> $GITHUB_STEP_SUMMARY
 
+      # `cancelled` counts as a failure, deliberately. A matrix leg killed by its own
+      # `timeout-minutes` reports `cancelled`, not `failure` — so on 2026-09-03 the on-chain
+      # tier's shard 2 was cut off mid-spec and this summary still reported success, which is a
+      # merge gate reporting on tests that never finished. A cancelled RUN is a different thing
+      # and is excluded by the job's `!cancelled()` condition, not here: this step only ever sees
+      # runs that were allowed to finish.
       - name: Check overall status
         run: |
-          if [[ "${{ needs.smart-contract-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.frontend-tests.result }}" == "failure" ]] || \
-             [[ "${{ needs.docs-build.result }}" == "failure" ]] || \
-             [[ "${{ needs.security-analysis.result }}" == "failure" ]]; then
-            echo "❌ One or more CI jobs failed"
+          failed=""
+          for job in smart-contract-tests frontend-tests docs-build security-analysis; do
+            case "$job" in
+              smart-contract-tests) result="${{ needs.smart-contract-tests.result }}" ;;
+              frontend-tests)       result="${{ needs.frontend-tests.result }}" ;;
+              docs-build)           result="${{ needs.docs-build.result }}" ;;
+              security-analysis)    result="${{ needs.security-analysis.result }}" ;;
+            esac
+            if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
+              failed="$failed $job($result)"
+            fi
+          done
+          if [[ -n "$failed" ]]; then
+            echo "❌ CI jobs did not complete successfully:$failed"
             exit 1
           fi
           echo "✅ All CI jobs completed successfully"

@@ -71,7 +71,6 @@
 │    - Hardhat tests with gas reporting                       │
 │    - Coverage analysis                                       │
 │    - Slither static analysis                                │
-│    - Manticore symbolic execution                           │
 │    - Medusa fuzz testing                                    │
 └────────────────────────┬────────────────────────────────────┘
                          │

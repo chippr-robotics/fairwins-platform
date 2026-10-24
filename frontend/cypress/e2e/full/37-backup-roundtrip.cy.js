@@ -64,6 +64,12 @@ function readBook(win, account) {
  * ASSERTION against the value the task resolved ONCE — it never re-runs the task. The pointer is
  * written by a transaction that lands after the pin, so that reads a stale "no pointer" and then
  * re-asserts it for the full timeout. Same family as anti-pattern 3: a snapshot reported as state.
+ *
+ * PREDICATE ON THE CID, NEVER ON `has` ALONE (#1327). The task's `cid` and `has` are two separate
+ * eth_calls, so a write landing between them yields `{ has: true, cid: '' }` — a tuple that cannot
+ * exist at any single block (`hasPointer` IS `getPointer().length != 0`). A predicate of `r.has`
+ * accepts that torn read as settled and the caller then asserts on the pre-write `cid`, which is
+ * the flake this spec failed on. Requiring the CID itself means a torn read simply polls again.
  */
 function waitForPointer(address, predicate, tries = 30) {
   const check = (remaining) =>
@@ -147,7 +153,7 @@ describe('Encrypted backup and restore — the on-chain pointer (spec 032)', () 
         expect(pinned, 'nor the contact address').to.not.include(CONTACT_ADDRESS)
 
         // And the chain now points at exactly that blob. Judged on chain, not on the dialog.
-        waitForPointer(OWNER, (r) => r.has).then((after) => {
+        waitForPointer(OWNER, (r) => r.has && Boolean(r.cid)).then((after) => {
           expect(after.cid, 'the pointer names the blob this run pinned').to.include(cid)
         })
       })

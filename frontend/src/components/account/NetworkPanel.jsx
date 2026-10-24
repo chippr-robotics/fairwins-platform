@@ -1,8 +1,13 @@
 import { useState } from 'react'
 import { useSwitchChain } from 'wagmi'
-import { getSelectableNetworks } from '../../config/networks'
+import { useNavigate } from 'react-router-dom'
+import { getSelectableNetworks, getNetwork } from '../../config/networks'
 import { getNetworkFeatures } from '../../config/networkCapabilities'
-import { BITCOIN_NETWORKS } from '../../config/bitcoinNetworks'
+import {
+  BITCOIN_NETWORKS,
+  getActiveBitcoinNetworkId,
+  isBitcoinNetworkId,
+} from '../../config/bitcoinNetworks'
 import { useRpcEndpoints } from '../../hooks/useRpcEndpoints'
 import { useWalletChainId } from '../../hooks/useWalletChainId'
 import NetworkEndpointForm from './NetworkEndpointForm'
@@ -29,15 +34,22 @@ const BITCOIN_FEATURE_TAGS = [
 ]
 
 /**
- * Display-only Bitcoin network card (spec 061, T033). Bitcoin is a non-EVM
- * network: there is NO wallet chain switch for it (network-registry rule 2),
- * so the card carries no switch affordance — surfaces activate per feature
- * (portfolio, send, receive) instead. Capability tags state truthfully what
- * is and is not supported (FR-020).
+ * Bitcoin network card (spec 061 T033, first-class since release 1.14.0 task 13).
+ *
+ * Bitcoin is a non-EVM network: there is NO wagmi chain switch for it
+ * (network-registry rule 2), and its string id must never reach an EVM seam.
+ * The card for the app's current testnet/mainnet mode (`actionable`) carries a
+ * "Use <network>" action that deep-links to the Bitcoin wallet surface —
+ * Transfer, where the BTC asset's send/receive/balance live — which is exactly
+ * how the Bitcoin surfaces have always activated (per feature, never by
+ * mutating a global chain id). The pair's other side renders display-only so
+ * only ONE Bitcoin network is ever offered (constitution III: the active
+ * Bitcoin network mirrors the EVM testnet/mainnet mode, FR-021). Capability
+ * tags state truthfully what is and is not supported (FR-020).
  */
-function BitcoinNetworkCard({ net }) {
+function BitcoinNetworkCard({ net, actionable = false, onOpen }) {
   return (
-    <li className="network-card network-card-display-only">
+    <li className={`network-card ${actionable ? '' : 'network-card-display-only'}`}>
       <div className="network-card-header">
         <div className="network-card-title">
           <span className="network-name">{net.name}</span>
@@ -45,7 +57,18 @@ function BitcoinNetworkCard({ net }) {
             {net.isTestnet ? 'Testnet' : 'Mainnet'}
           </span>
         </div>
-        <span className="network-active-badge network-display-only-badge">No wallet switch</span>
+        {actionable ? (
+          <button
+            type="button"
+            className="network-switch-btn"
+            onClick={onOpen}
+            aria-label={`Use ${net.name}`}
+          >
+            {`Use ${net.name}`}
+          </button>
+        ) : (
+          <span className="network-active-badge network-display-only-badge">No wallet switch</span>
+        )}
       </div>
 
       <ul className="network-feature-tags">
@@ -88,8 +111,11 @@ function BitcoinNetworkCard({ net }) {
       </dl>
 
       <p className="network-display-only-note">
-        Bitcoin has no wallet network switch — it activates per feature
-        (portfolio, send, receive). Members always pay the Bitcoin network fee.
+        {actionable
+          ? 'Bitcoin has no wallet network switch — "Use" opens the wallet\'s Transfer surface, ' +
+            'where Bitcoin send, receive and balances live. Members always pay the Bitcoin network fee.'
+          : 'Bitcoin has no wallet network switch — it activates per feature (portfolio, send, ' +
+            'receive). Members always pay the Bitcoin network fee.'}
       </p>
     </li>
   )
@@ -119,7 +145,19 @@ function NetworkPanel() {
   // the one control that would have got them there.
   const chainId = useWalletChainId()
   const { switchChain, isPending, variables, error } = useSwitchChain()
+  const navigate = useNavigate()
   const networks = getSelectableNetworks()
+  // The one Bitcoin network this build/mode may offer (task 13): the active
+  // Bitcoin network mirrors the app's EVM testnet/mainnet mode (spec 061
+  // FR-021 — the exact seam useBitcoinWallet resolves with), which at rest is
+  // the build's cohort. Never both sides of the pair (constitution III).
+  const activeBitcoinId = getActiveBitcoinNetworkId(Boolean(getNetwork(chainId)?.isTestnet))
+  const openBitcoin = (id) => {
+    // Type guard at the boundary: a Bitcoin string id activates its own
+    // surface by navigation and must never fall through to wagmi switchChain.
+    if (!isBitcoinNetworkId(id)) return
+    navigate('/wallet?tab=paytransfer')
+  }
   const pendingChainId = isPending ? variables?.chainId : null
   const { entryFor, describe, save, reset, probe, reloadRecommended } = useRpcEndpoints()
   const [editingChainId, setEditingChainId] = useState(null)
@@ -299,12 +337,19 @@ function NetworkPanel() {
               </li>
             )
           })}
-          {/* Non-EVM networks (spec 061): display-only rows — the EVM list
-              always includes testnets, and the Bitcoin pair mirrors that. */}
+          {/* Non-EVM networks (spec 061 + task 13). The EVM list always includes
+              testnets and the Bitcoin pair mirrors that for documentation — but
+              only the side matching the app's current testnet/mainnet mode is
+              offered for use; the other stays display-only. */}
           {Object.values(BITCOIN_NETWORKS)
             .sort((a, b) => Number(a.isTestnet) - Number(b.isTestnet))
             .map((net) => (
-              <BitcoinNetworkCard key={net.id} net={net} />
+              <BitcoinNetworkCard
+                key={net.id}
+                net={net}
+                actionable={net.id === activeBitcoinId}
+                onOpen={() => openBitcoin(net.id)}
+              />
             ))}
         </ul>
       </div>

@@ -1,0 +1,99 @@
+/*
+ * App lock overlay (spec 041 amendment).
+ *
+ * The backdrop is OPAQUE, not a tint. The whole point of the cover is that account content —
+ * balances, addresses, history — is not readable behind it, and an alpha layer's legibility
+ * depends on whatever happens to be underneath (the same reasoning that made spec 090's status
+ * surfaces opaque). `--bg-primary` is the page ground in both themes, so the cover reads as a
+ * blank app rather than as a dimmed one.
+ *
+ * z-index sits above every in-app layer — the nav drawer backdrop (1400) is the highest thing
+ * this app renders — because a lock that something else can paint over is not a lock.
+ */
+.app-lock {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  overflow-y: auto;
+}
+
+.app-lock__card {
+  width: 100%;
+  max-width: 26rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-lg);
+  background: var(--surface-color);
+  box-shadow: var(--shadow-lg);
+  text-align: center;
+}
+
+.app-lock__title {
+  margin: 0;
+  font-size: 1.375rem;
+  color: var(--text-primary);
+}
+
+.app-lock__body {
+  margin: 0;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.app-lock__error {
+  margin: 0;
+  padding: 0.625rem 0.75rem;
+  border-radius: var(--radius-md);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+  text-align: left;
+  line-height: 1.45;
+}
+
+/*
+ * The brand fill and its label are a MATCHED PAIR (spec 090 rule 6) — never `color: #fff` over
+ * `--brand-primary`, which measures 2.16:1 in dark. `index.css` re-points both when the button is
+ * disabled, so the "waiting for your passkey" state changes hue rather than just fading.
+ */
+.app-lock__unlock {
+  padding: 0.75rem 1.25rem;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--primary-button);
+  color: var(--primary-button-text);
+  font-weight: 600;
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.app-lock__unlock:hover:not(:disabled) {
+  background: var(--primary-button-hover);
+}
+
+.app-lock__signout {
+  padding: 0.625rem 1.25rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  cursor: pointer;
+  min-height: 44px;
+}
+
+.app-lock__signout:hover:not(:disabled) {
+  border-color: var(--text-secondary);
+}
+
+.app-lock__unlock:disabled,
+.app-lock__signout:disabled {
+  cursor: progress;
+}

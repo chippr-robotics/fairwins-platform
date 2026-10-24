@@ -64,6 +64,29 @@ Cypress.Commands.add('a11yScan', (options = {}) => {
 
   return injectAxe().then(() =>
     cy.window({ log: false }).then((win) => {
+      /*
+       * SETTLE FINITE ANIMATIONS FIRST. Surfaces animate in (e.g. the
+       * dashboard's 400ms fadeInUp runs opacity 0→1), and axe computes text
+       * color AS RENDERED — a scan that lands mid-fade sees semi-transparent
+       * text blended toward the background and reports a color-contrast
+       * violation that no member ever sees for more than a frame. That was
+       * the phone-profile "wagers dashboard" flake on #1388: identical CSS,
+       * verdict decided by scan timing. Infinite animations (loading pulses)
+       * are skipped — their `finished` promise never resolves, and an
+       * element that permanently blinks below contrast is a REAL finding the
+       * scan must keep catching.
+       */
+      const settling = win.document.getAnimations
+        ? Promise.all(
+            win.document.getAnimations()
+              .filter((a) => {
+                const timing = a.effect?.getTiming?.()
+                return timing && timing.iterations !== Infinity
+              })
+              .map((a) => a.finished.catch(() => {}))
+          )
+        : Promise.resolve()
+
       const axeOptions = {
         resultTypes: ['violations'],
         rules: Object.fromEntries(disableRules.map((d) => [d.rule, { enabled: false }])),
@@ -71,7 +94,8 @@ Cypress.Commands.add('a11yScan', (options = {}) => {
       if (runOnly) axeOptions.runOnly = runOnly
 
       const target = context || win.document
-      return cy.wrap(win.axe.run(target, axeOptions), { log: false, timeout: 30000 }).then((results) => {
+      const run = settling.then(() => win.axe.run(target, axeOptions))
+      return cy.wrap(run, { log: false, timeout: 30000 }).then((results) => {
         const where = label || (typeof context === 'string' ? context : 'document')
         const blocking = results.violations.filter((v) => BLOCKING_IMPACTS.includes(v.impact))
         const advisory = results.violations.filter((v) => !BLOCKING_IMPACTS.includes(v.impact))

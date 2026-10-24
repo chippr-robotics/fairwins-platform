@@ -10,6 +10,7 @@
  */
 import express from 'express'
 import { GatewayError } from '../errors.js'
+import { callerQuotaKey } from '../identity/quotaKey.js'
 import { PolymarketRequestError } from './client.js'
 import { BuilderConfig } from '@polymarket/builder-signing-sdk'
 import { attachBuilderCode } from './builderCode.js'
@@ -63,18 +64,28 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
     }
   }
 
-  function guard(quotaKey) {
+  // Keyed on the CALLER, not on request content (spec 106, FR-011). It formerly keyed on the
+  // search terms, the condition id or an address out of the path — all caller-chosen, so varying
+  // any of them minted a fresh bucket and the ceiling was never approached.
+  function guard(req) {
     requireLive()
-    const q = quotas.hit(quotaKey)
+    const q = quotas.hit(callerQuotaKey(req))
     if (!q.allowed) {
       throw new GatewayError(429, 'quota_exceeded', `${q.scope} predict read quota exceeded`, { retryAfterSec: q.retryAfterSec })
     }
   }
 
-  /** Write pre-flight: live check + the tighter write quota, keyed by the trader address. */
-  function guardWrite(quotaKey) {
+  /**
+   * Write pre-flight: live check + the tighter write quota, keyed on the CALLER (spec 106, FR-011).
+   *
+   * This formerly used the CONSTANT key `'builder-sign'`, which is the same defect in a different
+   * shape: one bucket shared by everyone means no caller is individually limited, and one script
+   * can exhaust the window for every legitimate trader at once. Since this route signs orders with
+   * the platform's builder credentials, both halves of that matter.
+   */
+  function guardWrite(req) {
     requireLive()
-    const q = (writeQuotas ?? quotas).hit(quotaKey)
+    const q = (writeQuotas ?? quotas).hit(callerQuotaKey(req))
     if (!q.allowed) {
       throw new GatewayError(429, 'quota_exceeded', `${q.scope} predict write quota exceeded`, { retryAfterSec: q.retryAfterSec })
     }
@@ -119,7 +130,7 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
       const search = typeof req.query.q === 'string' ? req.query.q.slice(0, 128) : ''
       if (!isCursor(next)) throw new GatewayError(400, 'invalid_cursor', 'malformed pagination cursor')
       const offset = Number.parseInt(next ?? '0', 10) || 0
-      guard(`markets:${search}:${offset}`)
+      guard(req)
 
       const result = await cache.fetchThrough(`markets:${search}:${offset}`, pm.cacheTtlMs, async () => {
         const body = await gamma.get('/markets', {
@@ -149,7 +160,7 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
       if (typeof conditionId !== 'string' || conditionId.length < 3 || conditionId.length > 128) {
         throw new GatewayError(400, 'invalid_market', 'condition id is malformed')
       }
-      guard(`market:${conditionId}`)
+      guard(req)
 
       const result = await cache.fetchThrough(`market:${conditionId}`, pm.cacheTtlMs, async () => {
         const body = await gamma.get('/markets', { query: { condition_ids: conditionId } })
@@ -172,7 +183,7 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
       requirePolygon(req.params.chainId)
       const tokenId = typeof req.query.token_id === 'string' ? req.query.token_id : ''
       if (!isTokenId(tokenId)) throw new GatewayError(400, 'invalid_token', 'token_id must be a numeric token id')
-      guard(`fee:${tokenId}`)
+      guard(req)
 
       const result = await cache.fetchThrough(`fee:${tokenId}`, pm.cacheTtlMs, async () => {
         // The builder code + fee are OUR config and are ALWAYS known — trading must never be blocked
@@ -214,7 +225,7 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
       requirePolygon(req.params.chainId)
       const address = typeof req.query.address === 'string' ? req.query.address : ''
       if (!isAddress(address)) throw new GatewayError(400, 'invalid_address', 'address must be a 0x-prefixed 20-byte hex address')
-      guard(address.toLowerCase())
+      guard(req)
 
       const result = await cache.fetchThrough(`positions:${address.toLowerCase()}`, pm.cacheTtlMs, async () => {
         // Positions live on the public Data API (not the CLOB), keyed by the wallet — no L2 auth.
@@ -239,7 +250,7 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
       requirePolygon(req.params.chainId)
       // Absent builder creds => let the SPA post the order unattributed rather than blocking it (FR-015).
       if (!builderConfig) throw new GatewayError(503, 'builder_unconfigured', 'builder attribution is not configured on this gateway')
-      guardWrite('builder-sign') // killswitch + fail-closed key + tighter write quota
+      guardWrite(req) // killswitch + fail-closed key + tighter per-caller write quota
       const { method, path, body, timestamp } = req.body || {}
       if (typeof method !== 'string' || typeof path !== 'string') {
         throw new GatewayError(400, 'invalid_builder_sign', 'method and path are required')

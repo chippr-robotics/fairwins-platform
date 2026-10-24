@@ -1,0 +1,33 @@
+/* App lock settings card (spec 041 amendment). Tokens only — colour lives in theme.css. */
+
+.app-lock-prefs__row {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.app-lock-prefs__checkbox {
+  flex: 0 0 auto;
+  width: 18px;
+  height: 18px;
+  margin-top: 0.15rem;
+  accent-color: var(--brand-primary);
+  cursor: pointer;
+}
+
+.app-lock-prefs__checkbox:disabled {
+  cursor: not-allowed;
+}
+
+.app-lock-prefs__sub {
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.app-lock-prefs__note {
+  margin: 0 0 0.75rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-size: 0.9rem;
+}

@@ -11,9 +11,9 @@
  * switch. Off Polygon / no gateway / passkey session → {supported:false} and NO fetches (FR-018).
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useChainId, useWalletClient } from 'wagmi'
+import { useWalletClient } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { WalletContext } from '../contexts/WalletContext.js'
-import { getCurrentChainId } from '../config/networks'
 import { predictAvailable, fetchPositions } from '../lib/predict/predictClient'
 import {
   loadCachedCreds as defaultLoadCachedCreds,
@@ -27,7 +27,7 @@ const POLYGON = 137
 export function usePredictPositions() {
   const wallet = useContext(WalletContext) || {}
   const { address, isConnected } = wallet
-  const chainId = useChainId() || getCurrentChainId()
+  const chainId = useWalletChainId()
   const supported = predictAvailable(chainId)
 
   const [positions, setPositions] = useState([])
@@ -73,7 +73,7 @@ export function usePredictPositions() {
 export function usePredictOpenOrders(options = {}) {
   const wallet = useContext(WalletContext) || {}
   const { address, isConnected, loginMethod } = wallet
-  const chainId = useChainId() || getCurrentChainId()
+  const chainId = useWalletChainId()
   const { data: hookWalletClient } = useWalletClient()
   const walletClient = options.walletClient ?? hookWalletClient
   const deps = useMemo(

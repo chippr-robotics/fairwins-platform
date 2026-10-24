@@ -18,11 +18,21 @@ export default function IntrospectionPanel({ baseUrl, token }) {
   const [state, setState] = useState({ status: 'idle' })
   const abortRef = useRef(null)
 
-  // A token change invalidates any answer on screen: showing the previous key's scopes next to a
-  // new key's box is the one mistake that would make this panel actively misleading.
-  useEffect(() => {
-    setState({ status: 'idle' })
-  }, [token, baseUrl])
+  /*
+   * A token change invalidates any answer on screen: showing the previous key's scopes next to a
+   * new key's box is the one mistake that would make this panel actively misleading.
+   *
+   * Invalidation is DERIVED, never scheduled. Every answer records the token and base URL it was
+   * asked about, and the render below shows it only while both still match — so a stale answer is
+   * gone in the same frame the input changes, with no window where the old key's scopes sit next
+   * to the new key's box. The previous shape (an effect resetting state on [token, baseUrl])
+   * additionally scheduled one update per keystroke; typed in a single synchronous burst (Cypress
+   * `delay: 0`, a paste-then-fix), those updates trip React's nested-update limit and crash the
+   * whole console — reproduced and pinned in __tests__/ApiAccessConsole.test.jsx.
+   */
+  const view = state.status !== 'idle' && (state.forToken !== token || state.forBaseUrl !== baseUrl)
+    ? { status: 'idle' }
+    : state
 
   useEffect(() => () => abortRef.current?.abort(), [])
 
@@ -31,16 +41,19 @@ export default function IntrospectionPanel({ baseUrl, token }) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    setState({ status: 'loading' })
+    // Every state carries what it was asked about, so the derived view above can retire it the
+    // moment either input changes.
+    const asked = { forToken: token, forBaseUrl: baseUrl }
+    setState({ status: 'loading', ...asked })
     try {
       const result = await requestJson(apiUrl(baseUrl, ME_PATH), { token, signal: controller.signal })
       if (controller.signal.aborted) return
-      if (result.state === 'ok') setState({ status: 'read', me: result.body })
-      else if (result.state === 'error') setState({ status: 'unavailable', error: result.error, httpStatus: result.status })
-      else setState({ status: 'unavailable', reason: result.reason })
+      if (result.state === 'ok') setState({ status: 'read', me: result.body, ...asked })
+      else if (result.state === 'error') setState({ status: 'unavailable', error: result.error, httpStatus: result.status, ...asked })
+      else setState({ status: 'unavailable', reason: result.reason, ...asked })
     } catch (err) {
       if (err && err.name === 'AbortError') return
-      setState({ status: 'unavailable', reason: String((err && err.message) || err) })
+      setState({ status: 'unavailable', reason: String((err && err.message) || err), ...asked })
     }
   }, [baseUrl, token])
 
@@ -53,8 +66,8 @@ export default function IntrospectionPanel({ baseUrl, token }) {
         membership.
       </p>
 
-      <button type="button" className="aa-btn aa-btn-primary" onClick={check} disabled={!baseUrl || !token || state.status === 'loading'}>
-        {state.status === 'loading' ? 'Checking…' : 'Check this token'}
+      <button type="button" className="aa-btn aa-btn-primary" onClick={check} disabled={!baseUrl || !token || view.status === 'loading'}>
+        {view.status === 'loading' ? 'Checking…' : 'Check this token'}
       </button>
 
       {!token && (
@@ -63,20 +76,20 @@ export default function IntrospectionPanel({ baseUrl, token }) {
         </p>
       )}
 
-      {state.status === 'unavailable' && (
+      {view.status === 'unavailable' && (
         <div className="aa-error" role="alert">
-          {state.error ? (
+          {view.error ? (
             <p>
-              The gateway answered <code>{state.httpStatus}</code> <code>{state.error.code}</code>
-              {state.error.reason ? ` — ${state.error.reason}` : ''}
+              The gateway answered <code>{view.httpStatus}</code> <code>{view.error.code}</code>
+              {view.error.reason ? ` — ${view.error.reason}` : ''}
             </p>
           ) : (
-            <p>{state.reason}</p>
+            <p>{view.reason}</p>
           )}
         </div>
       )}
 
-      {state.status === 'read' && <MeView me={state.me} />}
+      {view.status === 'read' && <MeView me={view.me} />}
     </section>
   )
 }

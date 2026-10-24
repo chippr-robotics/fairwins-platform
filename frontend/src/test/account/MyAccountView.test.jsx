@@ -22,8 +22,18 @@ vi.mock('../../hooks/usePortfolio', () => ({
 vi.mock('../../hooks/useEffectiveAccount', () => ({
   useEffectiveAccount: () => effectiveAccount,
 }))
+// `useWallet` joins the mock because the view now mounts the FR-021 first-funding
+// DeviceLossWarning (issue #1405), which reads the passkey session through
+// usePasskeyAccount → useWallet. A classic (non-passkey) session renders nothing.
 vi.mock('../../hooks/useWalletManagement', () => ({
   useWalletConnection: () => ({ disconnectWallet: vi.fn() }),
+  useWallet: () => ({
+    address: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed',
+    chainId: 137,
+    loginMethod: 'wallet',
+    isConnected: true,
+    provider: null,
+  }),
 }))
 vi.mock('../../hooks/useAccountSwitcher', () => {
   const useAccountSwitcher = () => ({

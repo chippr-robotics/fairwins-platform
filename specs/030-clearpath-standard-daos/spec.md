@@ -62,11 +62,55 @@ accessible, runs entirely within the platform's **no-backend** footprint, and sh
 - Treasury tracking surfaces the Governor's **timelock AND known extra vaults** (e.g. the real OlympiaTreasury on Mordor) with **native + per-network USDC** balances.
 - The proposal builder is a **rich, no-calldata-required** composer (named action types, multiple actions, asset-aware amounts, encoded-call preview, pre-sign guards) over the existing `IGovernor.propose()` — **no new contract**.
 
+### Session 2026-08-30 — Amendment (issue #1268): pillar A ships on Cancun chains
+
+The 2026-06-24 deferral of native standard DAOs is **resolved, not carried forward**. The
+maintainer's decision on issue #1268 is: **use the latest in-tree OpenZeppelin Governor
+(5.4.0) and drop pre-Cancun chain support for this contract.** The amendment is additive —
+every requirement below stands as written except where this block names it.
+
+- Q: Which governance base ships for native DAOs? → A: **The stock OZ 5.4.0 `Governor`**
+  (`GovernorSettings` + `GovernorCountingSimple` + `GovernorVotes` +
+  `GovernorVotesQuorumFraction` + `GovernorTimelockControl`) with `TimelockController`. Not a
+  bespoke paris-safe governor and not a vendored OZ 5.1: a member's DAO must be a contract
+  every wallet, explorer, indexer and other DAO tool already understands, and a hand-rolled
+  governor would be an unaudited one-off holding a real treasury.
+- Q: What happens to ETC 61 and Mordor 63? → A: **They do not get native DAO creation.** The OZ
+  Governor closure reaches `utils/Bytes.sol`, which uses the Cancun `mcopy` opcode; no compiler
+  flag emulates it. This is an **exclusion by decision, not a deferral** — nothing is pending,
+  and the surface must say so honestly rather than implying "coming soon". **Pillar B is
+  unaffected**: `ExternalDAORegistry` imports only the `IGovernor` *interface*, stays `paris`,
+  and keeps serving every chain unchanged, so an ETC/Mordor member can still register, track and
+  govern DAOs — they simply cannot mint a new one on those chains.
+- Q: Does FR-018 (upgradeable pattern) apply to the DAOs a member creates? → A: **No — only to
+  the factory.** The `StandardDAOFactory` holds state and authority and is UUPS, mirroring
+  `WagerPoolFactory` (spec 034). The **created governor, timelock and token are IMMUTABLE**: a
+  platform-held upgrade key over a member's governor is a key over their treasury, since the
+  timelock's entire guarantee is that only its own governance can move funds. A new template
+  ships as a **new factory**, never as a swap under a live DAO. This is the `SafePolicyGuard`
+  (spec 043) reasoning applied to governance.
+- Q: How is the voting-weight choice of FR-001 realised? → A: **Two modes at creation** — the
+  factory deploys a fresh fixed-supply `ERC20Votes` (`StandardDAOToken`), or it accepts an
+  **existing `IVotes`** address, which covers both a member's own `ERC20Votes` and an
+  `ERC721Votes`/soulbound membership NFT (the Olympia-style 1-member-1-vote source). The factory
+  does not itself mint membership NFTs; that remains a separate primitive.
+- Q: Does the creation slice ship the administration surfaces of US6? → A: **No.** US6
+  (role grants, parameter changes, ownership transfer/renounce as a member-facing screen) stays
+  out of this slice. On-chain the created DAO already administers itself — the timelock's admin
+  role is the timelock — so US6 is a UI over proposals, not new authority.
+
 ## User Scenarios & Testing *(mandatory)*
 
-### User Story 1 - Launch a standard DAO (Priority: P1) — ⏸️ DEFERRED (native)
+### User Story 1 - Launch a standard DAO (Priority: P1) — *Amendment 2026-08-30: SHIPS on Cancun chains*
 
 > **Deferred (2026-06-24):** native OZ-Governor DAOs can't run on pre-Cancun ETC/Mordor (the `mcopy` blocker). Implement after the external-DAO pillar, once the governance base is chosen. Requirements retained below unchanged.
+>
+> **Resolved (2026-08-30, issue #1268):** the governance base is the stock OZ 5.4.0 Governor and
+> the chain set is **Cancun-capable chains only** — Polygon 137, Ethereum 1, Optimism 10, Base
+> 8453, Arbitrum One 42161 and Amoy 80002. **ETC 61 and Mordor 63 are excluded by decision**, not
+> deferred: on those chains this surface is absent and says why, while pillar B keeps working.
+> The requirements below stand unchanged; the acceptance scenarios are exercised against a real
+> deployed governor + timelock in `test/clearpath/StandardDAOFactory.test.js`.
 
 An authorized member creates a native standard DAO, choosing its name, purpose,
 voting-weight source (a governance token or a membership NFT), a USDC treasury, and
@@ -160,7 +204,16 @@ membership shown match the external DAO's real on-chain state — with a truthfu
 
 ---
 
-### User Story 4 - Run a proposal on a native DAO (Priority: P2) — ⏸️ DEFERRED (native)
+### User Story 4 - Run a proposal on a native DAO (Priority: P2) — *Amendment 2026-08-30: on-chain lifecycle proven; UI reuses the external-DAO surfaces*
+
+> **Resolved (2026-08-30, issue #1268):** the full propose → vote → queue → execute lifecycle is
+> exercised against a factory-created governor + timelock in
+> `test/clearpath/StandardDAOFactory.test.js`, including the two negative cases this story asks
+> for (a defeated proposal moves nothing; a passed one executes exactly once). No new UI is
+> needed for it: a natively created DAO **is** a stock `IGovernor`, so ClearPath's existing
+> `ExternalDaoView` + `ProposalBuilder` serve it byte-identically once it is registered in the
+> `ExternalDAORegistry` — which is why the creation flow offers that registration as its next
+> step rather than growing a parallel governance surface.
 
 A member of a native standard DAO submits a proposal (a USDC treasury action or a
 parameter change), other members vote during the voting period, and after the
@@ -244,7 +297,15 @@ compose a proposal without hand-writing calldata:
 
 ---
 
-### User Story 6 - Administer a DAO: roles, parameters & ownership (Priority: P2) — ⏸️ DEFERRED (native)
+### User Story 6 - Administer a DAO: roles, parameters & ownership (Priority: P2) — ⏸️ STILL DEFERRED (UI)
+
+> **Amendment 2026-08-30 (issue #1268):** deferred for a NEW reason. The `mcopy` blocker is gone,
+> but this story is a member-facing administration console, and the creation slice deliberately
+> does not grow one. On-chain the answer is already in place and is stronger than what this story
+> describes: a created DAO's timelock roles are held by its governor, its admin role is the
+> timelock itself, and the factory renounced everything — so every role grant, parameter change
+> and hand-off is *already* a governance proposal, expressible today through the existing
+> proposal builder. What remains is the screen, not the authority.
 
 A native-DAO administrator grants/revokes scoped roles (e.g. proposer, treasurer,
 canceller), configures governance parameters, and transfers or renounces

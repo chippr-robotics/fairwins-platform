@@ -1,0 +1,151 @@
+/*
+ * Group pay — layout only.
+ *
+ * Every colour comes from a token defined in theme.css (spec 090/091: theme.css is the only file
+ * that states a colour), and no font-family is restated (a component that names one overrides the
+ * brand face).
+ */
+
+.gp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-top: 0.5rem;
+}
+
+.gp-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.gp-row-fields {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+
+.gp-row-address {
+  flex: 1 1 12rem;
+  min-width: 0;
+}
+
+.gp-amount-input {
+  width: 6.5rem;
+  min-width: 4.5rem;
+  padding: 0.5rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.gp-amount-sym {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  min-width: 2.5rem;
+}
+
+.gp-remove {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 0;
+  line-height: 1;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.gp-add {
+  align-self: flex-start;
+  padding: 0.4rem 0.75rem;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--accent-color);
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+
+.gp-add:disabled {
+  cursor: not-allowed;
+}
+
+.gp-cap,
+.gp-row-note {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.gp-row-error {
+  color: var(--error-color);
+  font-size: 0.8rem;
+}
+
+/* ── confirm-step breakdown ─────────────────────────────────────────────────────────────── */
+
+.gp-breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0.5rem 0;
+  max-height: 14rem;
+  overflow-y: auto;
+}
+
+.gp-breakdown-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.gp-breakdown-row .gp-to {
+  color: var(--text-secondary);
+}
+
+.gp-total {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--border-color);
+  font-weight: 600;
+}
+
+.gp-note {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* ── outcomes ───────────────────────────────────────────────────────────────────────────── */
+
+.gp-outcomes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.5rem;
+}
+
+.gp-outcome {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+  font-size: 0.9rem;
+}
+
+.gp-outcome-reason {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.gp-outcome-status {
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}

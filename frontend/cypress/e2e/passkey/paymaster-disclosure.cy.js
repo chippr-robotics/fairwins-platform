@@ -11,8 +11,19 @@
 //
 // This build configures no bundler and no sponsor paymaster (`VITE_BUNDLER_URLS_*`
 // and the sponsor endpoint are unset), which is exactly the case FR-004 exists
-// for. The assertion is therefore the NEGATIVE one, and it is the one worth
-// having: no surface may claim a sponsorship this deployment cannot deliver.
+// for. Each test therefore makes TWO claims, and both are needed: the negative —
+// no surface may claim a sponsorship this deployment cannot deliver — and the
+// positive one that gives the flow its name, that the fee line names the MEMBER
+// as the payer.
+//
+// `sponsorPaymasterUrl` is resolved at BUILD time (`networks.js#passkeyConfig`
+// from `VITE_SPONSOR_PAYMASTER_<NET>`), so the unavailable state cannot be
+// produced at runtime by intercepting `POST /v1/paymaster`: with the URL null
+// the client never builds a paymaster transport and never issues that request.
+// The unavailability is a property of the build, and that is what is driven here.
+// The runtime failure of a CONFIGURED endpoint (sponsorship requested, refused,
+// UserOp self-funds) is covered in
+// `frontend/src/lib/passkey/__tests__/sendBatch.fallback.test.js`.
 //
 // The positive path — a UserOp actually sponsored end to end — needs a live
 // bundler and paymaster and is tracked separately; it is not faked here.
@@ -64,14 +75,34 @@ import {
     })
 
     /*
-     * And the member is told what IS true instead — either that a network fee applies, or that a
-     * passkey account cannot transact on this pair's network at all. Both are honest; silence is
-     * not, because the member would be left to assume the headline feature is working.
+     * And the member is told, POSITIVELY, that the fee is theirs.
+     *
+     * This assertion was originally a disjunction — "network fee applies" OR "passkey accounts
+     * can't send transactions here" — on the reasoning that both are honest. Both are, but only
+     * one of them is a fee disclosure, and in this build the second is always rendered (no
+     * bundler ⇒ `passkeyReady` is false ⇒ TradePanel.jsx:489 prints the unsupported-network
+     * note). So the disjunction was satisfied by the note in every run and the fee line was
+     * never actually examined: `feeBadge` could have been deleted outright and this still passed.
+     *
+     * The badge is the disclosure, it is computed independently of `passkeyReady`
+     * (TradePanel.jsx:437-443), and for a passkey session that is neither a vault nor a recovered
+     * account its only two possible values are "⚡ Gasless · sponsored" and "Network fee applies".
+     * Asserting the exact one therefore states the whole claim in the flow's name: sponsorship is
+     * unavailable, and the member is told they pay.
+     */
+    cy.get('.trade-panel .trade-badge')
+      .invoke('text')
+      .invoke('trim')
+      .should('equal', 'Network fee applies')
+
+    /*
+     * The unsupported-network note is still expected, and is now asserted as its own separate
+     * fact rather than as an alternative to the fee line — it explains WHY nothing can be sent
+     * here, which is a different thing from saying who pays.
      */
     cy.get('.trade-panel').should(($p) => {
-      const text = $p.text()
-      expect(text, 'the true fee position is stated').to.match(
-        /network fee applies|can’t send transactions|can't send transactions/i,
+      expect($p.text(), 'and the reason nothing can be sent here is stated too').to.match(
+        /can’t send transactions|can't send transactions/i,
       )
     })
   })
@@ -92,5 +123,13 @@ import {
         /gasless|sponsored/i,
       )
     })
+
+    // The SAME disclosure, word for word, as the passkey session gets in PM-01. That equality is
+    // the point: it is what makes PM-01's badge a statement about this deployment's paymaster
+    // rather than a side effect of the passkey rail being unavailable in this build.
+    cy.get('.trade-panel .trade-badge')
+      .invoke('text')
+      .invoke('trim')
+      .should('equal', 'Network fee applies')
   })
 })

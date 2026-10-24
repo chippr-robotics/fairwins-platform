@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import { hostRef, resetHost } from './_host'
@@ -157,5 +157,29 @@ describe('ApiAccessConsole', () => {
     await user.click(screen.getByRole('button', { name: /open api access settings/i }))
 
     expect(hostRef.current.navigate).toHaveBeenCalledWith('/wallet?tab=settings#api-access')
+  })
+
+  it('survives a full token typed as one synchronous burst without tripping the update limit', () => {
+    // The shard-0 crash on PR #1386: IntrospectionPanel invalidated its answer via an effect keyed
+    // on [token, baseUrl], which scheduled one extra update per keystroke. Cypress types with
+    // `delay: 0` — every character lands in a single synchronous flush — and ~68 of those nested
+    // updates trip React's depth limit, killing the whole console mid-type. Invalidation is now
+    // DERIVED (the answer records what it was asked about and retires itself in render), so a
+    // burst costs exactly one update per character. jsdom reproduces the crash the same way the
+    // browser did; with the effect shape restored this test fails with "Maximum update depth
+    // exceeded".
+    specServed()
+    render(<ApiAccessConsole />)
+    const input = document.querySelector('#aa-token')
+
+    act(() => {
+      let value = ''
+      for (const ch of `${A_TOKEN}.${A_TOKEN}`) {
+        value += ch
+        fireEvent.change(input, { target: { value } })
+      }
+    })
+
+    expect(input.value).toBe(`${A_TOKEN}.${A_TOKEN}`)
   })
 })

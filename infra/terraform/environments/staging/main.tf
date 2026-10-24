@@ -31,6 +31,12 @@ module "staging_mainnet" {
   # proposing a SECOND, public, unmanaged one beside it. That apply would have SUCCEEDED.
   name = "prediction-dao-research-staging"
 
+  # A static bundle needs no GCP access, so it runs as an account that HAS none. This is not
+  # hardening for its own sake: managing the service at all requires `actAs` on whatever runtime
+  # account it uses, and the alternative — the Cloud Run default compute account — carries
+  # roles/editor project-wide in a shared project. See the variable, and bootstrap/main.tf.
+  service_account_email = var.run_noperm_service_account
+
   # Required by the provider, then ignored — Cloud Build owns the artifact.
   image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_registry_repository}/prediction-dao-research/staging:latest"
 
@@ -58,6 +64,9 @@ module "staging_testnet" {
   project_id = var.project_id
   region     = var.region
   name       = "prediction-dao-research-staging-testnet"
+
+  # Same reasoning as the mainnet service above.
+  service_account_email = var.run_noperm_service_account
 
   image = "${var.region}-docker.pkg.dev/${var.project_id}/${var.artifact_registry_repository}/prediction-dao-research/staging-testnet:latest"
 
@@ -94,9 +103,14 @@ module "staging_testnet" {
  * staging SPAs already point at the same relay host (cloudbuild.staging.yaml). A second copy would
  * be two identical services, which is a maintenance seam bought for no isolation.
  *
- * Stateless and secretless exactly as in prod: no `secret_env`, no runtime service account, and the
- * member's own capability token — never anything held here — is what authorizes a call. See the
- * comment on `module "mcp_server"` in environments/prod/main.tf for the full reasoning.
+ * Stateless and secretless exactly as in prod: no `secret_env`, and the member's own capability
+ * token — never anything held here — is what authorizes a call. See the comment on
+ * `module "mcp_server"` in environments/prod/main.tf for the full reasoning.
+ *
+ * It does carry a runtime account, and that is a CORRECTION rather than a change of mind: needing
+ * no GCP permission is why it runs as `run_noperm`, which HAS none. Terraform cannot manage a Cloud
+ * Run service without `actAs` on its runtime account, so "leave it on the default" was never the
+ * no-grant option — it was a grant on an account holding roles/editor project-wide.
  *
  * ⚠ THIS POINTS AT THE MAINNET-COHORT STAGING RELAY, which touches real funds. It is a rehearsal of
  * the production wiring, not a sandbox.
@@ -109,6 +123,11 @@ module "mcp_server_staging" {
   project_id = var.project_id
   region     = var.region
   name       = "fairwins-mcp-server-staging"
+
+  # Set BEFORE this module is ever ungated, so the flag flip is a flag flip. Without it the first
+  # apply after `manage_mcp_server = true` would fail exactly as `Apply staging` did on 2026-09-08:
+  # 403 actAs denied on the default compute account.
+  service_account_email = var.run_noperm_service_account
 
   # Required by the provider, then ignored — but it must still RESOLVE on the first create, and
   # nothing publishes this path today. `:latest` here is an instruction to whoever publishes the

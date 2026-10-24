@@ -26,8 +26,18 @@ vi.mock('../config/contracts', async (importOriginal) => {
   return { ...actual, getContractAddressForChain: resolver }
 })
 vi.mock('../hooks/useWeb3', () => ({ useWeb3: () => web3 }))
-vi.mock('wagmi', () => ({
-  useAccount: () => ({ address: '0x0000000000000000000000000000000000000abc', isConnected: true }),
+// The address now comes from the ACTING account (see useRoleDetails' header), not wagmi's
+// connected one. This suite is about WHICH CHAIN, so it pins a single account and says nothing
+// about which one — `membershipActingAccount.test.jsx` is the suite that covers that.
+vi.mock('../hooks/useEffectiveAccount', () => ({
+  useEffectiveAccount: () => ({
+    address: '0x0000000000000000000000000000000000000abc',
+    isActingAccount: false,
+    type: 'personal',
+    label: null,
+    connectedAddress: '0x0000000000000000000000000000000000000abc',
+    chainId: null,
+  }),
 }))
 
 import { useRoleDetails } from '../hooks/useRoleDetails'

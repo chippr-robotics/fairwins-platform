@@ -1,20 +1,19 @@
 import { useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Navigate, useSearchParams } from 'react-router-dom'
 import TransferForm from './TransferForm'
-import WrapView from './WrapView'
 import BridgeView from './BridgeView'
 import BridgeStatusList from './BridgeStatusList'
 import BridgeUnavailableNotice from './BridgeUnavailableNotice'
 import Dashboard from '../fairwins/Dashboard'
 import { BRIDGE_UNAVAILABLE_REASON } from '../../hooks/useBridgeAvailability'
 import { bridgeGatewayUrl } from '../../lib/bridge/acrossQuotes'
-import { WAGERS_VIEW, isNavItemEnabledForTenant } from '../../config/appNav'
+import { WAGERS_VIEW, TRADE_WRAP_PATH, isNavItemEnabledForTenant } from '../../config/appNav'
 import './PayTransfer.css'
 
 /*
  * Wagers sits with the other ways money moves in this section — the tabs are all actions.
  *
- * It is TENANT-GATED, unlike its neighbours. Transfer, Wrap and Bridge are core platform surfaces
+ * It is TENANT-GATED, unlike its neighbours. Transfer and Bridge are core platform surfaces
  * every tenant gets; wagers is an optional manifest feature (spec 072), so on a tenant without it
  * the tab is ABSENT rather than present-and-broken — and because `?view=` only accepts ids that are
  * in this list, a saved `?view=wagers` link for that tenant falls back to Transfer on its own.
@@ -23,7 +22,6 @@ const WAGERS_ENABLED = isNavItemEnabledForTenant(WAGERS_VIEW.id)
 
 const TABS = [
   { id: 'transfer', label: 'Transfer' },
-  { id: 'wrap', label: 'Wrap' },
   { id: 'bridge', label: 'Bridge' },
   ...(WAGERS_ENABLED ? [{ id: WAGERS_VIEW.view, label: WAGERS_VIEW.label }] : []),
 ]
@@ -45,8 +43,9 @@ const TAB_IDS = TABS.map((t) => t.id)
  * Wagers joined the same row (spec 073): it was its own `/wagers` destination, and it is now another
  * way money leaves this section. `/wagers` redirects here so every saved link keeps working.
  *
- * Wrap sits second, next to the send form: it is the other same-chain action, and it is what a member
- * needs before a DEX, a pool or a contract that will only take the ERC-20 form of the coin.
+ * Wrap USED to sit second in this row; it now lives in Trade beside Swap (release 1.14.0) — it is
+ * what a member needs immediately before a DEX, and that is where they look for it. The old
+ * `?view=wrap` deep link redirects there (see the Navigate below) rather than dying.
  *
  * Activity is NOT a tab here. Transfer history is the activity ledger's (spec 051), and My Account ▸
  * Activity renders it in full for every class of entry — a second, transfer-only copy of the same
@@ -59,6 +58,16 @@ const TAB_IDS = TABS.map((t) => t.id)
 export default function PayTransferPanel() {
   const [searchParams, setSearchParams] = useSearchParams()
   const requested = searchParams.get('view')
+
+  // Wrap moved into Trade (release 1.14.0). The old `?tab=paytransfer&view=wrap` link is on saved
+  // bookmarks and in muscle memory, so it redirects to the new location instead of silently
+  // falling back to the send form — the same reasoning as App.jsx's `/wagers` → WAGERS_PATH
+  // redirect (spec 073 FR-030): a redirect costs nothing where a dead link costs a member the
+  // surface. The tab guard stops a re-render at the target URL from redirecting again.
+  if (requested === 'wrap' && searchParams.get('tab') !== 'trade') {
+    return <Navigate to={TRADE_WRAP_PATH} replace />
+  }
+
   const tab = TAB_IDS.includes(requested) ? requested : 'transfer'
 
   const setTab = (next) => {
@@ -95,11 +104,6 @@ export default function PayTransferPanel() {
               the notification, and the full history lives in My Account ▸ Activity. Staying put
               also leaves the member where they can send again. */}
           <TransferForm />
-        </div>
-      )}
-      {tab === 'wrap' && (
-        <div role="tabpanel" aria-label="Wrap" data-attention="transfer-wrap">
-          <WrapView />
         </div>
       )}
       {tab === 'bridge' && (

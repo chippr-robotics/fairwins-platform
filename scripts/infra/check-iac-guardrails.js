@@ -84,6 +84,11 @@ const OWNED_NAME_PATTERNS = [
   /^relay-(webhook-secret|engine-api-key)$/,
   /^POLYMARKET_/, // gateway feature credentials, named in their upstream's convention
   /^QUICKNODE_(POLYGON|AMOY)_(API|WSS)$/, // QuickNode Multi-Chain RPC credentials (one token, chain by hostname infix)
+  // The numbered MULTICHAIN endpoint family (001=eth, 002=matic, 003=sol, 004=btc, 005=zec — the
+  // scheme is documented on managed_secret_ids in prod's terraform.tfvars) plus the account admin
+  // key. Bounded to three digits deliberately: a new endpoint number extends the estate, and this
+  // gate's job is to make that a decision here rather than a foreign name slipping through.
+  /^QUICKNODE_(ADMIN_API|RPC_\d{3}_(API|WSS))$/,
   /^github-actions$/, // the WIF pool
 ];
 

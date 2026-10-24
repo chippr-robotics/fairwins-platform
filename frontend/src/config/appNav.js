@@ -96,6 +96,16 @@ export const TAB_ALIASES = { swap: 'trade', backup: 'security', preferences: 'se
 /** The canonical location of the Wagers view — the one place that URL is spelled out. */
 export const WAGERS_PATH = `/wallet?tab=${WAGERS_VIEW.tab}&view=${WAGERS_VIEW.view}`
 
+/**
+ * The canonical location of the Wrap view (release 1.14.0): Wrap moved from the Transfer section
+ * into Trade, beside Swap — wrapping changes the FORM of the coin you hold, not where the money
+ * is, and it is what a member needs immediately before a DEX. The old
+ * `?tab=paytransfer&view=wrap` deep link redirects here (PayTransferPanel owns that redirect, the
+ * same way App.jsx's `/wagers` route redirects into Transfer), and both point at THIS constant so
+ * the redirect and the Trade section cannot drift into disagreeing about the URL.
+ */
+export const TRADE_WRAP_PATH = '/wallet?tab=trade&view=wrap'
+
 import { isFeatureEnabled } from './tenant'
 
 // Tenant feature gating (spec 072 T019/FR-002): nav item id -> manifest feature id.
@@ -125,6 +135,9 @@ const NAV_FEATURE_IDS = {
   // one place rather than being re-derived at each conversion.
   clearpath: 'clearpath',
   tokens: 'token-mint',
+  // Assistant (spec 104) — the agent controls tab. Same feature id the launcher already gates on,
+  // so a tenant without the assistant has no tab, no launcher and no `?tab=assistant` panel.
+  assistant: 'assistant',
 }
 
 export function isNavItemEnabledForTenant(id) {
@@ -190,6 +203,13 @@ const RAW_NAV_GROUPS = [
       // mini-app that has not been registered would make the catalog claim a verified package
       // exists when none does — the one thing this surface must never do.
       { id: 'apps', label: 'Apps', icon: 'grid' },
+      // Assistant (spec 104) — the AGENT controls: which rail answers (FairWins membership or the
+      // member's own GutterToken credits), the GutterToken key, and API access for the member's
+      // own tools. These used to be two cards in Settings; they are not "how this app looks",
+      // they are things that act on the member's behalf, which is what Tools holds. The card ids
+      // (`assistant-prefs`, `api-access`) are unchanged, so the old Settings deep links redirect
+      // here (WalletPage) rather than dying.
+      { id: 'assistant', label: 'Assistant', icon: 'chat' },
       // 'network' deliberately absent (spec 069): network settings moved to the account
       // button beside Settings. The app reads every supported network at once, so the
       // active chain is a per-transaction detail rather than a tool you go to — and the

@@ -39,6 +39,27 @@ and contract set (`shared` | `dedicated`). Rules:
   script.
 - Feature gating: a feature absent from `settings.features` must be absent from
   nav/routes — never present-but-broken.
+- **Assistant providers (spec 104).** Two feature ids and one optional settings block govern the
+  member assistant:
+    - `assistant` — the assistant itself and the **Tools ▸ Assistant** tab that hosts its
+      preferences and the API access console. Members still opt in individually.
+    - `assistant-byok` — offers the **GutterToken (your credits)** provider: the member pastes their
+      own GutterToken `sk-…` key (stored on their device only, wallet-scoped, never backed up) and
+      their browser calls `api.guttertokens.com` directly. The tenant is not in that request path,
+      sees no message content and charges nothing for it. **Requires `assistant`** (the validator
+      refuses `assistant-byok` without it — it is a radio inside the Assistant card, not a surface).
+      A tenant that wants the assistant on its membership-funded rail only simply leaves this out.
+      `fairwins` enables both.
+    - `settings.assistant.guttertokenReferralCode` — **optional** string, `^[A-Za-z0-9_-]{1,64}$`,
+      delivered as `https://app.guttertokens.com/signup?ref=<code>` (it prefills GutterToken's
+      referral field) from the **Get a key** link on the Assistant card. Absent means the plain link; present, the card discloses in words that the
+      tenant receives GutterToken credit when a member funds an account through it. The validator
+      refuses a code on a tenant that does not enable `assistant-byok` (dead config that would still
+      read as a live referral arrangement in the FinOps catalogue, entry `referral-guttertoken`).
+      It is an identity value like any other manifest field: public, never a credential, and never
+      hardcoded in a shipped path — resolve it through `getActiveTenant().settings.assistant`.
+      No code is registered for `fairwins` yet, so its manifest carries no `settings.assistant`
+      block.
 
 ## Contract isolation (dedicated tenants)
 
@@ -70,3 +91,31 @@ Suspension never traps value: contracts don't know about suspension; members kee
 documented direct-claim path. Shared-mode ("branding-only") tenants have cosmetic
 isolation only — this must be disclosed to the tenant, and graduation to dedicated
 contracts preserves claimability of positions opened on the shared estate.
+
+## Native channels (spec 102)
+
+A tenant gets iOS/Android apps by adding the OPTIONAL `native` block to its
+manifest (`tenants/<id>/manifest.json`; schema in `tenants/manifest.schema.json`):
+
+```jsonc
+"native": {
+  "ios":     { "appId": "app.<tenant>.member" },   // bundle identifier
+  "android": { "appId": "app.<tenant>.member" },   // application id
+  "displayName": "<Home-screen name>",
+  "iconSource": "icons/native/"
+}
+```
+
+Rules, all gated: appIds are reverse-DNS and globally unique ACROSS tenants
+(the same tenant may reuse one id on both platforms); an absent block means
+NO native channel — a native build for that tenant fails naming it, never
+borrowing another tenant's identity; the associated domain (passkey RP +
+universal links) is the tenant's `identity.domains[0]`, synced into both
+shells by `scripts/native/sync-native-config.js --tenant <id>`.
+
+Onboarding beyond the manifest is the OPERATOR ceremony — store records under
+the tenant's appIds, association files generated per tenant
+(`scripts/native/generate-association-files.js --tenant <id> …`) and served
+from the TENANT's origin, and its own support-floor document. See
+`docs/runbooks/native-release-operations.md` and
+`docs/developer-guide/native-channels.md`.

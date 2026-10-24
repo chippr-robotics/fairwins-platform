@@ -25,7 +25,7 @@ import {
 import { ACCOUNT_KIND_LABEL } from '../../lib/account/accountKinds'
 import './AccountCard.css'
 
-export default function AccountCard({ account, active = false, network = null, balance = null, onSelect }) {
+export default function AccountCard({ account, active = false, network = null, balance = null, onSelect, idleLabel = 'Tap to use' }) {
   const revision = useSyncExternalStore(subscribeAccountProfiles, getAccountProfilesRevision)
   const profile = useMemo(
     () => getAccountProfile(account.address),
@@ -60,7 +60,7 @@ export default function AccountCard({ account, active = false, network = null, b
             <NavIcon name="check" size={12} /> Active
           </>
         ) : (
-          'Tap to use'
+          idleLabel
         )}
       </span>
     </button>
@@ -76,4 +76,7 @@ AccountCard.propTypes = {
   /** Pre-rendered balance node for the active card, or null. */
   balance: PropTypes.node,
   onSelect: PropTypes.func,
+  /** What tapping a non-active card does — 'Tap to use' switches accounts (carousel); a host that
+   *  opens something else (spec 102: the vault sheet) says so instead. */
+  idleLabel: PropTypes.string,
 }

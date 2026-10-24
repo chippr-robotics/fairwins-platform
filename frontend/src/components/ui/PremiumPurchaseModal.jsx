@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo, useEffect } from 'react'
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useRoles } from '../../hooks/useRoles'
 import { useWeb3 } from '../../hooks/useWeb3'
@@ -6,7 +6,11 @@ import { useNotification } from '../../hooks/useUI'
 import { useTierPrices } from '../../hooks/useTierPrices'
 import { useEncryption } from '../../hooks/useEncryption'
 import { recordRolePurchase } from '../../utils/roleStorage'
-import { getUserTierOnChain, buildMembershipPurchaseCalls } from '../../utils/blockchainService'
+import { getUserTierOnChain, buildMembershipPurchaseCalls, checkApprovalNeededForAddress } from '../../utils/blockchainService'
+import { useEffectiveAccount } from '../../hooks/useEffectiveAccount'
+import { useActiveAccount } from '../../hooks/useActiveAccount'
+import { getReadProvider } from '../../utils/rpcProvider'
+import { mustSplitBatch, previewBatchSupport } from '../../lib/custody/batchPreflight'
 import { membershipChainId } from '../../config/networks'
 import { networkName } from '../../lib/chains/estate'
 import { ensurePasskeyEncryptionKeys } from '../../lib/passkey/encryption'
@@ -16,6 +20,7 @@ import { getCurrentDocument } from '../../utils/legalDocs'
 import { getContractAddressForChain } from '../../config/contracts'
 import { ACCOUNT_MODERATION_PATH } from '../../constants/legalLinks'
 import MembershipAttestation from '../compliance/MembershipAttestation'
+import DeviceLossWarning from '../wallet/DeviceLossWarning'
 import { getTransactionUrl } from '../../config/blockExplorer'
 import { usePurchaseFlow } from '../../hooks/usePurchaseFlow'
 import PurchaseProgressView from './PurchaseProgressView'
@@ -60,7 +65,7 @@ const ROLE_COPY = {
   icon: '🎲',
   tagline: 'Create and accept peer-to-peer wagers',
   features: [
-    'Create 1v1 wagers in USDC or WMATIC',
+    'Create 1v1 wagers in USDC or WPOL',
     'Self-resolve, third-party arbitrator, or Polymarket auto-resolve',
     'Share via QR code or direct link',
     'Escrow + refund protection if a counterparty no-shows',
@@ -104,7 +109,19 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
     loginMethod, sendCalls, provider,
   } = useWeb3()
   const { showNotification } = useNotification()
-  const { getPrice, getLimits, usingFallbackPrices } = useTierPrices()
+  // ── WHICH ACCOUNT GETS THE MEMBERSHIP (specs 063 + 088 + 098) ──────────────────────────
+  // `MembershipManager.purchaseTier` credits `msg.sender` and takes NO beneficiary, so a
+  // membership lands on exactly the address that signed. Spec 098 threads the purchase THROUGH
+  // the acting account on every rail it has one for, so the account whose tier this modal shows
+  // is the account that signs — and the accounts that genuinely cannot be `msg.sender` on the
+  // membership chain keep a refusal that names them and says why (FR-003).
+  const {
+    address: actingAddress, isActingAccount, label: actingLabel, type: actingType,
+    chainId: actingChainId,
+  } = useEffectiveAccount()
+  const { submit: submitAsActive, resolveActingSigner } = useActiveAccount()
+  const membershipAddress = actingAddress || account
+  const { getPrice, getLimits, usingFallbackPrices, isTierActive } = useTierPrices()
   const { ensureInitialized } = useEncryption()
   const flow = usePurchaseFlow()
   const navigate = useNavigate()
@@ -126,9 +143,67 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
   //
   // `isCorrectNetwork` is not enough here: it means "any supported chain". The purchase needs
   // one specific chain, disclosed before signature, with the wallet actually on it.
+
+  const ACTING_KIND_LABEL = { vault: 'multisig vault', legacy: 'recovered account', hardware: 'hardware account', derived: 'derived account' }
+  const actingAccountName =
+    actingLabel || ACTING_KIND_LABEL[actingType] || 'another account'
+
   const purchaseChainId = membershipChainId()
   const purchaseNetworkName = networkName(purchaseChainId)
   const onPurchaseChain = Number(chainId) === Number(purchaseChainId)
+
+  /*
+   * ── WHICH RAIL, AND WHETHER THERE IS ONE (spec 098 FR-003) ─────────────────────────────
+   *
+   * Identity FIRST, rail second. An acting account is purchase-eligible exactly when it can be
+   * `msg.sender` on the membership chain, and each eligible kind has its own way of signing:
+   *
+   *   personal (incl. passkey)  → today's rails, byte-identical (FR-016)
+   *   vault ON the membership chain → one threshold-gated Safe proposal (FR-005)
+   *   recovered legacy / hardware   → the spec-088 deferred ceremony's own signer (FR-004)
+   *
+   * Everything else refuses BEFORE any signature, naming the account and the specific reason —
+   * never the spec-088-era blanket "switch back to your personal wallet", which said nothing
+   * about which accounts could be helped by switching CHAINS instead, and nothing about the
+   * accounts that nothing would unblock.
+   *
+   * The passkey batch is deliberately not reachable while acting: `sendCalls` executes as the
+   * passkey smart account, so using it under an acting label would put both the funds and the
+   * tier on the passkey address while the screen named another account (FR-006).
+   */
+  const purchaseRail = useMemo(() => {
+    if (!isActingAccount) {
+      return { rail: loginMethod === 'passkey' ? 'passkey' : 'classic', eligible: true, reason: null }
+    }
+    if (actingType === 'vault') {
+      if (actingChainId == null || Number(actingChainId) !== Number(purchaseChainId)) {
+        const where = actingChainId == null ? 'another network' : networkName(actingChainId)
+        return {
+          rail: null,
+          eligible: false,
+          reason: `Memberships live on ${purchaseNetworkName}, and ${actingAccountName} exists only on ${where} — so a purchase here could never be credited to it. Nothing has been proposed.`,
+        }
+      }
+      return { rail: 'vault', eligible: true, reason: null }
+    }
+    if (actingType === 'legacy' || actingType === 'hardware') {
+      return { rail: 'acting-signer', eligible: true, reason: null }
+    }
+    return {
+      rail: null,
+      eligible: false,
+      reason: `${actingAccountName} has no sending identity on ${purchaseNetworkName}, and a membership is credited only to the account that sends the transaction — so it cannot be given one. Switching accounts would unblock this; switching networks would not.`,
+    }
+  }, [isActingAccount, actingType, actingChainId, actingAccountName, loginMethod, purchaseChainId, purchaseNetworkName])
+
+  // FR-010: one place says who is credited, who pays, where it settles, and (vault) that the
+  // outcome is a proposal.
+  const creditedName = isActingAccount ? actingAccountName : 'your account'
+  const payerDescription = purchaseRail.rail === 'vault'
+    ? "the vault's own USDC"
+    : isActingAccount
+      ? `${actingAccountName}'s own USDC`
+      : 'your connected wallet'
 
   const [currentStep, setCurrentStep] = useState(0)
   const [selectedTier, setSelectedTier] = useState('BRONZE')
@@ -138,6 +213,8 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
   const [errors, setErrors] = useState({})
   const [keyRegStatus, setKeyRegStatus] = useState(null) // null | 'registering' | 'success' | 'skipped' | 'failed'
   const [keyRegError, setKeyRegError] = useState(null)
+  // Spec 098 FR-013: the identity this run was bound to at confirm time.
+  const boundIdentityRef = useRef(null)
 
   // While any wallet interaction is in flight the modal must not be dismissed
   // (FR-012) and the step/footer controls are locked.
@@ -152,13 +229,13 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
 
   useEffect(() => {
     let cancelled = false
-    if (!account) return
+    if (!membershipAddress) return
     // Clear any tier read from a previously-selected chain so a testnet tier
     // doesn't linger when the wallet switches to mainnet (where the user may
     // have no membership). Re-fetch for the chain the wallet is now on.
     setUserCurrentTier(0)
     setIsLoadingTier(true)
-    getUserTierOnChain(account, ROLE_KEY, chainId).then(({ tier, readable }) => {
+    getUserTierOnChain(membershipAddress, ROLE_KEY, chainId).then(({ tier, readable }) => {
       if (cancelled) return
       // FR-004/FR-005: an unreadable reference chain is NOT tier 0. Offering "upgrade from
       // None" to a member who already holds Platinum — because their RPC blipped — would take
@@ -179,7 +256,7 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
       if (!cancelled) setIsLoadingTier(false)
     })
     return () => { cancelled = true }
-  }, [account, chainId, tierRetry])
+  }, [membershipAddress, chainId, tierRetry])
 
   /*
    * ENTRY MODE — what this modal is for, from the caller or from the member.
@@ -195,12 +272,51 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
   const isManageFlow = entryMode === 'manage'
   const allowsSameTier = isExtendFlow || isManageFlow
 
+  /*
+   * EXPIRED RENEWAL — an 'extend' entry whose ACTIVE tier reads 0.
+   *
+   * `getActiveTier` returns 0 for an EXPIRED membership, so the member the Renew CTA exists
+   * for (RoleDetailsCard shows it off the raw stored tier, which persists past expiry) arrived
+   * here with `userCurrentTier === 0`. The same-tier filter below then offered NOTHING: no tier
+   * cards, no explanatory card, Continue disabled — a dead-end for exactly the member who most
+   * needs to pay us. On-chain nothing blocks them: `purchaseTier` reverts AlreadyActive only
+   * while UNexpired, so an expired member can buy any tier fresh (and `effectiveAction` already
+   * resolves tier-0 to 'purchase'). Fall back to the purchase-mode offering and say why.
+   * ('manage' can't reach tier 0 — it is only ever derived from `userCurrentTier > 0` — but is
+   * included so a future explicit caller gets the same fallback rather than the dead-end.)
+   */
+  const isExpiredRenewal = allowsSameTier && tierReadable && !isLoadingTier && userCurrentTier === 0
+
   const availableTiers = useMemo(() => {
-    return Object.entries(MEMBERSHIP_TIERS).filter(([, tier]) => {
-      if (allowsSameTier) return tier.id >= userCurrentTier && userCurrentTier > 0
+    return Object.entries(MEMBERSHIP_TIERS).filter(([tierKey, tier]) => {
+      // A tier the CONTRACT will refuse is never offered: `purchaseTier` reverts TierInactive()
+      // for `active == false`, and it does so AFTER the member's USDC approval has landed.
+      // Only a DEFINITE false hides — `null` (unread) keeps the tier offered so an RPC blip
+      // cannot empty the grid, and the contract remains the real gate.
+      if (isTierActive(ROLE_KEY, tierKey) === false) return false
+      if (allowsSameTier) {
+        // Offer the current tier and up — but only while a current tier exists. At an ACTUALLY
+        // READ tier 0 (expired renewal) fall back to the full purchase offering; never return
+        // an empty list to a member who can legally buy. An UNREADABLE tier is not tier 0
+        // (FR-004): keep the pre-existing empty offering so only the retry card renders.
+        if (userCurrentTier > 0) return tier.id >= userCurrentTier
+        return tierReadable && tier.id > 0
+      }
       return tier.id > userCurrentTier
     })
-  }, [userCurrentTier, allowsSameTier])
+  }, [userCurrentTier, allowsSameTier, tierReadable, isTierActive])
+
+  /*
+   * The default selection is BRONZE, which is exactly the tier production had INACTIVE — so a
+   * member opened the modal already pointed at a purchase the contract would refuse. If the
+   * current selection is not on offer, move to the first tier that is; never price, quote or
+   * submit a tier the grid is not showing.
+   */
+  useEffect(() => {
+    if (availableTiers.length === 0) return
+    if (availableTiers.some(([tierKey]) => tierKey === selectedTier)) return
+    setSelectedTier(availableTiers[0][0])
+  }, [availableTiers, selectedTier])
 
   const selectedTierInfo = MEMBERSHIP_TIERS[selectedTier]
 
@@ -216,6 +332,12 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
    * Safe to read `userCurrentTier` here: handleSubmit refuses outright while `tierReadable` is
    * false (FR-005), so this only ever decides on a tier that was actually read. The fallback
    * matters anyway for the disabled-button render path.
+   *
+   * An EXPIRED member (active tier 0, whatever tier is still stored) resolves to 'purchase' on
+   * every selection, deliberately: `purchaseTier` succeeds once expired (AlreadyActive guards
+   * only an UNexpired membership) and charges exactly the full tier price shown above, while
+   * `upgradeTier` reverts NoActiveMembership on expired and `extendMembership` needs the stored
+   * tier this modal never read. Do not route tier-0 through 'extend' or 'upgrade'.
    */
   const effectiveAction = useMemo(() => {
     if (!tierReadable) return action || 'purchase'
@@ -226,6 +348,85 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
 
   const selectedPrice = getPrice(ROLE_KEY, selectedTier)
   const chainLimits = getLimits(ROLE_KEY, selectedTier)
+
+  /*
+   * ── Issue #1368 — WHAT SHAPE will the vault proposal be, and why? ───────────────────────────
+   *
+   * The batched purchase is [approve(exact), purchase] through MultiSendCallOnly, i.e. a
+   * DELEGATECALL. Both policy guards deny operation != 0 once a vault has an active policy
+   * (`SafePolicyGuardV2._preCheck`), so on a policy-guarded vault that proposal is approved by the
+   * signers and then reverts — no funds lost, but a dishonest screen, on exactly the vaults that
+   * followed our own starter-policy guidance.
+   *
+   * Three shapes, resolved ONCE (the same answer the propose closure uses, so the screen cannot
+   * describe something other than what is created):
+   *
+   *   'single' — the vault's live allowance already covers the price, so there is one leg. The
+   *              submit seam emits a one-leg batch as a plain CALL, which every guard evaluates
+   *              normally. Nothing to split.
+   *   'batch'  — the guard allows delegatecall (no policy, or no guard). Unchanged behaviour.
+   *   'split'  — the guard denies it, or could not be read. TWO proposals at CONSECUTIVE nonces:
+   *              approve at N, purchase at N+1.
+   *
+   * Why split rather than refuse the purchase outright: the approve is for the EXACT quoted price
+   * to one FairWins contract, and consecutive nonces mean the purchase cannot execute before the
+   * approve and nothing else can take the slot between them — so the exposure is bounded to the
+   * membership price, for as long as the queue takes. Refusing instead would tell members who
+   * followed our own hardening guidance that they must LOOSEN their policy to buy a membership,
+   * which is a worse outcome than a bounded, disclosed, exact-amount allowance. The residual case
+   * — a purchase leg never executed, leaving a standing exact-price allowance — is stated on the
+   * confirm screen, and the vault can cancel or revoke it from its own queue.
+   */
+  const [resolvedVaultShape, setResolvedVaultShape] = useState(null) // null | {shape, batchSupport, legs}
+  const vaultShapeRef = useRef({ key: null, promise: null })
+
+  const resolveVaultShape = useCallback(async (acceptedTermsHash) => {
+    const tierValue = selectedTierInfo?.id
+    const key = `${actingAddress}:${purchaseChainId}:${tierValue}:${effectiveAction}`
+    if (vaultShapeRef.current.key !== key) {
+      vaultShapeRef.current = {
+        key,
+        promise: (async () => {
+          const readProvider = getReadProvider(purchaseChainId)
+          const { calls } = await buildMembershipPurchaseCalls(
+            readProvider, actingAddress, ROLE_KEY, tierValue, effectiveAction, acceptedTermsHash,
+          )
+          // FR-015: the approve leg is omitted when the VAULT's live allowance already covers the
+          // quoted price — read for the vault's address, never signer-implicit.
+          const needsApprove = await checkApprovalNeededForAddress(
+            actingAddress, ROLE_KEY, selectedPrice, tierValue, effectiveAction,
+            { provider: readProvider, chainId: purchaseChainId },
+          )
+          const legs = (needsApprove ? calls : calls.slice(1))
+            .map((c) => ({ to: c.target, value: c.value ?? 0n, data: c.data }))
+          if (legs.length < 2) return { shape: 'single', batchSupport: null, legs }
+          const probe = await previewBatchSupport(actingAddress, purchaseChainId)
+          return {
+            shape: mustSplitBatch(probe.support) ? 'split' : 'batch',
+            batchSupport: probe.support,
+            legs,
+          }
+        })(),
+      }
+    }
+    return vaultShapeRef.current.promise
+  }, [actingAddress, purchaseChainId, selectedTierInfo?.id, effectiveAction, selectedPrice])
+
+  // Resolve it for DISPLAY as soon as the vault rail is the one in play, so the shape is on the
+  // confirm screen before the member signs rather than discovered afterwards.
+  const onVaultRail = purchaseRail.rail === 'vault'
+  useEffect(() => {
+    if (!onVaultRail || !actingAddress || !selectedTierInfo?.id) return undefined
+    let on = true
+    const termsHash = getCurrentDocument('terms')?.hash || null
+    resolveVaultShape(termsHash)
+      .then((res) => { if (on) setResolvedVaultShape(res) })
+      .catch(() => { /* the shape stays unstated rather than guessed */ })
+    return () => { on = false }
+  }, [onVaultRail, actingAddress, selectedTierInfo?.id, resolveVaultShape])
+  // Read only on the rail it describes: a shape resolved for a vault the member has since switched
+  // away from must never describe a different account's proposal.
+  const vaultShape = onVaultRail ? resolvedVaultShape : null
 
   const validateStep = useCallback((step) => {
     const next = {}
@@ -267,6 +468,13 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
       )
       return
     }
+    // FR-003: the acting account must be able to be `msg.sender` on the membership chain. When it
+    // cannot, refuse here — before anything is signed, sent or proposed — with the reason, rather
+    // than substituting the connected wallet (the exact bug class spec 088 FR-002 eliminated).
+    if (!purchaseRail.eligible) {
+      showNotification(purchaseRail.reason, 'error')
+      return
+    }
     // FR-006/FR-007: not "a supported network" — THE reference chain, named. Declining the
     // switch must leave no purchase attempted anywhere, which is why this returns rather than
     // falling through to a best-effort send on whatever chain the wallet is on.
@@ -285,14 +493,33 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
 
     const tierValue = selectedTierInfo.id
     const tierName = selectedTierInfo.name
-    const isPasskey = loginMethod === 'passkey'
+    const rail = purchaseRail.rail
     showNotification(
-      isPasskey
+      rail === 'passkey'
         ? `Confirm with your passkey to complete your ${tierName} membership (${selectedPrice} USDC)`
-        : `Confirm the wallet prompts to complete your ${tierName} membership (${selectedPrice} USDC)`,
+        : rail === 'vault'
+          ? `Confirm the wallet prompts to propose your ${tierName} membership (${selectedPrice} USDC) to ${actingAccountName}`
+          : rail === 'acting-signer'
+            ? `Unlock ${actingAccountName} when prompted to complete its ${tierName} membership (${selectedPrice} USDC)`
+            : `Confirm the wallet prompts to complete your ${tierName} membership (${selectedPrice} USDC)`,
       'info',
       10000,
     )
+
+    /*
+     * FR-013 — bind the identity HERE, at confirm, not at render. Everything the flow does from
+     * this point resolves against this binding; if the acting selection (or the connected wallet)
+     * changes while the run is in flight, the effect below invalidates it rather than letting a
+     * later step re-resolve to whoever is selected by then.
+     */
+    const acting = isActingAccount
+      ? { kind: actingType, address: actingAddress, chainId: actingChainId ?? null, label: actingLabel || null }
+      : undefined
+    boundIdentityRef.current = {
+      address: (membershipAddress || '').toLowerCase(),
+      connectedAddress: (account || '').toLowerCase(),
+      name: creditedName,
+    }
 
     // Switch to the dedicated Processing view (spec 022) — the step indicator
     // surfaces each wallet interaction in turn.
@@ -302,22 +529,123 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
       const acceptedTermsHash = getCurrentDocument('terms')?.hash || null
 
       // Membership is active the moment payment confirms — run side effects then,
-      // before the (non-blocking) key steps.
+      // before the (non-blocking) key steps. The purchaser is `membershipAddress`, which is the
+      // ACTING account on an acting rail: the connected member's own role cache must not be
+      // granted a membership somebody else now holds.
       const onPaid = async (receipt) => {
-        grantRole(ROLE_KEY)
-        recordRolePurchase(account, ROLE_KEY, {
+        if (!isActingAccount) {
+          grantRole(ROLE_KEY)
+          try { await loadRoles() } catch (e) { console.warn('refresh roles failed:', e) }
+        }
+        recordRolePurchase(membershipAddress, ROLE_KEY, {
           price: selectedPrice,
           currency: 'USDC',
           tier: selectedTier,
           tierValue,
           txHash: receipt?.hash,
-          purchasedBy: account,
+          purchasedBy: membershipAddress,
         }, chainId)
-        try { await loadRoles() } catch (e) { console.warn('refresh roles failed:', e) }
-        showNotification(`${tierName} membership activated.`, 'success', 7000)
+        showNotification(
+          isActingAccount
+            ? `${tierName} membership activated for ${actingAccountName}.`
+            : `${tierName} membership activated.`,
+          'success', 7000,
+        )
       }
 
-      if (isPasskey) {
+      if (rail === 'vault') {
+        /*
+         * ── VAULT RAIL (FR-005) ──────────────────────────────────────────────────────────────
+         * A Safe has no key, so the purchase becomes ONE threshold-gated proposal whose batch is
+         * [approve(price)?, purchase] via MultiSendCallOnly. On execution `msg.sender` is the
+         * vault, so the membership is credited to it and paid from its USDC.
+         *
+         * approve and purchase are ONE proposal on purpose: split across two, the gap between
+         * them is a live allowance to `membershipManager` controlled by a shared queue. Because
+         * MultiSend reverts atomically, a price rise before execution reverts the purchase leg AND
+         * the approve — leaving no orphaned allowance.
+         */
+        const proposePurchase = async () => {
+          // The SAME resolution the confirm screen read, so what is created is what was disclosed.
+          const { shape, legs } = await resolveVaultShape(acceptedTermsHash)
+          if (shape !== 'split') return { ...(await submitAsActive({ batch: legs })), shape }
+
+          /*
+           * Issue #1368 — the guard denies delegatecall (or could not be read), so the MultiSend
+           * would be approved and then revert. Two proposals instead, at CONSECUTIVE nonces:
+           * the purchase sits at N+1 and therefore cannot execute before the approve at N, and no
+           * other queued vault transaction can occupy the slot between them. The approve is for
+           * the EXACT price, so the window between executions authorises nothing beyond it.
+           */
+          const first = await submitAsActive(legs[0])
+          const second = await submitAsActive(
+            first?.nonce != null ? { ...legs[1], nonce: Number(first.nonce) + 1 } : legs[1],
+          )
+          return { ...second, shape: 'split', proposals: [first, second] }
+        }
+
+        await flow.start({
+          signer: null,
+          account: actingAddress,
+          acting,
+          chainId: purchaseChainId,
+          roleName: ROLE_KEY,
+          priceUSD: selectedPrice,
+          tier: tierValue,
+          action: effectiveAction,
+          termsHash: acceptedTermsHash,
+          proposePurchase,
+          // #1368 — the propose step must describe the shape it is actually creating.
+          proposalShape: vaultShape?.shape ?? null,
+        })
+        return
+      }
+
+      if (rail === 'acting-signer') {
+        /*
+         * ── CLASSIC ACTING RAIL (FR-004) ─────────────────────────────────────────────────────
+         * A recovered or hardware account signs for itself. The ceremony (unlock passphrase /
+         * connect device) runs at CONFIRM time through the spec-088 broker — never at modal-open
+         * or account-switch time — and one ceremony serves the whole flow.
+         */
+        const getActingSigner = async () => {
+          if (typeof resolveActingSigner !== 'function') {
+            throw new Error('No signing ceremony is available for this account, so nothing has been signed.')
+          }
+          return resolveActingSigner()
+        }
+
+        /*
+         * FR-012 — the key steps follow the PURCHASER. `useEncryption.ensureInitialized` derives
+         * (and caches) keys for the CONNECTED account; using it here would publish the operator's
+         * key against the acting address. Derive from the acting signer instead, and keep it out
+         * of the connected member's key state entirely.
+         */
+        const ensureInitializedAsActing = async (actingSigner) => {
+          if (!actingSigner) throw new Error('No signer for the acting account')
+          const { deriveKeyPair } = await import('../../utils/crypto/envelopeEncryption.js')
+          const derived = await deriveKeyPair(actingSigner)
+          return { publicKey: derived.publicKey }
+        }
+
+        await flow.start({
+          signer: null,
+          account: actingAddress,
+          acting,
+          chainId: purchaseChainId,
+          roleName: ROLE_KEY,
+          priceUSD: selectedPrice,
+          tier: tierValue,
+          action: effectiveAction,
+          termsHash: acceptedTermsHash,
+          getActingSigner,
+          ensureInitialized: ensureInitializedAsActing,
+          onPaid,
+        })
+        return
+      }
+
+      if (rail === 'passkey') {
         // Passkey smart account (spec 041, FR-016): approve + purchase are batched into
         // ONE WebAuthn ceremony via the ERC-4337 bundler/relayer (WalletContext.sendCalls) —
         // no browser-wallet prompt and no separate on-chain approval. Reads use the session's
@@ -393,9 +721,41 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
     }
   }
 
-  // React to the flow reaching a terminal success (all steps done, or the member
-  // chose "Continue anyway" past a non-blocking key step).
+  /*
+   * FR-013 — the acting selection (or the connected wallet) changed while a run was in flight.
+   * The run is bound to the identity captured at confirm; it cannot be re-pointed at a new one, so
+   * fail it and name the account it was bound to. A payment that already confirmed stays honestly
+   * attributed to that address — the flow keeps its receipt.
+   */
   useEffect(() => {
+    const bound = boundIdentityRef.current
+    if (!bound || flow.status !== 'running') return
+    const nowActing = (membershipAddress || '').toLowerCase()
+    const nowConnected = (account || '').toLowerCase()
+    if (nowActing === bound.address && nowConnected === bound.connectedAddress) return
+    boundIdentityRef.current = null
+    flow.invalidateIdentity?.(
+      `This purchase was bound to ${bound.name}, and the account changed while it was in flight. ` +
+      'Nothing further will be signed, and no step will run under a different account.',
+    )
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [membershipAddress, account, flow.status])
+
+  // React to the flow reaching a terminal state: success (all steps done, or the member chose
+  // "Continue anyway" past a non-blocking key step), or — on the vault rail — PROPOSED, which is
+  // deliberately not success: nothing is paid and no membership is active until the vault executes.
+  useEffect(() => {
+    if (flow.status === 'proposed') {
+      setPurchaseResult({
+        proposed: true,
+        tier: selectedTierInfo?.name,
+        safeTxHash: flow.purchaseReceipt?.safeTxHash || null,
+      })
+      setKeyRegStatus(null)
+      setShowProcessing(false)
+      setCurrentStep(2)
+      return
+    }
     if (flow.status !== 'succeeded') return
     setPurchaseResult({ success: true, tier: selectedTierInfo?.name, txHash: flow.purchaseReceipt?.hash })
     setKeyRegStatus(flow.keyRegOutcome) // 'success' | 'skipped' | 'failed'
@@ -416,6 +776,7 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
     setShowProcessing(false)
     setKeyRegStatus(null)
     setKeyRegError(null)
+    boundIdentityRef.current = null
     flow.reset()
   }, [flow])
 
@@ -425,6 +786,19 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
       onClose?.()
     }
   }, [isBusy, resetForm, onClose])
+
+  /*
+   * FR-021 moment 3 of 3 — MEMBERSHIP PURCHASE (spec 041 US5, issue #1405): the warning's
+   * "Add a backup now" lands on the controllers card. It CLOSES the modal on the way out, the
+   * same as goToVouchers: this dialog is portalled, so navigating from underneath it would leave
+   * a purchase flow floating over the Recovery tab.
+   */
+  const goToControllers = useCallback(() => {
+    if (isBusy) return
+    resetForm()
+    onClose?.()
+    navigate('/wallet?tab=security#controllers')
+  }, [isBusy, resetForm, onClose, navigate])
 
   // Leave the purchase modal and open the dedicated voucher view (buy or redeem).
   const goToVouchers = useCallback((hash = '') => {
@@ -451,7 +825,7 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
               {isUpgradeFlow
                 ? 'Upgrade Membership'
                 : isExtendFlow
-                  ? 'Extend Membership'
+                  ? (isExpiredRenewal ? 'Renew Membership' : 'Extend Membership')
                   : isManageFlow
                     ? 'Renew or Upgrade Membership'
                     : 'Get Wager Access'}
@@ -460,7 +834,9 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
               {isUpgradeFlow
                 ? 'Move to a higher tier for more monthly and concurrent wagers.'
                 : isExtendFlow
-                  ? 'Add another 30 days at your current tier.'
+                  ? (isExpiredRenewal
+                      ? 'Your membership has expired — choose a tier to renew for another 30 days.'
+                      : 'Add another 30 days at your current tier.')
                   : isManageFlow
                     ? 'Add another 30 days at your current tier, or move up to a higher one.'
                     : 'Purchase the Wager Participant role to create and accept peer-to-peer wagers.'}
@@ -564,6 +940,22 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
                   </div>
                 )}
 
+                {/* Expired renewal: the active tier reads 0, so no "Current Membership" card can
+                    render — without this the member saw four unexplained tier cards under a
+                    "Renew" title. Say what happened and what picking a tier does. */}
+                {isExpiredRenewal && (
+                  <div className="ppm-info-card ppm-renewal-info" role="status">
+                    <span className="ppm-info-icon" aria-hidden="true">ℹ️</span>
+                    <div>
+                      <strong>Your membership has expired</strong>
+                      <p>
+                        Choose any tier to renew — your previous tier or a different one. The new
+                        30 days start when the purchase confirms.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
                 {!isLoadingTier && userCurrentTier > 0 && (
                   <div className="ppm-info-card ppm-current-tier-info">
                     <span className="ppm-info-icon" aria-hidden="true">ℹ️</span>
@@ -589,6 +981,21 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
                     <div className="ppm-warning-content">
                       <strong>Maximum Tier Reached</strong>
                       <p>You're already on Platinum — the highest tier. There's nothing to upgrade to.</p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Every tier the contract has switched off — an empty grid is a real state
+                    (nothing is on sale), and it must say so rather than render blank. */}
+                {!isLoadingTier && tierReadable && availableTiers.length === 0 && userCurrentTier < 4 && (
+                  <div className="ppm-warning-card" role="status">
+                    <span className="ppm-warning-icon" aria-hidden="true">🔒</span>
+                    <div className="ppm-warning-content">
+                      <strong>No memberships are on sale right now</strong>
+                      <p>
+                        Every tier is currently switched off in the membership contract. Nothing was
+                        charged. Please check back later.
+                      </p>
                     </div>
                   </div>
                 )}
@@ -675,13 +1082,23 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
                   <span aria-hidden="true">📋</span> Review Your Purchase
                 </h3>
 
+                {/* FR-021 moment 3 of 3 — before the member commits money to an account that one
+                    lost device would take with it. It warns, it never gates: the purchase button
+                    below is untouched, and a member who reads this and continues, continues. */}
+                <DeviceLossWarning moment="membership-purchase" onAddController={goToControllers} />
+
                 <div className="ppm-review-card">
                   <h4>Order Summary</h4>
+                  {/* FR-001/FR-010: the recipient IS the acting account on an acting rail — the
+                      membership is credited to whoever signs, and spec 098 makes that the account
+                      named here rather than the connected wallet. */}
                   <div className="ppm-review-recipient">
                     <span className="ppm-review-label">Recipient</span>
                     <span className="ppm-review-value">
-                      <span className="ppm-recipient-badge">You</span>
-                      <code>{account?.slice(0, 6)}...{account?.slice(-4)}</code>
+                      <span className="ppm-recipient-badge">
+                        {isActingAccount ? actingAccountName : 'You'}
+                      </span>
+                      <code>{membershipAddress?.slice(0, 6)}...{membershipAddress?.slice(-4)}</code>
                     </span>
                   </div>
                   <div className="ppm-review-tier">
@@ -754,13 +1171,68 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
                   </div>
                 </div>
 
-                {/* FR-007: the settlement network is disclosed BEFORE signature, always —
-                    not only when it is wrong. A member should not have to infer where their
-                    money is going from the absence of a warning. */}
-                <p className="ppm-settlement-note" role="note">
-                  Memberships are held on <strong>{purchaseNetworkName}</strong>, so this purchase
-                  settles there and is recognised from every network afterwards.
-                </p>
+                {/* Spec 071 FR-007 + spec 098 FR-010: ONE pre-signature disclosure — which
+                    account is credited, which account pays, which network it settles on, and (on
+                    the vault rail) that the outcome is a proposal, not an active membership. It is
+                    unconditional: a member should not have to infer any of it from the absence of
+                    a warning. */}
+                <div className="ppm-settlement-note" role="note">
+                  <p>
+                    This membership is credited to <strong>{creditedName}</strong>
+                    {isActingAccount && membershipAddress
+                      ? <> (<code>{membershipAddress.slice(0, 6)}...{membershipAddress.slice(-4)}</code>)</>
+                      : null}
+                    , and the price is paid from {payerDescription}.
+                  </p>
+                  <p>
+                    Memberships are held on <strong>{purchaseNetworkName}</strong>, so this purchase
+                    settles there and is recognised from every network afterwards.
+                  </p>
+                  {purchaseRail.rail === 'vault' && (
+                    <p>
+                      Confirming creates a <strong>proposal</strong> in the vault&rsquo;s queue. The
+                      membership activates when the vault&rsquo;s threshold approves and executes
+                      it — not when you confirm here.
+                    </p>
+                  )}
+                  {/* Issue #1368 — WHICH SHAPE, and why. A vault whose policy guard denies
+                      delegatecall cannot execute a batched proposal at all, so the approval and
+                      the purchase are proposed separately. The member reads that here, before
+                      signing, rather than discovering it when the batch reverts. */}
+                  {purchaseRail.rail === 'vault' && vaultShape?.shape === 'split' && (
+                    <p>
+                      This will be <strong>two separate proposals</strong> — the USDC approval, then
+                      the purchase — because{' '}
+                      {vaultShape.batchSupport === 'batch-denied'
+                        ? "this vault's policy does not allow batched transactions"
+                        : "we could not confirm this vault's policy allows a batched transaction"}
+                      . They are queued <strong>in order</strong>, so the purchase cannot execute
+                      before the approval. The approval is for the <strong>exact</strong> price
+                      ({selectedPrice} USDC) and nothing more; if the purchase is never executed,
+                      that approval stays in place until the vault cancels or revokes it.
+                    </p>
+                  )}
+                  {purchaseRail.rail === 'vault' && vaultShape?.shape && vaultShape.shape !== 'split' && (
+                    <p>
+                      This will be <strong>one proposal</strong>
+                      {vaultShape.shape === 'batch'
+                        ? ' carrying the USDC approval and the purchase together.'
+                        : " — the vault's USDC approval already covers this price, so only the purchase is proposed."}
+                    </p>
+                  )}
+                </div>
+
+                {/* FR-003/US4: refusal names the account AND the specific reason, so the member
+                    knows whether switching accounts, switching chains, or nothing would help. */}
+                {!purchaseRail.eligible && (
+                  <div className="ppm-network-warning">
+                    <span aria-hidden="true">⚠️</span>
+                    <div>
+                      <strong>This account cannot hold a membership bought here</strong>
+                      <p>{purchaseRail.reason}</p>
+                    </div>
+                  </div>
+                )}
 
                 {isConnected && !onPurchaseChain && (
                   <div className="ppm-network-warning">
@@ -799,15 +1271,22 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
             <div className="ppm-panel" role="tabpanel">
               <section className="ppm-section ppm-complete-section">
                 <div className="ppm-success-icon" aria-hidden="true">
-                  {purchaseResult?.success ? '🎉' : '⚠️'}
+                  {purchaseResult?.proposed ? '🗳️' : purchaseResult?.success ? '🎉' : '⚠️'}
                 </div>
                 <h3 className="ppm-complete-title">
-                  {purchaseResult?.success ? 'Purchase Complete!' : 'Purchase Failed'}
+                  {purchaseResult?.proposed
+                    ? 'Proposed to your vault'
+                    : purchaseResult?.success ? 'Purchase Complete!' : 'Purchase Failed'}
                 </h3>
+                {/* FR-005/FR-014: `proposed` is NOT `paid`. Nothing has been charged and no
+                    membership is active until the vault's threshold executes the proposal, which
+                    lives in the vault queue whether or not this modal stays open. */}
                 <p className="ppm-complete-desc">
-                  {purchaseResult?.success
-                    ? <>Your <strong style={{ color: selectedTierInfo?.color }}>{selectedTierInfo?.name}</strong> Wager Participant membership is active for 30 days.</>
-                    : purchaseResult?.error}
+                  {purchaseResult?.proposed
+                    ? <>The <strong style={{ color: selectedTierInfo?.color }}>{selectedTierInfo?.name}</strong> membership for {actingAccountName} is waiting in the vault&rsquo;s queue. Nothing has been charged yet — it activates when the vault&rsquo;s threshold approves and executes the proposal. Closing this window changes nothing.</>
+                    : purchaseResult?.success
+                      ? <>Your <strong style={{ color: selectedTierInfo?.color }}>{selectedTierInfo?.name}</strong> Wager Participant membership is active for 30 days.</>
+                      : purchaseResult?.error}
                 </p>
                 {purchaseResult?.txHash && (
                   <a
@@ -892,7 +1371,7 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
                 type="button"
                 className="ppm-btn-primary ppm-btn-purchase"
                 onClick={handlePurchase}
-                disabled={isBusy || !isConnected || !onPurchaseChain || !tierReadable || !acknowledged}
+                disabled={isBusy || !isConnected || !onPurchaseChain || !tierReadable || !acknowledged || !purchaseRail.eligible}
               >
                 Confirm Purchase (${selectedPrice.toFixed(2)} USDC)
               </button>

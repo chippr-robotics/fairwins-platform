@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
 import { useWallet } from '../hooks/useWalletManagement'
 import { useVouchers } from '../hooks/useVouchers'
 import { useTierPrices } from '../hooks/useTierPrices'
 import { TIER_NAMES, TIER_COLORS } from '../hooks/useRoleDetails'
 import { MEMBERSHIP_VOUCHERS_TERMS_PATH } from '../constants/legalLinks'
+import { getCurrentDocument } from '../utils/legalDocs'
 import Button from '../components/ui/Button'
 import AddressInput from '../components/ui/AddressInput'
 import AddressBookButton from '../components/ui/AddressBookButton'
@@ -25,7 +26,7 @@ const MAX_QUANTITY = 50
  */
 export default function VouchersPage() {
   const { account, isConnected, openConnectModal } = useWallet()
-  const { getPrice, ROLE_HASHES, TIER_IDS, usingFallbackPrices } = useTierPrices()
+  const { getPrice, ROLE_HASHES, TIER_IDS, usingFallbackPrices, isTierActive } = useTierPrices()
   const {
     status, error, lastTxHash, voucherAvailable, batchMintAvailable,
     mintVouchers, redeemVoucher, transferVoucher, listMyVouchers,
@@ -93,6 +94,36 @@ export default function VouchersPage() {
     refreshVouchers()
   }, [refreshVouchers])
 
+  // Arriving at #vch-transfer (the portfolio asset sheet's Send / Gift deep link) means the
+  // member came to SEND: preselect the first held voucher so they land on a usable form, not a
+  // disabled Transfer button. Only fills an EMPTY selection — it never overrides a choice, and a
+  // plain visit (no hash) keeps selection an explicit act.
+  useEffect(() => {
+    if (hash !== '#vch-transfer') return
+    if (myVouchers.length === 0) return
+    setSelectedVoucherId((cur) => (cur ? cur : myVouchers[0].tokenId))
+  }, [hash, myVouchers])
+
+  /*
+   * Minting a voucher runs the SAME tier check the purchase does — `MembershipVoucher.mint`
+   * reads the tier config and reverts `TierInactive()` for `active == false`, after the buyer's
+   * USDC approval. So a tier the contract has switched off is not offered here either. Only a
+   * DEFINITE false is hidden; an unread tier stays listed (an RPC blip must not empty the list)
+   * and the estimate warning below already covers that case.
+   */
+  const activeTiers = useMemo(
+    () => TIER_ORDER.filter((tierKey) => isTierActive('WAGER_PARTICIPANT', tierKey) !== false),
+    [isTierActive],
+  )
+
+  // The default selection is BRONZE — the very tier production had inactive. Never leave a
+  // hidden tier selected: it would price and submit a mint the contract refuses.
+  useEffect(() => {
+    if (activeTiers.length === 0) return
+    if (activeTiers.includes(selectedTier)) return
+    setSelectedTier(activeTiers[0])
+  }, [activeTiers, selectedTier])
+
   // Disconnected members stay HERE rather than being bounced to the landing
   // page: the app's unlock dialog is already opening over this route, and
   // connecting drops them straight into the vouchers they came for.
@@ -110,18 +141,23 @@ export default function VouchersPage() {
 
   // Resolve the gift recipient: prefer the ENS-resolved address, else accept a
   // directly-typed hex address. Empty when neither is valid yet.
-  const giftAddr = recipientResolved || (ethers.isAddress(recipient.trim()) ? recipient.trim() : '')
+  const giftAddr = recipientResolved || (isAddress(recipient.trim()) ? recipient.trim() : '')
   const giftMode = recipient.trim().length > 0
-  const recipientValid = !giftMode || ethers.isAddress(giftAddr)
+  const recipientValid = !giftMode || isAddress(giftAddr)
 
   // Transfer recipient (same ENS-or-hex resolution as the gift field).
-  const transferAddr = transferToResolved || (ethers.isAddress(transferTo.trim()) ? transferTo.trim() : '')
+  const transferAddr = transferToResolved || (isAddress(transferTo.trim()) ? transferTo.trim() : '')
   const transferEntered = transferTo.trim().length > 0
-  const transferValid = ethers.isAddress(transferAddr) && transferAddr.toLowerCase() !== (account || '').toLowerCase()
+  const transferValid = isAddress(transferAddr) && transferAddr.toLowerCase() !== (account || '').toLowerCase()
 
   const qtyNum = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)))
   const unitPrice = getPrice('WAGER_PARTICIPANT', selectedTier)
   const totalPrice = unitPrice * qtyNum
+  // Every tier switched off on-chain: there is nothing to sell, so the buy control must be
+  // withheld too. Hiding the tier radios alone left `selectedTier` at its BRONZE default with the
+  // Buy button still live — which would mint the very inactive tier this change exists to avoid.
+  const nothingOnSale = activeTiers.length === 0
+
   // Multiple or gifting needs the batch helper; a single self-purchase does not.
   const needsHelper = qtyNum > 1 || giftMode
   const buyBlocked = needsHelper && !batchMintAvailable
@@ -148,6 +184,8 @@ export default function VouchersPage() {
 
   async function onBuy() {
     setMinted(null)
+    // Defense in depth behind the disabled button: never submit a tier that is not on offer.
+    if (nothingOnSale) return
     try {
       // Pass the resolved 0x address (ENS-resolved or directly typed) so the hook's
       // address check passes for gifts entered as an ENS name.
@@ -178,9 +216,14 @@ export default function VouchersPage() {
     setRedeemed(false)
     if (!selectedVoucherId) return
     try {
-      // NOTE: pass the in-force Terms version hash here once wired (spec 007); the contract records whatever
-      // hash is supplied for the redeemer. The checkbox captures explicit consent in the UI.
-      await redeemVoucher(selectedVoucherId, undefined)
+      // Spec 026 FR-013/SC-005: record the redeemer's Terms acceptance on-chain, the same way the
+      // purchase rail does (PremiumPurchaseModal.jsx) — the in-force Terms hash, resolved from the
+      // SAME source (getCurrentDocument('terms')), so redemption and purchase record the identical
+      // accepted-terms artifact. The checkboxes above (MembershipAttestation) already gate this
+      // button on explicit consent; this just plumbs that consent into the recorded hash instead of
+      // discarding it.
+      const acceptedTermsHash = getCurrentDocument('terms')?.hash || null
+      await redeemVoucher(selectedVoucherId, acceptedTermsHash)
       setRedeemed(true)
       refreshVouchers()
     } catch {
@@ -222,9 +265,15 @@ export default function VouchersPage() {
 
       <section className="vch-card" aria-labelledby="vch-buy-h">
         <h2 id="vch-buy-h">Buy a voucher</h2>
+        {activeTiers.length === 0 && (
+          <p className="vch-warn" role="status">
+            No voucher tiers are on sale right now — every tier is switched off in the membership
+            contract. Nothing was charged.
+          </p>
+        )}
         <fieldset className="vch-tiers" disabled={!voucherAvailable || busy}>
           <legend>Choose a tier</legend>
-          {TIER_ORDER.map((tierKey) => {
+          {activeTiers.map((tierKey) => {
             const id = TIER_IDS[tierKey]
             const price = getPrice('WAGER_PARTICIPANT', tierKey)
             return (
@@ -321,11 +370,16 @@ export default function VouchersPage() {
           variant="primary"
           onClick={onBuy}
           loading={status === 'minting'}
-          disabled={!voucherAvailable || busy || buyBlocked || !recipientValid}
+          disabled={!voucherAvailable || busy || buyBlocked || !recipientValid || nothingOnSale}
         >
-          {giftMode
-            ? `Gift ${qtyNum} ${TIER_NAMES[TIER_IDS[selectedTier]]} voucher${qtyNum > 1 ? 's' : ''} ($${totalPrice} USDC)`
-            : `Buy ${qtyNum} ${TIER_NAMES[TIER_IDS[selectedTier]]} voucher${qtyNum > 1 ? 's' : ''} ($${totalPrice} USDC)`}
+          {/* With nothing on sale the label must not quote a tier and price that are not being
+              offered — `selectedTier` is still its default, and naming it would advertise a
+              purchase the contract refuses. */}
+          {nothingOnSale
+            ? 'No tiers available'
+            : giftMode
+              ? `Gift ${qtyNum} ${TIER_NAMES[TIER_IDS[selectedTier]]} voucher${qtyNum > 1 ? 's' : ''} ($${totalPrice} USDC)`
+              : `Buy ${qtyNum} ${TIER_NAMES[TIER_IDS[selectedTier]]} voucher${qtyNum > 1 ? 's' : ''} ($${totalPrice} USDC)`}
         </Button>
         {minted && (
           <p className="vch-success" role="status">
@@ -400,7 +454,10 @@ export default function VouchersPage() {
             No membership is granted by transferring — the recipient redeems it
             themselves. Same address entry / address book / QR as the gift field. */}
         {myVouchers.length > 0 && (
-          <div className="vch-transfer">
+          /* `id` is a deep-link anchor: the portfolio's FWMV asset sheet sends its Send / Gift
+             action to `/vouchers#vch-transfer` (release 1.14.0 task 9), and the page's hash
+             effect scrolls whatever element carries the hash's id into view. */
+          <div className="vch-transfer" id="vch-transfer">
             <span className="vch-subhead">Transfer this voucher to someone else</span>
             <p className="vch-help">
               Send the selected voucher to another wallet — they can redeem it for their own membership.

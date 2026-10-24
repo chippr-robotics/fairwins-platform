@@ -125,10 +125,22 @@ for (const shot of SHOTS) {
       const nav = document.querySelector('#app-nav-drawer .portal-nav')
       if (!strip || !nav) return
       const anchor = nav.querySelector('.portal-nav-group-items')
+      // Built node by node rather than through innerHTML: the initial and the label are
+      // app-supplied text (a mini-app's own name), and interpolating them into markup
+      // reinterprets whatever they contain as HTML.
+      const span = (className, text) => {
+        const el = document.createElement('span')
+        el.className = className
+        if (text !== undefined) el.textContent = text
+        return el
+      }
       for (const tile of strip.querySelectorAll('.pinned-app-tile')) {
         const row = document.createElement('button')
         row.className = 'portal-nav-item'
-        row.innerHTML = `<span class="portal-nav-item-icon"><span class="portal-nav-item-initial">${tile.textContent[0]}</span></span><span class="portal-nav-item-label">${tile.getAttribute('aria-label')}</span>`
+        const icon = span('portal-nav-item-icon')
+        icon.appendChild(span('portal-nav-item-initial', tile.textContent[0]))
+        row.appendChild(icon)
+        row.appendChild(span('portal-nav-item-label', tile.getAttribute('aria-label')))
         anchor?.appendChild(row)
       }
       strip.remove()

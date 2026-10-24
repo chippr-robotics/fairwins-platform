@@ -1,11 +1,11 @@
 import { useMemo } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { getNetwork, getCurrentChainId } from '../config/networks'
 
 /**
  * Hook returning chain-aware token symbols, decimals, and per-chain
  * capabilities. Use this anywhere the UI would otherwise hardcode a token
- * symbol — on Polygon Amoy the native is MATIC and the stable is USDC.
+ * symbol — on the Polygon pair the native is POL and the stable is USDC.
  *
  * Capabilities flow through here so screens can decide whether to gate
  * features (e.g. Polymarket-pegged side bets only render on chains where
@@ -17,7 +17,7 @@ import { getNetwork, getCurrentChainId } from '../config/networks'
  * effects (issue #1027 — the Bridge quote loop).
  */
 export function useChainTokens() {
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
 
   return useMemo(() => {

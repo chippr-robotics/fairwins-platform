@@ -14,7 +14,10 @@
  * VERIFY every address at build time (Lido deployed-contracts page,
  * 0xPolygon/spol-contracts, and the live Polygon staking API).
  */
-import { getAddress, id as keccakId } from 'ethers'
+import { getAddress, keccak256, stringToBytes } from 'viem'
+
+// ethers' `id(text)` — keccak256 over the UTF-8 bytes of the label.
+const keccakId = (text) => keccak256(stringToBytes(text))
 
 // Position refresh cadence — aligned with usePortfolio / useEarnPositions.
 export const STAKING_POLL_MS = 60_000

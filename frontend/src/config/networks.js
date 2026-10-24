@@ -257,8 +257,15 @@ const NETWORKS = {
     isPrimary: false,
     // Surfaced in the My Account → Network tab as a user-switchable network.
     selectable: true,
-    nativeCurrency: { decimals: 18, name: 'MATIC', symbol: 'MATIC' },
-    rpcUrl: import.meta.env?.VITE_RPC_URL_AMOY || 'https://rpc-amoy.polygon.technology',
+    // POL since Polygon's MATIC → POL migration (the testnet gas token followed
+    // mainnet's rebrand). Same coin, same decimals — only the ticker moved.
+    nativeCurrency: { decimals: 18, name: 'POL', symbol: 'POL' },
+    // publicnode, not Polygon's own `rpc-amoy.polygon.technology`: the official endpoint
+    // stopped answering browser reads for the testnet staging build (issue #1458 QA round —
+    // every Amoy screening source came back unreadable while the same calls succeed here),
+    // and it is the odd one out anyway, since Polygon mainnet, Sepolia and Hoodi all default
+    // to publicnode already. A member can still point `network_endpoints` anywhere (spec 069).
+    rpcUrl: import.meta.env?.VITE_RPC_URL_AMOY || 'https://polygon-amoy-bor-rpc.publicnode.com',
     explorer: { name: 'Polygonscan', baseUrl: 'https://amoy.polygonscan.com' },
     // The Graph endpoint that indexes this chain's WagerRegistry. When present,
     // the wager list/reports read from the subgraph; when null (see Mordor),
@@ -466,13 +473,23 @@ const NETWORKS = {
     // Surfaced in the My Account → Network tab as a user-switchable network.
     selectable: true,
     nativeCurrency: { decimals: 18, name: 'Ethereum Classic', symbol: 'ETC' },
-    rpcUrl: import.meta.env?.VITE_RPC_URL_ETC || 'https://etc.rivet.link',
-    // Build-level last resort when the primary default above is unreachable and the member
-    // hasn't configured their own endpoint (spec 069) — without this, a member on default
-    // settings has zero redundancy on a community-run RPC. Verified independently to answer
-    // eth_chainId with a correct `access-control-allow-origin` header on both the preflight
-    // and the real request. Override via VITE_RPC_URL_ETC_FAILOVER.
-    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_ETC_FAILOVER || 'https://etc.etcdesktop.com',
+    // `etc.rivet.link` was the default here until it stopped resolving entirely
+    // (NXDOMAIN — the host is gone, not down), which cost every ETC read a failed DNS
+    // lookup before the failover leg could answer. etcdesktop was already the verified
+    // failover and is promoted in its place: it answers eth_chainId with `0x3d` and a
+    // correct `access-control-allow-origin` on both the preflight and the real request.
+    rpcUrl: import.meta.env?.VITE_RPC_URL_ETC || 'https://etc.etcdesktop.com',
+    // NO BUILD DEFAULT FAILOVER, deliberately — and this is a smaller loss than it looks:
+    // rivet was the only other default, and it was already dead, so ETC has in practice
+    // been running on one endpoint for as long as that host has been gone. Shipping a
+    // second URL is only redundancy if it works, and every other public ETC RPC checked
+    // (geth-at.etc-network.info, etccooperative, rivet.cloud) either sends no
+    // `access-control-allow-origin` — unusable from a browser at any price — or was
+    // already rate-limiting. A URL that cannot answer is not a failover; it is a
+    // guaranteed wasted round-trip on the way to the one that can. Ops can point
+    // VITE_RPC_URL_ETC_FAILOVER at a keyed endpoint, and a member can set their own
+    // (spec 069), the moment one is available.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_ETC_FAILOVER || null,
     explorer: { name: 'Blockscout', baseUrl: 'https://etc.blockscout.com' },
     // No hosted Graph indexer supports Ethereum Classic, so wager reads go
     // straight to the WagerRegistry over RPC (RegistrySource). ETC mainnet is
@@ -553,8 +570,18 @@ const NETWORKS = {
     isPrimary: true,
     // Surfaced in the My Account → Network tab as a user-switchable network.
     selectable: true,
-    nativeCurrency: { decimals: 18, name: 'MATIC', symbol: 'MATIC' },
+    // POL since Polygon's MATIC → POL migration. The rebrand renamed the coin,
+    // not any contract: addresses (WPOL wrapper, price feeds) are unchanged.
+    nativeCurrency: { decimals: 18, name: 'POL', symbol: 'POL' },
     rpcUrl: import.meta.env?.VITE_RPC_URL_POLYGON || 'https://polygon-bor-rpc.publicnode.com',
+    // Build-level failover (spec 069 precedent: ETC's rpcFailoverUrl, ~L477). A distinct public
+    // provider so redundancy is real even before ops set VITE_RPC_URL_POLYGON — and critically, once
+    // ops DO point VITE_RPC_URL_POLYGON at a deploy-time-keyed QuickNode endpoint (any `VITE_` var
+    // ships public in the client bundle per spec 097 — never a reason to withhold the failover), a
+    // keyed primary going dark degrades to this route instead of leaving the chain unreadable.
+    // Mirrors the relay-gateway's own Polygon pair (services/relay-gateway/src/config/chains.js:
+    // publicnode primary, drpc.org secondary). Override via VITE_RPC_URL_POLYGON_FAILOVER.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_POLYGON_FAILOVER || 'https://polygon.drpc.org',
     explorer: { name: 'Polygonscan', baseUrl: 'https://polygonscan.com' },
     // The Graph endpoint indexing Polygon. Override with VITE_SUBGRAPH_URL_POLYGON.
     //
@@ -586,7 +613,7 @@ const NETWORKS = {
       swapRouter: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
       quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e',
       positionManager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88',
-      wnative: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WMATIC
+      wnative: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270', // WPOL (the contract formerly branded WMATIC — same address)
     },
     contracts: {},
     polymarket: {
@@ -647,6 +674,9 @@ const NETWORKS = {
     selectable: true,
     nativeCurrency: { decimals: 18, name: 'Ether', symbol: 'ETH' },
     rpcUrl: import.meta.env?.VITE_RPC_URL_ARBITRUM || 'https://arbitrum-one-rpc.publicnode.com',
+    // Build-level failover — see the Polygon entry above for the full rationale. Override via
+    // VITE_RPC_URL_ARBITRUM_FAILOVER.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_ARBITRUM_FAILOVER || 'https://arbitrum.drpc.org',
     explorer: { name: 'Arbiscan', baseUrl: 'https://arbiscan.io' },
     // No FairWins wager subgraph on this network.
     subgraphUrl: null,
@@ -694,6 +724,9 @@ const NETWORKS = {
     selectable: true,
     nativeCurrency: { decimals: 18, name: 'Ether', symbol: 'ETH' },
     rpcUrl: import.meta.env?.VITE_RPC_URL_BASE || 'https://base-rpc.publicnode.com',
+    // Build-level failover — see the Polygon entry above for the full rationale. Override via
+    // VITE_RPC_URL_BASE_FAILOVER.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_BASE_FAILOVER || 'https://base.drpc.org',
     explorer: { name: 'Basescan', baseUrl: 'https://basescan.org' },
     subgraphUrl: null,
     stablecoin: {
@@ -748,6 +781,9 @@ const NETWORKS = {
     selectable: true,
     nativeCurrency: { decimals: 18, name: 'Ether', symbol: 'ETH' },
     rpcUrl: import.meta.env?.VITE_RPC_URL_OPTIMISM || 'https://optimism-rpc.publicnode.com',
+    // Build-level failover — see the Polygon entry above for the full rationale. Override via
+    // VITE_RPC_URL_OPTIMISM_FAILOVER.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_OPTIMISM_FAILOVER || 'https://optimism.drpc.org',
     explorer: { name: 'Etherscan', baseUrl: 'https://optimistic.etherscan.io' },
     subgraphUrl: null,
     stablecoin: {
@@ -801,6 +837,9 @@ const NETWORKS = {
     // enabled on the Ethereum family in this cut — a passkey member transacts via a linked wallet
     // and may still select the network for view-only use (FR-003a).
     rpcUrl: import.meta.env?.VITE_RPC_URL_MAINNET || 'https://ethereum-rpc.publicnode.com',
+    // Build-level failover — see the Polygon entry (networks.js ~L561) for the full rationale.
+    // Override via VITE_RPC_URL_MAINNET_FAILOVER.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_MAINNET_FAILOVER || 'https://eth.drpc.org',
     explorer: { name: 'Etherscan', baseUrl: 'https://etherscan.io' },
     // No wager subgraph for this network. ClearPath reads a DAO's own data subgraph-first (per-DAO,
     // see config/clearpath/daoSubgraphs.js) then falls back to a bounded on-chain scan.

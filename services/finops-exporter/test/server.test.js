@@ -29,7 +29,7 @@ const baseConfig = () =>
 async function appWith(overrides = {}) {
   const stub = async (source) => overrides[source.id] ?? read(10, source.unit ?? 'USD')
   const collectors = Object.fromEntries(
-    ['feeRouter', 'membership', 'referral', 'pools', 'gcpBilling', 'cloudflare', 'quicknode'].map((name) => [name, stub]),
+    ['feeRouter', 'membership', 'referral', 'pools', 'gcpBilling', 'cloudflare', 'quicknode', 'x402'].map((name) => [name, stub]),
   )
   const harness = createApp({
     config: baseConfig(),

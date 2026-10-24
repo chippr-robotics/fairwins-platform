@@ -96,6 +96,23 @@ body:
     validations:
       required: true
 
+  - type: dropdown
+    id: size
+    attributes:
+      label: Size (t-shirt)
+      description: |
+        Rough scale of the FIX, if you can judge it. Triage writes this onto the Effort field,
+        which is what the project board reads. XS/S -> Low · M -> Medium · L/XL -> High.
+      options:
+        - XS — under an hour
+        - S — a few hours, one surface
+        - M — a day or two, or more than one surface
+        - L — multi-day, needs a spec
+        - XL — too big for one issue, split it
+        - "Not sure — please size during triage"
+    validations:
+      required: false
+
   - type: textarea
     id: context
     attributes:

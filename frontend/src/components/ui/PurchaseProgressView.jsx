@@ -16,6 +16,7 @@ const STATE_ICON = {
   active: '●',
   confirming: '●',
   completed: '✓',
+  skipped: '—',
   failed: '✕',
 }
 
@@ -96,6 +97,11 @@ function PurchaseProgressView({
                 )}
                 {step.state === 'failed' && step.failureReason && (
                   <span className="ppm-progress-step-error">{step.failureReason}</span>
+                )}
+                {/* A skipped step is not a failure — say why it was skipped rather than
+                    leaving a dash the member has to interpret (spec 098 FR-012). */}
+                {step.state === 'skipped' && step.failureReason && (
+                  <span className="ppm-progress-step-detail">{step.failureReason}</span>
                 )}
               </span>
             </li>

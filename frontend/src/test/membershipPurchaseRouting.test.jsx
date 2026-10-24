@@ -21,6 +21,19 @@ const m = vi.hoisted(() => ({
   builtCalls: [],
 }))
 
+// The Review step now mounts the FR-021 device-loss warning (issue #1405), which reads the
+// session through usePasskeyAccount → useWallet. These suites are about purchase ROUTING, so the
+// session here is a classic wallet and the warning renders nothing; its own three-moment coverage
+// lives in src/test/passkey/deviceLossWarning.test.jsx.
+vi.mock('../hooks/useWalletManagement', () => ({
+  useWallet: () => ({
+    address: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed',
+    chainId: 137,
+    loginMethod: 'wallet',
+    isConnected: true,
+    provider: null,
+  }),
+}))
 vi.mock('../hooks/useWeb3', () => ({
   useWeb3: () => ({
     account: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed',
@@ -42,11 +55,19 @@ vi.mock('../hooks/useTierPrices', () => ({
     getPrice: () => 2,
     getLimits: () => ({ monthly: 15, concurrent: 5 }),
     usingFallbackPrices: false,
+    isTierActive: () => true,
   }),
 }))
 vi.mock('../hooks/useEncryption', () => ({
   useEncryption: () => ({ ensureInitialized: vi.fn(), isInitialized: true }),
 }))
+// Spec 098: the modal resolves the acting account's write rail through the spec-043/088 seam,
+// which reads the wallet context. These tests mount the modal in isolation (no WalletProvider),
+// so stub the seam in personal mode — every one of these cases acts as the connected wallet.
+vi.mock('../hooks/useActiveAccount', () => {
+  const hook = () => ({ submit: vi.fn(), resolveActingSigner: vi.fn() })
+  return { useActiveAccount: hook, default: hook }
+})
 vi.mock('../utils/blockchainService', async (orig) => {
   const actual = await orig()
   return {

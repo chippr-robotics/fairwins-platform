@@ -384,15 +384,10 @@ describe('Accessibility', () => {
   const KNOWN = [
     // The menu trigger has no accessible name; the name itself is still undecided (#1019).
     { rule: 'button-name', issue: '#1019' },
-    /*
-     * Serious contrast failures on the quick-action group headers and their secondary text, found
-     * by this scan's first CI run (#1247). Suppressed by RULE and by issue rather than left
-     * failing: the fix is a brand-token change with its own guards (specs 090/091 — small text uses
-     * --accent-color, and darkening --brand-primary is the wrong repair), and it does not belong in
-     * the change that added the scanner. Everything else in the ruleset is enforced, and this line
-     * comes off with the fix.
-     */
-    { rule: 'color-contrast', issue: '#1247' },
+    // #1247's color-contrast suppression came off here: the quick-action group headers
+    // and their secondary/tag text now read from --accent-color / --text-secondary
+    // (Dashboard.css), both audited ≥4.5:1 on every background they render over in
+    // both themes (frontend/src/test/brand/tokenContrast.test.js).
   ]
 
   it('[A11Y-12] Dashboard has no serious or critical violations', () => {

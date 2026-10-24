@@ -67,3 +67,16 @@ export function totalGas(userOp) {
 export function estCostWei(userOp) {
   return totalGas(userOp) * BigInt(userOp.maxFeePerGas)
 }
+
+/**
+ * Worst-case prefund the EntryPoint demands of the PAYMASTER for a v0.6 op: with a paymaster
+ * present, `verificationGasLimit` counts THREE times (EntryPoint v0.6 `mul = 3`), so this is
+ * deliberately larger than `estCostWei` — `AA31 paymaster deposit too low` fires against THIS
+ * number, not against `totalGas`. Used by the deposit gate; the configured per-op ceilings keep
+ * their original `estCostWei` semantics.
+ */
+export function requiredPrefundWei(userOp) {
+  const gas =
+    BigInt(userOp.callGasLimit) + BigInt(userOp.verificationGasLimit) * 3n + BigInt(userOp.preVerificationGas)
+  return gas * BigInt(userOp.maxFeePerGas)
+}

@@ -33,7 +33,7 @@ function mockViewport({ mobile }) {
   }))
 }
 
-// The drawer is aria-hidden while closed (off-screen), so open it on mount to
+// The drawer is inert while closed (off-screen), so open it on mount to
 // exercise its contents — mirrors the clover-logo trigger.
 function OpenOnMount() {
   const { open } = useNavDrawer()
@@ -197,7 +197,7 @@ describe('AppNavDrawer (desktop icon gutter)', () => {
     )
 
     const aside = document.getElementById('app-nav-drawer')
-    expect(aside).not.toHaveAttribute('aria-hidden', 'true')
+    expect(aside).not.toHaveAttribute('inert')
     expect(aside.className).toContain('collapsed')
     expect(screen.getByRole('button', { name: 'Expand menu' })).toBeInTheDocument()
     // Entries stay reachable (label visually hidden, not removed) — the
@@ -233,7 +233,9 @@ describe('AppNavDrawer (desktop icon gutter)', () => {
     )
 
     const aside = document.getElementById('app-nav-drawer')
-    expect(aside).toHaveAttribute('aria-hidden', 'true')
+    // `inert` rather than `aria-hidden`: the panel is off-canvas but still in the DOM,
+    // so it must be removed from the tab order too, not merely from the a11y tree.
+    expect(aside).toHaveAttribute('inert')
     expect(aside.className).not.toContain('collapsed')
   })
 })

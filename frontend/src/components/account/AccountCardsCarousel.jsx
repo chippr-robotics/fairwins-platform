@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import AccountCard from './AccountCard'
 import AccountCustomizeSheet from './AccountCustomizeSheet'
+import AccountAddSheet from './AccountAddSheet'
 import SensitiveValue from '../common/SensitiveValue'
 import { useAccountSwitcher, ACCOUNT_KIND_TAG, shortAccountAddr } from '../../hooks/useAccountSwitcher'
 import { NETWORKS } from '../../config/networks'
@@ -52,6 +53,9 @@ function AccountCardsCarousel({ activeTotalUsd = null }) {
   // browsing to a card and dressing it must not require switching to it. The target is captured
   // at open time so scrolling underneath an open sheet cannot retarget it.
   const [customizeTarget, setCustomizeTarget] = useState(null)
+  // Release 1.14.0 — the "+" chooser: the three ways an account joins this list (vault /
+  // hardware / legacy recovery), each a deep link to its existing surface.
+  const [addOpen, setAddOpen] = useState(false)
   // The "⋯" overlay is pinned to the MEASURED corner of the centered card — CSS center math
   // cannot place it, because the first/last cards clamp against the track edge instead of
   // centering. Recomputed with the scroll index and on resize.
@@ -183,6 +187,19 @@ function AccountCardsCarousel({ activeTotalUsd = null }) {
           </button>
         )}
 
+        {/* Release 1.14.0 — the "+" add-account control. Like the "⋯" it lives OUTSIDE the
+            listbox (an option may contain no interactive children, and the control is about the
+            LIST, not any one card). */}
+        <button
+          type="button"
+          className="account-cards-add"
+          onClick={() => setAddOpen(true)}
+          aria-label="Add an account"
+          data-testid="account-add-open"
+        >
+          +
+        </button>
+
         {showControls && (
           <>
             <button
@@ -227,6 +244,10 @@ function AccountCardsCarousel({ activeTotalUsd = null }) {
         onClose={() => setCustomizeTarget(null)}
         account={customizeTarget}
       />
+
+      {/* Mounted only while open: the sheet navigates (useNavigate), and the carousel itself
+          must keep rendering outside a router context (its unit tests do exactly that). */}
+      {addOpen && <AccountAddSheet open onClose={() => setAddOpen(false)} />}
 
       {/* Spec 088: switching is instant and address-only — ceremonies render from the
           global SignerRequestHost at send time. */}

@@ -1,4 +1,5 @@
 //core
+import { useEffect } from 'react'
 import { BrowserRouter as Router, Routes, Route, Navigate, Outlet, useLocation } from 'react-router-dom'
 import './theme.css'
 import './App.css'
@@ -22,6 +23,7 @@ import WalletPage from './pages/WalletPage'
 import VouchersPage from './pages/VouchersPage'
 import MarketAcceptancePage from './pages/MarketAcceptancePage'
 import PoolPage from './pages/PoolPage'
+import FundingPoolPage from './pages/FundingPoolPage'
 import MiniAppWorkspace from './components/miniapps/MiniAppWorkspace'
 import { TermsPage, RiskPage, PrivacyPage } from './pages/legal/LegalDocPage'
 import EntryGate from './components/compliance/EntryGate'
@@ -43,6 +45,9 @@ import DevelopmentWarningBanner from './components/ui/DevelopmentWarningBanner'
 import StagingBanner from './components/ui/StagingBanner'
 import StateManagementDemo from './components/StateManagementDemo'
 import { ComponentExamples } from './components/ui'
+import AppLockOverlay from './components/applock/AppLockOverlay'
+import StaleBuildNotice from './components/native/StaleBuildNotice'
+import NativeDeepLinks from './components/native/NativeDeepLinks'
 import PwaInstallPrompt from './components/pwa/PwaInstallPrompt'
 import PwaUpdateNotification from './components/pwa/PwaUpdateNotification'
 
@@ -192,6 +197,8 @@ function AppContent() {
           <Route path="/vouchers" element={<VouchersPage />} />
           <Route path="/friend-market/accept" element={<MarketAcceptancePage />} />
           <Route path="/pools/:address" element={<PoolPage />} />
+          {/* Funding pools (spec 103): the share link lands on the pool page (four words or address). */}
+          <Route path="/fund/:ref" element={<FundingPoolPage />} />
           {/* Spec 073: one mini-app workspace per registry listing. The slug is
               derived from the listing's on-chain (unique) name, and the workspace
               re-reads that record from the chain on every launch — a catalog card
@@ -207,11 +214,34 @@ function AppContent() {
 
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+
+      {/* Spec 041 amendment: the optional app lock. Rendered LAST and BESIDE the routes, never
+          around them — the overlay covers the app, it does not unmount it, so an FR-008
+          confirmation that was open when the lock fired is still there (unconfirmed, unsubmitted,
+          undropped) after the member unlocks. It renders null for everyone who has not turned the
+          setting on, which is everyone by default. */}
+      <AppLockOverlay />
+
+      {/* Spec 102 FR-015: on a native build older than the published support
+          floor, say so with the update path named. Renders null on web and
+          whenever no floor is knowable — it never manufactures a banner from
+          a network failure. */}
+      <StaleBuildNotice />
+
+      {/* Spec 102 US5: universal/app links land on the linked surface. Inert
+          on web; renders nothing everywhere. */}
+      <NativeDeepLinks />
     </>
   )
 }
 
 function App() {
+  // Spec 102: one boot marker for the native smoke tier. Capacitor forwards
+  // console output to logcat / the simulator console, so the smoke jobs can
+  // assert "the shell actually rendered" instead of "the process exists".
+  useEffect(() => {
+    console.info('[fw-smoke] shell-mounted')
+  }, [])
   return (
     <Router>
       <AppContent />

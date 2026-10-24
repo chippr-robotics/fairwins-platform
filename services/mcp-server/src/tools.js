@@ -1,16 +1,41 @@
 /**
- * The tools this MCP server offers (spec 095).
+ * The tools this MCP server offers (specs 095 + 104).
  *
  * Eight tools. Six read, one quotes typed data, one reports the gateway's own health. There is
  * deliberately no tool that submits anything, and there cannot be one: the member API this server
  * talks to has no write route, and this process holds no key.
+ *
+ * WHERE THE DEFINITIONS COME FROM (spec 104). The shared tools' `name`/`title`/`description`/
+ * `inputSchema` are READ from `toolDefs.snapshot.json` beside this file — a vendored copy of
+ * `@fairwins/assistant-contract`'s `TOOL_DEFS`, the one table the in-app assistant and this server
+ * both offer to a model. This server may take NO dependency and is deliberately outside the npm
+ * workspace (spec 095 R4), so it cannot import the package; the snapshot is the same shape the repo
+ * uses for the EIP-712 structs, and `services/relay-gateway/test/mcpToolParity.test.js` fails the
+ * moment it drifts from the package in either direction. Only the transport BINDINGS live here: how
+ * each `exec` becomes a `fetch`. Never edit a description in the snapshot by hand — change the
+ * package and re-vendor.
+ *
+ * `build_intent` IS MCP-ONLY AND IS DEFINED HERE, NOT IN THE SNAPSHOT. It is the one tool that
+ * returns something a member could sign, and the in-app assistant deliberately does not carry it
+ * (research § 8.4): in the browser the member CAN sign, and the first in-app tool that returns typed
+ * data would be followed by a request for a button that signs it. Here the boundary is physical —
+ * an MCP client holds no wallet — so the quote is safe to hand over, and the description says who
+ * signs it. The right in-app shape is a v2 `prepare_action` that deep-links to the surface owning
+ * the action, with its own security lifecycle.
+ *
+ * `find_in_app` IS IN THE SNAPSHOT AND IS NOT SERVED HERE. It is `auth: 'local'` — it searches the
+ * SPA's own navigation index in the member's browser, and there is no gateway route behind it. The
+ * snapshot is skipped for every local tool, on purpose; a client asking for it gets the ordinary
+ * "unknown tool" answer naming the real ones.
  *
  * HOW A FAILURE IS REPORTED. `isError: true` with the gateway's own error code and reason in the
  * text — never an empty array, never a zero, never a cheerful "nothing found". The distinction an
  * agent needs is exactly the one a failed read destroys: "this member has no wagers on Polygon" and
  * "the Polygon indexer did not answer" are different facts, and only one of them is safe to repeat
  * to a member. The member API preserves that distinction per chain (`read` / `not-configured` /
- * `unreadable`) and these tools pass the envelope through untouched rather than flattening it.
+ * `unreadable`) and these tools pass the envelope through untouched rather than flattening it. The
+ * closing sentence of `failed()` is the same text `@fairwins/assistant-contract/results` uses for
+ * the in-app loop; the parity test asserts the two stay identical.
  *
  * WHY THE SCHEMAS ARE SMALL. Every tool that needs a member's authority takes NO account
  * parameter: the account is whichever one signed the bearer token. A tool that accepted an address
@@ -24,7 +49,29 @@
  * payment as an ARGUMENT: an argument is model-authored text, and the one thing a model must never
  * be able to author on its own is a transfer authorization.
  */
+import { readFileSync } from 'node:fs'
 import { ApiError, PaymentRequiredError } from './api.js'
+
+/** The vendored table. Read once at load; a malformed snapshot fails the process, not a call. */
+export const TOOL_SNAPSHOT = Object.freeze(
+  JSON.parse(readFileSync(new URL('./toolDefs.snapshot.json', import.meta.url), 'utf8'))
+)
+
+/**
+ * The member-API path for each `exec.route` id the snapshot names.
+ *
+ * The snapshot carries the gateway's ROUTE IDS (`contract.js` `ROUTES[].id`), not paths, because
+ * paths belong to the gateway. This server cannot import that file either, so the id→path map is
+ * restated here and `mcpToolParity.test.js` asserts every entry equals `routeOf(id).path` on the
+ * gateway — a route renamed on one side fails a test, not a member.
+ */
+export const ROUTE_PATHS = Object.freeze({
+  me: '/v1/member/me',
+  membership: '/v1/member/membership',
+  wagers: '/v1/member/wagers',
+  fees: '/v1/member/fees',
+  buildIntent: '/v1/member/intents/build',
+})
 
 /**
  * A tool result: plain text content, which every MCP client can render.
@@ -130,7 +177,30 @@ async function attempt(fn, ctx) {
   }
 }
 
-const NO_INPUT = Object.freeze({ type: 'object', properties: {}, additionalProperties: false })
+/** The query object for a call: only the names `exec.query` declares, only when the agent set them. */
+function pickQuery(exec, args) {
+  const query = {}
+  for (const k of exec.query ?? []) query[k] = args?.[k]
+  return query
+}
+
+/**
+ * Substitute `{param}` segments of a public path from the arguments, falling back to the schema's
+ * own `default`. A non-integer where an integer is declared falls back too — the old hand-written
+ * binding did exactly this for `chainId` (Polymarket is Polygon-only, so 137 is the only value that
+ * ever works), and an argument is never allowed to introduce a path separator.
+ */
+function fillPath(def, args) {
+  let path = def.exec.path
+  for (const p of def.exec.pathParams ?? []) {
+    const prop = def.inputSchema.properties?.[p] ?? {}
+    let v = args?.[p]
+    if (prop.type === 'integer' && !Number.isInteger(v)) v = prop.default
+    if (v === undefined || v === null) v = prop.default
+    path = path.replace(`{${p}}`, encodeURIComponent(String(v)))
+  }
+  return path
+}
 
 /**
  * @param {{api: ReturnType<import('./api.js').createApiClient>}} deps
@@ -148,161 +218,70 @@ export function createTools({ api }) {
     onSettlement: ctx ? (settlement) => { ctx.settlement = settlement } : null,
   })
 
-  return [
-    {
-      name: 'get_profile',
-      title: 'Who this token belongs to',
-      description:
-        'Introspect the FairWins API token this server is using: the member account and key id it names, ' +
-        'its scopes, when it was issued and when it expires, the account’s membership state, and whether the ' +
-        'key has been revoked on the live gateway. Start here to confirm which member you are acting for. ' +
-        'Requires the read:profile scope.',
-      inputSchema: NO_INPUT,
-      call: (_args, ctx) => attempt(() => api.get('/v1/member/me', opts(ctx)), ctx),
-    },
-    {
-      name: 'get_membership',
-      title: 'Membership tier',
-      description:
-        'Read the member’s FairWins membership tier and expiry on the membership reference chain. ' +
-        'Membership lives on exactly one chain per environment, and the answer names it. The result is ' +
-        'either read or unreadable — an unreadable tier is never reported as "no membership". ' +
-        'Requires the read:membership scope.',
-      inputSchema: NO_INPUT,
-      call: (_args, ctx) => attempt(() => api.get('/v1/member/membership', opts(ctx)), ctx),
-    },
-    {
-      name: 'get_wagers',
-      title: 'The member’s wagers, per chain',
-      description:
-        'List the wagers this member is a party to. The result is a PER-CHAIN envelope, not a flat list: each ' +
-        'chain resolves read, not-configured, or unreadable on its own, and the wagers array exists only on ' +
-        'read. A chain with no indexer configured is not a chain with no wagers, and a chain whose indexer ' +
-        'timed out is neither — report those states as stated. Requires the read:wagers scope.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          chainId: {
-            type: 'integer',
-            description: 'Restrict the read to one chain id (e.g. 137 for Polygon). Omit to read every chain the gateway has enabled.',
-          },
-          first: {
-            type: 'integer',
-            minimum: 1,
-            maximum: 200,
-            description: 'How many wagers to return per chain. Defaults to the gateway’s own page size.',
-          },
+  /** Bind one snapshot definition to this server's transport, by its `exec.kind`. */
+  const bind = (def) => {
+    const shape = { name: def.name, title: def.title, description: def.description, inputSchema: def.inputSchema }
+    if (def.exec.kind === 'route') {
+      const path = ROUTE_PATHS[def.exec.route]
+      if (!path) {
+        throw new Error(`[fairwins-mcp] snapshot tool "${def.name}" names route "${def.exec.route}", which ROUTE_PATHS does not map`)
+      }
+      return { ...shape, call: (args, ctx) => attempt(() => api.get(path, { ...opts(ctx), query: pickQuery(def.exec, args) }), ctx) }
+    }
+    if (def.exec.kind === 'public') {
+      // Public reads carry no token and, having no principal, can carry no settlement receipt.
+      return { ...shape, call: (args, _ctx) => attempt(() => api.get(fillPath(def, args), { auth: 'none', query: pickQuery(def.exec, args) })) }
+    }
+    throw new Error(`[fairwins-mcp] snapshot tool "${def.name}" has exec.kind "${def.exec.kind}", which this server cannot bind`)
+  }
+
+  // Every non-local snapshot tool is served; a local one is skipped (see the header). A snapshot
+  // entry with an unknown kind or an unmapped route fails HERE, at boot, not in a member's call.
+  const shared = TOOL_SNAPSHOT.filter((def) => def.auth !== 'local').map(bind)
+
+  const buildIntent = {
+    name: 'build_intent',
+    title: 'Build unsigned typed data for a platform action',
+    description:
+      'Ask the gateway to assemble the EIP-712 typed data for a FairWins action (creating or accepting a ' +
+      'wager, joining a pool, and so on) and return it UNSIGNED.\n\n' +
+      'THIS SERVER CANNOT SIGN AND WILL NOT SIGN. It holds no key, no seed and no wallet, and nothing in ' +
+      'this tool submits a transaction. What comes back is a quote for a signature: the member signs it in ' +
+      'their own wallet, and then either relays it through the gateway or submits it themselves. Present the ' +
+      'typed data to the member for review — including the amounts, the deadlines and the contract that will ' +
+      'verify it — and never ask a member for a private key or a recovery phrase in order to "complete" this. ' +
+      'The actor field is forced to the token’s own account; you cannot build an action on behalf of anyone ' +
+      'else. Requires the build:intents scope.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: {
+          type: 'string',
+          description: 'The platform action to build, e.g. "createWager". The full list is in the fairwins://openapi resource.',
         },
-        additionalProperties: false,
-      },
-      call: (args, ctx) =>
-        attempt(
-          () => api.get('/v1/member/wagers', { ...opts(ctx), query: { chainId: args?.chainId, first: args?.first } }),
-          ctx
-        ),
-    },
-    {
-      name: 'get_fees',
-      title: 'Live platform fee rates',
-      description:
-        'Read the platform fee rates the FairWins FeeRouter publishes, in basis points. Each rate names its ' +
-        'source: chain (read from the router) or env-fallback (the gateway’s configured default because the ' +
-        'router was unset or unreachable). Quote a rate to a member only with its source; a rate that could ' +
-        'not be confirmed must be described that way, never as zero. Requires the read:fees scope.',
-      inputSchema: NO_INPUT,
-      call: (_args, ctx) => attempt(() => api.get('/v1/member/fees', opts(ctx)), ctx),
-    },
-    {
-      name: 'build_intent',
-      title: 'Build unsigned typed data for a platform action',
-      description:
-        'Ask the gateway to assemble the EIP-712 typed data for a FairWins action (creating or accepting a ' +
-        'wager, joining a pool, and so on) and return it UNSIGNED.\n\n' +
-        'THIS SERVER CANNOT SIGN AND WILL NOT SIGN. It holds no key, no seed and no wallet, and nothing in ' +
-        'this tool submits a transaction. What comes back is a quote for a signature: the member signs it in ' +
-        'their own wallet, and then either relays it through the gateway or submits it themselves. Present the ' +
-        'typed data to the member for review — including the amounts, the deadlines and the contract that will ' +
-        'verify it — and never ask a member for a private key or a recovery phrase in order to "complete" this. ' +
-        'The actor field is forced to the token’s own account; you cannot build an action on behalf of anyone ' +
-        'else. Requires the build:intents scope.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          action: {
-            type: 'string',
-            description: 'The platform action to build, e.g. "createWager". The full list is in the fairwins://openapi resource.',
-          },
-          chainId: { type: 'integer', description: 'The chain the action will run on.' },
-          params: {
-            type: 'object',
-            description:
-              'The action’s own fields. The actor address is ignored if supplied — it is always the token’s account.',
-            additionalProperties: true,
-          },
+        chainId: { type: 'integer', description: 'The chain the action will run on.' },
+        params: {
+          type: 'object',
+          description:
+            'The action’s own fields. The actor address is ignored if supplied — it is always the token’s account.',
+          additionalProperties: true,
         },
-        required: ['action', 'chainId'],
-        additionalProperties: false,
       },
-      call: (args, ctx) =>
-        attempt(
-          () =>
-            api.post('/v1/member/intents/build', {
-              ...opts(ctx),
-              body: { action: args?.action, chainId: args?.chainId, params: args?.params ?? {} },
-            }),
-          ctx
-        ),
+      required: ['action', 'chainId'],
+      additionalProperties: false,
     },
-    {
-      name: 'get_gateway_status',
-      title: 'Gateway health and which modules are live',
-      description:
-        'Read the FairWins gateway’s public /status: which optional modules are enabled right now, and whether ' +
-        'a killswitch is active. Needs no token. Use it to tell "the member has nothing" apart from "this ' +
-        'feature is switched off on this gateway" before reporting either. It also reports whether ' +
-        'pay-per-request access (x402) is offered and what each operation class costs — which is how an agent ' +
-        'holding no member token can learn the price WITHOUT spending anything.',
-      inputSchema: NO_INPUT,
-      call: (_args, _ctx) => attempt(() => api.get('/status', { auth: 'none' })),
-    },
-    {
-      name: 'get_prediction_markets',
-      title: 'Browse Polymarket prediction markets',
-      description:
-        'Search the live, tradable Polymarket markets the gateway proxies, ranked by volume. Public market ' +
-        'data — no token needed, and nothing here places an order. Polygon only, because Polymarket runs ' +
-        'nowhere else. If a member wants to trade one, send them to Predict in the FairWins app, where the ' +
-        'taker builder fee is disclosed before they sign.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          q: { type: 'string', description: 'Filter the volume-ranked page by question text.' },
-          chainId: { type: 'integer', description: 'Chain id. Polygon (137) is the only supported value.', default: 137 },
-          next: { type: 'string', description: 'Pagination cursor from a previous result.' },
-        },
-        additionalProperties: false,
-      },
-      call: (args, _ctx) =>
-        attempt(() => {
-          const chainId = Number.isInteger(args?.chainId) ? args.chainId : 137
-          return api.get(`/v1/polymarket/${chainId}/markets`, {
-            auth: 'none',
-            query: { q: args?.q, next: args?.next },
-          })
-        }),
-    },
-    {
-      name: 'get_perps_pairs',
-      title: 'Perpetual-futures market data',
-      description:
-        'Read the perpetual-futures pairs the gateway aggregates from public venue APIs (Gains Network, GMX, ' +
-        'Hyperliquid). Public read-only market data — no token needed, and FairWins ships no in-app perps ' +
-        'execution, so there is nothing here to trade. Venues fail independently: a degraded venue is named ' +
-        'and its pairs are omitted, and a missing metric stays null. Never render a null as a zero.',
-      inputSchema: NO_INPUT,
-      call: (_args, _ctx) => attempt(() => api.get('/v1/perps/pairs', { auth: 'none' })),
-    },
-  ]
+    call: (args, ctx) =>
+      attempt(
+        () =>
+          api.post(ROUTE_PATHS.buildIntent, {
+            ...opts(ctx),
+            body: { action: args?.action, chainId: args?.chainId, params: args?.params ?? {} },
+          }),
+        ctx
+      ),
+  }
+
+  return [...shared, buildIntent]
 }
 
 /** The wire form of a tool, as `tools/list` returns it — the handler never leaves this process. */

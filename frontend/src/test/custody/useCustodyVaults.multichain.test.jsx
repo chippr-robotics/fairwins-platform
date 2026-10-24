@@ -3,7 +3,7 @@
 // isolation, and the `onVaultChain` flag every action gates on (FR-004).
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
 
 const VAULT_MORDOR = '0x1111111111111111111111111111111111111111'
 const VAULT_POLYGON = '0x2222222222222222222222222222222222222222'
@@ -108,6 +108,40 @@ describe('useCustodyVaults — multi-chain', () => {
     await waitFor(() => expect(result.current.vaults).toHaveLength(1))
     expect(result.current.vaults[0].chainName).toBe('Chain 424242')
     expect(result.current.vaults[0].chainKnown).toBe(false)
+  })
+
+  it('exposes one GROUP per address over the per-chain instances, pinned to the wallet chain (spec 102)', async () => {
+    references = [
+      { chainId: 63, address: VAULT_MORDOR, label: 'Team treasury', role: 'owner' },
+      { chainId: 137, address: VAULT_MORDOR, label: 'Team treasury', role: 'owner' },
+      { chainId: 137, address: VAULT_POLYGON, label: 'Family savings', role: 'owner' },
+    ]
+    const { result } = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(result.current.vaults).toHaveLength(3))
+    expect(result.current.groups).toHaveLength(2)
+    const [treasury, savings] = result.current.groups
+    expect(treasury.chainIds).toEqual([63, 137])
+    expect(treasury.networkLine).toBe('2 networks')
+    expect(treasury.pinnedChainId).toBe(137)
+    expect(treasury.threshold).toEqual({ value: 1, of: 1 })
+    expect(savings.networkLine).toBe('Polygon')
+  })
+
+  it('activeVault is the selected address\'s instance on the connected chain, else its pinned one', async () => {
+    references = [
+      { chainId: 63, address: VAULT_MORDOR, label: 'Team treasury', role: 'owner' },
+      { chainId: 137, address: VAULT_MORDOR, label: 'Team treasury', role: 'owner' },
+    ]
+    const { result } = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(result.current.vaults).toHaveLength(2))
+    act(() => result.current.selectVault(VAULT_MORDOR))
+    expect(result.current.activeVault.chainId).toBe(137) // wallet is on Polygon
+
+    walletCtx = { ...walletCtx, chainId: 1 } // a chain the vault is NOT on → first instance
+    const off = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(off.result.current.vaults).toHaveLength(2))
+    act(() => off.result.current.selectVault(VAULT_MORDOR))
+    expect(off.result.current.activeVault.chainId).toBe(63)
   })
 
   it('clears the list when no account is connected', async () => {

@@ -67,9 +67,11 @@ describe('makeReadProvider — member endpoints', () => {
   })
 
   it('uses the caller-supplied default when the member has configured nothing', () => {
-    makeReadProvider(NETWORKS[137].rpcUrl, 137)
+    // 137 now declares a build-curated rpcFailoverUrl (generalized beyond ETC), so this legitimately
+    // builds a fallback pair rather than a single provider — Amoy is the chain still on one leg.
+    makeReadProvider(NETWORKS[80002].rpcUrl, 80002)
     expect(constructed).toHaveLength(1)
-    expect(constructed[0]).toMatchObject({ kind: 'json-rpc', target: NETWORKS[137].rpcUrl })
+    expect(constructed[0]).toMatchObject({ kind: 'json-rpc', target: NETWORKS[80002].rpcUrl })
   })
 
   it('overrides the caller-supplied URL with the member endpoint', () => {
@@ -119,31 +121,57 @@ describe('makeReadProvider — member endpoints', () => {
 
 describe('makeReadProvider — build-curated failover', () => {
   // A member who has configured nothing still needs redundancy on chains served by a single
-  // community-run RPC. Ethereum Classic's default going dark is what left every read on the
-  // chain with no route at all, so the chain declares a second endpoint at build time.
+  // community-run RPC. Ethereum Classic's default going dark is what motivated build-declared
+  // failovers in the first place; they are now declared on every covered EVM mainnet.
   beforeEach(() => {
     localStorage.clear()
     __resetEndpointStoreForTests()
     constructed.length = 0
   })
 
-  it('falls back to the chain-declared endpoint on ETC with no member settings', () => {
+  // ETC is the exception, and it inverted: the chain USED to declare a pair here
+  // (`etc.rivet.link` primary, etcdesktop failover). rivet then stopped resolving entirely,
+  // etcdesktop was promoted to primary, and no browser-usable second endpoint could be
+  // verified to sit behind it (see `rpcFailover.test.js` for what was checked and rejected).
+  //
+  // So ETC now takes the SINGLE-provider path, and the consequence is deliberate rather than a
+  // loss: `buildProvider` sets `staticNetwork` only for a failover SET, because every member of
+  // a FallbackProvider has to agree on the network up front. A lone provider instead keeps
+  // ethers' own network detection on purpose, so an endpoint that answers for the wrong chain
+  // fails loudly instead of quietly serving another network's state into every ETC read. On a
+  // chain down to one community-run RPC that verification is worth more than the saved probe.
+  it('builds a single detecting provider on ETC, which declares no build failover', () => {
+    expect(NETWORKS[61].rpcFailoverUrl).toBeNull()
     makeReadProvider(NETWORKS[61].rpcUrl, 61)
+
+    expect(constructed.some((c) => c.kind === 'fallback')).toBe(false)
+    const direct = constructed.filter((c) => c.kind !== 'fallback')
+    expect(direct.map((c) => c.target)).toEqual([NETWORKS[61].rpcUrl])
+    // Detection deliberately left on (see above), and ETC keeps its no-batch workaround.
+    expect(direct.every((c) => c.options?.staticNetwork)).toBe(false)
+    expect(direct.every((c) => c.options?.batchMaxCount === 1)).toBe(true)
+  })
+
+  it('leaves chains without a declared failover on a single provider', () => {
+    // 137 now declares a build failover too (this task, generalizing beyond ETC) — Amoy is the
+    // one still genuinely undeclared, so it is the honest fixture for "no failover at all".
+    expect(NETWORKS[80002].rpcFailoverUrl).toBeFalsy()
+    makeReadProvider(NETWORKS[80002].rpcUrl, 80002)
+    expect(constructed.some((c) => c.kind === 'fallback')).toBe(false)
+  })
+
+  it('also falls back to the chain-declared endpoint on Polygon with no member settings', () => {
+    // Generalized (this task) beyond ETC: every EVM mainnet the app supports now declares a
+    // distinct public rpcFailoverUrl, so a deploy-time-keyed VITE_RPC_URL_POLYGON going dark
+    // degrades to this route rather than leaving the chain unreadable.
+    makeReadProvider(NETWORKS[137].rpcUrl, 137)
 
     const fallbackCall = constructed.find((c) => c.kind === 'fallback')
     expect(fallbackCall).toBeTruthy()
     expect(fallbackCall.configs.map((c) => c.provider.target)).toEqual([
-      NETWORKS[61].rpcUrl,
-      NETWORKS[61].rpcFailoverUrl,
+      NETWORKS[137].rpcUrl,
+      NETWORKS[137].rpcFailoverUrl,
     ])
-    // staticNetwork on both members is what stops ethers' endless `_detectNetwork` retry
-    // loop — the source of the "failed to detect network; retry in 1s" console storm.
-    expect(fallbackCall.configs.every((c) => c.provider.options?.staticNetwork)).toBe(true)
-  })
-
-  it('leaves chains without a declared failover on a single provider', () => {
-    makeReadProvider(NETWORKS[137].rpcUrl, 137)
-    expect(constructed.some((c) => c.kind === 'fallback')).toBe(false)
   })
 
   it('still prefers the member endpoint, keeping the build default behind it', () => {

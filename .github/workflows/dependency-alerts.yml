@@ -1,0 +1,72 @@
+# Dependency vulnerability gate — live half (issue #1521).
+#
+# `.github/dependabot.yml` said in its own header that there was no vulnerability gate anywhere in
+# CI. There was not, and 45 alerts (1 critical, 9 high) accumulated while every required check
+# stayed green. This is the half that reads the real alert list; the offline half — policy schema,
+# acceptance expiry and the wiring of this file — runs on every pull request inside the
+# `Spec Registry` job, where it needs no token.
+#
+# WHY THIS IS NOT A PULL_REQUEST WORKFLOW. Dependabot alerts are computed for the REPOSITORY, not
+# for a branch, so a PR's own diff cannot move them: running here per-PR would re-report repository
+# state as though it were a property of the change. It would also fail on every fork and Dependabot
+# PR, where GITHUB_TOKEN is not granted `vulnerability-alerts`. So it runs where the answer means
+# something — on the integration branches, and daily, because a new advisory against an unchanged
+# lockfile is exactly the event no push will ever tell you about.
+#
+# `vulnerability-alerts: read` is the only permission that lets GITHUB_TOKEN list Dependabot alerts
+# (`security-events` covers code scanning, which is a different API). No PAT is required, and the
+# offline D-06 rule fails if this block is ever dropped.
+name: Dependency Alerts
+
+on:
+  push:
+    branches: [staging, main]
+  schedule:
+    # 07:00 UTC daily. A dependency does not have to change to become vulnerable.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  vulnerability-alerts: read
+
+concurrency:
+  group: dependency-alerts-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    name: Dependency Alerts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Fixtures first, for the same reason as the other structural gates: a gate that enforces
+      # nothing prints the same line as one that enforces everything. No npm ci — dependency-free.
+      - name: Test the gate's own rules
+        run: npm run test:dep-alerts
+
+      # Must fail loudly. Do NOT add continue-on-error (Constitution IV) — and D-06 fails the
+      # offline half on every PR if anyone does.
+      - name: Reconcile open alerts against the policy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/security/check-dependency-alerts.js --live
+
+      # "Passed" and "never ran" must not look alike (the check:ci-gating principle). This always
+      # writes a line, so the run summary says which of the two happened.
+      - name: Say what happened
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ Dependency alerts reconciled against scripts/security/dependency-alert-policy.json" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "❌ Dependency alert gate did not pass — see the job log. An unreadable alert list counts as a failure (D-05)." >> "$GITHUB_STEP_SUMMARY"
+          fi

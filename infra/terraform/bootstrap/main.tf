@@ -10,6 +10,12 @@
  * not depend on itself. Committing `terraform.tfstate` is safe here because this root manages only
  * a bucket, a federation pool and two service accounts — no secrets, no payloads — and it makes the
  * establishment of the trust root auditable at any commit.
+ *
+ * COMMIT AND PUSH, EVERY TIME. "Custom project role ... already exists and must be imported" on a
+ * resource this exact config already created is what a committed-but-unpushed apply looks like on
+ * the next run: `import` it (harmless — nothing here is destroy-sensitive) and finish the push this
+ * time. Hit three times in the 2026-08-28 IAM rounds, once per resource that had been created but
+ * whose recording commit never reached `origin`.
  */
 
 terraform {
@@ -114,6 +120,55 @@ resource "google_service_account" "tf_apply" {
   description  = "Applies reviewed plans on merge to main. Cannot destroy irreplaceable resources. Spec 085."
 }
 
+# The Android upload key's reader (#1378 H2). It exists so the release workflow can sign the .aab
+# and NOTHING else: it holds no project role, and its only grant is secretAccessor on the two
+# android-upload secrets, declared in the prod environment beside the containers themselves.
+#
+# Deliberately a THIRD identity rather than reusing tf-apply. That one can mutate production
+# infrastructure; a signing key reader has no business holding that power, and the reverse is worse
+# — a release workflow compromise should not be able to reach Terraform.
+resource "google_service_account" "android_signing" {
+  project      = var.project_id
+  account_id   = "fairwins-android-signing"
+  display_name = "FairWins Android upload-key reader"
+  description  = "Reads the Play upload keystore + password at release time. Signing only; no project role. Spec 103 / #1378 H2."
+}
+
+# The runtime identity for Cloud Run services that need NO GCP permission at all: the two staging
+# SPAs today, and the MCP servers when they are ungated. It holds no role anywhere, and that is the
+# whole point of it.
+#
+# It exists because TERRAFORM CANNOT MANAGE A CLOUD RUN SERVICE WITHOUT `actAs` ON THAT SERVICE'S
+# RUNTIME ACCOUNT. Leaving these services on the Cloud Run DEFAULT COMPUTE account therefore does
+# not avoid a grant — it forces one on `266380754692-compute@`, which carries roles/editor,
+# run.admin and iam.serviceAccountUser PROJECT-WIDE in a project shared with unrelated workloads
+# (WordPress, clearpath-*, fukuii-*, kings-edge-*). That grant would let the apply identity attach
+# an Editor to anything it deploys.
+#
+# The comment on `module "mcp_server"` in environments/prod/main.tf argued the reverse — that a
+# dedicated runtime account "would have to be added to the enumerated actAs list … a widening of the
+# apply identity bought for nothing". It missed that the default account needs that same list entry,
+# and is the far larger widening. Nothing caught it because `manage_mcp_server` is false, so that
+# module has never applied; the two staging SPAs hit the 403 the first time `Apply staging` actually
+# ran to completion (2026-09-08).
+#
+# An account that can do nothing is the cheaper thing to be able to act as.
+resource "google_service_account" "run_noperm" {
+  project      = var.project_id
+  account_id   = "fairwins-run-noperm"
+  display_name = "FairWins Cloud Run — no permissions"
+  description  = "Runtime identity for Cloud Run services that need no GCP access. Holds no role, deliberately. Spec 087."
+}
+
+# Deliberately NOT folded into `node_service_account_emails`: that list is VM accounts the apply
+# identity attaches to compute, and this is a Cloud Run runtime account. Same role, different reason,
+# so it is stated separately rather than hidden inside a list whose name would stop being true.
+resource "google_service_account_iam_member" "tf_apply_act_as_run_noperm" {
+  service_account_id = google_service_account.run_noperm.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.tf_apply.email}"
+}
+
 # Any branch of this repository may impersonate the READ-ONLY identity.
 resource "google_service_account_iam_member" "tf_plan_wif" {
   service_account_id = google_service_account.tf_plan.name
@@ -124,6 +179,16 @@ resource "google_service_account_iam_member" "tf_plan_wif" {
 # Only the default branch may impersonate the APPLY identity.
 resource "google_service_account_iam_member" "tf_apply_wif" {
   service_account_id = google_service_account.tf_apply.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/${var.default_branch}"
+}
+
+# Only the default branch may impersonate the SIGNING identity, for the same reason and one more:
+# release.yml's ONLY trigger is a push to main, so a repository-wide binding would grant every
+# branch's workflow the ability to read the upload key while no legitimate release could ever come
+# from one. The tighter binding costs nothing and closes that gap.
+resource "google_service_account_iam_member" "android_signing_wif" {
+  service_account_id = google_service_account.android_signing.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/${var.default_branch}"
 }
@@ -193,6 +258,88 @@ resource "google_project_iam_custom_role" "tf_service_account_manager" {
     "iam.serviceAccounts.getIamPolicy",
     "iam.serviceAccounts.setIamPolicy",
   ]
+}
+
+# Custom role rather than roles/secretmanager.admin at project scope — which the exclusion list
+# above rules out by name, because it would grant every secret in a shared project. This role can
+# create secret CONTAINERS and set their bindings; it deliberately carries NO
+# secretmanager.versions.* permission, so the apply identity can never read (or write) a payload.
+# Needed since spec 097: the prod plan's first genuine creates are eight secret containers, and the
+# 2026-08-25 promotion apply failed on exactly this ("Permission 'secretmanager.secrets.create'
+# denied" x8).
+resource "google_project_iam_custom_role" "tf_secret_container_manager" {
+  project     = var.project_id
+  role_id     = "fairwins.tfSecretContainerManager"
+  title       = "FairWins Terraform secret-container manager"
+  description = "Create/read/update secret containers and their IAM. No version access — cannot read payloads. Spec 097."
+
+  permissions = [
+    "secretmanager.secrets.create",
+    "secretmanager.secrets.get",
+    "secretmanager.secrets.list",
+    "secretmanager.secrets.update",
+    "secretmanager.secrets.getIamPolicy",
+    "secretmanager.secrets.setIamPolicy",
+  ]
+}
+
+resource "google_project_iam_member" "tf_apply_secret_containers" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.tf_secret_container_manager.id
+  member  = "serviceAccount:${google_service_account.tf_apply.email}"
+}
+
+# The FinOps billing reader (google_bigquery_dataset_iam_member) edits ONE dataset's access list.
+# BigQuery expresses dataset IAM through datasets.get/update, and the same failed apply also
+# reported "Permission bigquery.datasets.get denied". No project-wide BigQuery role: this pair of
+# permissions on a custom role is the whole requirement.
+resource "google_project_iam_custom_role" "tf_bq_dataset_access" {
+  project     = var.project_id
+  role_id     = "fairwins.tfBqDatasetAccess"
+  title       = "FairWins Terraform BigQuery dataset access editor"
+  description = "Read and update dataset metadata/access lists for declared dataset IAM members. Spec 097."
+
+  permissions = [
+    "bigquery.datasets.get",
+    "bigquery.datasets.update",
+  ]
+}
+
+# Custom role granting NOTHING but resourcemanager.projects.getIamPolicy. The v1.13.4 apply's own
+# log is what surfaced this: module.gateway.google_project_iam_member.node["roles/bigquery.jobUser"]
+# failed "Error retrieving IAM policy for project ... 403" — a READ failure, not a write one. The
+# grant it was trying to reconcile (roles/bigquery.jobUser on fairwins-relay-engine@) was ALREADY
+# live, set out of band alongside its logging.logWriter / monitoring.metricWriter /
+# secretmanager.secretAccessor siblings — Terraform simply could not READ the project's IAM policy
+# to notice the binding already matched. `google_project_iam_member` is additive: once it can read
+# the current policy and finds the (role, member) pair present, it reports no change and never
+# calls setIamPolicy. This role therefore deliberately carries NO write permission — the exclusion
+# list at the top of this file rules out a broad `resourcemanager.projectIamAdmin`-equivalent grant
+# for exactly this reason (IAM offers no way to scope setIamPolicy to "only this one role"), and
+# nothing observed here needs write. If a future change genuinely adds a NEW project-level member
+# this apply identity does not yet see, that will surface its own permission-denied error — fixed
+# the same deliberate way this one was, not preemptively.
+resource "google_project_iam_custom_role" "tf_project_iam_reader" {
+  project     = var.project_id
+  role_id     = "fairwins.tfProjectIamReader"
+  title       = "FairWins Terraform project IAM policy reader"
+  description = "Read-only: resourcemanager.projects.getIamPolicy. Lets additive IAM-member resources detect an already-satisfied grant without needing write access. Spec 097."
+
+  permissions = [
+    "resourcemanager.projects.getIamPolicy",
+  ]
+}
+
+resource "google_project_iam_member" "tf_apply_project_iam_reader" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.tf_project_iam_reader.id
+  member  = "serviceAccount:${google_service_account.tf_apply.email}"
+}
+
+resource "google_project_iam_member" "tf_apply_bq_dataset_access" {
+  project = var.project_id
+  role    = google_project_iam_custom_role.tf_bq_dataset_access.id
+  member  = "serviceAccount:${google_service_account.tf_apply.email}"
 }
 
 resource "google_project_iam_member" "tf_apply_sa_manager" {

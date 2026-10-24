@@ -31,13 +31,14 @@
  * exclude Bitcoin upstream via `isBitcoinNetworkId` / `bridgeUnavailableCopy`.
  * ---------------------------------------------------------------------------
  */
-import { AbiCoder, Contract, Interface, ZeroAddress, keccak256 } from 'ethers'
+import { encodeAbiParameters, encodeFunctionData, keccak256, parseAbi, zeroAddress } from 'viem'
 import { BRIDGE_ROUTER_ABI } from '../../abis/BridgeRouter'
 import { getContractAddressForChain } from '../../config/contracts'
 import { isBitcoinNetworkId } from '../../config/bitcoinNetworks'
+import { readContract, normalizeAbi } from '../chains/readContract'
 
-const ROUTER_IFACE = new Interface(BRIDGE_ROUTER_ABI)
-const ERC20_APPROVE_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+const ROUTER_ABI = normalizeAbi(BRIDGE_ROUTER_ABI)
+const ERC20_APPROVE_ABI = parseAbi(['function approve(address spender, uint256 amount) returns (bool)'])
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
@@ -106,9 +107,9 @@ export function computeRouteId({ inputToken, outputToken, originChainId, destina
   assertEvmChainId(originChainId, 'computeRouteId(originChainId)')
   assertEvmChainId(destinationChainId, 'computeRouteId(destinationChainId)')
   return keccak256(
-    AbiCoder.defaultAbiCoder().encode(
-      ['address', 'address', 'uint256', 'uint256'],
-      [inputToken, outputToken, originChainId, destinationChainId],
+    encodeAbiParameters(
+      [{ type: 'address' }, { type: 'address' }, { type: 'uint256' }, { type: 'uint256' }],
+      [inputToken, outputToken, BigInt(originChainId), BigInt(destinationChainId)],
     ),
   )
 }
@@ -128,7 +129,7 @@ export function computeRouteId({ inputToken, outputToken, originChainId, destina
 export function normalizeRoute(routeId, raw) {
   if (!raw) return null
   const inputToken = raw.inputToken
-  if (!inputToken || inputToken === ZeroAddress) return null
+  if (!inputToken || inputToken === zeroAddress) return null
   return {
     routeId,
     inputToken,
@@ -160,28 +161,31 @@ export async function readBridgeRouterConfig({ chainId, provider }) {
   const routerAddress = getBridgeRouterAddress(chainId)
   if (!routerAddress || !provider) return null
 
-  const router = new Contract(routerAddress, BRIDGE_ROUTER_ABI, provider)
+  // Spec 110 Phase 1: reads go through the chain seam. `provider` stays in the signature as
+  // the caller-side availability gate (null still means "do not read") until callers convert.
+  const routerRead = (functionName, args) =>
+    readContract(chainId, { address: routerAddress, abi: ROUTER_ABI, functionName, args })
   // `paused` is the load-bearing read — if even it fails, treat the router as unreadable
   // and withhold availability (never guess that bridging is open).
-  const paused = await safe(router.paused())
+  const paused = await safe(routerRead('paused'))
   if (paused === undefined) return null
 
   const [spokePool, feeRouter, sanctionsGuard, bridgeTransferServiceId, maxFeeBps, count] =
     await Promise.all([
-      safe(router.spokePool()),
-      safe(router.feeRouter()),
-      safe(router.sanctionsGuard()),
-      safe(router.bridgeTransferServiceId()),
-      safe(router.MAX_FEE_BPS()),
-      safe(router.routeCount()),
+      safe(routerRead('spokePool')),
+      safe(routerRead('feeRouter')),
+      safe(routerRead('sanctionsGuard')),
+      safe(routerRead('bridgeTransferServiceId')),
+      safe(routerRead('MAX_FEE_BPS')),
+      safe(routerRead('routeCount')),
     ])
 
   const routes = []
   let routesComplete = count !== undefined
   if (count !== undefined) {
     const n = Number(count)
-    const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(router.routeAt(i))))
-    const raws = await Promise.all(ids.map((id) => (id ? safe(router.getRoute(id)) : Promise.resolve(undefined))))
+    const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(routerRead('routeAt', [BigInt(i)]))))
+    const raws = await Promise.all(ids.map((id) => (id ? safe(routerRead('getRoute', [id])) : Promise.resolve(undefined))))
     for (let i = 0; i < n; i += 1) {
       const id = ids[i]
       const raw = raws[i]
@@ -227,8 +231,9 @@ export async function readBridgeRoute({ chainId, provider, inputToken, outputTok
   if (!routerAddress || !provider) return null
 
   const routeId = computeRouteId({ inputToken, outputToken, originChainId: chainId, destinationChainId })
-  const router = new Contract(routerAddress, BRIDGE_ROUTER_ABI, provider)
-  const raw = await safe(router.getRoute(routeId))
+  const raw = await safe(
+    readContract(chainId, { address: routerAddress, abi: ROUTER_ABI, functionName: 'getRoute', args: [routeId] }),
+  )
   if (raw === undefined) return null
   return normalizeRoute(routeId, raw)
 }
@@ -282,7 +287,7 @@ export function buildBridgeCalls({
   quoteTimestamp,
   fillDeadline,
   exclusivityDeadline = 0,
-  exclusiveRelayer = ZeroAddress,
+  exclusiveRelayer = zeroAddress,
   maxFeeBps,
 }) {
   if (!routerAddress) throw new Error('buildBridgeCalls: routerAddress is required')
@@ -297,17 +302,21 @@ export function buildBridgeCalls({
   const amount = BigInt(inputAmount)
   const bridgeCall = {
     target: routerAddress,
-    data: ROUTER_IFACE.encodeFunctionData('bridgeWithFee', [
-      route.routeId,
-      amount,
-      BigInt(outputAmount),
-      recipient,
-      quoteTimestamp,
-      fillDeadline,
-      exclusivityDeadline,
-      exclusiveRelayer,
-      maxFeeBps,
-    ]),
+    data: encodeFunctionData({
+      abi: ROUTER_ABI,
+      functionName: 'bridgeWithFee',
+      args: [
+        route.routeId,
+        amount,
+        BigInt(outputAmount),
+        recipient,
+        BigInt(quoteTimestamp),
+        BigInt(fillDeadline),
+        BigInt(exclusivityDeadline),
+        exclusiveRelayer,
+        BigInt(maxFeeBps),
+      ],
+    }),
     value: route.nativeInput ? amount : 0n,
   }
 
@@ -318,7 +327,7 @@ export function buildBridgeCalls({
     calls: [
       {
         target: route.inputToken,
-        data: ERC20_APPROVE_IFACE.encodeFunctionData('approve', [routerAddress, amount]),
+        data: encodeFunctionData({ abi: ERC20_APPROVE_ABI, functionName: 'approve', args: [routerAddress, amount] }),
         value: 0n,
       },
       bridgeCall,

@@ -4,6 +4,20 @@ This directory contains in-depth research and analysis documents for proposed en
 
 ## Available Research
 
+### [GutterToken Assistant Integration](guttertoken-assistant-integration.md)
+
+**Status**: Evaluation - Input to a feature spec  
+**Date**: September 5, 2026
+
+Evaluates how FairWins members could run the spec-095 assistant on their own GutterToken prepaid
+credits, as an alternative to the members-only FairWins-funded rail. Measures what the GutterToken
+API actually offers (open CORS, bearer keys, no account or balance endpoint, no delegated auth),
+compares bring-your-own-key browser-direct, gateway passthrough, a FairWins-owned account, and a
+mini-app, and recommends the browser-direct pattern surfaced through the existing bottom sheets.
+Part II evaluates how the existing MCP server should relate to the assistant and recommends a
+client-side tool loop over a shared tool table rather than the MCP transport or Anthropic's MCP
+connector.
+
 ### [Dex v3 Integration Analysis](dex-v3-integration-analysis.md)
 
 **Status**: Final - Ready for Review  
@@ -77,7 +91,7 @@ All research documents should:
 
 For questions about research documents or to propose new research topics, please:
 
-- Open an issue on [GitHub](https://github.com/chippr-robotics/prediction-dao-research/issues)
+- Open an issue on [GitHub](https://github.com/chippr-robotics/fairwins-platform/issues)
 - Contact the core team
 
 ---

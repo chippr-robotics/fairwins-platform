@@ -14,6 +14,10 @@ import { renderHook, act } from '@testing-library/react'
 vi.mock('../utils/blockchainService', () => ({
   purchaseRoleWithStablecoin: vi.fn(),
   checkApprovalNeeded: vi.fn(),
+  // Spec 098 — the acting-account allowance pre-flight. Declared so the hook can import it; the
+  // passkey batch path must never CALL it (the batch carries its own approve leg), which the
+  // assertion below pins.
+  checkApprovalNeededForAddress: vi.fn(),
   resolveMembershipIntentParams: vi.fn().mockResolvedValue({ roleHash: '0xrole', validTier: 1, price: 0n, acceptedTermsHash: '0x0' }),
 }))
 vi.mock('../utils/keyRegistryService', () => ({
@@ -40,7 +44,7 @@ vi.mock('../lib/relay/useGaslessWrite', () => ({
 }))
 
 import { usePurchaseFlow } from '../hooks/usePurchaseFlow'
-import { purchaseRoleWithStablecoin, checkApprovalNeeded } from '../utils/blockchainService'
+import { purchaseRoleWithStablecoin, checkApprovalNeeded, checkApprovalNeededForAddress } from '../utils/blockchainService'
 import { ensureKeyRegistered } from '../utils/keyRegistryService'
 
 const passkeyParams = (overrides = {}) => ({
@@ -76,6 +80,9 @@ describe('usePurchaseFlow — passkey batch path (spec 041)', () => {
     expect(result.current.steps.find((s) => s.id === 'pay').txHash).toBe('0xbatch')
     expect(params.batchPurchase).toHaveBeenCalledTimes(1)
     expect(checkApprovalNeeded).not.toHaveBeenCalled()
+    // Spec 098 FR-006: the batch rail is personal-only and carries its own approve leg — neither
+    // allowance pre-flight is an input to it.
+    expect(checkApprovalNeededForAddress).not.toHaveBeenCalled()
     expect(purchaseRoleWithStablecoin).not.toHaveBeenCalled()
     expect(params.onPaid).toHaveBeenCalledTimes(1)
   })

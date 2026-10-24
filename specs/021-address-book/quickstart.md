@@ -74,21 +74,36 @@ regression to manual entry.
 
 **Expected**: Toast appears only for new addresses, never blocks the flow.
 
-### US5 — Encrypted export/import (P3)
+### US5 / US7 — Plain-text export/import (P3, amended by issue #1550)
 
-1. Populate a book, click **Export**, sign the backup message. → An encrypted file
-   downloads; opening it shows no readable names/addresses/notes (FR-019).
-2. In a second browser profile (or after clearing local data) with the **same**
-   wallet, **Import** the file. → All contacts/addresses/networks/notes restored
-   (FR-020).
-3. Try importing with a **different** wallet, or a corrupted file. → Clear error; no
-   data revealed; existing book unchanged (FR-021).
-4. Import a file that overlaps existing contacts. → New addresses added, existing
+Run this signed in with a **passkey** at least once: that session has no ethers
+signer, and it is the session the encrypted design refused.
+
+1. Populate a book, click **Export**. → A `.json` file downloads with **no signature
+   prompt**; opening it in a text editor shows the nicknames, addresses and notes as
+   readable text (FR-019). Nothing says "Wallet not connected" (SC-012).
+2. Before exporting, read the note beside the buttons. → It says the file is readable
+   by anyone who opens it (FR-031).
+3. In a second browser profile (or after clearing local data), on **any** account —
+   including a different member — **Import** the file. → All
+   contacts/addresses/networks/notes restored (FR-020).
+4. Hand-edit the file (rename a contact, add one) and import it. → The edits arrive;
+   editing is a supported use of a plain-text file.
+5. Import a corrupted or non-address-book file. → Clear error naming what was wrong;
+   existing book unchanged (FR-021).
+6. Import a **pre-#1550 encrypted** backup with no signer. → Refused with a message
+   naming the file as an older encrypted export and how to proceed — never "wrong
+   wallet", "different wallet", or "not connected" (SC-014). With the original
+   wallet connected, the same file still opens.
+7. Import a file that overlaps existing contacts. → New addresses added, existing
    kept (no duplicates); differing nickname/notes prompt keep/take per conflict
    (FR-022).
+8. Export with an empty book. → "There are no contacts to export yet"; no file is
+   written.
 
-**Expected**: Same-wallet round-trip restores 100%; wrong wallet/corrupt fails
-safely; overlap merges additively.
+**Expected**: round-trip restores 100% on every account type with zero signature
+prompts; corrupt and legacy files fail safely with an honest reason; overlap merges
+additively.
 
 ## Accessibility & quality gates
 

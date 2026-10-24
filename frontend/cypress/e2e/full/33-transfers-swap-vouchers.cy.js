@@ -17,7 +17,7 @@
  * That double answers a fixed rate. So SW-01 can claim — and does claim — that the app quoted,
  * showed the member a number, obtained the approval, encoded the swap, and that BOTH of the
  * member's balances then moved by exactly what the quote named. It claims nothing about Uniswap's
- * pricing or routing, which are not ours to regress. The rate is asymmetric on purpose (2 WMATIC
+ * pricing or routing, which are not ours to regress. The rate is asymmetric on purpose (2 WPOL
  * per USDC, 0.5 the other way) so a swap that silently ran backwards cannot pass.
  *
  * TR-01 and VC-01 use no doubles at all: the transfer is a real ERC-20 transfer and the redemption
@@ -206,7 +206,7 @@ describe('Transfers, swap and vouchers (specs 058 / 033 / 026)', () => {
            */
           pickToken('Token to sell', 'USDC')
           cy.get('#trade-amount').clear().type('10')
-          pickToken('Token to buy', 'WMATIC')
+          pickToken('Token to buy', 'WPOL')
 
           // A quote must actually arrive — the summary only renders when one does.
           cy.get('.trade-summary', { timeout: 40000 }).should('be.visible')
@@ -284,6 +284,57 @@ describe('Transfers, swap and vouchers (specs 058 / 033 / 026)', () => {
               })
               cy.task('voucherFixture', { action: 'vouchersOf', args: { address: REDEEMER } }).then((r) => {
                 expect(r.held, 'and the voucher was burned').to.not.include(held[0])
+              })
+            })
+          })
+        })
+      })
+    })
+  })
+
+  it('[VC-02] membership.buy-voucher — the Buy section takes exactly the tier price and the chain holds the voucher', () => {
+    /*
+     * Spec 026 US1/FR-001a: minting a voucher pulls the tier's USDC price from the buyer —
+     * a member signing something that costs them money, which admission rule 2 puts in this
+     * tier. VC-01 arranges its voucher through the fixture (correct, as a precondition);
+     * this is the flow that proves the Buy section itself. The fixture only FUNDS the buyer:
+     * the page sends its own `approve` before the mint, and pre-approving would leave that
+     * half of the purchase untested.
+     *
+     * The buyer is chosen the same way as VC-01's redeemer, and for the same reason: the
+     * Vouchers page needs an account the node can sign for, and a fixed one stops being
+     * representative after its first purchase-and-redeem against a given node.
+     */
+    vouchers('freshRedeemer').then(({ address: BUYER }) => {
+      vouchers('fundBuyer', { address: BUYER, tier: 1 }).then(({ priceUSDC }) => {
+        vouchers('vouchersOf', { address: BUYER }).then(({ held: heldBefore }) => {
+          vouchers('swapRate').then(({ usdc }) => {
+            balanceOf(usdc, BUYER).then((usdcBefore) => {
+              cy.mockWeb3Provider({ account: BUYER, preAuthorized: true, realBalances: true })
+              cy.visit(VOUCHERS_URL)
+
+              cy.get('#vch-buy-h', { timeout: 40000 }).should('be.visible')
+
+              // Bronze is the default selection; the button restates tier and quantity, so
+              // matching its text is also an assertion that the page quoted ONE Bronze voucher.
+              cy.contains('button', /^Buy 1 Bronze voucher/, { timeout: 30000 })
+                .should('not.be.disabled')
+                .click()
+
+              // Two wallet transactions (approve, then mint) sit behind this one status line.
+              cy.contains(/minted to your wallet/i, { timeout: 90000 }).should('be.visible')
+
+              // The chain is the authority on both halves: the voucher exists in the buyer's
+              // hands, and exactly the quoted price left them — no more, no less.
+              cy.then(() => {
+                cy.task('voucherFixture', { action: 'vouchersOf', args: { address: BUYER } }, { timeout: 60000 })
+                  .should((r) => {
+                    expect(r.ok, r.error).to.equal(true)
+                    expect(r.held.length - heldBefore.length, 'one voucher was minted to the buyer').to.equal(1)
+                  })
+                expectBalance(usdc, BUYER, (after) => {
+                  expect(usdcBefore - after, 'exactly the tier price was paid').to.equal(BigInt(priceUSDC))
+                })
               })
             })
           })

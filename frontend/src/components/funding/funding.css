@@ -1,0 +1,311 @@
+/* Funding pools (spec 103). Theme tokens only (specs 090/091): the goal bar fills with the brand
+   colour (a FILL use), the refund bar with the amber signal, and every label reads from text tokens. */
+
+.fp-page {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 1.25rem 1rem 3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.fp-h1 {
+  font-size: 1.5rem;
+  line-height: 1.25;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.fp-h2 {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  margin: 0 0 0.5rem;
+}
+
+.fp-head {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.fp-head-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
+.fp-muted { color: var(--text-muted); margin: 0; }
+.fp-small { font-size: 0.82rem; }
+
+.fp-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.15rem 0.6rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+}
+.fp-chip--success { background: var(--success-bg); color: var(--success-text); border-color: var(--success-border); }
+.fp-chip--warn { background: var(--surface-2); color: var(--warning-text); }
+.fp-chip--closed { background: var(--surface-2); color: var(--text-secondary); }
+
+/* ── Progress ────────────────────────────────────────────────────────────── */
+.fp-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.fp-progress--compact { padding: 0; border: 0; background: transparent; gap: 0.3rem; }
+
+.fp-progress-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.fp-progress-raised strong { font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+.fp-progress--compact .fp-progress-raised strong { font-size: 1rem; }
+.fp-progress-of { color: var(--text-secondary); }
+.fp-progress-pct { font-weight: 700; font-variant-numeric: tabular-nums; color: var(--accent-color); }
+.fp-progress-meta {
+  display: flex;
+  gap: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.fp-bar {
+  height: 10px;
+  border-radius: 999px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+}
+.fp-bar-fill {
+  height: 100%;
+  background: var(--brand-primary);
+  border-radius: 999px;
+  transition: width 240ms ease-out;
+}
+.fp-bar--refund .fp-bar-fill { background: var(--warning-color); }
+
+/* ── Actions ─────────────────────────────────────────────────────────────── */
+.fp-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.fp-actions-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+.fp-primary { width: 100%; }
+.fp-contribute { display: flex; flex-direction: column; gap: 0.75rem; }
+
+.fp-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.fp-confirm-amount { font-size: 1.6rem; font-weight: 700; text-align: center; font-variant-numeric: tabular-nums; }
+.fp-confirm-row { display: flex; justify-content: space-between; gap: 1rem; font-size: 0.9rem; }
+.fp-confirm-row .k { color: var(--text-muted); }
+.fp-confirm-note { color: var(--warning-text); font-size: 0.88rem; margin: 0; }
+
+.fp-notice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.7rem 0.9rem;
+  border-radius: 10px;
+  border: 1px solid var(--border-color);
+  background: var(--surface-2);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+}
+.fp-notice--warn { border-color: var(--warning-color); }
+.fp-notice--error { border-color: var(--danger-color); color: var(--danger-text); }
+.fp-notice--info { border-color: var(--accent-color); }
+
+.fp-link {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--accent-color);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+.fp-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-color);
+  color: var(--text-primary);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.fp-icon-btn:hover { border-color: var(--accent-color); }
+
+/* ── Refund status ───────────────────────────────────────────────────────── */
+.fp-refund {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.fp-refund--active { border-color: var(--warning-color); }
+.fp-refund-head { display: flex; justify-content: space-between; align-items: baseline; }
+.fp-refund-label { font-weight: 600; }
+.fp-refund-count { font-variant-numeric: tabular-nums; color: var(--text-secondary); }
+.fp-refund-text, .fp-refund-reason, .fp-refund-standing { margin: 0; font-size: 0.88rem; }
+.fp-refund-text { color: var(--text-secondary); }
+.fp-refund-reason { color: var(--warning-text); }
+.fp-refund-standing { color: var(--text-primary); font-weight: 500; }
+
+/* ── Share ────────────────────────────────────────────────────────────────── */
+.fp-share { display: flex; flex-direction: column; gap: 0.6rem; }
+.fp-share-link, .fp-share-words-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.fp-share-url, .fp-share-phrase {
+  flex: 1;
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-2);
+  font-family: var(--font-mono);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+.fp-share-phrase { font-size: 1.05rem; letter-spacing: 0.02em; word-spacing: 0.3rem; text-align: center; }
+.fp-share-words { display: flex; flex-direction: column; gap: 0.35rem; }
+.fp-share-words-label { font-size: 0.85rem; color: var(--text-secondary); display: inline-flex; align-items: center; gap: 0.3rem; }
+.fp-share-qr { display: flex; flex-direction: column; align-items: center; gap: 0.35rem; padding-top: 0.25rem; }
+
+/* ── Feed ─────────────────────────────────────────────────────────────────── */
+.fp-feed-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.35rem; }
+.fp-feed-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--surface-2);
+  font-size: 0.9rem;
+}
+.fp-feed-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); align-self: center; }
+.fp-feed-dot--contribute { background: var(--brand-primary); }
+.fp-feed-dot--close { background: var(--success-color); }
+.fp-feed-dot--vote, .fp-feed-dot--refunding { background: var(--warning-color); }
+.fp-feed-dot--refund { background: var(--accent-color); }
+.fp-feed-text { overflow-wrap: anywhere; }
+.fp-feed-when { color: var(--text-muted); font-size: 0.78rem; white-space: nowrap; }
+
+/* ── Create panel (inside RequestPanel) ──────────────────────────────────── */
+.fp-create { display: flex; flex-direction: column; gap: 0.75rem; }
+.fp-kind-switch { display: flex; justify-content: center; margin-bottom: 0.25rem; }
+/* Compact, quiet: a small two-way switch, not a second mode bar. */
+.fp-kind-switch .pill-select { gap: 0.3rem; }
+.fp-kind-switch .pill-select-option { padding: 0.28rem 0.7rem; font-size: 0.82rem; }
+.fp-kind-switch .pill-select-option-icon { opacity: 0.75; }
+.fp-field { display: flex; flex-direction: column; gap: 0.3rem; }
+.fp-field label { font-weight: 600; font-size: 0.9rem; }
+.fp-field input[type='text'] {
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font: inherit;
+}
+.fp-field input[type='text']:focus-visible { outline: 2px solid var(--focus-color); outline-offset: 1px; }
+.fp-counter { font-size: 0.78rem; color: var(--text-muted); text-align: right; }
+.fp-public-note { display: flex; gap: 0.4rem; align-items: flex-start; }
+
+/* ── My Pools sheet ───────────────────────────────────────────────────────── */
+.fp-sheet-find { display: flex; gap: 0.5rem; margin-bottom: 0.75rem; }
+.fp-sheet-find input {
+  flex: 1;
+  min-width: 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font: inherit;
+}
+.fp-sheet-find input:focus-visible { outline: 2px solid var(--focus-color); outline-offset: 1px; }
+/* The sheet's mobile rule widens every button to the sheet; the find button must stay a button. */
+.action-sheet .fp-sheet-find button,
+.fp-sheet-find button { width: auto; flex: 0 0 auto; }
+.fp-sheet-section { margin: 0 0 0.9rem; }
+.fp-sheet-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0.45rem; }
+.fp-sheet-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.7rem 0.8rem;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  background: var(--surface-2);
+}
+.fp-sheet-row-head { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+.fp-sheet-row-title {
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  font: inherit;
+  font-weight: 600;
+  color: var(--text-primary);
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.fp-sheet-row-title:hover { color: var(--accent-color); }
+.fp-sheet-row-meta { display: flex; flex-wrap: wrap; gap: 0.4rem; align-items: center; font-size: 0.82rem; color: var(--text-secondary); }
+.fp-sheet-row-action { align-self: flex-start; }
+.fp-sheet-empty { display: flex; flex-direction: column; gap: 0.6rem; align-items: flex-start; }
+.app-nav-drawer .fp-link { padding: 0; }
+
+@media (max-width: 480px) {
+  .fp-actions-row { grid-template-columns: 1fr; }
+  .fp-feed-item { grid-template-columns: auto 1fr; }
+  .fp-feed-when { grid-column: 2; }
+}

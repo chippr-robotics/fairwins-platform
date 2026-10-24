@@ -12,7 +12,8 @@
  * than zeros (FR-054), partial-withdrawal math (FR-022), and call construction.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { Interface } from 'ethers'
+import { decodeFunctionData } from 'viem'
+import { normalizeAbi } from '../../chains/readContract'
 // The module's own source text, so the "no router import" assertion below reads what ships
 // rather than what a mock happens to expose.
 import acrossLpSource from '../acrossLpPositions.js?raw'
@@ -20,36 +21,21 @@ import { LIQUIDITY_ROUTER_ABI } from '../../../abis/LiquidityRouter'
 
 const m = vi.hoisted(() => ({ methods: {}, calls: [] }))
 
-vi.mock('ethers', async (orig) => {
+// Every read rides the spec-110 chain seam; fake it there and record what was asked of it.
+// `exchangeRateCurrent` and `liquidityUtilizationCurrent` are NOT view functions — they settle
+// accrued LP fees before answering — and the seam is what makes reading them safe: it is an
+// `eth_call` whatever the declared mutability, with no path that sends a transaction.
+vi.mock('../../chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract(address) {
-    return new Proxy(
-      {},
-      {
-        get(_t, prop) {
-          if (prop === 'then') return undefined
-          if (prop === 'target') return address
-          const key = String(prop)
-          const call = (...args) => {
-            m.calls.push([key, ...args])
-            const f = m.methods[key]
-            if (!f) throw new Error('unmocked method: ' + key)
-            return f(...args)
-          }
-          // `exchangeRateCurrent` and `liquidityUtilizationCurrent` are NOT view functions —
-          // they settle accrued LP fees before answering. Reading them requires this shape.
-          call.staticCall = (...args) => {
-            m.calls.push([`${key}.staticCall`, ...args])
-            const f = m.methods[`${key}.staticCall`]
-            if (!f) throw new Error('unmocked staticCall: ' + key)
-            return f(...args)
-          }
-          return call
-        },
-      },
-    )
+  return {
+    ...actual,
+    readContract: async (chainId, { functionName, args = [] }) => {
+      m.calls.push([functionName, ...args])
+      const f = m.methods[functionName]
+      if (!f) throw new Error('unmocked method: ' + functionName)
+      return f(...args)
+    },
   }
-  return { ...actual, Contract: vi.fn(FakeContract) }
 })
 
 // A SPY over the real resolver, not a replacement: the R3 test asserts this is never asked
@@ -85,9 +71,32 @@ import { getLiquidityRouterAddress } from '../liquidityRouter'
 // The cohort roster the availability answers are bounded by (#1265).
 import { NETWORKS, cohortChainIds, isInCohort, listSupportedChainIds } from '../../../config/networks'
 
-const HUB_POOL_IFACE = new Interface(HUB_POOL_ABI)
-const ROUTER_IFACE = new Interface(LIQUIDITY_ROUTER_ABI)
-const ERC20_IFACE = new Interface(['function approve(address spender, uint256 amount) returns (bool)'])
+const HUB_POOL_PARSED = normalizeAbi(HUB_POOL_ABI)
+const ROUTER_PARSED = normalizeAbi(LIQUIDITY_ROUTER_ABI)
+const ERC20_PARSED = normalizeAbi(['function approve(address spender, uint256 amount) returns (bool)'])
+
+/**
+ * Decode one call's arguments, asserting it really is the function named (spec 110).
+ *
+ * ethers' `decodeFunctionData(name, data)` threw when the selector belonged to another function;
+ * viem's derives the name FROM the selector, so without this check it would decode the wrong call
+ * and hand back plausible arguments.
+ */
+function decodeAs(abi, name, data) {
+  const { functionName, args } = decodeFunctionData({ abi, data })
+  expect(functionName, `expected calldata for ${name}`).toBe(name)
+  return args
+}
+
+/** True when this ABI can decode the calldata at all. viem THROWS where ethers returned null. */
+function decodesWith(abi, data) {
+  try {
+    decodeFunctionData({ abi, data })
+    return true
+  } catch {
+    return false
+  }
+}
 
 const HUB_POOL = '0xc186fA914353c44b2E33eBE05f21846F1048bEda'
 const LIQUIDITY_ROUTER = '0x1111111111111111111111111111111111111111'
@@ -132,8 +141,8 @@ describe('T092 — the Across LP path never routes through liquidityRouter (rese
 
   it('never resolves a liquidityRouter address, on any code path', async () => {
     m.methods.pooledTokens = () => rawPooled()
-    m.methods['exchangeRateCurrent.staticCall'] = () => WAD
-    m.methods['liquidityUtilizationCurrent.staticCall'] = () => WAD / 2n
+    m.methods.exchangeRateCurrent = () => WAD
+    m.methods.liquidityUtilizationCurrent = () => WAD / 2n
     m.methods.balanceOf = () => 5n * WAD
     m.methods.paused = () => false
 
@@ -141,8 +150,8 @@ describe('T092 — the Across LP path never routes through liquidityRouter (rese
     getHubPoolAddress(1)
     bridgeLiquiditySupport(1)
     bridgeLiquiditySupport(137)
-    await readLpPosition({ provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })
-    await readHubPoolPaused({ provider: {}, hubPool: HUB_POOL })
+    await readLpPosition({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })
+    await readHubPoolPaused({ chainId: 1, provider: {}, hubPool: HUB_POOL })
     buildAddLiquidityCalls({ hubPool: HUB_POOL, l1Token: USDC, amount: 1n })
     buildRemoveLiquidityCalls({ hubPool: HUB_POOL, l1Token: USDC, lpTokenAmount: 1n })
 
@@ -165,8 +174,8 @@ describe('T092 — the Across LP path never routes through liquidityRouter (rese
     for (const call of [...supply.calls, ...exit.calls]) {
       expect([HUB_POOL, USDC]).toContain(call.target)
       expect(call.target).not.toBe(LIQUIDITY_ROUTER)
-      // If any leg were a router call, the router's own interface would decode it.
-      expect(ROUTER_IFACE.parseTransaction({ data: call.data })).toBeNull()
+      // If any leg were a router call, the router's own ABI would decode it.
+      expect(decodesWith(ROUTER_PARSED, call.data), 'no leg is a router call').toBe(false)
     }
   })
 
@@ -186,7 +195,7 @@ describe('T092 — the Across LP path never routes through liquidityRouter (rese
 
     // The deposit itself carries exactly the token and the full amount — nothing is skimmed.
     const deposit = plain.calls.at(-1)
-    const decoded = HUB_POOL_IFACE.decodeFunctionData('addLiquidity', deposit.data)
+    const decoded = decodeAs(HUB_POOL_PARSED, 'addLiquidity', deposit.data)
     expect(decoded[0]).toBe(USDC)
     expect(decoded[1]).toBe(1_000_000n)
   })
@@ -264,7 +273,7 @@ describe('availability is Ethereum only, and says so', () => {
 describe('reads — state-changing calls are static-called, failures are null', () => {
   it('reads the pooled-token record', async () => {
     m.methods.pooledTokens = () => rawPooled()
-    const pooled = await readPooledToken({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })
+    const pooled = await readPooledToken({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })
     expect(pooled).toEqual({
       lpToken: LP_TOKEN,
       isEnabled: true,
@@ -277,35 +286,54 @@ describe('reads — state-changing calls are static-called, failures are null', 
 
   it('treats a zero LP token as "not a pooled token here", not as a real pool', async () => {
     m.methods.pooledTokens = () => rawPooled({ lpToken: '0x' + '0'.repeat(40) })
-    expect(await readPooledToken({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
+    expect(await readPooledToken({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
   })
 
   it('keeps a DISABLED pooled token readable — no new deposits, still withdrawable (FR-024)', async () => {
     m.methods.pooledTokens = () => rawPooled({ isEnabled: false })
-    const pooled = await readPooledToken({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })
+    const pooled = await readPooledToken({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })
     expect(pooled.isEnabled).toBe(false)
     expect(pooled.lpToken).toBe(LP_TOKEN)
   })
 
-  it('static-calls exchangeRateCurrent rather than reading it as a view', async () => {
-    m.methods['exchangeRateCurrent.staticCall'] = () => (WAD * 1013n) / 1000n
-    const rate = await readExchangeRate({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })
+  // The two fee-settling functions are NOT views, and the danger was never that they would be
+  // read wrongly — it was that reading them wrongly builds a TRANSACTION the member is asked to
+  // sign. Under ethers that was held off by spelling `.staticCall(...)` at each site, which is a
+  // thing a future edit can forget. On the chain seam it cannot happen: `readContract` is an
+  // eth_call whatever the declared mutability, and has no path that sends one. So what is
+  // asserted now is the property itself — these two are READ, and never end up in a built call.
+  it('reads exchangeRateCurrent through the read seam, which cannot send a transaction', async () => {
+    m.methods.exchangeRateCurrent = () => (WAD * 1013n) / 1000n
+    const rate = await readExchangeRate({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })
     expect(rate).toBe((WAD * 1013n) / 1000n)
-    expect(m.calls.map(([k]) => k)).toContain('exchangeRateCurrent.staticCall')
-    expect(m.calls.map(([k]) => k)).not.toContain('exchangeRateCurrent')
+    expect(m.calls.map(([k]) => k)).toContain('exchangeRateCurrent')
   })
 
-  it('static-calls liquidityUtilizationCurrent too', async () => {
-    m.methods['liquidityUtilizationCurrent.staticCall'] = () => WAD / 4n
-    expect(await readUtilization({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBe(WAD / 4n)
-    expect(m.calls.map(([k]) => k)).toContain('liquidityUtilizationCurrent.staticCall')
+  it('reads liquidityUtilizationCurrent the same way', async () => {
+    m.methods.liquidityUtilizationCurrent = () => WAD / 4n
+    expect(await readUtilization({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBe(WAD / 4n)
+    expect(m.calls.map(([k]) => k)).toContain('liquidityUtilizationCurrent')
+  })
+
+  it('never encodes either fee-settling function into a call the member would sign', () => {
+    // Source-level, because the failure it guards is a call that is never built in any test:
+    // an edit that encodes one of these into `{target, data, value}` would settle Across's fees
+    // at the member's expense and could not be read back from a return value.
+    const encoded = [...acrossLpSource.matchAll(/functionName:\s*'([^']+)'/g)].map((mm) => mm[1])
+    const built = [...acrossLpSource.matchAll(/encodeFunctionData\(\{[^}]*functionName:\s*'([^']+)'/g)].map(
+      (mm) => mm[1],
+    )
+    expect(encoded).toContain('exchangeRateCurrent') // it IS read
+    expect(built).toEqual(expect.arrayContaining(['approve', 'addLiquidity', 'removeLiquidity']))
+    expect(built).not.toContain('exchangeRateCurrent')
+    expect(built).not.toContain('liquidityUtilizationCurrent')
   })
 
   it('returns null — never a zero or a 1e18 stand-in — when a read fails', async () => {
     m.methods.pooledTokens = () => {
       throw new Error('rpc down')
     }
-    m.methods['exchangeRateCurrent.staticCall'] = () => {
+    m.methods.exchangeRateCurrent = () => {
       throw new Error('rpc down')
     }
     m.methods.balanceOf = () => {
@@ -314,16 +342,16 @@ describe('reads — state-changing calls are static-called, failures are null', 
     m.methods.paused = () => {
       throw new Error('rpc down')
     }
-    expect(await readPooledToken({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
-    expect(await readExchangeRate({ provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
-    expect(await readLpBalance({ provider: {}, lpToken: LP_TOKEN, owner: MEMBER })).toBeNull()
+    expect(await readPooledToken({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
+    expect(await readExchangeRate({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
+    expect(await readLpBalance({ chainId: 1, provider: {}, lpToken: LP_TOKEN, owner: MEMBER })).toBeNull()
     // Unknown pause state is null, NOT false — "we could not check" is not "it is running".
-    expect(await readHubPoolPaused({ provider: {}, hubPool: HUB_POOL })).toBeNull()
+    expect(await readHubPoolPaused({ chainId: 1, provider: {}, hubPool: HUB_POOL })).toBeNull()
   })
 
   it('returns null when an argument is missing, without touching the chain', async () => {
-    expect(await readPooledToken({ provider: null, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
-    expect(await readLpBalance({ provider: {}, lpToken: LP_TOKEN, owner: null })).toBeNull()
+    expect(await readPooledToken({ chainId: 1, provider: null, hubPool: HUB_POOL, l1Token: USDC })).toBeNull()
+    expect(await readLpBalance({ chainId: 1, provider: {}, lpToken: LP_TOKEN, owner: null })).toBeNull()
     expect(m.calls).toEqual([])
   })
 
@@ -375,10 +403,10 @@ describe('valuation and partial withdrawal (FR-020/FR-022)', () => {
   it('assembles a position, labelled an estimate', async () => {
     m.methods.pooledTokens = () => rawPooled({ liquidReserves: 10n * WAD })
     m.methods.balanceOf = () => 4n * WAD
-    m.methods['exchangeRateCurrent.staticCall'] = () => (WAD * 11n) / 10n
-    m.methods['liquidityUtilizationCurrent.staticCall'] = () => WAD / 3n
+    m.methods.exchangeRateCurrent = () => (WAD * 11n) / 10n
+    m.methods.liquidityUtilizationCurrent = () => WAD / 3n
 
-    const position = await readLpPosition({ provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })
+    const position = await readLpPosition({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })
     expect(position.lpToken).toBe(LP_TOKEN)
     expect(position.acceptsDeposits).toBe(true)
     expect(position.lpBalance).toBe(4n * WAD)
@@ -392,13 +420,13 @@ describe('valuation and partial withdrawal (FR-020/FR-022)', () => {
   it('keeps the position visible when a FIGURE is unreadable', async () => {
     m.methods.pooledTokens = () => rawPooled()
     m.methods.balanceOf = () => 4n * WAD
-    m.methods['exchangeRateCurrent.staticCall'] = () => {
+    m.methods.exchangeRateCurrent = () => {
       throw new Error('rpc down')
     }
-    m.methods['liquidityUtilizationCurrent.staticCall'] = () => {
+    m.methods.liquidityUtilizationCurrent = () => {
       throw new Error('rpc down')
     }
-    const position = await readLpPosition({ provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })
+    const position = await readLpPosition({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })
     expect(position.lpBalance).toBe(4n * WAD) // still there, still exitable
     expect(position.currentValue).toBeNull() // honestly unavailable, not 0
     expect(position.withdrawable).toBeNull()
@@ -409,7 +437,7 @@ describe('valuation and partial withdrawal (FR-020/FR-022)', () => {
     m.methods.pooledTokens = () => {
       throw new Error('rpc down')
     }
-    expect(await readLpPosition({ provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })).toBeNull()
+    expect(await readLpPosition({ chainId: 1, provider: {}, hubPool: HUB_POOL, l1Token: USDC, owner: MEMBER })).toBeNull()
   })
 })
 
@@ -426,13 +454,13 @@ describe('buildAddLiquidityCalls', () => {
     expect(calls).toHaveLength(2)
 
     expect(calls[0].target).toBe(USDC)
-    const approve = ERC20_IFACE.decodeFunctionData('approve', calls[0].data)
+    const approve = decodeAs(ERC20_PARSED, 'approve', calls[0].data)
     expect(approve[0]).toBe(HUB_POOL)
     expect(approve[1]).toBe(250_000_000n)
     expect(calls[0].value).toBe(0n)
 
     expect(calls[1].target).toBe(HUB_POOL)
-    expect(HUB_POOL_IFACE.decodeFunctionData('addLiquidity', calls[1].data)).toEqual([USDC, 250_000_000n])
+    expect(decodeAs(HUB_POOL_PARSED, 'addLiquidity', calls[1].data)).toEqual([USDC, 250_000_000n])
     expect(calls[1].value).toBe(0n)
   })
 
@@ -474,7 +502,7 @@ describe('buildRemoveLiquidityCalls', () => {
     expect(calls).toHaveLength(1)
     expect(calls[0].target).toBe(HUB_POOL)
     expect(calls[0].value).toBe(0n)
-    expect(HUB_POOL_IFACE.decodeFunctionData('removeLiquidity', calls[0].data)).toEqual([USDC, 2n * WAD, false])
+    expect(decodeAs(HUB_POOL_PARSED, 'removeLiquidity', calls[0].data)).toEqual([USDC, 2n * WAD, false])
   })
 
   it('supports a PARTIAL exit — the remainder stays supplied (FR-022)', () => {
@@ -483,7 +511,7 @@ describe('buildRemoveLiquidityCalls', () => {
       l1Token: USDC,
       lpTokenAmount: (2n * WAD) / 5n,
     })
-    expect(HUB_POOL_IFACE.decodeFunctionData('removeLiquidity', calls[0].data)[1]).toBe((2n * WAD) / 5n)
+    expect(decodeAs(HUB_POOL_PARSED, 'removeLiquidity', calls[0].data)[1]).toBe((2n * WAD) / 5n)
   })
 
   it('unwraps to ETH only for the WETH pool', () => {
@@ -494,7 +522,7 @@ describe('buildRemoveLiquidityCalls', () => {
       receiveNative: true,
       weth: WETH,
     })
-    expect(HUB_POOL_IFACE.decodeFunctionData('removeLiquidity', calls[0].data)[2]).toBe(true)
+    expect(decodeAs(HUB_POOL_PARSED, 'removeLiquidity', calls[0].data)[2]).toBe(true)
     expect(() =>
       buildRemoveLiquidityCalls({
         hubPool: HUB_POOL,

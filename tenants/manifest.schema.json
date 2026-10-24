@@ -2,105 +2,225 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://fairwins.app/schemas/tenant-manifest.schema.json",
   "title": "Tenant Manifest",
-  "description": "Single source of truth for one white-label tenant (spec 072). Enforced by scripts/tenants/validate-tenant-manifest.js — which also applies cross-manifest rules (domain uniqueness, fee caps, dedicated-mode deployment-record presence) that JSON Schema cannot express. Never put secrets in a manifest.",
+  "description": "Single source of truth for one white-label tenant (spec 072). Enforced by scripts/tenants/validate-tenant-manifest.js \u2014 which also applies cross-manifest rules (domain uniqueness, fee caps, dedicated-mode deployment-record presence) that JSON Schema cannot express. Never put secrets in a manifest.",
   "type": "object",
-  "required": ["schemaVersion", "id", "lifecycle", "identity", "brand", "settings", "contractSet"],
+  "required": [
+    "schemaVersion",
+    "id",
+    "lifecycle",
+    "identity",
+    "brand",
+    "settings",
+    "contractSet"
+  ],
   "additionalProperties": false,
   "properties": {
-    "schemaVersion": { "const": 1 },
+    "schemaVersion": {
+      "const": 1
+    },
     "id": {
       "type": "string",
       "pattern": "^[a-z][a-z0-9-]{1,30}$",
-      "description": "Immutable once any deployment record exists — CREATE2 salts derive from it. Must equal the manifest's directory name."
+      "description": "Immutable once any deployment record exists \u2014 CREATE2 salts derive from it. Must equal the manifest's directory name."
     },
-    "lifecycle": { "enum": ["draft", "live", "suspended", "retired"] },
+    "lifecycle": {
+      "enum": [
+        "draft",
+        "live",
+        "suspended",
+        "retired"
+      ]
+    },
     "identity": {
       "type": "object",
-      "required": ["displayName", "domains", "appUrl"],
+      "required": [
+        "displayName",
+        "domains",
+        "appUrl"
+      ],
       "additionalProperties": false,
       "properties": {
-        "displayName": { "type": "string", "minLength": 1 },
-        "legalName": { "type": "string" },
-        "tagline": { "type": "string" },
-        "metaDescription": { "type": "string" },
+        "displayName": {
+          "type": "string",
+          "minLength": 1
+        },
+        "legalName": {
+          "type": "string"
+        },
+        "tagline": {
+          "type": "string"
+        },
+        "metaDescription": {
+          "type": "string"
+        },
         "domains": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "pattern": "^[a-z0-9.-]+$" },
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z0-9.-]+$"
+          },
           "description": "Globally unique across all manifests (validator-enforced)."
         },
-        "appUrl": { "type": "string", "pattern": "^https://" },
-        "docsUrl": { "type": "string", "pattern": "^https://" },
-        "copyrightNotice": { "type": "string" },
+        "appUrl": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "docsUrl": {
+          "type": "string",
+          "pattern": "^https://"
+        },
+        "copyrightNotice": {
+          "type": "string"
+        },
         "support": {
           "type": "object",
           "additionalProperties": false,
-          "properties": { "email": { "type": "string" }, "url": { "type": "string" } }
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            }
+          }
         },
-        "social": { "type": "object", "additionalProperties": { "type": "string" } },
+        "social": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
         "legal": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "termsPath": { "type": "string" },
-            "privacyPath": { "type": "string" },
-            "riskPath": { "type": "string" }
+            "termsPath": {
+              "type": "string"
+            },
+            "privacyPath": {
+              "type": "string"
+            },
+            "riskPath": {
+              "type": "string"
+            }
           }
         }
       }
     },
     "brand": {
       "type": "object",
-      "required": ["logo", "logoMark", "favicon", "pwa", "theme"],
+      "required": [
+        "logo",
+        "logoMark",
+        "favicon",
+        "pwa",
+        "theme"
+      ],
       "additionalProperties": false,
       "properties": {
-        "logo": { "type": "string" },
-        "logoMark": { "type": "string" },
-        "favicon": { "type": "string" },
-        "appleTouchIcon": { "type": "string" },
+        "logo": {
+          "type": "string"
+        },
+        "logoMark": {
+          "type": "string"
+        },
+        "favicon": {
+          "type": "string"
+        },
+        "appleTouchIcon": {
+          "type": "string"
+        },
         "pwa": {
           "type": "object",
-          "required": ["name", "shortName", "themeColor", "backgroundColor"],
+          "required": [
+            "name",
+            "shortName",
+            "themeColor",
+            "backgroundColor"
+          ],
           "additionalProperties": false,
           "properties": {
-            "name": { "type": "string" },
-            "shortName": { "type": "string" },
-            "appleTitle": { "type": "string" },
-            "themeColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" },
-            "backgroundColor": { "type": "string", "pattern": "^#[0-9A-Fa-f]{6}$" }
+            "name": {
+              "type": "string"
+            },
+            "shortName": {
+              "type": "string"
+            },
+            "appleTitle": {
+              "type": "string"
+            },
+            "themeColor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            },
+            "backgroundColor": {
+              "type": "string",
+              "pattern": "^#[0-9A-Fa-f]{6}$"
+            }
           }
         },
-        "htmlTitle": { "type": "string" },
+        "htmlTitle": {
+          "type": "string"
+        },
         "theme": {
           "type": "object",
-          "required": ["base", "light", "dark"],
+          "required": [
+            "base",
+            "light",
+            "dark"
+          ],
           "additionalProperties": false,
           "description": "CSS custom properties materialized under .platform-<id> (base), .theme-light.platform-<id> (light), .theme-dark.platform-<id> (dark). base MUST define --brand-primary and --brand-secondary; light and dark MUST each define --primary-button and --primary-button-hover (the tokens frontend/src/utils/validateTheme.js asserts).",
           "properties": {
-            "base": { "$ref": "#/definitions/cssVars" },
-            "light": { "$ref": "#/definitions/cssVars" },
-            "dark": { "$ref": "#/definitions/cssVars" }
+            "base": {
+              "$ref": "#/definitions/cssVars"
+            },
+            "light": {
+              "$ref": "#/definitions/cssVars"
+            },
+            "dark": {
+              "$ref": "#/definitions/cssVars"
+            }
           }
         }
       }
     },
     "settings": {
       "type": "object",
-      "required": ["features", "chains"],
+      "required": [
+        "features",
+        "chains"
+      ],
       "additionalProperties": false,
       "properties": {
         "features": {
           "type": "array",
-          "items": { "type": "string" },
-          "description": "Subset of tenants/features.json. An absent feature is absent from nav/routes — not present-but-broken."
+          "items": {
+            "type": "string"
+          },
+          "description": "Subset of tenants/features.json. An absent feature is absent from nav/routes \u2014 not present-but-broken."
         },
         "chains": {
           "type": "object",
-          "required": ["mainnet", "testnet"],
+          "required": [
+            "mainnet",
+            "testnet"
+          ],
           "additionalProperties": false,
           "properties": {
-            "mainnet": { "type": "array", "items": { "type": "integer" } },
-            "testnet": { "type": "array", "items": { "type": "integer" } }
+            "mainnet": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            },
+            "testnet": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
           },
           "description": "Cohorts never mix (constitution III); validator refuses a chain listed in the wrong cohort."
         },
@@ -112,10 +232,22 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "bronze": { "type": "number", "minimum": 0 },
-                "silver": { "type": "number", "minimum": 0 },
-                "gold": { "type": "number", "minimum": 0 },
-                "platinum": { "type": "number", "minimum": 0 }
+                "bronze": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "silver": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "gold": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "platinum": {
+                  "type": "number",
+                  "minimum": 0
+                }
               },
               "description": "USD tier prices seeded into the tenant's MembershipManager at provisioning."
             }
@@ -123,44 +255,133 @@
         },
         "fees": {
           "type": "object",
-          "additionalProperties": { "type": "integer", "minimum": 0 },
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          },
           "description": "bps per spec-060 serviceId. Validator enforces platform caps (polymarket.taker <= 100, polymarket.maker <= 50, all others <= 250)."
         },
         "gateway": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "relayerUrl": { "type": ["string", "null"] },
-            "bundlerUrls": { "type": "object", "additionalProperties": { "type": "string" } },
-            "paymaster": { "type": "object" }
+            "relayerUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "bundlerUrls": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            },
+            "paymaster": {
+              "type": "object"
+            }
           }
         },
         "subgraph": {
           "type": "object",
           "additionalProperties": false,
           "properties": {
-            "urls": { "type": "object", "additionalProperties": { "type": "string" } }
+            "urls": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "assistant": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Assistant settings (spec 104). Optional. Public config only — a referral code is an identity value, never a credential.",
+          "properties": {
+            "guttertokenReferralCode": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "description": "Referral code delivered as https://app.guttertokens.com/signup?ref=<code> (prefills GutterToken's referral field) from the Get-a-key link on the Tools › Assistant tab. Optional: absent means the plain signup link. Requires the assistant-byok feature (validator-enforced) — a referral code for a rail the tenant does not offer is dead config. The credit it earns is catalogued as finops source referral-guttertoken."
+            }
           }
         }
       }
     },
     "contractSet": {
       "type": "object",
-      "required": ["mode"],
+      "required": [
+        "mode"
+      ],
       "additionalProperties": false,
       "properties": {
         "mode": {
-          "enum": ["shared", "dedicated"],
-          "description": "shared: the platform estate (cosmetic isolation only — disclose per FR-015). dedicated: tenant-owned proxies recorded under deployments/tenants/<id>/."
+          "enum": [
+            "shared",
+            "dedicated"
+          ],
+          "description": "shared: the platform estate (cosmetic isolation only \u2014 disclose per FR-015). dedicated: tenant-owned proxies recorded under deployments/tenants/<id>/."
         },
         "saltPrefix": {
-          "type": ["string", "null"],
-          "description": "Dedicated only. Defaults to id. NEVER change after the first deployment — addresses derive from it."
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Dedicated only. Defaults to id. NEVER change after the first deployment \u2014 addresses derive from it."
         },
         "pendingChains": {
           "type": "array",
-          "items": { "type": "integer" },
+          "items": {
+            "type": "integer"
+          },
           "description": "Dedicated + live: chains enabled in settings.chains whose deployment records intentionally do not exist yet (honest absence)."
+        }
+      }
+    },
+    "native": {
+      "type": "object",
+      "required": [
+        "ios",
+        "android",
+        "displayName",
+        "iconSource"
+      ],
+      "additionalProperties": false,
+      "description": "Native app identity (spec 102). Optional: absent means the tenant has no native channel and a native build for it fails loudly. One tenant = one appId per platform; appIds are globally unique across tenants.",
+      "properties": {
+        "ios": {
+          "type": "object",
+          "required": [
+            "appId"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "appId": {
+              "type": "string",
+              "description": "iOS bundle identifier (reverse-DNS)."
+            }
+          }
+        },
+        "android": {
+          "type": "object",
+          "required": [
+            "appId"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "appId": {
+              "type": "string",
+              "description": "Android application id (reverse-DNS)."
+            }
+          }
+        },
+        "displayName": {
+          "type": "string",
+          "description": "Home-screen app name."
+        },
+        "iconSource": {
+          "type": "string",
+          "description": "Path (relative to the tenant directory) of the icon masters the shells' icon sets are generated from."
         }
       }
     }
@@ -168,8 +389,12 @@
   "definitions": {
     "cssVars": {
       "type": "object",
-      "propertyNames": { "pattern": "^--[a-z][a-z0-9-]*$" },
-      "additionalProperties": { "type": "string" }
+      "propertyNames": {
+        "pattern": "^--[a-z][a-z0-9-]*$"
+      },
+      "additionalProperties": {
+        "type": "string"
+      }
     }
   }
 }

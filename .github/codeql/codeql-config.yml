@@ -1,0 +1,19 @@
+# CodeQL analysis configuration (issue #1486).
+#
+# Paths excluded here are not shipped code. Excluding them is not a way to quiet
+# an alert — it is a statement that nothing in them reaches a member, so a
+# finding there is noise that competes for attention with findings that matter.
+
+name: FairWins CodeQL
+
+paths-ignore:
+  # Reference-only Solidity and its tests. CLAUDE.md: "never import or deploy it."
+  - contracts-archive
+  - test-archive
+  # Design mockups checked into a spec directory: standalone HTML prototypes that
+  # exist to be looked at, are served from nowhere, and are not built by anything.
+  - specs/**/design
+  # Build output and vendored trees, in case a runner has them on disk.
+  - '**/node_modules'
+  - '**/dist'
+  - frontend/coverage

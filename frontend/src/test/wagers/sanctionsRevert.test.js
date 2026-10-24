@@ -200,3 +200,76 @@ describe('sanctionsRevert: every screened wager entrypoint speaks to it', () => 
     expect(translateAcceptRevert('MembershipDenied')).toMatch(/active membership/i)
   })
 })
+
+/*
+ * DIVERGENCE 23 (spec 110). Every translator in this area matches on the STRING this returns —
+ * `r.includes('NotOpenChallenge')`, `r.includes('MembershipDenied')`, nine of them on the accept
+ * path alone. Under ethers that worked because ethers put a decoded custom error's name on
+ * `error.reason`. viem puts it in NO message: its `shortMessage` for the same revert is the whole
+ * of `The contract function "…" reverted.`, and the name lives on `cause.data.errorName`.
+ *
+ * So without this the accept flow would stop naming nine distinct failures and tell every member
+ * "Acceptance failed. Please try again." — no error, no crash, nothing red.
+ *
+ * The errors below are REAL viem errors, produced by driving a real `readContract` against a
+ * transport that throws, because a hand-built fixture would agree with whatever this file was
+ * written to expect.
+ */
+describe('revertReasonFrom on a viem error (divergence 23)', () => {
+  async function viemRevert(data) {
+    const { createPublicClient, custom, parseAbi } = await import('viem')
+    const abi = parseAbi([
+      'function acceptOpenWager(uint256 id, bytes sig)',
+      'error NotOpenChallenge()',
+      'error MembershipDenied()',
+    ])
+    const client = createPublicClient({
+      chain: { id: 137, name: 'p', nativeCurrency: { name: 'n', symbol: 'n', decimals: 18 }, rpcUrls: { default: { http: [] } } },
+      transport: custom({
+        async request({ method }) {
+          if (method === 'eth_chainId') return '0x89'
+          throw Object.assign(new Error('execution reverted'), { code: 3, data: { data } })
+        },
+      }),
+    })
+    try {
+      await client.readContract({ address: '0x' + '11'.repeat(20), abi, functionName: 'acceptOpenWager', args: [1n, '0x00'] })
+      throw new Error('expected a revert')
+    } catch (e) {
+      return e
+    }
+  }
+
+  it('names a decoded custom error that appears in no message', async () => {
+    const { encodeErrorResult, parseAbi } = await import('viem')
+    const abi = parseAbi(['error NotOpenChallenge()', 'error MembershipDenied()'])
+    const err = await viemRevert(encodeErrorResult({ abi, errorName: 'NotOpenChallenge' }))
+    // The name is genuinely absent from what a message-reading implementation would have seen.
+    expect(err.shortMessage).not.toContain('NotOpenChallenge')
+    expect(revertReasonFrom(err)).toBe('NotOpenChallenge')
+    expect(translateAcceptRevert(revertReasonFrom(err))).toBe(
+      'This challenge is no longer open — someone may have already taken it.',
+    )
+
+    const denied = await viemRevert(encodeErrorResult({ abi, errorName: 'MembershipDenied' }))
+    expect(translateAcceptRevert(revertReasonFrom(denied))).toBe(
+      'An active membership is required to take a challenge. Purchase one and try again.',
+    )
+  })
+
+  it('prefers the string a plain revert("…") carried over the `Error` wrapper name', async () => {
+    const reason = 'ZeroStake'
+    const data =
+      '0x08c379a0' +
+      '0000000000000000000000000000000000000000000000000000000000000020' +
+      `000000000000000000000000000000000000000000000000000000000000000${reason.length.toString(16)}` +
+      Buffer.from(reason).toString('hex').padEnd(64, '0')
+    const err = await viemRevert(data)
+    expect(revertReasonFrom(err)).toBe('ZeroStake')
+  })
+
+  it('still finds SanctionedAddress by selector, which no ABI here decodes', async () => {
+    const err = await viemRevert(encodeSanctioned(MEMBER))
+    expect(revertReasonFrom(err)).toBe('SanctionedAddress')
+  })
+})

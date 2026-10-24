@@ -64,6 +64,14 @@ vi.mock('../hooks', () => ({
   useWallet: () => ({ isConnected: walletHolder.isConnected, account: '0xabc' }),
   useWalletConnection: () => ({ connectWallet: walletHolder.connectWallet }),
 }))
+// The screen mounts the FR-021 creation-moment DeviceLossWarning (issue #1405), which reads the
+// passkey session through usePasskeyAccount → useWallet (the useWalletManagement module, NOT the
+// `hooks` barrel mocked above). A classic session renders nothing, which is what these tests want.
+vi.mock('../hooks/useWalletManagement', () => ({
+  useWallet: () => ({
+    address: '0xabc', chainId: 137, loginMethod: 'wallet', isConnected: true, provider: null,
+  }),
+}))
 vi.mock('../hooks/useUI', () => ({ useModal: () => ({ showModal: vi.fn(), hideModal: vi.fn() }) }))
 vi.mock('../contexts/FriendMarketsContext.js', () => ({ useFriendMarkets: () => ({ friendMarkets: [] }) }))
 

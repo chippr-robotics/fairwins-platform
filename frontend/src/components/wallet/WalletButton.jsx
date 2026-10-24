@@ -70,6 +70,23 @@ function WalletButton({ className = '' }) {
     loading: roleDetailsLoading,
     refresh: refreshRoleDetails
   } = useRoleDetails()
+  /*
+   * ── MEMBERSHIP IS THE ACTING ACCOUNT'S, AND ONE SOURCE DECIDES ────────────────────────────
+   * `hasRole()` comes from WalletContext, which loads roles for the CONNECTED wallet and
+   * cannot see the acting account (CustodyProvider nests inside WalletProvider). `roleDetails`
+   * now reads the acting account. Gating the card on one and the upsell on the other put two
+   * different accounts' answers in the same dropdown — and the comment below rightly says they
+   * must never both show. So both read `roleDetails`.
+   *
+   * THREE STATES, not two. `readable === false` (or no detail read yet) means UNKNOWN: an
+   * unreadable reference chain must not be rendered as "you own nothing" and pushed a buy
+   * button at a paid-up member. Only a DEFINITE inactive membership offers the upsell.
+   */
+  const membership = roleDetails?.WAGER_PARTICIPANT
+  const membershipUnknown = !membership || membership.readable === false
+  const isMember = Boolean(membership?.isActive)
+  const offerMembershipUpsell = !isMember && !membershipUnknown
+
   const dropdownRef = useRef(null)
   const buttonRef = useRef(null)
 
@@ -306,7 +323,7 @@ function WalletButton({ className = '' }) {
               {/* Wager creation & management now live on the Dashboard, so the
                   dropdown no longer carries "Create Wager" / "My Wagers". The
                   membership upsell stays for non-members. */}
-              {!hasRole(ROLES.WAGER_PARTICIPANT) && (
+              {offerMembershipUpsell && (
                 <div className="dropdown-section">
                   <span className="wallet-section-title">Wagers</span>
                   <div className="friend-market-promo">
@@ -317,7 +334,17 @@ function WalletButton({ className = '' }) {
                       role="menuitem"
                     >
                       <span className="action-icon" aria-hidden="true"><NavIcon name="key" size={16} /></span>
-                      <span>Get Access - from $2 USDC / month</span>
+                      {/* NO PRICE HERE, deliberately. This said "from $2 USDC / month" as a
+                          hardcoded string, and both halves were untrue on production: Bronze ($2)
+                          is INACTIVE on the live ladder so the cheapest purchasable tier is Silver
+                          at $8, and the contract sells a one-shot 30-day term, not a recurring
+                          month. The tier grid inside the purchase modal reads getTierConfig live
+                          (and discloses when it is falling back), which is the only place a price
+                          can be stated honestly — the other two membership CTAs (Dashboard,
+                          WalletPage) already quote no price for the same reason. Quoting one here
+                          would mean either a second hardcoded number that drifts again, or a
+                          contract read on every page that mounts the header. */}
+                      <span>Get Access</span>
                     </button>
                     <button
                       onClick={() => { setIsOpen(false); navigate('/vouchers#vch-redeem-h') }}
@@ -345,7 +372,7 @@ function WalletButton({ className = '' }) {
                 {/* Membership entry is mutually exclusive with the purchase
                     upsell: members manage their membership, non-members buy in.
                     Never show both at once. */}
-                {hasRole(ROLES.WAGER_PARTICIPANT) ? (
+                {!offerMembershipUpsell ? (
                   <button
                     onClick={() => { setIsOpen(false); navigate('/wallet?tab=membership') }}
                     className="action-button"

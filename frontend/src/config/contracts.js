@@ -40,11 +40,18 @@ const MORDOR_CONTRACTS = {
   voucherBatchMinter: '0xc26F02da923263e2c9CFB722006e0B8Da2F952B2',
   tokenFactory: '0x5bdf74Ce98D41bf35192c20B25ACd561C75CFe62',
   externalDAORegistry: '0xcEE0fb2e1407f0A0d19Bcf4Fee2726A3005FA3C0',
+  // NOTE: there is deliberately NO `standardDaoFactory` key here, and none is coming (issue #1268).
+  // Mordor's EVM is pre-Cancun, so OpenZeppelin 5.4.0's Governor — which uses MCOPY — cannot be
+  // deployed on it at all. The absence IS the answer: ClearPath's Launch tab names that reason,
+  // while the registry above keeps serving register/track/govern on this chain unchanged.
   backupPointerRegistry: '0x664ACAd4d604c626A6160948Df9C10FE38010E11',
   // Wager Pools (spec 034, address-based — Semaphore removed). Pending the fresh WagerPoolFactory
   // deploy; populated by `npm run sync:frontend-contracts` after `deploy-wager-pool-factory.js`.
   // The prior Semaphore-based factory (0x33cD…) is abandoned and intentionally NOT wired here.
   wagerPoolFactory: '0xac78B4EdeF96e74a2653028dF93A26acFCfC613F',
+  // Funding pools (spec 103) — sibling factory of wagerPoolFactory. Empty until
+  // `deploy-funding-pool-factory.js` runs; populated by `npm run sync:frontend-contracts`.
+  fundingPoolFactory: '',
   // Callsigns (spec 054) — %callsign naming registry. Empty until `deploy-callsign-registry.js` runs;
   // populated by `npm run sync:frontend-contracts`.
   callsignRegistry: '',
@@ -84,7 +91,31 @@ const HARDHAT_CONTRACTS = {
   sanctionsGuard: '0xA3Fd27637C50a407E43B2CF889E83CdABF070D17',
   polymarketAdapter: '0xeA913b1a96D9447080bBfA7Cb7C397ae0A0fcADB',
   paymentToken: '0xbc4D54AE49ED9C6075770CD6acA930A728dcf526',
-  wmatic: '0x007e106a5664D48e02f571b58694B74c9D5c22a1',
+  // Passkey smart-account stack (spec 041). NOT nonce-derived like everything else in this block:
+  // the implementation and factory are CREATE2-deployed from the canonical Arachnid proxy with a
+  // fixed salt and EntryPoint v0.6 sits at its canonical address, so FR-023 makes all three the
+  // SAME addresses on every chain — including a local node the passkey full-stack e2e job has
+  // bootstrapped (scripts/e2e/passkey-stack/deploy-passkey-stack.js, which fails loudly if the
+  // deterministic deploy does not reproduce them). They are stated here because
+  // `requirePasskeySupport` reads them per chain: without them the local 80002 impersonation can
+  // sign in but can submit no UserOp at all. A plain local sandbox that has not run that bootstrap
+  // has no bundler configured either, so `isPasskeySupported` still answers false there.
+  entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+  accountFactory: '0xd519C25e9dEd0DAC586B764574100479CB318734',
+  // Spec 108: the local wrapped native is now the WETH9-shaped MockWNative (payable
+  // deposit()/withdraw()), because the Wrap surface's on-chain flow runs a REAL wrap here.
+  // CREATE2 (salt V2+"MockWMATIC" + MockWNative init code), so the address is the same on
+  // every clean local chain; re-derived from a fresh node:e2e + setup:e2e run.
+  wmatic: '0x637914a81B4F67BeA3acd94fc5a233656f8C08f7',
+  /*
+   * spec 030 pillar A — the native standard-DAO factory. NONCE-DERIVED, deployed by
+   * `deploy:local:clearpath` (which `setup:e2e` runs after the seed); recorded from a clean
+   * `node:e2e` + `setup:e2e` run and verified by `check:e2e-addresses` on every full-tier run.
+   * Without this key the app resolves `null` and ClearPath's Launch tab honestly says
+   * "not deployed" — the app working, which is why full/42-clearpath-native-dao.cy.js asserts
+   * the precondition first.
+   */
+  standardDaoFactory: '0x172076E0166D1F9Cc711C77Adf8488051744980C',
   // spec 049 — multisig policy engine (synced from deployments/hardhat-chain1337-v2.json)
   safePolicyGuard: '0xBE509C8E6c4F132e2Af49761A318FfA362e9CE38',
   // Spec 068 ordered rule engine; deployed alongside v1 (both guards stay live — vaults adopt V2
@@ -143,7 +174,7 @@ const HARDHAT_CONTRACTS = {
    * commit→reveal, so the on-chain flow needs a registry it can actually write to; a shipped build
    * still resolves this from the per-network maps above (Polygon has one, Mordor does not yet).
    */
-  callsignRegistry: '0x7A9Ec1d04904907De0ED7b6839CcdD59c3716AC9',
+  callsignRegistry: '0xf953b3A269d80e3eB0F2947630Da976B896A8C5b',
   /*
    * THE TWO ENTRIES BELOW ARE NONCE-DERIVED, AND THEIR ORDER IS THE `setup:e2e` ORDER.
    *
@@ -159,6 +190,9 @@ const HARDHAT_CONTRACTS = {
    */
   // spec 034 — Wager Pools factory (address-based, no Semaphore).
   wagerPoolFactory: '0xc3e53F4d16Ae77Db1c982e75a937B9f60FE63690',
+  // Funding pools (spec 103). NONCE-DERIVED — deployed by `deploy-funding-pool-factory.js`, which
+  // `setup:e2e` runs LAST so no earlier nonce-derived address moves (#1289). Recorded from a real run.
+  fundingPoolFactory: '0x18E317A7D70d8fBf8e6E893616b52390EbBdb629',
   /*
    * spec 060 — the platform-fee source of truth.
    * `frontend/cypress/e2e/full/25-platform-fees.cy.js` asserts this against the address the chain
@@ -179,7 +213,7 @@ const AMOY_CONTRACTS = {
   keyRegistry: '0xcEFdeBba8E040c035c690ca9057cF22E73247c24',
   sanctionsGuard: '0xdF41355dD5E47FCA4eE2F2205af4C70Dab8C13B3',
   polymarketAdapter: '0x98fe63209f5BffcCe905bF8779a1F06576A2C313',
-  // Stake / payment tokens (Circle USDC + Wrapped MATIC on Amoy)
+  // Stake / payment tokens (Circle USDC + wrapped native (WPOL) on Amoy)
   paymentToken: '0x41E94Eb019C0762f9Bfcf9Fb1E58725BfB0e7582',
   wmatic: '0x0ae690AAD8663aaB12a671A6A0d74242332de85f',
   chainlinkDataFeedAdapter: '0x7ae8220Dc02D0504EDCBa2C1B1AbA579AA3F0f23',
@@ -201,7 +235,9 @@ const AMOY_CONTRACTS = {
   bridgeRouter: '',
   liquidityRouter: '',
   entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+  verifyingPaymaster: '0xA00A06ae44FA2bd40Ec10D9613c96afD779b6898', // spec 050 — sponsored-gas paymaster (EntryPoint v0.6)
   accountFactory: '0xd519C25e9dEd0DAC586B764574100479CB318734',
+  standardDaoFactory: '', // spec 030 pillar A — native standard-DAO factory (synced after deploy)
 }
 
 // Polygon mainnet deployment (v2 — P2P betting architecture) — LIVE
@@ -217,7 +253,7 @@ const POLYGON_CONTRACTS = {
   keyRegistry: '0xcEFdeBba8E040c035c690ca9057cF22E73247c24',
   sanctionsGuard: '0x2Dc53d91A189be71DfE96Ea9BCFCF6aDDA77BC76', // Spec 007 compliance guard
   polymarketAdapter: '0x83688e9b8D4f085E3eF4619D91e0e6303cFcf0A4', // tie-fix + admin-owner redeploy
-  // Stake / payment tokens (Circle USDC + Wrapped MATIC on Polygon)
+  // Stake / payment tokens (Circle USDC + wrapped native (WPOL) on Polygon)
   paymentToken: '0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359',
   wmatic: '0x0d500B1d8E8eF31E21C99d1Db9A6444d3ADf1270',
   chainlinkDataFeedAdapter: '0x7ae8220Dc02D0504EDCBa2C1B1AbA579AA3F0f23',
@@ -227,6 +263,9 @@ const POLYGON_CONTRACTS = {
   voucherBatchMinter: '0x4b50d24ca28CbDC029714e5830f7D16a0ebEDb0e',
   tokenFactory: '0x5806e76cA3c838524E7cF43db7625bdFBA0783a0',
   wagerPoolFactory: '0x420aEC3c76859eB74ab21c769c16AcdAB221f723',
+  // Funding pools (spec 103) — sibling factory of wagerPoolFactory. Empty until
+  // `deploy-funding-pool-factory.js` runs; populated by `npm run sync:frontend-contracts`.
+  fundingPoolFactory: '',
   entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
   verifyingPaymaster: '0xe14554D14eB5DeC47f7824ebeeDa6C9f3A50d105', // spec 050 — sponsored-gas paymaster (EntryPoint v0.6)
   accountFactory: '0xd519C25e9dEd0DAC586B764574100479CB318734',
@@ -245,6 +284,10 @@ const POLYGON_CONTRACTS = {
   liquidityRouter: '0x13762c059c2A22E3bCd8A44F36EA44e8e3B22B31',
   safePolicyGuardV2: '0xf18B813Ad8C01249FE904A732543A1b8E6CAfd0c',
   feeRouter: '0xf8161fC26172621E9fbcc6c39500Bb14b0902B35',
+  // spec 030 pillar A — native standard-DAO factory. Empty until
+  // `deploy-clearpath.js` runs; `npm run sync:frontend-contracts` populates it.
+  // Undeployed ⇒ ClearPath's Launch tab says so honestly and offers nothing.
+  standardDaoFactory: '',
 }
 
 // Ethereum Classic mainnet (chainId 61) — CUSTODY ONLY. ETC hosts no FairWins wager/membership
@@ -504,6 +547,19 @@ export function getContractAddressForChain(contractName, chainId) {
 
 // Local-only sandboxes — never surfaced as public "deployed" networks.
 const LOCAL_ONLY_CHAIN_IDS = new Set([1337])
+
+/**
+ * Is this chain a local development sandbox rather than a real network?
+ *
+ * Exported because "local-only" is a fact about REACHABILITY, not just about the landing page:
+ * a shipped build can never reach `http://127.0.0.1:8545`, so any read routed at such a chain
+ * from a deployed origin is guaranteed to fail. Callers that would otherwise report that
+ * guaranteed failure to a member as a degraded state must exclude these chains first —
+ * see `lib/screening/sources.js#screeningChainIds` for the case that made this necessary.
+ */
+export function isLocalOnlyChain(chainId) {
+  return LOCAL_ONLY_CHAIN_IDS.has(Number(chainId))
+}
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 /**
@@ -558,7 +614,8 @@ const NETWORK_INFO_BY_CHAIN = {
   },
   80002: {
     name: 'Polygon Amoy',
-    rpcUrl: 'https://rpc-amoy.polygon.technology',
+    // Mirrors config/networks.js — see the note there on why this is not Polygon's own endpoint.
+    rpcUrl: 'https://polygon-amoy-bor-rpc.publicnode.com',
     blockExplorer: 'https://amoy.polygonscan.com',
   },
   137: {

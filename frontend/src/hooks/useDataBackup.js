@@ -25,6 +25,10 @@ import { readSession } from '../connectors/passkey'
 const SIZE_WARN_BYTES = 1024 * 1024 // ~1 MB soft cap (FR-021)
 const LAST_BACKUP_KEY = 'data_backup_last_at'
 
+// Honest passkey-UserOp lifecycle states as returned by sendCalls (mirrors LIFECYCLE in
+// lib/passkey/submission.js — kept as literals here to avoid pulling the relay graph into this hook).
+const OP_STATE = Object.freeze({ INCLUDED: 'included', FAILED: 'failed' })
+
 // Session-only key cache (in-memory; cleared on reload or account change) so a backup+restore in one session
 // doesn't double-prompt for the signature/ceremony. Never persisted to disk.
 let keyCache = { account: null, key: null }
@@ -63,10 +67,29 @@ export function useDataBackup() {
   const isPasskey = loginMethod === 'passkey'
   const canSign = Boolean(account) && (Boolean(signer) || isPasskey)
 
-  // Persist the pointer on the canonical network, using the session's signing path.
+  /*
+   * Persist the pointer on the canonical network, using the session's signing path — and RESOLVE
+   * ONLY WHEN THE WRITE HAS SETTLED, because both callers treat "returned" as "recorded".
+   *
+   * The signer path already does: `writePointer` awaits the receipt. The passkey path did not.
+   * `sendCalls` resolves to an honest terminal state — included | failed | stalled — and NEVER
+   * throws on a stalled or reverted UserOp (submission.js#trackToInclusion returns those). An
+   * unchecked `await` therefore let `backup()` say "Your data is backed up" and set remoteState
+   * 'yes' for a pointer that is not on chain, and let `remove()` say the backup was removed while
+   * it is still pointed at. Both are claims about chain state that nothing established, and a
+   * member acts on them: the first stops backing up, the second stops trying to remove.
+   *
+   * A result carrying no `state` is left alone — that is a non-passkey rail, not a stalled op.
+   */
   const persistPointer = useCallback(async (cid) => {
     if (isPasskey) {
-      await sendCalls([buildSetPointerCall(cid)])
+      const res = await sendCalls([buildSetPointerCall(cid)])
+      if (res?.state === OP_STATE.FAILED) {
+        throw new Error(res.reason || 'Recording your backup pointer reverted on chain — nothing was recorded.')
+      }
+      if (res?.state && res.state !== OP_STATE.INCLUDED) {
+        throw new Error('Your backup pointer was submitted but has not confirmed on chain yet — check back shortly before trying again.')
+      }
     } else {
       await writePointer(signer, cid)
     }

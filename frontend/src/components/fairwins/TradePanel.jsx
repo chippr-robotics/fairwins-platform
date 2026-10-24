@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { parseUnits } from 'ethers'
+import { parseUnits } from '../../lib/evm/units'
 import { useSwitchChain } from 'wagmi'
 import { useDex } from '../../hooks/useDex'
 import {
@@ -28,7 +28,10 @@ import { useActiveAccount } from '../../hooks/useActiveAccount'
 import { useSwapBalances } from '../../hooks/useSwapBalances'
 import SensitiveValue from '../common/SensitiveValue'
 import InfoTip from '../ui/InfoTip'
+import { formatDecimalForDisplay } from '../../lib/format/amount'
 import TradeTokenSelect from './TradeTokenSelect'
+import TokenNewsCard from '../news/TokenNewsCard'
+import { isFeatureEnabled } from '../../config/tenant'
 import './TradePanel.css'
 
 // Price impact bands used to color the trade summary, mirroring the thresholds
@@ -43,7 +46,10 @@ function impactSeverity(pct) {
   return 'low'
 }
 
-const fmtBalance = (value) =>
+// Quote figures only (minimum received / limit floor), NOT balances: a slippage floor is shown
+// to more digits than a balance would be, and the summary only renders once a quote exists, so
+// `value` is never an unread balance here. Balances go through `formatDecimalForDisplay` below.
+const fmtQuoteAmount = (value) =>
   Number(value || 0).toLocaleString(undefined, { maximumSignificantDigits: 8 })
 
 /**
@@ -172,7 +178,7 @@ function TradePanel() {
     return value == null ? (
       <span className="trade-balance-pending" aria-label="balance loading">…</span>
     ) : (
-      <SensitiveValue>{fmtBalance(value)}</SensitiveValue>
+      <SensitiveValue>{formatDecimalForDisplay(value) ?? '—'}</SensitiveValue>
     )
   }
 
@@ -671,6 +677,23 @@ function TradePanel() {
         </div>
       </div>
 
+      {/* Token news (spec 109 US2) — below the amount entry, ADVISORY ONLY: no news state gates,
+          delays or alters the swap form, quoting or submission (FR-006). One card per leg, so a
+          pair with one covered and one uncovered token renders labelled partial coverage rather
+          than a silently completed feed. */}
+      {isFeatureEnabled('news') && (fromToken || toToken) && (
+        <div className="trade-news">
+          {[fromToken, toToken].filter(Boolean).map((token) => (
+            <TokenNewsCard
+              key={`${token.chainId}:${token.address}`}
+              chainId={Number(token.chainId)}
+              address={token.address}
+              assetLabel={token.symbol}
+            />
+          ))}
+        </div>
+      )}
+
       {/* Trade summary — the capital-markets read-out */}
       {quote && (
         <div className="trade-summary" role="group" aria-label="Trade details">
@@ -705,8 +728,8 @@ function TradePanel() {
             <span className="trade-summary-val">
               <SensitiveValue>
                 {priceType === 'limit' && limitFloor
-                  ? fmtBalance(limitFloor.text)
-                  : fmtBalance(quote.minimumReceived)}
+                  ? fmtQuoteAmount(limitFloor.text)
+                  : fmtQuoteAmount(quote.minimumReceived)}
               </SensitiveValue>{' '}
               {quote.tokenOutSymbol}
             </span>

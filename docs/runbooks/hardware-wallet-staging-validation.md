@@ -124,3 +124,27 @@ that fired — or failed to). A raw vendor message on screen is itself a bug aga
 when the underlying failure is legitimate. Note browser + version, vendor firmware version, and
 whether the failure reproduces with the DEV test adapter (if it does, it is not a
 transport/firmware problem).
+
+## Native app addendum (spec 102 — Ledger over the OS Bluetooth stack)
+
+The native iOS/Android apps reach a Ledger through
+`lib/native/ledgerBleTransport.js` (the Capacitor BLE plugin speaking the
+Ledger BLE framing), selected by runtime inside the same one-seam ladder.
+Everything above the transport is identical, so this addendum validates ONLY
+the rail; every row above still applies inside the native app.
+
+Run on PHYSICAL devices (a Nano X — the only Bluetooth Ledger), per platform:
+
+| Check | iOS | Android | Notes |
+|---|---|---|---|
+| Pair + connect from Protect ▸ Off chain | | | first connect shows the OS pairing dialog, not a browser chooser |
+| Address verify-on-device at add time | | | must match the saved address on reconnect (re-derive rule) |
+| Sign one transaction with physical confirmation | | | recover-and-verify before broadcast still runs |
+| Bluetooth permission DENIED | | | expects the `permission-denied` sentence, never a raw plugin message |
+| Radio OFF | | | expects the `bluetooth-unavailable` sentence (distinct remedy from denial) |
+| Link drop mid-session (walk away / power off) | | | expects `disconnected`, reconnect works |
+| App backgrounded mid-signature | | | on return (through any due lock re-prompt) the action reports its true state |
+
+A raw SDK/plugin sentence reaching the member fails the run (FR-012), exactly
+as on web. Record outcomes on the release issue alongside the passkey PRF
+check from `docs/runbooks/native-release-operations.md`.

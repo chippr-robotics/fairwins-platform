@@ -96,7 +96,7 @@ const TARGETS = {
   61: {
     name: 'Ethereum Classic',
     rpc: ['VITE_RPC_URL_ETC', 'ETC_RPC_URL'],
-    fallbackRpc: ['https://etc.rivet.link', 'https://etc.etcdesktop.com'],
+    fallbackRpc: ['https://etc.etcdesktop.com'], // etc.rivet.link removed — NXDOMAIN
     bundlerEnv: 'VITE_BUNDLER_URLS_ETC',
   },
   63: {

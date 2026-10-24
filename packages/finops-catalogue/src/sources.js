@@ -211,6 +211,47 @@ const referral = [
       'captured by fee-polymarket-taker/maker. The builder code IS registered, so unlike the other referral ' +
       'sources this one is expected to report a real value once the credential is provisioned.',
   },
+  /**
+   * GutterToken referral (spec 104). Catalogued ON PURPOSE, not because a gate demanded it: C2b
+   * enumerates payee env reads in `services/relay-gateway/src/**` only, and this referral code lives
+   * in the TENANT MANIFEST (`settings.assistant.guttertokenReferralCode`) and ships in the frontend's
+   * signup link — the gateway never reads it, so the gate is structurally blind to this one. That is
+   * exactly the "a gate that cannot see the source is not protection" case the x402 rail taught, and
+   * the remedy is the same: name it here so it is visible.
+   *
+   * `planned` and NOT `live`+`not-configured`, unlike the other referral entries, because there is a
+   * real difference: those have a collector that CAN read a value once an env var is set. This one
+   * has no collector that could ever read one — GutterToken exposes no balance, usage, or referral
+   * endpoint (research §1, verified negative), and the credit lands on FairWins' own GutterToken
+   * account, visible only on GutterToken's billing page. `moneyPath` carries the namespace alone:
+   * there is no `payeeEnv` because no gateway variable holds the code (declaring one the gateway
+   * does not read would trip the stale-claim rule), and no `enableEnv` because the rail is switched
+   * by the tenant feature flag `assistant-byok`, not by deployment config.
+   */
+  {
+    id: 'referral-guttertoken',
+    kind: 'revenue',
+    status: 'planned',
+    label: 'Assistant — GutterToken referral credit',
+    metric: null,
+    collector: 'none',
+    interval: VENDOR,
+    credential: null,
+    docs: 'finops-operations.md#planned-sources',
+    moneyPath: { namespace: 'guttertoken' },
+    meaning:
+      'PLANNED, NOT LIVE — and NOT CASH. When a member opens and funds a GutterToken account through the ' +
+      'referral-coded signup link on the Assistant tab (spec 104), GutterToken credits FairWins’ own ' +
+      'GutterToken account with prepaid usage credit (docs: 15% of the referee’s FIRST deposit, capped at $50; ' +
+      'non-refundable, non-cashable, self-referral void). It is in-kind credit that can only be spent on model ' +
+      'calls from that account, so it is never revenue in USD and must never be summed with the cash sources. ' +
+      'No referral code is registered yet and, more fundamentally, nothing can read the figure: GutterToken ' +
+      'publishes no balance or referral endpoint, so no collector could ever report it — the honest state is ' +
+      'not-yet-live with no metric, and it is excluded from every total. If P3 (a FairWins-owned GutterToken ' +
+      'account as the FairWins rail’s upstream) is adopted, this credit accrues on the same account that ' +
+      'assistant-model-api would then be billed to, and offsets that cost; the two entries should be promoted ' +
+      'together, with this one staying an in-kind offset rather than becoming a revenue line.',
+  },
 ]
 
 /**
@@ -253,6 +294,47 @@ const planned = [
 ]
 
 /**
+ * x402 agent payments (spec 096) — LIVE since 2026-08-28.
+ *
+ * Promoted together with the deployment that switched the rail on, which is the sequencing the C2b
+ * gate exists to force: a revenue path and the thing that watches it ship in one change, so there
+ * is never a window where money can arrive unobserved.
+ *
+ * The collector reads settlements FROM CHAIN, not from the gateway, and that is deliberate. A
+ * gateway counter would reset on every restart and vanish entirely if the container were replaced —
+ * for a revenue figure that is an undercount which still looks like a number. The chain is the
+ * durable record, and `collectors/x402.js` documents how a settlement is told apart from every
+ * other USDC arrival at the same treasury (a `Transfer` into it whose transaction ALSO used an
+ * EIP-3009 authorization — a shape only `transferWithAuthorization` produces).
+ */
+const x402 = [
+  {
+    id: 'x402-agent-payments',
+    kind: 'revenue',
+    status: 'live',
+    label: 'Member API — x402 agent payments',
+    metric: 'fairwins_finops_revenue_total',
+    collector: 'x402',
+    chains: [POLYGON],
+    interval: CHAIN_EVENTS,
+    credential: null,
+    docs: 'finops-operations.md#x402-agent-payments',
+    moneyPath: { namespace: 'x402', payeeEnv: 'X402_PAY_TO', enableEnv: 'X402_ENABLED' },
+    meaning:
+      'An agent holding no membership pays per request: it signs an EIP-3009 USDC authorization to the platform ' +
+      'treasury (X402_PAY_TO) and the gateway settles it — $0.01 a read, $0.05 a typed-data build, $0.10 an ' +
+      'assistant message. Unambiguously revenue, and it routes around the FeeRouter entirely, which is why the ' +
+      'coverage gate could not see it until C2 learned to look for configured platform payees. The treasury is the ' +
+      'admin Safe, which the FeeRouter also pays into on most chains — so counting arrivals at that address would ' +
+      'attribute fee revenue to agents. The collector counts only authorization-settled transfers, which nothing ' +
+      'else in this estate produces at this address. Counters are cumulative SINCE EXPORTER START, not all-time: ' +
+      'cursors are in memory by design (owning a datastore whose corruption silently understates revenue is the ' +
+      'worse failure), and the dashboard states that rather than implying a lifetime total.',
+  },
+]
+
+
+/**
  * BUILT, NOT OFFERED. Two money paths whose code is complete and whose deployment is switched off.
  *
  * These are a different thing from the `planned` block above, and the difference is worth stating
@@ -273,29 +355,6 @@ const planned = [
  * dashboard.
  */
 const dormant = [
-  {
-    id: 'x402-agent-payments',
-    kind: 'revenue',
-    status: 'planned',
-    label: 'Member API — x402 agent payments',
-    metric: null,
-    collector: 'none',
-    chains: [POLYGON],
-    interval: CHAIN_EVENTS,
-    credential: null,
-    docs: 'finops-operations.md#planned-sources',
-    moneyPath: { namespace: 'x402', payeeEnv: 'X402_PAY_TO', enableEnv: 'X402_ENABLED' },
-    meaning:
-      'BUILT, NOT OFFERED. The x402 paid rail (spec 096) lets an agent holding no membership pay per request: it ' +
-      'signs an EIP-3009 USDC authorization to the platform treasury (X402_PAY_TO) and the gateway settles it — ' +
-      '$0.01 a read, $0.05 a typed-data build, $0.10 an assistant message. Unambiguously revenue, and it routes ' +
-      'around the FeeRouter entirely, which is why the coverage gate could not see it until C2 learned to look for ' +
-      'configured platform payees. It is enabled on NO deployment: X402_ENABLED and X402_PAY_TO are commented out, ' +
-      'the treasury has no default on purpose, and the pinned gateway image predates the module. So no payment has ' +
-      'ever been possible and there is no value to read — not a $0, which would claim the rail was offered and ' +
-      'ignored. Promoting this to `live` needs a collector that can tell x402 settlements apart from every other ' +
-      'USDC arrival at the same treasury; the gate now forces that work to happen BEFORE the first payment, not after.',
-  },
   {
     id: 'assistant-model-api',
     kind: 'cost',
@@ -449,6 +508,90 @@ const vendors = [
       'plan the modelled figure is the flat subscription and credit usage is informational only.',
   },
   {
+    id: 'pinata',
+    kind: 'cost',
+    status: 'live',
+    label: 'Pinata (IPFS pinning)',
+    metric: 'fairwins_finops_cost_usd_total',
+    unit: 'USD',
+    basis: 'modelled',
+    collector: 'pinata',
+    interval: VENDOR,
+    // A SEPARATE, READ-SCOPED key — never the pinning JWT, which is a write credential and has no
+    // business in a service that is read-only by construction (FR-026).
+    credential: 'finops-pinata-read-jwt',
+    docs: 'finops-operations.md#pinata-cost',
+    meaning:
+      'Pinata spend MODELLED from the declared plan subscription; storage is read separately and exported as ' +
+      'measured vendor usage. This is a PAID vendor on the member write path — wager creation, open challenges ' +
+      'and encrypted backup pin JSON with no fallback, and mini-app packages are published here under CIDs that ' +
+      'are keccak-committed on chain — so an outage is a member-facing incident, not a reporting one. Neither ' +
+      'check:finops discovery route could ever have found it (no FeeRouter serviceId, no gateway payee env: the ' +
+      'money flows the other way), which is why it sat uncatalogued while the vendor workbook recorded "we pay ' +
+      'them" the whole time. The vendor publishes no billing API on our plan, so the dollar figure is arithmetic ' +
+      'over a declared rate and the bytes beside it are the fact.',
+  },
+  {
+    id: 'alphaday-news-api',
+    kind: 'cost',
+    status: 'live',
+    label: 'Alphaday news API',
+    metric: 'fairwins_finops_cost_usd_total',
+    unit: 'USD',
+    basis: 'modelled',
+    collector: 'flatSubscription', // keyless vendor, no billing API — the declared plan IS the model
+    interval: VENDOR,
+    credential: null,
+    docs: 'finops-operations.md#alphaday-news-cost',
+    meaning:
+      'The token-news vendor behind the relay-gateway news proxy (spec 109). Keyless public API on a free ' +
+      'tier: the modelled figure is $0 by declared plan rate, and the entry exists so the dependency is ' +
+      'VISIBLE — if Alphaday ever prices the tier, this line is where the change lands rather than a ' +
+      'surprise (research R7). No revenue entry pairs with it: the module carries no fee, no referral, no ' +
+      'payee env, so C2b has nothing to claim. Gateway request volume shows in gateway-upstream-usage ' +
+      'under the news upstream label.',
+  },
+  {
+    id: 'gateway-upstream-usage',
+    kind: 'usage',
+    status: 'live',
+    label: 'Gateway upstream usage',
+    metric: 'fairwins_finops_vendor_usage',
+    collector: 'gateway',
+    interval: VENDOR,
+    docs: 'finops-operations.md#gateway-upstream-usage',
+    meaning:
+      'MEASURED request counts from the relay-gateway, per assurance tier and per upstream (spec 106, #1447): ' +
+      'who is consuming the platform-held vendor credentials, in whose name. It is context for the vendor cost ' +
+      'sources beside it — the QuickNode account is capped at 50 req/s shared with the gasless bundler, so this ' +
+      'is the series that says WHERE that budget went. It is NOT a dollar and never joins a money total; counters ' +
+      'are cumulative-since-boot on the gateway (rate() over them survives restarts the way any Prometheus ' +
+      'counter does), and the labels are bounded by construction: tiers come from the fixed ladder, upstreams ' +
+      'from the route table.',
+  },
+  {
+    id: 'thegraph',
+    kind: 'cost',
+    status: 'live',
+    label: 'The Graph (subgraph queries)',
+    metric: 'fairwins_finops_cost_usd_total',
+    unit: 'USD',
+    basis: 'modelled',
+    collector: 'flatSubscription',
+    interval: VENDOR,
+    credential: null,
+    docs: 'finops-operations.md#thegraph-cost',
+    meaning:
+      'Subgraph query spend, MODELLED from the declared plan rate. THE TIER IS WHICH ENDPOINT THE APP CALLS, not ' +
+      'a setting: `api.studio.thegraph.com` is Subgraph Studio, the free development tier, where the cost really ' +
+      'is $0 and no GRT is consumed. Publishing to the decentralized network and switching a `subgraphUrl` to ' +
+      '`gateway.thegraph.com` changes that in one edit — query fees are then paid in GRT from a billing balance ' +
+      'held on ARBITRUM ONE (GRT on Ethereum L1 does not pay them). The free allowance does not bill over, it ' +
+      'FAILS, so this line is about a dependency as much as a dollar. `check:finops` C6 fails if a gateway URL ' +
+      'appears while the plan price is still asserted at zero, because that transition is a one-character edit ' +
+      'that would otherwise leave a confidently wrong $0 on the dashboard.',
+  },
+  {
     id: 'grafana-cloud',
     kind: 'cost',
     status: 'live',
@@ -456,7 +599,7 @@ const vendors = [
     metric: 'fairwins_finops_cost_usd_total',
     unit: 'USD',
     basis: 'modelled',
-    collector: 'quicknode', // shares the flat-subscription modeller; no vendor API is polled
+    collector: 'flatSubscription', // no vendor API is polled; the declared plan IS the model
     interval: VENDOR,
     credential: null,
     docs: 'finops-operations.md#self-cost',
@@ -475,6 +618,7 @@ export const SOURCES = [
   ...membership,
   ...referral,
   ...planned,
+  ...x402,
   ...dormant,
   ...gasPools,
   ...vendors,

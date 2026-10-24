@@ -221,6 +221,82 @@ export async function verifyRevocation({ provider, body, now = () => Math.floor(
  *   now?: () => number,   // unix SECONDS, matching the gateway-wide `now`
  * }} deps
  */
+/**
+ * Steps 1-3 of `authenticate`, extracted so a caller can establish CONTROL OF AN ACCOUNT without
+ * also demanding a paid membership (spec 106, FR-003).
+ *
+ * WHY THIS EXISTS. `authenticate` answers one question — "may this key call this member-API route?"
+ * — and its answer includes an active paid tier (step 4, 403 `membership_required`). That is right
+ * for the member API. It is wrong as a general test of who is calling: spec 106 gates order
+ * signing, Bitcoin broadcast and marketplace writes, and those need an ANSWERABLE PARTY, not a
+ * customer. Reusing `authenticate` there would have made trading require a purchase, silently.
+ *
+ * So the parse/expiry/signature/revocation core lives here and both callers share it. This is
+ * extraction, not duplication, on purpose: a second signature path is exactly the drift this
+ * repo's type-parity gates exist to prevent, and the three-verdict rule below is too easy to get
+ * subtly wrong twice.
+ *
+ * THROWS `GatewayError` exactly as before, including the 503/401 split that keeps "unknown" apart
+ * from "forged". A contract account (a passkey member) has no public key, so an unreachable chain
+ * looks identical to a legitimate smart-account signature — which is why `unverifiable` can never
+ * become a denial.
+ *
+ * @returns {Promise<{grant: object, scopeString: string}>} the verified grant; membership NOT read
+ */
+export async function verifyGrantCredential({
+  authorization,
+  referenceProvider,
+  revocations,
+  clockSkewSec,
+  maxTtlDays,
+  nowSec,
+}) {
+  // ---- 1. parse + window + TTL cap (pure) ----------------------------------------------------
+  const { grant, signature, scopeString } = parseToken(authorization ?? '')
+
+  if (grant.expiresAt <= nowSec) {
+    throw new GatewayError(401, 'token_expired', 'this key has expired; mint a new one in the app')
+  }
+  if (grant.issuedAt > nowSec + clockSkewSec) {
+    throw invalid('grant.issuedAt is in the future')
+  }
+  const ttlSec = grant.expiresAt - grant.issuedAt
+  if (ttlSec > maxTtlDays * DAY_SEC) {
+    throw new GatewayError(
+      401,
+      'token_ttl_exceeded',
+      `this key asks for ${Math.ceil(ttlSec / DAY_SEC)} days; this gateway accepts at most ${maxTtlDays}`
+    )
+  }
+
+  // ---- 2. signature: ECDSA, then ERC-1271 on the reference chain -----------------------------
+  const verdict = await verifyTypedSignature({
+    provider: referenceProvider,
+    account: grant.account,
+    types: MEMBER_API_GRANT_TYPES,
+    message: grantMessage(grant, scopeString),
+    signature,
+  })
+  if (verdict === 'unverifiable') {
+    // NEVER 401 here. Unknown is not forged.
+    throw new GatewayError(
+      503,
+      'auth_unverifiable',
+      'this key could not be checked because the membership reference chain was unreachable; try again shortly'
+    )
+  }
+  if (verdict === 'invalid') {
+    throw new GatewayError(401, 'invalid_signature', 'the grant is not signed by the account it names')
+  }
+
+  // ---- 3. revocation (in-process; honest about it everywhere it surfaces) --------------------
+  if (revocations.isRevoked(grant.account, grant.keyId)) {
+    throw new GatewayError(401, 'token_revoked', 'this key was revoked on this gateway')
+  }
+
+  return { grant, scopeString }
+}
+
 export function createMemberAuth(config, { providers, screen, revocations, membership, quotas, now = () => Math.floor(Date.now() / 1000) }) {
   const memberApi = config.memberApi
   const referenceProvider = providers?.[memberApi.referenceChainId] ?? null
@@ -233,53 +309,19 @@ export function createMemberAuth(config, { providers, screen, revocations, membe
    * @returns {Promise<{account: string, keyId: string, scopes: string[], issuedAt: number, expiresAt: number, label: string|null, membership: object}>}
    */
   async function authenticate(req, requiredScope) {
-    // ---- 1. parse + window + TTL cap (pure) ----------------------------------------------------
-    const { grant, signature, scopeString } = parseToken(req.get('authorization') ?? '')
+    // ---- 1-3. parse, window, TTL cap, signature, revocation -----------------------------------
+    // Shared with the spec-105 identity layer via `verifyGrantCredential`. The split is exactly
+    // here because everything above establishes CONTROL OF THE ACCOUNT, and everything below adds
+    // requirements specific to the member API — a paid tier, a scope, this module's own quota.
     const nowSec = now()
-
-    if (grant.expiresAt <= nowSec) {
-      throw new GatewayError(401, 'token_expired', 'this key has expired; mint a new one in the app')
-    }
-    // A grant that claims to start in the future is not yet a grant. A little skew is tolerated so a
-    // client clock a minute fast does not mint a key that is dead on arrival.
-    if (grant.issuedAt > nowSec + memberApi.clockSkewSec) {
-      throw invalid('grant.issuedAt is in the future')
-    }
-    const ttlSec = grant.expiresAt - grant.issuedAt
-    if (ttlSec > memberApi.maxTtlDays * DAY_SEC) {
-      throw new GatewayError(
-        401,
-        'token_ttl_exceeded',
-        `this key asks for ${Math.ceil(ttlSec / DAY_SEC)} days; this gateway accepts at most ${memberApi.maxTtlDays}`
-      )
-    }
-
-    // ---- 2. signature: ECDSA, then ERC-1271 on the reference chain -----------------------------
-    const verdict = await verifyTypedSignature({
-      provider: referenceProvider,
-      account: grant.account,
-      types: MEMBER_API_GRANT_TYPES,
-      message: grantMessage(grant, scopeString),
-      signature,
+    const { grant } = await verifyGrantCredential({
+      authorization: req.get('authorization'),
+      referenceProvider,
+      revocations,
+      clockSkewSec: memberApi.clockSkewSec,
+      maxTtlDays: memberApi.maxTtlDays,
+      nowSec,
     })
-    if (verdict === 'unverifiable') {
-      // NEVER 401 here. Unknown is not forged.
-      throw new GatewayError(
-        503,
-        'auth_unverifiable',
-        'this key could not be checked because the membership reference chain was unreachable; try again shortly'
-      )
-    }
-    if (verdict === 'invalid') {
-      // `invalid_signature`, NOT `invalid_token`: the token parsed fine and the account was asked.
-      // The distinction is the whole point of the three verdicts — see auth_unverifiable above.
-      throw new GatewayError(401, 'invalid_signature', 'the grant is not signed by the account it names')
-    }
-
-    // ---- 3. revocation (in-process; honest about it everywhere it surfaces) --------------------
-    if (revocations.isRevoked(grant.account, grant.keyId)) {
-      throw new GatewayError(401, 'token_revoked', 'this key was revoked on this gateway')
-    }
 
     // ---- 4. membership: active paid tier on the reference chain, three-state -------------------
     const m = await membership.read(grant.account)

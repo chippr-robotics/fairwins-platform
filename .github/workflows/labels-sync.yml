@@ -1,0 +1,78 @@
+name: Sync Coordination Labels
+
+# Issue #1460. The multi-agent flow classifies issues with labels — size, blocked, spec-reservation,
+# agent-coordinated — and those have to EXIST before an agent can apply one meaningfully. Creating
+# them by hand is exactly the kind of setup step that gets done on one repo and forgotten on the
+# next; .github/labels.json is the declaration and this workflow is what applies it.
+#
+# NOTE: there are deliberately NO `status:*` labels in that file. An issue's state is read from the
+# data GitHub already keeps exactly once — assignee, linked PRs, open/closed — and a mirrored status
+# label would be a second copy that drifts the moment an agent stops mid-task. `blocked` is the one
+# state-ish label, because an open, assigned, stuck issue has no other representation, and it is
+# meaningless without a comment naming the blocker. See labels.json and
+# docs/developer-guide/multi-agent-workflow.md § "The board is a human task".
+#
+# `gh` is preinstalled on the runner and GITHUB_TOKEN with `issues: write` can create and edit
+# labels, so this needs no marketplace action and no dependency — which matters, because a workflow
+# that ran `npm ci` to manage label names would drag the root lockfile (spec 075) into a change
+# about colours.
+#
+# Idempotent: `--force` updates an existing label rather than failing. Labels are never DELETED
+# here — removing a name from labels.json stops it being managed, it does not strip it off the
+# issues that already carry it. Deleting a label deletes it from every issue at once, and that is
+# not a thing a merge should do silently.
+
+on:
+  push:
+    branches: [main, staging]
+    paths:
+      - '.github/labels.json'
+      - '.github/workflows/labels-sync.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: labels-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Apply .github/labels.json
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Create or update each declared label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          # Tab-separated so a description containing spaces survives the read loop intact.
+          node -e '
+            const { labels } = require("./.github/labels.json");
+            for (const l of labels) {
+              if (!/^[0-9A-Fa-f]{6}$/.test(l.color)) throw new Error(`bad color for ${l.name}`);
+              if (l.description.length > 100) throw new Error(`description over 100 chars: ${l.name}`);
+              process.stdout.write([l.name, l.color, l.description].join("\t") + "\n");
+            }
+          ' > /tmp/labels.tsv
+
+          while IFS=$'\t' read -r name color description; do
+            [ -n "$name" ] || continue
+            echo "::group::$name"
+            gh label create "$name" \
+              --repo "$REPO" \
+              --color "$color" \
+              --description "$description" \
+              --force
+            echo "::endgroup::"
+          done < /tmp/labels.tsv
+
+          echo "Applied $(wc -l < /tmp/labels.tsv) labels to $REPO."

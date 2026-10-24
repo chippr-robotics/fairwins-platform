@@ -11,7 +11,7 @@ export default function SettingsModal({ isOpen, onClose, onConnect, onDisconnect
   const { mode, toggleMode, isDark } = useTheme()
   const { showUsd, toggleCurrency } = usePrice()
   const { native: nativeSymbol } = useChainTokens()
-  const symbol = nativeSymbol || 'MATIC'
+  const symbol = nativeSymbol || 'POL'
 
   if (!isOpen) return null
 

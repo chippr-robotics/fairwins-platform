@@ -42,10 +42,13 @@ const ROOT = path.resolve(__dirname, "..", "..", "..");
 const CONTRACTS_FILE = path.join(ROOT, "frontend", "src", "config", "contracts.js");
 
 // Measured on a fresh local chain (issue #1298): same commit, only the deploy sequence changed.
+// Re-measured after spec-030 pillar A grew deploy-clearpath.js (the "checks the swap env vars it
+// is given" test reads the REAL frontend/package.json dev:e2e as its third source, so APPENDED
+// must track the values a fresh `setup:e2e` run actually produces).
 const APPENDED = {
-  callsignRegistry: "0x7A9Ec1d04904907De0ED7b6839CcdD59c3716AC9",
+  callsignRegistry: "0xf953b3A269d80e3eB0F2947630Da976B896A8C5b",
   mockUniswapRates: "0xD84379CEae14AA33C123Af12424A37803F885889",
-  mockUniswapQuoter: "0x2B0d36FACD61B71CC05ab8F3D2355ec3631C0dd5",
+  mockUniswapQuoter: "0x367761085BF3C12e5DA2Df99AC6E1a824612b8fb",
 };
 const INSERTED = {
   callsignRegistry: "0x49fd2BE640DB2910c2fAb69bB8531Ab6E76127ff",

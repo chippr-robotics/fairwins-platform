@@ -24,7 +24,7 @@ permissions:
   issues: write
 
 env:
-  TERRAFORM_VERSION: "1.15.8"
+  TERRAFORM_VERSION: "1.15.9"
 
 concurrency:
   group: infra-drift
@@ -203,7 +203,7 @@ jobs:
 
       - name: Open or update a drift issue
         if: steps.plan.outputs.exitcode == '2'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const fs = require('fs');

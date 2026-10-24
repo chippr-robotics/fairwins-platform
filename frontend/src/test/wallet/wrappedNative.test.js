@@ -12,8 +12,8 @@
  *      wrappable on one surface and absent from the other.
  */
 import { describe, it, expect } from 'vitest'
-import { getWrappedNative, hasWrappedNative } from '../../config/wrappedNative'
-import { NETWORKS } from '../../config/networks'
+import { getWrappedNative, hasWrappedNative, listWrappableCoins } from '../../config/wrappedNative'
+import { NETWORKS, cohortChainIds, isInCohort } from '../../config/networks'
 import { getContractAddressForChain } from '../../config/contracts'
 import { getPortfolioRegistry } from '../../config/assetTaxonomy'
 
@@ -69,5 +69,37 @@ describe('the portfolio and the Wrap view see the same token', () => {
   it('leaves the registry without a wrapped entry where there is nothing to wrap', () => {
     const symbols = getPortfolioRegistry(SEPOLIA).map((a) => a.symbol)
     expect(symbols).not.toContain(`W${NETWORKS[SEPOLIA].nativeCurrency.symbol}`)
+  })
+})
+
+describe('listWrappableCoins (spec 108) — the picker’s candidate list', () => {
+  it('is exactly the cohort chains whose wrapper the resolver answers for', () => {
+    const listed = listWrappableCoins().map((c) => c.chainId)
+    const expected = cohortChainIds().filter((id) => hasWrappedNative(id))
+    expect(listed.sort()).toEqual(expected.map(Number).sort())
+    // A chain with no configured wrapper is ABSENT, never a disabled row: there is no
+    // address to disable honestly.
+    expect(listed).not.toContain(SEPOLIA)
+  })
+
+  it('never crosses the build’s cohort', () => {
+    for (const coin of listWrappableCoins()) {
+      expect(isInCohort(coin.chainId), `chain ${coin.chainId}`).toBe(true)
+    }
+  })
+
+  it('carries the resolver’s own wrapped twin verbatim, never a re-derivation', () => {
+    for (const coin of listWrappableCoins()) {
+      expect(coin.wrapped).toEqual(getWrappedNative(coin.chainId))
+      expect(coin.kind).toBe('native')
+      expect(coin.symbol).toBe(NETWORKS[coin.chainId].nativeCurrency.symbol)
+      expect(coin.networkName).toBe(NETWORKS[coin.chainId].name)
+    }
+  })
+
+  it('keys are stable and unique', () => {
+    const keys = listWrappableCoins().map((c) => c.key)
+    expect(new Set(keys).size).toBe(keys.length)
+    for (const key of keys) expect(key).toMatch(/^native:\d+$/)
   })
 })

@@ -3,7 +3,7 @@
  * positions. Shows staked amount + (US2) unbonding/ready status. Selecting a
  * position opens its StakeSheet. On-chain amounts; USD degrades to "—".
  */
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { NETWORKS } from '../../config/networks'
 import AssetLogo from '../wallet/AssetLogo'
 

@@ -71,6 +71,41 @@ describe('RPC_URL_PRIMARY_<chainId>', () => {
     expect(config.chains[137].rpcUrls).toEqual([KEYED, PUBLIC_A])
     expect(config.chains[63].rpcUrls).toEqual([PUBLIC_B])
   })
+
+  it('is genuinely generic — the seam is chainId-keyed, not hardcoded to 137 (release 1.14.0 task 8)', () => {
+    // config/index.js reads `RPC_URL_PRIMARY_${chainId}` inside a loop over enabledChainIds, so
+    // every enabled chain already gets this for free — Amoy here, not Polygon, to prove it.
+    const AMOY_KEYED = 'https://keyed.matic-amoy.quiknode.pro/token-shaped-path'
+    const config = testConfig({
+      ENABLED_CHAIN_IDS: '80002',
+      RPC_URLS_80002: `${PUBLIC_A},${PUBLIC_B}`,
+      RPC_URL_PRIMARY_80002: AMOY_KEYED,
+    })
+    expect(config.chains[80002].rpcUrls).toEqual([AMOY_KEYED, PUBLIC_A, PUBLIC_B])
+  })
+})
+
+describe('CHAIN_DEFS default RPC lists (release 1.14.0 task 8)', () => {
+  // Every enabled chain's default list already carries >= 2 independent public endpoints
+  // (FR-007) BEFORE any RPC_URL_PRIMARY_<chainId> is set, so a fresh deploy with no QuickNode
+  // credential provisioned yet still has real failover rather than a single point of failure.
+  it('every chain currently wired into the gateway ships >= 2 default public endpoints', () => {
+    const config = testConfig({ ENABLED_CHAIN_IDS: '137,80002,63' })
+    for (const chainId of [137, 80002, 63]) {
+      expect(config.chains[chainId].rpcUrls.length, `chain ${chainId}`).toBeGreaterThanOrEqual(2)
+    }
+  })
+
+  it("Polygon's default pair is publicnode primary, drpc.org secondary — matches the frontend's pair", () => {
+    // frontend/src/config/networks.js NETWORKS[137]: rpcUrl defaults to the same publicnode host,
+    // rpcFailoverUrl to the same drpc.org host. Keeping the two planes' defaults aligned is what
+    // makes "QuickNode primary, publicnode failover" one consistent story across the app.
+    const config = testConfig({ ENABLED_CHAIN_IDS: '137' })
+    expect(config.chains[137].rpcUrls).toEqual([
+      'https://polygon-bor-rpc.publicnode.com',
+      'https://polygon.drpc.org',
+    ])
+  })
 })
 
 describe('redactRpcUrl', () => {

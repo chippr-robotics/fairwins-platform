@@ -56,3 +56,80 @@ export function writeAllowed({ deployed, onWalletChain, held, readable }) {
   return held !== false
 }
 
+/**
+ * FR-019: turn an authority read of ONE contract on ONE chain into a write gate — with words.
+ *
+ * ── WHY AN APP-WIDE FLAG CANNOT STAND IN HERE ──────────────────────────────────────────────
+ * `useAdminAccess().flags.isAdmin` / `.isRoleManager` are ESTATE-WIDE: true when the role is
+ * held on ANY cohort chain, against a candidate list that is not necessarily the contract a
+ * given control writes to. Offering Grant/Revoke on that plus a wallet-chain match tells an
+ * operator they hold authority the contract will then refuse — the belief FR-019 exists to
+ * prevent. So the question is put to the contract that will enforce it (`readAuthority` in
+ * `lib/chains/estate.js`), and only its answer decides.
+ *
+ * Four inputs, four different answers — none of them interchangeable:
+ *
+ *   pending       → nobody has asked yet. `fallback` (the estate-wide flag) stands in for one
+ *                   round-trip so an operator who DOES hold the role is not shown a dead button
+ *                   while the read is in flight. Same stand-in StakingTab/FeesTab already use.
+ *   not deployed  → there is no contract here to hold a role on, so there is no authority
+ *                   verdict to give. The caller's own deployment guard already refuses this in
+ *                   words at click time; this gate must not silently become a second, different
+ *                   refusal for the same fact.
+ *   unconfirmed   → the question could not be PUT (RPC timeout, no read connection). That is
+ *                   not a "no". The control stays OFFERED and says so: withdrawing it because
+ *                   an endpoint blinked tells an operator who holds the role that they do not.
+ *   definite no   → the chain answered, and the answer was no. THIS is the only state that
+ *                   withholds, and it says who lacks what, on which contract, on which chain.
+ *
+ * @param {object} opts
+ * @param {object|null} opts.authority  a `readAuthority` result, or null while it is in flight
+ * @param {string[]} opts.roles         role keys that would satisfy this control (ORed)
+ * @param {boolean} opts.fallback       estate-wide stand-in, used ONLY while pending/undeployed
+ * @param {number}  opts.chainId        the chain the write signs on — named in every message
+ * @param {string}  opts.contractLabel  the contract that will enforce it, named in every message
+ * @param {string}  opts.roleLabel      the on-chain role name, named in the refusal
+ * @param {string}  opts.accountLabel   who was asked about, named in the refusal
+ * @returns {{allowed: boolean, reason: string|null, unconfirmed: boolean, pending: boolean,
+ *            answered: boolean}}
+ */
+export function contractAuthorityGate({
+  authority,
+  roles = [],
+  fallback = false,
+  chainId,
+  contractLabel = 'this contract',
+  roleLabel = 'the required role',
+  accountLabel = 'This account',
+}) {
+  const base = { allowed: false, reason: null, unconfirmed: false, pending: false, answered: false }
+
+  if (!authority) return { ...base, allowed: Boolean(fallback), pending: true }
+  // No contract ⇒ no verdict. The caller's deployment guard owns this case.
+  if (authority.deployed === false) return { ...base, allowed: Boolean(fallback) }
+
+  if (!authority.readable) {
+    return {
+      ...base,
+      allowed: true,
+      unconfirmed: true,
+      reason:
+        `Your authority could not be confirmed on the ${contractLabel} on ${networkName(chainId)} — ` +
+        'the control stays available because that contract is the real gate, and it will refuse ' +
+        'anything you do not hold.',
+    }
+  }
+
+  if (roles.some((role) => Boolean(authority.roles?.[role]))) {
+    return { ...base, allowed: true, answered: true }
+  }
+
+  return {
+    ...base,
+    answered: true,
+    reason:
+      `${accountLabel} does not hold ${roleLabel} on the ${contractLabel} on ${networkName(chainId)}, ` +
+      'so this control is withheld — that contract would reject it.',
+  }
+}
+

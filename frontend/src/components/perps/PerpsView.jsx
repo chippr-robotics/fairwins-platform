@@ -78,6 +78,10 @@ const SORT_OPTIONS = [
   { id: 'symbol', label: 'Pair name' },
 ]
 
+/** `usePerpsMarkets`' own initial sort. Kept here only so the toolbar can tell a member's choice
+ *  from the default — the hook remains the one place the value is set. */
+const DEFAULT_SORT_KEY = 'oi'
+
 /** Public attribution + HL builder-fee config; `fee: null` = could not be confirmed (disclosed). */
 function usePerpsConfigState(deps) {
   const [state, setState] = useState({ attribution: {}, fee: undefined }) // undefined = loading
@@ -137,6 +141,34 @@ export default function PerpsView({ deps }) {
    * FairWins. Conditioning it here means the claim can only return with the capability it
    * describes. Until then the footnote below states the true economics instead. */
   const hyperliquidManageable = manageEnabled && perpsVenueManageableAnywhere('hyperliquid')
+
+  /* ------------------------------------------------------------------------------------------- *
+   * THE CONTROLS ARE ONE ROW AT REST (issue #1440)
+   *
+   * The venue pills, the search box and the sort select were three stacked rows — on a phone the
+   * pills alone wrapped onto two — and together they cost roughly a fifth of the viewport before a
+   * single pair was on screen, on a surface whose entire job is the table underneath them. Search
+   * stays on the toolbar (it is the control a member reaches for first); the venue filter and the
+   * sort move behind a disclosure.
+   *
+   * A COLLAPSED PANEL NEVER HIDES AN ACTIVE FILTER, and that is the whole reason this is safe to
+   * collapse. `filterSummary` names on the toggle itself whatever is currently shaping the table,
+   * and the "showing N of M" line — until now `sr-only` — becomes VISIBLE the moment anything
+   * narrows the list. A table that has silently lost rows is indistinguishable from a venue that
+   * has stopped reporting, which is exactly the confusion the rest of this view is built to avoid.
+   *
+   * The panel is UNMOUNTED rather than hidden: a control still in the tab order under a heading
+   * claiming `aria-expanded="false"` is claiming something untrue.
+   * ------------------------------------------------------------------------------------------- */
+  const [filtersOpen, setFiltersOpen] = useState(false)
+  const venueFilterLabel =
+    markets.venueFilter === 'all' ? null : (PERP_VENUES[markets.venueFilter]?.label ?? markets.venueFilter)
+  const sortLabel =
+    markets.sortKey === DEFAULT_SORT_KEY ? null : (SORT_OPTIONS.find((o) => o.id === markets.sortKey)?.label ?? null)
+  const filterSummary = [venueFilterLabel, sortLabel].filter(Boolean).join(' · ')
+  // The search box is its own visible evidence, so it is not summarised on the toggle — but it does
+  // narrow the table, so it counts towards showing the member how many pairs they are looking at.
+  const narrowed = markets.search !== '' || markets.venueFilter !== 'all'
 
   const [managed, setManaged] = useState(null)
   const dismissSheet = useCallback(() => setManaged(null), [])
@@ -420,47 +452,70 @@ export default function PerpsView({ deps }) {
       <PerpsHeader />
 
       <div className="perps-controls">
-        <div className="perps-venue-filter" role="group" aria-label="Filter by venue">
+        <div className="perps-toolbar">
+          <label className="perps-search">
+            <span className="sr-only">Search pairs</span>
+            <input
+              type="search"
+              placeholder="Search pairs (BTC, ETH…)"
+              value={markets.search}
+              onChange={(e) => markets.setSearch(e.target.value)}
+              aria-label="Search pairs"
+            />
+          </label>
           <button
             type="button"
-            className={`perps-filter-pill ${markets.venueFilter === 'all' ? 'active' : ''}`}
-            aria-pressed={markets.venueFilter === 'all'}
-            onClick={() => markets.setVenueFilter('all')}
+            className={`perps-filter-toggle ${filterSummary ? 'has-filters' : ''}`}
+            aria-expanded={filtersOpen}
+            aria-controls="perps-filter-panel"
+            onClick={() => setFiltersOpen((open) => !open)}
           >
-            All venues
+            <span>Filters</span>
+            {/* The active filter, named on the closed control. Without this the panel would be
+                hiding the reason the table is short. */}
+            {filterSummary && <span className="perps-filter-summary">{filterSummary}</span>}
           </button>
-          {PERP_VENUE_IDS.map((id) => (
-            <button
-              key={id}
-              type="button"
-              className={`perps-filter-pill ${markets.venueFilter === id ? 'active' : ''}`}
-              aria-pressed={markets.venueFilter === id}
-              onClick={() => markets.setVenueFilter(id)}
-            >
-              {PERP_VENUES[id].label}
-            </button>
-          ))}
         </div>
-        <label className="perps-search">
-          <span className="sr-only">Search pairs</span>
-          <input
-            type="search"
-            placeholder="Search pairs (BTC, ETH…)"
-            value={markets.search}
-            onChange={(e) => markets.setSearch(e.target.value)}
-            aria-label="Search pairs"
-          />
-        </label>
-        <label className="perps-sort">
-          <span className="perps-sort-label">Sort by</span>
-          <select value={markets.sortKey} onChange={(e) => markets.setSortKey(e.target.value)} aria-label="Sort pairs">
-            {SORT_OPTIONS.map((o) => (
-              <option key={o.id} value={o.id}>
-                {o.label}
-              </option>
-            ))}
-          </select>
-        </label>
+
+        {filtersOpen && (
+          <div className="perps-filter-panel" id="perps-filter-panel">
+            <div className="perps-venue-filter" role="group" aria-label="Filter by venue">
+              <button
+                type="button"
+                className={`perps-filter-pill ${markets.venueFilter === 'all' ? 'active' : ''}`}
+                aria-pressed={markets.venueFilter === 'all'}
+                onClick={() => markets.setVenueFilter('all')}
+              >
+                All venues
+              </button>
+              {PERP_VENUE_IDS.map((id) => (
+                <button
+                  key={id}
+                  type="button"
+                  className={`perps-filter-pill ${markets.venueFilter === id ? 'active' : ''}`}
+                  aria-pressed={markets.venueFilter === id}
+                  onClick={() => markets.setVenueFilter(id)}
+                >
+                  {PERP_VENUES[id].label}
+                </button>
+              ))}
+            </div>
+            <label className="perps-sort">
+              <span className="perps-sort-label">Sort by</span>
+              <select
+                value={markets.sortKey}
+                onChange={(e) => markets.setSortKey(e.target.value)}
+                aria-label="Sort pairs"
+              >
+                {SORT_OPTIONS.map((o) => (
+                  <option key={o.id} value={o.id}>
+                    {o.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
       </div>
 
       {markets.degradedVenues.length > 0 && (
@@ -482,7 +537,9 @@ export default function PerpsView({ deps }) {
         </p>
       ) : (
         <>
-          <p className="sr-only" role="status">
+          {/* ONE element, not two: always announced, and visible exactly while something is
+              narrowing the list. A second copy for sighted members would be announced twice. */}
+          <p className={narrowed ? 'perps-result-count' : 'sr-only'} role="status">
             Showing {markets.pairs.length} of {markets.totalCount} pairs
           </p>
           <PerpsPairTable

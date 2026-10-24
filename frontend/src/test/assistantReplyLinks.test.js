@@ -59,9 +59,14 @@ describe('extractInAppLinks', () => {
       extractInAppLinks(hostile(n))
       return performance.now() - started
     }
+    // Best-of-5: a single-shot reading is at the mercy of a GC pause or JIT tier-up on a busy CI
+    // runner, and one 1.5ms hiccup fails a linearity claim the code actually satisfies. The
+    // minimum over several runs discards hiccups while still rejecting a quadratic trim, whose
+    // *floor* for 4x the input is ~16x the time.
+    const best = (n) => Math.min(...Array.from({ length: 5 }, () => elapsed(n)))
     elapsed(2000) // warm up
-    const small = Math.max(elapsed(20000), 0.05)
-    const large = elapsed(80000)
+    const small = Math.max(best(20000), 0.05)
+    const large = best(80000)
     expect(large).toBeLessThan(small * 8)
   })
 

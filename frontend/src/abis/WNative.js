@@ -1,6 +1,6 @@
 /**
  * Minimal WETH9-shaped ABI for wrapping/unwrapping the chain's native token
- * (WMATIC on Polygon Amoy).
+ * (WPOL on the Polygon pair, WETC on the ETC family).
  */
 export const WNATIVE_ABI = [
   // WETH9 specific functions

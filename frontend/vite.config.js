@@ -48,9 +48,34 @@ function pinataSecretGuard() {
   }
 }
 
+// Spec 106 (T014): refuse a production build carrying one of Cloudflare's PUBLISHED Turnstile
+// TEST sitekeys. They always pass (or always block) regardless of who is calling — the right tool
+// in development, and in production a mock in a shipped path (constitution III): the always-pass
+// key silently turns the human tier into a stamp anyone can print, and nothing at runtime would
+// ever look wrong. Unlike the Pinata guard above this is not about secrecy (a sitekey is public by
+// design) — it is about honesty.
+function challengeSitekeyGuard() {
+  const TEST_SITEKEY = /^[123]x0{20}[A-Z]{2}$/
+  return {
+    name: 'challenge-sitekey-guard',
+    config(_config, { command, mode }) {
+      if (command !== 'build' || mode !== 'production') return
+      const env = loadEnv(mode, process.cwd(), '')
+      const sitekey = (env.VITE_CHALLENGE_SITEKEY || '').trim()
+      if (sitekey && TEST_SITEKEY.test(sitekey)) {
+        throw new Error(
+          `[honesty] Refusing to build: VITE_CHALLENGE_SITEKEY=${sitekey} is a published Turnstile ` +
+          'TEST key. In production it makes the proof-of-human tier a mock that always answers the ' +
+          'same way. Configure the real sitekey, or unset it to leave the challenge dormant.'
+        )
+      }
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), pinataSecretGuard(), tenantBrandingPlugin()],
+  plugins: [react(), pinataSecretGuard(), challengeSitekeyGuard(), tenantBrandingPlugin()],
   // Build-time constants, NOT `import.meta.env`: the preset used for mini-app packages sets an
   // envPrefix that turns any bundled `import.meta.env` read into `undefined`, and a value that is
   // only sometimes present would make the drawer's build label sometimes lie.
@@ -96,7 +121,12 @@ export default defineConfig({
       // neither holds tests, and both would be scanned on every run.
       'miniapps/*/dist/**',
       'miniapps/*/node_modules/**',
-      '**/useIpfs.test.js'
+      '**/useIpfs.test.js',
+      // Spec 085/110 — the hardware-emulator suite runs on its OWN config
+      // (vitest.hardware.config.js): it needs `environment: 'node'` because Speculos answers with
+      // a chunked body whose first chunk is empty and jsdom's fetch drops it, and it must not load
+      // this config's jsdom setup file. Left in, it fails every ordinary run.
+      'src/test/hardware/speculosDevice.test.js'
     ],
     alias: {
       // Spec 073: `@fairwins/miniapp-sdk` is not an npm package — at runtime the

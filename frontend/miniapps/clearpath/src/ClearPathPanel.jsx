@@ -18,6 +18,7 @@ import './clearpath.css'
 import { DAO_FRAMEWORK_LABEL } from './externalDAORegistryAbi'
 import { useClearPath } from './useClearPath'
 import RegisterExternalDao from './RegisterExternalDao'
+import CreateStandardDao from './CreateStandardDao'
 import ExternalDaoView from './ExternalDaoView'
 
 // Spec 030/042 + network-agnostic follow-up — ClearPath module (external-DAO pillar), embedded as the My
@@ -112,6 +113,14 @@ export default function ClearPathPanel() {
             <button type="button" role="tab" aria-selected={tab === 'register'} className={`cp-tab ${tab === 'register' ? 'active' : ''}`} onClick={() => setTab('register')}>
               Register / Track
             </button>
+            {/*
+              Spec 030 pillar A. Always OFFERED, never a dead end: on a chain with no factory the panel
+              itself explains why (pre-Cancun by decision, or simply not deployed), which is strictly more
+              useful than hiding the tab and leaving the member to guess whether the feature exists.
+            */}
+            <button type="button" role="tab" aria-selected={tab === 'create'} className={`cp-tab ${tab === 'create' ? 'active' : ''}`} onClick={() => setTab('create')}>
+              Launch
+            </button>
           </div>
 
           {tab === 'daos' && (
@@ -150,6 +159,17 @@ export default function ClearPathPanel() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {tab === 'create' && (
+            <div role="tabpanel">
+              {/* The created DAO is registered/tracked through the SAME hook the Register tab uses, so a
+                  native DAO lands in exactly one list alongside external ones (FR-009). */}
+              <CreateStandardDao
+                hasRegistryFor={hasRegistryFor}
+                track={async (args) => { const r = await trackDAO(args); load(); return r }}
+              />
             </div>
           )}
 

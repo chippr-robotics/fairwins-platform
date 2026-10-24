@@ -16,6 +16,10 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, waitFor, act } from '@testing-library/react'
 import { WalletContext } from '../../contexts'
 import usePortfolio from '../../hooks/usePortfolio'
+// Fixtures are ENCODED with ethers while batchBalances decodes with viem — the same
+// cross-library parity the module's own suite relies on (spec 110).
+import { AbiCoder } from 'ethers'
+import { MULTICALL3_ADDRESS } from '../../lib/portfolio/batchBalances'
 import { getPortfolioRegistry } from '../../config/assetTaxonomy'
 
 const fixtures = vi.hoisted(() => ({
@@ -38,24 +42,20 @@ vi.mock('../../utils/rpcProvider', () => ({
   makeReadProvider: (url, chainId) => ({
     chainId,
     getBalance: () => resolveFixture(fixtures.nativeBalances.get(chainId)),
+    // The ERC-20 leg is a bare `eth_call` now (spec 110 — batchBalances encodes its own
+    // calldata rather than going through a contract object), so the fixture is served here.
+    // Multicall3 stays UNAVAILABLE on this fake, which is what it always was: these suites
+    // exercise the per-asset fallback ladder, and answering the batch here would silently
+    // move them onto a path they were never written to cover.
+    call: async ({ to }) => {
+      if (String(to).toLowerCase() === MULTICALL3_ADDRESS.toLowerCase()) {
+        throw new Error('no multicall on this fake provider')
+      }
+      const raw = await resolveFixture(fixtures.tokenBalances.get(`${chainId}:${String(to).toLowerCase()}`))
+      return AbiCoder.defaultAbiCoder().encode(['uint256'], [raw])
+    },
   }),
 }))
-
-vi.mock('ethers', async (importOriginal) => {
-  const actual = await importOriginal()
-  return {
-    ...actual,
-    Contract: class {
-      constructor(address, abi, provider) {
-        this.key = `${provider.chainId}:${String(address).toLowerCase()}`
-      }
-
-      balanceOf() {
-        return resolveFixture(fixtures.tokenBalances.get(this.key))
-      }
-    },
-  }
-})
 
 vi.mock('../../lib/portfolio/prices', async (importOriginal) => {
   const actual = await importOriginal()
@@ -211,29 +211,29 @@ describe('usePortfolio — bitcoin branch (spec 061)', () => {
       expect(btc.instances.every((h) => h.asset.chainId !== 'bitcoin')).toBe(true)
     }
     // EVM portfolio unaffected.
-    expect(aggFor('MATIC').balance).toBeCloseTo(2)
+    expect(aggFor('POL').balance).toBeCloseTo(2)
   })
 
   it('makes NO gateway calls and adds no bitcoin row for a wallet with no issued addresses (SC-008)', async () => {
     fixtures.nativeBalances.set(137, 10n ** 18n)
-    fixtures.prices.set('MATIC', { usd: 0.5, source: 'chainlink', chainId: 137 })
+    fixtures.prices.set('POL', { usd: 0.5, source: 'chainlink', chainId: 137 })
     await renderPortfolio()
 
     expect(fixtures.gatewayCalls).toHaveLength(0)
     expect(latest.holdings.every((h) => h.asset.chainId !== 'bitcoin')).toBe(true)
     expect(latest.failedAssets).toEqual([])
     expect(aggFor('BTC')).toBeUndefined()
-    expect(aggFor('MATIC').usd).toBeCloseTo(0.5)
+    expect(aggFor('POL').usd).toBeCloseTo(0.5)
     expect(latest.totalUsd).toBeCloseTo(0.5)
   })
 
   it('EVM-only regression: existing behavior unchanged when bitcoin is unused', async () => {
     fixtures.nativeBalances.set(137, 2n * 10n ** 18n)
     fixtures.tokenBalances.set(addr(137, 'USDC'), 100_000_000n)
-    fixtures.prices.set('MATIC', { usd: 0.5, source: 'chainlink', chainId: 137 })
+    fixtures.prices.set('POL', { usd: 0.5, source: 'chainlink', chainId: 137 })
     await renderPortfolio()
 
-    expect(aggFor('MATIC').usd).toBeCloseTo(1)
+    expect(aggFor('POL').usd).toBeCloseTo(1)
     expect(aggFor('USDC').usd).toBeCloseTo(100)
     expect(latest.totalUsd).toBeCloseTo(101)
     expect(latest.aggregates.every((a) => a.balance > 0)).toBe(true)

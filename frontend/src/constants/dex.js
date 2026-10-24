@@ -79,8 +79,8 @@ export const TOKENS = {
       },
   NATIVE: {
     address: 'native',
-    symbol: _native?.symbol || 'MATIC',
-    name: _native?.name || 'MATIC',
+    symbol: _native?.symbol || 'POL',
+    name: _native?.name || 'POL',
     decimals: _native?.decimals || 18,
     icon: '💎',
   },

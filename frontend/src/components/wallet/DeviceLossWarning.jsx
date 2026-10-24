@@ -6,6 +6,21 @@
  * device-bound credential. Dismissals are tracked per moment in the local
  * AccountProfile but RE-ARM until a second controller exists: the risk is
  * real until then, so the warning is too.
+ *
+ * The three mounts (issue #1405):
+ *   creation            HomeScreen — the surface the ceremony lands on
+ *   first-funding       MyAccountView — the wallet home, once the portfolio
+ *                       reports a non-zero balance for this account
+ *   membership-purchase PremiumPurchaseModal — the Review step, before the
+ *                       member signs
+ *
+ * WHILE THE CONTROLLER SET IS STILL LOADING NOTHING RENDERS. `controllers`
+ * is `[]` before the read answers, so `singleControllerRisk` is true for
+ * every account for a moment — including two-key ones, which would see a
+ * warning flash that is not true of them. Once the read HAS answered, an
+ * empty set is a real answer: a counterfactual account (not yet deployed)
+ * genuinely has exactly the one local credential, which is the case FR-021
+ * exists for.
  */
 
 import { useState, useCallback } from 'react'
@@ -16,16 +31,21 @@ import './DeviceLossWarning.css'
 
 function DeviceLossWarning({ moment, onAddController, deps = {} }) {
   const account = usePasskeyAccount(deps)
-  const [dismissed, setDismissed] = useState(() =>
-    account.address ? dismissedAt(account.address, moment, deps.storage) : false
-  )
+  // Read the stored dismissal EVERY render, not once in a lazy initializer.
+  // The address arrives asynchronously (the controller read resolves after the
+  // first paint), so a one-shot initializer runs while `account.address` is
+  // still null, answers "not dismissed", and never looks again — which is
+  // exactly how a dismissal that IS on disk comes back on the next visit.
+  const stored = account.address ? dismissedAt(account.address, moment, deps.storage) : false
+  const [dismissedNow, setDismissedNow] = useState(false)
+  const dismissed = dismissedNow || stored
 
   const dismiss = useCallback(() => {
     recordDismissal(account.address, moment, deps.storage)
-    setDismissed(true)
+    setDismissedNow(true)
   }, [account.address, moment, deps.storage])
 
-  if (!account.isPasskeySession || !account.singleControllerRisk || dismissed) return null
+  if (account.loading || !account.isPasskeySession || !account.singleControllerRisk || dismissed) return null
 
   return (
     <aside className="device-loss-warning" role="alert" data-testid={`device-loss-warning-${moment}`}>

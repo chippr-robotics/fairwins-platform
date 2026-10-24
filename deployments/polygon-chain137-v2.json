@@ -118,7 +118,8 @@
     "safeProposalHub": 90120743,
     "safePolicyGuardV2": 90932886,
     "feeRouter": 90939919,
-    "miniAppRegistry": 91265680
+    "miniAppRegistry": 91265680,
+    "accountFactory": 89725718
   },
   "callsignRegistryDeployedAt": "2026-07-13T13:12:13.493Z",
   "feeRouterDeployedAt": "2026-07-27T01:14:35.084Z",

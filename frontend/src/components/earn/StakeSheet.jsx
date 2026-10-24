@@ -16,8 +16,9 @@
  * records to the notification feed + ledger (T034).
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import { useStakingActions } from '../../hooks/useStakingActions'
+import { earnActingRefusal } from '../../hooks/useEarnSend'
 import { useActivityOptional } from '../../hooks/useActivity'
 import InfoTip from '../ui/InfoTip'
 import { STAKING_TIPS } from '../../lib/staking/stakingCopy'
@@ -34,7 +35,10 @@ function fmt(raw, decimals, symbol) {
 
 export default function StakeSheet({ option, userState, position, onClose, onActionComplete }) {
   const actions = useStakingActions()
-  const { stake, requestUnstake, withdraw, claimRewards, address, canTransactOn, cannotTransactReason, isPasskey } = actions
+  const {
+    stake, requestUnstake, withdraw, claimRewards, address,
+    canTransactOn, cannotTransactReason, isPasskey, isActingAccount, actingAccount,
+  } = actions
   const activity = useActivityOptional()
   const sheetRef = useRef(null)
   const restoreFocusRef = useRef(null)
@@ -224,6 +228,41 @@ export default function StakeSheet({ option, userState, position, onClose, onAct
   const stakingPaused = Boolean(option.stakingPaused)
   const feeSplit = feeApplies && amount != null && amount > 0n ? splitFee(amount, feeQuote.bps) : null
   const stakeDisabled = busy || !canTransact || (mode === 'stake' && (feeBlocked || stakingPaused))
+
+  // Spec 088 FR-001/FR-002 — every write here (stake/unstake/withdraw/claim) goes out on
+  // useStakingActions → useEarnSend.sendOnChain, which signs with the CONNECTED wallet and
+  // switches networks on it directly (see the BridgeView template this mirrors). So while the
+  // switcher shows a vault, a recovered, a hardware, or any other non-personal account, the
+  // whole sheet is withheld with the reason instead of left up with the connected wallet's
+  // balances shown under the acting account's name.
+  if (isActingAccount) {
+    return (
+      <div className="asset-sheet-backdrop">
+        <button type="button" className="asset-sheet-scrim" aria-label="Close staking details" onClick={onClose} />
+        <div
+          className="asset-sheet earn-vault-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={titleId}
+          tabIndex={-1}
+          ref={sheetRef}
+        >
+          <div className="asset-sheet-grabber" aria-hidden="true" />
+          <div className="asset-sheet-header">
+            <div className="asset-sheet-heading">
+              <h3 id={titleId}>{label}</h3>
+            </div>
+            <button type="button" className="asset-sheet-close" onClick={onClose}>
+              Close
+            </button>
+          </div>
+          <p className="earn-unavailable" role="note" data-testid="earn-stake-acting-refusal">
+            {earnActingRefusal(actingAccount)}
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="asset-sheet-backdrop">

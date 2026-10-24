@@ -10,6 +10,7 @@ import UnifiedLookupModal from './UnifiedLookupModal'
 import MyMarketsModal from './MyMarketsModal'
 import PolymarketTickerCrawler from './PolymarketTickerCrawler'
 import PremiumPurchaseModal from '../ui/PremiumPurchaseModal'
+import DeviceLossWarning from '../wallet/DeviceLossWarning'
 import SectionIconNav from '../nav/SectionIconNav'
 import NavIcon from '../nav/NavIcon'
 import PillSelect from '../ui/PillSelect'
@@ -77,6 +78,9 @@ function HomeScreen() {
   const [unifiedAutoResolve, setUnifiedAutoResolve] = useState(false)
   const [showMyWagers, setShowMyWagers] = useState(false)
   const [initialWagerId, setInitialWagerId] = useState(null)
+  // Request ▸ Pool deep link (spec 103): /app?kind=pool opens the Request mode on its Pool kind. The
+  // nonce re-applies the kind when the link is followed while this screen is already mounted.
+  const [requestKind, setRequestKind] = useState({ kind: 'once', nonce: 0 })
   // While the create panel is on its oracle path, hide the secondary actions so the
   // taller oracle form (market + side picker) fits without scrolling (design feedback).
   const [oracleMode, setOracleMode] = useState(false)
@@ -90,6 +94,18 @@ function HomeScreen() {
     setMode('wager')
     navigate(location.pathname, { replace: true, state: {} })
   }, [location.state, location.pathname, navigate])
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search)
+    if (params.get('kind') === 'pool') {
+      userPickedRef.current = true
+      setMode('request')
+      setRequestKind((k) => ({ kind: 'pool', nonce: k.nonce + 1 }))
+      params.delete('kind')
+      const rest = params.toString()
+      navigate(`${location.pathname}${rest ? `?${rest}` : ''}`, { replace: true, state: location.state ?? {} })
+    }
+  }, [location.search, location.pathname, location.state, navigate])
 
   // Shared-phrase deep link (spec 037): /app?oc=take&code=<four words> opens the unified lookup,
   // prefilled + auto-resolving. Strip the query after consuming it (FR-016).
@@ -131,6 +147,24 @@ function HomeScreen() {
 
   return (
     <div className="dashboard-container home-screen">
+      {/*
+       * FR-021 moment 1 of 3 — ACCOUNT CREATION (spec 041 US5, issue #1405).
+       *
+       * This screen is where the passkey ceremony lands: ConnectModal closes itself the instant
+       * the session connects, so the account it just created does not exist yet on any surface
+       * inside that dialog — there is nothing there to warn. The first surface a brand-new
+       * passkey account ever renders is this one, so this is "at account creation".
+       *
+       * It keeps showing on later visits until the member dismisses it or a second controller
+       * exists, which is the honest reading of FR-021: the warning is about a risk that has not
+       * gone away. It renders for nobody else — a wallet session, or an account with two
+       * controllers, gets nothing (DeviceLossWarning self-gates).
+       */}
+      <DeviceLossWarning
+        moment="creation"
+        onAddController={() => navigate('/wallet?tab=security#controllers')}
+      />
+
       {/* Desktop/tablet mode switcher; mobile uses the bottom SectionIconNav. */}
       {!isMobile && (
         <div className="home-mode-switcher">
@@ -155,7 +189,7 @@ function HomeScreen() {
 
       {/* Request — payment-request QR (spec 058 US2). */}
       <section className="home-create home-mode-panel" aria-label="Request" hidden={mode !== 'request'}>
-        <RequestPanel />
+        <RequestPanel initialKind={requestKind.kind} kindNonce={requestKind.nonce} />
       </section>
 
       {/* Wager — the spec-053 inline open-challenge create view, unchanged. No disconnected
