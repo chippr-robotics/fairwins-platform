@@ -427,7 +427,13 @@ export const WAGER_POOL_ABI = [
     "type": "function"
   },
   {
-    "inputs": [],
+    "inputs": [
+      {
+        "internalType": "bytes32",
+        "name": "proposalId",
+        "type": "bytes32"
+      }
+    ],
     "name": "approve",
     "outputs": [],
     "stateMutability": "nonpayable",

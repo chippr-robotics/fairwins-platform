@@ -40,15 +40,15 @@
       "ghsa": "GHSA-v5mp-jgw5-2x6j",
       "package": "toml",
       "issue": 1519,
-      "expires": "2026-10-15",
-      "reason": "toml@3.0.0 arrives through @trezor/blockchain-link -> @stellar/stellar-sdk, i.e. the spec-085 hardware-wallet seam. Prototype pollution reachable only by parsing an attacker-supplied TOML document, which that path does not do; the SDK is lazy-loaded behind connectHardware. Tracked in #1519."
+      "expires": "2026-11-15",
+      "reason": "RENEWED 2026-10-24 as a bridge, not a re-acceptance: #1588 (merged to staging) overrides toml to ^4.2.0 under @stellar/stellar-sdk, which fixes this advisory, but Dependabot reads the default branch, so the alert stays open until staging is promoted to main. D-04 forces this entry's deletion the moment the alert closes; if it is still open at expiry, the promotion stalled and that is the thing to chase. Original rationale: toml@3.0.0 arrives through @trezor/blockchain-link -> @stellar/stellar-sdk, i.e. the spec-085 hardware-wallet seam. Prototype pollution reachable only by parsing an attacker-supplied TOML document, which that path does not do; the SDK is lazy-loaded behind connectHardware. Tracked in #1519."
     },
     {
       "ghsa": "GHSA-82x6-q7mm-w9cf",
       "package": "toml",
       "issue": 1519,
-      "expires": "2026-10-15",
-      "reason": "Same toml@3.0.0 copy as above via the Trezor SDK. Uncontrolled recursion is a denial of service against the parser, and the only documents it parses are ones the vendor SDK itself supplies. Fixed together with the sibling advisory in #1519."
+      "expires": "2026-11-15",
+      "reason": "RENEWED 2026-10-24 as a bridge, same as the sibling entry: fixed on staging by #1588, open only until the promotion reaches main, and D-04 removes it then. Original rationale: Same toml@3.0.0 copy as above via the Trezor SDK. Uncontrolled recursion is a denial of service against the parser, and the only documents it parses are ones the vendor SDK itself supplies. Fixed together with the sibling advisory in #1519."
     }
   ]
 }
