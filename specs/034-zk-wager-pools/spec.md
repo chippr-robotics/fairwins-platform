@@ -44,7 +44,7 @@ addendum governs.
 ### Requirements superseded (restated address-based)
 
 - **FR-010 (vote unlinkability) — SUPERSEDED.** Votes are **not** unlinkable; a
-  member `approve()`s the current proposal with their **real wallet** (`msg.sender`,
+  member `approve(proposalId)`s the current proposal (the id is bound, so a revision cannot retarget it — #1667) with their **real wallet** (`msg.sender`,
   or the recovered EOA on a `…WithSig` relay), and the `Approved(proposalId, member)`
   event records that address. There is no wallet↔identity boundary to protect and no
   "relayed path breaks the link" property.

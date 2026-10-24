@@ -51,6 +51,27 @@ and two of its rules change what you do on step 2:
 Branch from `staging`, never from `main`. Delegated work gets a **sub-issue**, and a
 subagent's report is a claim — read the diff and run the gates before accepting it.
 
+## Specialist subagents
+
+Project subagents live in `.claude/agents/` (routing + roster: `.claude/agents/README.md`).
+The main session orchestrates; subagents cannot spawn subagents.
+
+| Agent | Use it for | When |
+| :-- | :-- | :-- |
+| `keel` (opus) | Value-bearing contracts: wagers, pools, staking, liquidity, bridge, clearpath, tokens, naming, FeeRouter mechanics, membership fund paths, `upgradeable/` | **Before** the edit |
+| `augur` (opus) | Oracle adapters + resolution paths, open challenges, pending-resolution truth | **Before** the edit |
+| `custos` (opus) | Custody guards, roles/authority, SanctionsGuard, MiniAppRegistry curation, `lib/custody`, `lib/screening` | **Before** the edit |
+| `latch` (opus) | ERC-4337 account + paymaster contract, privacy registries, passkeys, hardware/Sigil, recovery, backup, verify | **Before** the edit |
+| `relay` | relay-gateway, oz-relayer, alto, mcp-server, `packages/*` (intent-types, assistant-contract, abi), subgraph | On the change |
+| `teller` | Fee rates/caps + disclosure, membership pricing, FinOps | On the change |
+| `mark` | Tenants, deployments, deploy scripts, infra/, secrets, CI workflows, release train, native shells, lockfile | On the change |
+| `satchel` | Bitcoin, Solana, cohort/estate reads, portfolio aggregation | On the change |
+| `glass` | React UI, mini-app host, a11y, brand, tenant theming | On the change |
+| `witness` | Read-only: diff vs invariants + narrowest real gates | **After** every change |
+
+A subagent's report is a claim until `witness` has run the gates. The Copilot
+`smart-contract-security` agent remains the contract merge gate.
+
 ## Repository map
 
 - `contracts/` — active Solidity (wagers, oracles, access, privacy). `mocks/` is
@@ -1053,7 +1074,7 @@ subagent's report is a claim — read the diff and run the gates before acceptin
   `docs/developer-guide/protect-policies.md` § "One vault, created everywhere" +
   `specs/105-multichain-vault-creation/`.
 - **A custody write's RAIL is a property of the SIGNER, not the login.**
-  `lib/custody/writeRail.js#resolveWriteRail` is the one answer to "can this session sign a vault
+  `lib/chains/writeRail.js#resolveWriteRail` is the one answer to "can this session sign a vault
   action on this chain?", and it checks for a signer FIRST. Branching on `loginMethod === 'passkey'`
   — which `WalletContext` itself documents as "INFORMATIONAL ONLY … no feature may branch on it" —
   refused members who could perfectly well act: **ETC 61 and Mordor 63 have no bundler**, so the
