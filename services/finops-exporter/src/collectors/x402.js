@@ -83,28 +83,58 @@ export function createX402Collector({ config, providers, cursors, log = console.
         return read(toUsdc(cursors.total(key)), 'USDC', { labels: { chain: String(chainId) } })
       }
 
-      // Both topics in ONE scan of the token contract: they must be correlated by transaction, so
-      // fetching them separately would mean two ranges that can disagree at the boundary.
-      const logs = await scanLogs(
-        provider,
-        { address: token, topics: [[TRANSFER, AUTHORIZATION_USED]] },
-        from,
-        to
-      )
-
-      // Transactions that used an authorization at all.
-      const authorizedTxs = new Set()
-      for (const entry of logs) {
-        if (entry.topics[0] === AUTHORIZATION_USED) authorizedTxs.add(entry.transactionHash)
-      }
-
+      /**
+       * THE TREASURY LEG IS FILTERED ON CHAIN, AND THAT IS NOT A PERFORMANCE CHOICE.
+       *
+       * `Transfer.to` is INDEXED, so the RPC can answer "transfers into this treasury" directly.
+       * Asking instead for every `Transfer` on the token and filtering in JS — which is what this
+       * did — means the payment token's ENTIRE traffic is pulled into one array before a single
+       * log is discarded. On Polygon USDC that measured ~2,244 logs per 100 blocks: over the
+       * default 50,000-block lookback, ~1.1M logs and ~635 MB of raw JSON, in a 192 MB container.
+       * The exporter was OOM-killed on every boot, 5,966 times, and therefore never listened at
+       * all — so EVERY panel on the FinOps dashboards read "no data", not just this source's.
+       *
+       * The narrowed filter returns 0–handful of logs in ~100ms against the same endpoint.
+       *
+       * WHY THE SECOND LEG IS A SEPARATE SCAN NOW. `AuthorizationUsed` indexes `authorizer` and
+       * `nonce` — the payer, never the treasury — so it cannot be narrowed the same way, and a
+       * chain-wide scan of it has the identical problem. But it only has to be read where a
+       * candidate actually landed: the correlation is BY TRANSACTION, and a transaction's two logs
+       * are in the same block by construction. So the authorization leg is read per candidate
+       * block, which is strictly inside the transfer range. The original comment warned that two
+       * scans could "disagree at the boundary" — that cannot happen here, because the second scan's
+       * range is derived from the first scan's results rather than from the cursor.
+       */
       const payToTopic = ethers.zeroPadValue(ethers.getAddress(payTo), 32).toLowerCase()
 
+      const transfers = await scanLogs(
+        provider,
+        { address: token, topics: [TRANSFER, null, payToTopic] },
+        from,
+        to,
+      )
+
+      // Only blocks that actually received a treasury transfer are worth asking about.
+      const candidateBlocks = [...new Set(transfers.map((t) => t.blockNumber))]
+
+      const authorizedTxs = new Set()
+      for (const block of candidateBlocks) {
+        // Through `scanLogs` on a single-block range rather than a bare `provider.getLogs`: it is
+        // exactly equivalent here, and it keeps this leg inside the shared RPC pace and the
+        // too-wide-filter cap instead of quietly being the one caller that escapes both.
+        const authLogs = await scanLogs(
+          provider,
+          { address: token, topics: [AUTHORIZATION_USED] },
+          block,
+          block,
+        )
+        for (const entry of authLogs) authorizedTxs.add(entry.transactionHash)
+      }
+
       let delta = 0n
-      for (const entry of logs) {
-        if (entry.topics[0] !== TRANSFER) continue
-        // topics[2] is the indexed `to`. Compare topic-to-topic so this never depends on how a
-        // provider cases or pads the address it echoes back.
+      for (const entry of transfers) {
+        // Belt and braces: the provider already filtered on the indexed `to`, but comparing
+        // topic-to-topic means this never depends on how a provider cases or pads what it echoes.
         if ((entry.topics[2] ?? '').toLowerCase() !== payToTopic) continue
         if (!authorizedTxs.has(entry.transactionHash)) continue
         delta += IFACE.decodeEventLog('Transfer', entry.data, entry.topics).value

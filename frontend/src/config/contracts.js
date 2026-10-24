@@ -102,7 +102,11 @@ const HARDHAT_CONTRACTS = {
   // has no bundler configured either, so `isPasskeySupported` still answers false there.
   entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
   accountFactory: '0xd519C25e9dEd0DAC586B764574100479CB318734',
-  wmatic: '0x007e106a5664D48e02f571b58694B74c9D5c22a1',
+  // Spec 108: the local wrapped native is now the WETH9-shaped MockWNative (payable
+  // deposit()/withdraw()), because the Wrap surface's on-chain flow runs a REAL wrap here.
+  // CREATE2 (salt V2+"MockWMATIC" + MockWNative init code), so the address is the same on
+  // every clean local chain; re-derived from a fresh node:e2e + setup:e2e run.
+  wmatic: '0x637914a81B4F67BeA3acd94fc5a233656f8C08f7',
   /*
    * spec 030 pillar A — the native standard-DAO factory. NONCE-DERIVED, deployed by
    * `deploy:local:clearpath` (which `setup:e2e` runs after the seed); recorded from a clean
@@ -543,6 +547,19 @@ export function getContractAddressForChain(contractName, chainId) {
 
 // Local-only sandboxes — never surfaced as public "deployed" networks.
 const LOCAL_ONLY_CHAIN_IDS = new Set([1337])
+
+/**
+ * Is this chain a local development sandbox rather than a real network?
+ *
+ * Exported because "local-only" is a fact about REACHABILITY, not just about the landing page:
+ * a shipped build can never reach `http://127.0.0.1:8545`, so any read routed at such a chain
+ * from a deployed origin is guaranteed to fail. Callers that would otherwise report that
+ * guaranteed failure to a member as a degraded state must exclude these chains first —
+ * see `lib/screening/sources.js#screeningChainIds` for the case that made this necessary.
+ */
+export function isLocalOnlyChain(chainId) {
+  return LOCAL_ONLY_CHAIN_IDS.has(Number(chainId))
+}
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 
 /**
@@ -597,7 +614,8 @@ const NETWORK_INFO_BY_CHAIN = {
   },
   80002: {
     name: 'Polygon Amoy',
-    rpcUrl: 'https://rpc-amoy.polygon.technology',
+    // Mirrors config/networks.js — see the note there on why this is not Polygon's own endpoint.
+    rpcUrl: 'https://polygon-amoy-bor-rpc.publicnode.com',
     blockExplorer: 'https://amoy.polygonscan.com',
   },
   137: {

@@ -28,9 +28,11 @@
  *   the amount the calls carry.
  */
 
-import { formatUnits, isAddress, parseUnits } from 'ethers'
+import { isAddress } from 'viem'
+import { formatUnits, parseUnits } from '../evm/units'
 import { BATCH_SUPPORT } from '../custody/batchPreflight'
 import { classifyAddress } from '../bitcoin/addresses'
+import { isBitcoinNetworkId } from '../../config/bitcoinNetworks'
 import { isValidSolanaAddress } from '../solana/address'
 
 /**
@@ -51,6 +53,27 @@ export const RECIPIENT_ISSUE = Object.freeze({
   SELF: 'self',
   RESTRICTED: 'restricted',
 })
+
+/**
+ * Issue #1441 — the multi-recipient affordance is WITHDRAWN from both send surfaces.
+ *
+ * It was offered unconditionally. On the sequential rail — a browser wallet, a hardware device,
+ * an unlocked recovered key, which is most members — "group pay" is N separate transactions with
+ * N confirmations and N fees, and on a chain with no bundler the passkey batch cannot be
+ * submitted at all. A control that reads as "pay these people together" while producing that is
+ * telling the member something untrue before they even reach the confirm screen, which is the
+ * one place the app currently corrected it.
+ *
+ * So the control is removed rather than narrowed, and nothing else is: the engine
+ * (`hooks/useGroupPay.js`), this module, the recipient list, the confirm breakdown and the
+ * outcome list all stay exactly as they are, exercised by their own tests. THIS FLAG IS THE ONE
+ * LEVER. `groupPayAvailability` below already encodes the per-rail and per-network conditions
+ * that were the alternative to withdrawing it; flipping this to `true` re-enables the affordance
+ * under them, and the e2e specs are guarded by the same fact rather than deleted.
+ *
+ * Bringing it back is tracked as #1538.
+ */
+export const GROUP_PAY_ENABLED = false
 
 export const GROUP_RAIL = Object.freeze({
   BATCH_PASSKEY: 'passkey-batch',
@@ -270,6 +293,93 @@ export function selectGroupRail({ actingType = 'personal', isPasskey = false, ca
           'This account cannot send payments here yet, so nothing has been signed. Switch back to acting as ' +
           'yourself to pay from your own account.',
       }
+  }
+}
+
+export const GROUP_UNAVAILABLE = Object.freeze({
+  /** The affordance is switched off outright — issue #1441. */
+  WITHDRAWN: 'withdrawn',
+  /** Bitcoin / Solana / Zcash: their own send pipelines, no batch rail (spec 061 and friends). */
+  NON_EVM: 'non_evm',
+  /** The acting identity cannot send here at all — `selectGroupRail` already said why. */
+  RAIL_REFUSED: 'rail_refused',
+  /** The signer signs one transaction at a time: N sends, not one batch. */
+  NO_BATCH_RAIL: 'no_batch_rail',
+  /** A passkey account on a chain with no bundler — the UserOp has nowhere to go. */
+  CHAIN_NO_BATCH: 'chain_no_batch',
+})
+
+/**
+ * Should the multi-recipient affordance be OFFERED at all? Answered before anything is typed, so
+ * a member is never shown a control whose submission would not be the one it implies.
+ *
+ * Shaped like `lib/chains/writeRail.js#resolveWriteRail`: `{ available, code, reason }`, where an
+ * unavailable answer NAMES what is missing rather than only that something is. Nothing here reads
+ * the network — `passkeySupported` is passed in — so this stays a pure function the surfaces and
+ * the hook can both call.
+ *
+ * `enabled` defaults to `GROUP_PAY_ENABLED`, which is `false`: today every call answers
+ * `withdrawn`. The rest of the logic is not dead — it is what #1538 turns back on, and it is
+ * tested by passing `enabled: true`.
+ *
+ * @param {object} args
+ * @param {boolean} [args.enabled]           the #1441 lever; defaults to `GROUP_PAY_ENABLED`
+ * @param {string} [args.rail]               a `GROUP_RAIL` value from `selectGroupRail`
+ * @param {string|null} [args.railReason]    that call's reason, reused verbatim when it refuses
+ * @param {number|string|null} [args.chainId] the chain the payment would be signed on
+ * @param {string|null} [args.assetKind]     the selected asset's `kind` ('native' | 'erc20' | 'btc-native' | …)
+ * @param {boolean} [args.passkeySupported]  can the passkey UserOp rail submit on this chain?
+ * @returns {{ available: boolean, code: string|null, reason: string|null }}
+ */
+export function groupPayAvailability({
+  enabled = GROUP_PAY_ENABLED,
+  rail = null,
+  railReason = null,
+  chainId = null,
+  assetKind = null,
+  passkeySupported = true,
+} = {}) {
+  const no = (code, reason) => ({ available: false, code, reason })
+
+  if (!enabled) {
+    return no(
+      GROUP_UNAVAILABLE.WITHDRAWN,
+      'Paying several people at once is not available yet — send one payment at a time.',
+    )
+  }
+
+  // Non-EVM first: `useGroupPay` refuses these by name at submit, and an affordance that leads
+  // straight to a refusal is worse than no affordance.
+  const evmChainId = chainId == null || chainId === '' ? null : Number(chainId)
+  if (assetKind === 'btc-native' || isBitcoinNetworkId(chainId) || evmChainId == null || !Number.isFinite(evmChainId)) {
+    return no(
+      GROUP_UNAVAILABLE.NON_EVM,
+      'This asset is sent one payment at a time from its own screen.',
+    )
+  }
+
+  switch (rail) {
+    case GROUP_RAIL.BATCH_PASSKEY:
+      return passkeySupported
+        ? { available: true, code: null, reason: null }
+        : no(
+            GROUP_UNAVAILABLE.CHAIN_NO_BATCH,
+            'Payments cannot be batched on this network, so they are sent one at a time. ' +
+            'Switch to a network that supports batched transactions to pay several people at once.',
+          )
+    case GROUP_RAIL.VAULT_PROPOSAL:
+      // A vault batches by MultiSend. Whether its own policy guard allows that is a per-vault
+      // read resolved later and DISCLOSED before signing (#1368) — it is not this decision.
+      return { available: true, code: null, reason: null }
+    case GROUP_RAIL.SEQUENTIAL:
+      return no(
+        GROUP_UNAVAILABLE.NO_BATCH_RAIL,
+        'This account signs one transaction at a time, so payments here are sent one by one.',
+      )
+    case GROUP_RAIL.REFUSED:
+      return no(GROUP_UNAVAILABLE.RAIL_REFUSED, railReason || 'This account cannot send payments here.')
+    default:
+      return no(GROUP_UNAVAILABLE.RAIL_REFUSED, railReason || 'This account cannot send payments here.')
   }
 }
 

@@ -14,6 +14,7 @@ import { createRegistry } from '../src/registry.js'
 import { createScheduler } from '../src/scheduler.js'
 import { createFxReader } from '../src/collectors/fx.js'
 import { createQuickNodeCollector } from '../src/collectors/quicknode.js'
+import { createFlatSubscriptionCollector } from '../src/collectors/flatSubscription.js'
 import { read, unreadable, notConfigured } from '../src/reading.js'
 import { aggregate } from '../src/aggregate.js'
 
@@ -164,27 +165,36 @@ describe('FX: an unknown rate is null, never zero', () => {
   })
 })
 
+// The flat-subscription modeller MOVED out of collectors/quicknode.js once a fourth vendor needed
+// it — a module named for one vendor had started telling the others their problem was a QuickNode
+// API key. The contract below is unchanged and is what this block has always been about; only the
+// import moved. See collectors/flatSubscription.js and its own suite.
 describe('an unset flat subscription is not-configured, not $0', () => {
+  const flatCollector = (env = {}) =>
+    createFlatSubscriptionCollector({ config: { flatSubscriptions: cfg(env).flatSubscriptions } })
+
   it('reports not-configured when no plan price is declared', async () => {
-    const collect = createQuickNodeCollector({ config: cfg(), fetchImpl: async () => {
-      throw new Error('should not be called')
-    }, log: () => {} })
-    const result = await collect({ id: 'grafana-cloud' })
+    const result = await flatCollector()({ id: 'grafana-cloud' })
     expect(result.state).toBe('not-configured')
     expect(result.value).toBeNull()
   })
 
   it('reports $0 only when the free tier is asserted explicitly', async () => {
-    const collect = createQuickNodeCollector({
-      config: cfg({ FINOPS_GRAFANA_PLAN_USD: '0' }),
-      fetchImpl: async () => {
-        throw new Error('should not be called')
-      },
-      log: () => {},
-    })
-    const result = await collect({ id: 'grafana-cloud' })
+    const result = await flatCollector({ FINOPS_GRAFANA_PLAN_USD: '0' })({ id: 'grafana-cloud' })
     expect(result.state).toBe('read')
     expect(result.value).toBe(0)
+  })
+
+  it('still reports not-configured when QuickNode itself has no credential', async () => {
+    // The other half of the split: quicknode.js now only ever answers about QuickNode.
+    const collect = createQuickNodeCollector({
+      config: cfg(),
+      fetchImpl: async () => { throw new Error('should not be called') },
+      log: () => {},
+    })
+    const result = await collect({ id: 'quicknode' })
+    expect(result.state).toBe('not-configured')
+    expect(result.reason).toMatch(/QUICKNODE_API_KEY/)
   })
 })
 

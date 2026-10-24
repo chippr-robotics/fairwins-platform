@@ -145,6 +145,12 @@ beforeEach(() => {
   Object.assign(groupHolder, {
     rail: GROUP_RAIL.BATCH_PASSKEY,
     railReason: null,
+    // Issue #1441 withdrew the affordance behind this flag. The journeys below drive the list
+    // itself, so they set it true; the withdrawal is asserted in its own describe at the end of
+    // the file, and the DEFAULT (false) is proven at the hook and lib level.
+    available: true,
+    unavailableCode: null,
+    unavailableReason: null,
     status: 'idle',
     outcomes: null,
     summary: null,
@@ -368,5 +374,57 @@ describe('per-recipient outcomes', () => {
     fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }))
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/sanctions screening flags/i))
     expect(screen.getByTestId('group-pay-confirm')).toBeInTheDocument()
+  })
+})
+
+/*
+ * Issue #1441 — the multi-recipient affordance is withdrawn from this surface. The single
+ * -recipient journey must be exactly what it always was, which is the test above; these are about
+ * what is NOT on the screen, and about the one way hiding a control can be worse than showing it.
+ */
+describe('the group affordance is withdrawn (#1441)', () => {
+  beforeEach(() => { groupHolder.available = false })
+
+  it('renders no add control and no recipient rows on Home ▸ Pay', () => {
+    render(<PayPanel />)
+    expect(screen.queryByTestId('group-pay-add')).toBeNull()
+    expect(screen.queryAllByTestId('group-pay-row')).toHaveLength(0)
+  })
+
+  it('still pays one recipient through the ordinary engine', async () => {
+    render(<PayPanel />)
+    typeAmount(['1', '2', '.', '5'])
+    setRecipient(RECIPIENT)
+    await waitFor(() => expect(payButton()).toBeEnabled())
+    fireEvent.click(payButton())
+    fireEvent.click(screen.getByRole('button', { name: /^confirm$/i }))
+
+    await waitFor(() => expect(transferHolder.send).toHaveBeenCalledWith(
+      expect.objectContaining({ to: RECIPIENT, amount: '12.5' }),
+    ))
+    expect(groupHolder.submitGroup).not.toHaveBeenCalled()
+  })
+
+  /*
+   * The hook's answer can change under a draft — a different asset, a different acting account —
+   * and rows left in the form's state while the control is gone would be SUBMITTED as a group
+   * payment the member can no longer see. Withdrawal empties the list.
+   */
+  it('empties a list that was already drafted when the affordance goes away', async () => {
+    groupHolder.available = true
+    const { rerender } = render(<PayPanel />)
+    typeAmount(['1', '2', '.', '5'])
+    setRecipient(RECIPIENT)
+    addRecipient()
+    setRow(2, SECOND, '5')
+    await waitFor(() => expect(payButton()).toHaveTextContent(/2 recipients/i))
+
+    groupHolder.available = false
+    rerender(<PayPanel />)
+
+    await waitFor(() => expect(screen.queryAllByTestId('group-pay-row')).toHaveLength(0))
+    expect(screen.queryByTestId('group-pay-add')).toBeNull()
+    // Back to a single-recipient payment — the button no longer offers to pay several people.
+    expect(payButton()).toHaveTextContent(/^Pay$/)
   })
 })

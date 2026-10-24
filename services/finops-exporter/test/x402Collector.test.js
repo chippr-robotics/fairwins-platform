@@ -20,16 +20,19 @@ const IFACE = new ethers.Interface([
   'event AuthorizationUsed(address indexed authorizer, bytes32 indexed nonce)',
 ])
 
+const TRANSFER_TOPIC = IFACE.getEvent('Transfer').topicHash.toLowerCase()
+const AUTH_TOPIC = IFACE.getEvent('AuthorizationUsed').topicHash.toLowerCase()
+
 const usdc = (n) => ethers.parseUnits(String(n), 6)
 
-function transferLog({ from = OTHER, to, value, txHash }) {
+function transferLog({ from = OTHER, to, value, txHash, blockNumber = 900 }) {
   const enc = IFACE.encodeEventLog('Transfer', [from, to, value])
-  return { ...enc, address: TOKEN, transactionHash: txHash }
+  return { ...enc, address: TOKEN, transactionHash: txHash, blockNumber }
 }
 
-function authorizationLog({ authorizer = OTHER, nonce = ethers.id('n'), txHash }) {
+function authorizationLog({ authorizer = OTHER, nonce = ethers.id('n'), txHash, blockNumber = 900 }) {
   const enc = IFACE.encodeEventLog('AuthorizationUsed', [authorizer, nonce])
-  return { ...enc, address: TOKEN, transactionHash: txHash }
+  return { ...enc, address: TOKEN, transactionHash: txHash, blockNumber }
 }
 
 /** Minimal cursor store with the surface the collector uses. */
@@ -44,19 +47,56 @@ function cursorStore() {
   }
 }
 
+/**
+ * A provider fake that ACTUALLY APPLIES THE FILTER.
+ *
+ * The previous fake was `getLogs: async () => logs` — it returned the same array whatever it was
+ * asked for. That is why the chain-wide filter this collector used to send shipped and survived a
+ * green suite for its whole life: a stub that ignores `topics` cannot tell a filter scoped to the
+ * treasury from one that asks for every `Transfer` on Polygon USDC. In production that was ~1.1M
+ * logs and ~635 MB of JSON in a 192 MB container, so the exporter was OOM-killed before it ever
+ * listened and EVERY FinOps panel read "no data".
+ *
+ * A fake that honours the filter is not a nicety here; it is the only version of this fake that
+ * can fail when the filter is wrong. `asked` records every call so a test can assert on the
+ * REQUEST, not just the answer — the memory cost lives in what we ask for, and no assertion about
+ * the returned value can see it.
+ */
+function matchesTopics(logTopics, filterTopics) {
+  if (!filterTopics) return true
+  return filterTopics.every((want, i) => {
+    if (want == null) return true
+    const got = (logTopics[i] ?? '').toLowerCase()
+    const options = (Array.isArray(want) ? want : [want]).map((t) => String(t).toLowerCase())
+    return options.includes(got)
+  })
+}
+
 function harness(logs, { payTo = TREASURY, paymentToken = TOKEN, head = 1000 } = {}) {
   const config = {
     x402: { payTo, chainId: 137, paymentToken },
     confirmations: { 137: 0 },
     lookbackBlocks: 500,
   }
+  const asked = []
   const providers = {
     137: {
       getBlockNumber: async () => head,
-      getLogs: async () => logs,
+      getLogs: async (filter) => {
+        asked.push(filter)
+        return logs.filter(
+          (l) =>
+            (!filter.address || l.address.toLowerCase() === filter.address.toLowerCase()) &&
+            matchesTopics(l.topics, filter.topics) &&
+            (filter.fromBlock == null || l.blockNumber >= filter.fromBlock) &&
+            (filter.toBlock == null || l.blockNumber <= filter.toBlock),
+        )
+      },
     },
   }
-  return createX402Collector({ config, providers, cursors: cursorStore(), log: () => {} })
+  const collect = createX402Collector({ config, providers, cursors: cursorStore(), log: () => {} })
+  collect.asked = asked
+  return collect
 }
 
 const SOURCE = { id: 'x402-agent-payments', chains: [137] }
@@ -111,6 +151,59 @@ describe('x402 collector — telling settlements apart from every other USDC arr
     ])
     const r = await collect(SOURCE)
     expect(r.value).toBeCloseTo(0.11, 9)
+  })
+
+  /**
+   * THE REGRESSION GUARD, and the reason it asserts on the REQUEST.
+   *
+   * Every test above passes with a chain-wide filter, because they all check the number that comes
+   * out — and the number was always right. What was wrong was what we ASKED FOR: `topics:
+   * [[Transfer, AuthorizationUsed]]` against Polygon USDC pulls the token's entire traffic into one
+   * array before discarding ~99.99% of it. That is invisible to any assertion about the result, and
+   * it is the whole failure: the exporter was OOM-killed before `app.listen()` on every boot, so it
+   * published nothing at all and the dashboards showed "no data" for sources that were fine.
+   */
+  it('asks the chain for transfers INTO THE TREASURY, never for the token\'s whole traffic', async () => {
+    const collect = harness([
+      transferLog({ to: TREASURY, value: usdc('0.05'), txHash: '0xaa' }),
+      authorizationLog({ txHash: '0xaa' }),
+    ])
+    await collect(SOURCE)
+
+    const treasuryTopic = ethers.zeroPadValue(ethers.getAddress(TREASURY), 32).toLowerCase()
+    const transferScans = collect.asked.filter(
+      (f) => String(f.topics?.[0] ?? '').toLowerCase() === TRANSFER_TOPIC,
+    )
+    expect(transferScans.length).toBeGreaterThan(0)
+    for (const f of transferScans) {
+      // topics[2] is the indexed `to`. Narrowed here means the RPC does the discarding, not us.
+      expect(String(f.topics?.[2] ?? '').toLowerCase()).toBe(treasuryTopic)
+      expect(f.address.toLowerCase()).toBe(TOKEN.toLowerCase())
+    }
+  })
+
+  it('reads the authorization leg only in blocks a treasury transfer actually landed in', async () => {
+    const collect = harness([
+      transferLog({ to: TREASURY, value: usdc('0.05'), txHash: '0xaa', blockNumber: 700 }),
+      authorizationLog({ txHash: '0xaa', blockNumber: 700 }),
+    ])
+    await collect(SOURCE)
+
+    const authScans = collect.asked.filter(
+      (f) => String(f.topics?.[0] ?? '').toLowerCase() === AUTH_TOPIC,
+    )
+    // One block had a candidate; the other ~500 in the lookback are never asked about. A
+    // chain-wide authorization scan has exactly the same memory profile as the transfer one did.
+    expect(authScans).toHaveLength(1)
+    expect(authScans[0].fromBlock).toBe(700)
+    expect(authScans[0].toBlock).toBe(700)
+  })
+
+  it('asks for NOTHING on the authorization leg when no treasury transfer landed', async () => {
+    const collect = harness([transferLog({ to: OTHER, value: usdc('9'), txHash: '0x04' })])
+    const r = await collect(SOURCE)
+    expect(r.value).toBe(0)
+    expect(collect.asked.filter((f) => String(f.topics?.[0] ?? '').toLowerCase() === AUTH_TOPIC)).toHaveLength(0)
   })
 
   it('reports not-configured — never $0 — when the rail is not offered', async () => {

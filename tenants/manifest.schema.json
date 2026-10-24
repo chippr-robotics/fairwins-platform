@@ -293,6 +293,18 @@
               }
             }
           }
+        },
+        "assistant": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Assistant settings (spec 104). Optional. Public config only — a referral code is an identity value, never a credential.",
+          "properties": {
+            "guttertokenReferralCode": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]{1,64}$",
+              "description": "Referral code delivered as https://app.guttertokens.com/signup?ref=<code> (prefills GutterToken's referral field) from the Get-a-key link on the Tools › Assistant tab. Optional: absent means the plain signup link. Requires the assistant-byok feature (validator-enforced) — a referral code for a rail the tenant does not offer is dead config. The credit it earns is catalogued as finops source referral-guttertoken."
+            }
+          }
         }
       }
     },

@@ -304,7 +304,10 @@ for (const file of files) {
       (h) => UNIVERSAL[h.toUpperCase()] || SCOPED[h.toUpperCase()]
     ).length
     const rgb = Object.keys(RGB_TRIPLES).reduce(
-      (n, t) => n + (s.replace(/\s+/g, '').match(new RegExp(t.replace(/,/g, ','), 'g')) || []).length,
+      // RGB_TRIPLES keys are `d,d,d` — digits and commas only, so they carry no regex
+      // metacharacter and need no escaping. `s` has had its whitespace stripped, so the
+      // commas match literally.
+      (n, t) => n + (s.replace(/\s+/g, '').match(new RegExp(t, 'g')) || []).length,
       0
     )
     return hex + rgb

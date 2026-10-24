@@ -39,9 +39,35 @@ describe('every covered EVM mainnet declares a distinct build-level failover', (
     expect(net.rpcFailoverUrl, `chain ${chainId} failover must differ from primary`).not.toBe(net.rpcUrl)
   })
 
-  it('ETC (61) keeps its pre-existing failover unchanged', async () => {
+  // ETC (61) is the one chain that cannot meet the invariant above, and the gap is recorded
+  // here rather than papered over with a URL that does not work.
+  //
+  // etcdesktop used to be the FAILOVER behind `etc.rivet.link`. rivet then stopped resolving
+  // outright (NXDOMAIN — the host is gone), so etcdesktop was promoted to primary and there is
+  // no verified second endpoint to put behind it. Every other public ETC RPC checked
+  // (geth-at.etc-network.info, etc-rpc.etccooperative.org, etc.rpc.rivet.cloud,
+  // etc-mainnet.public.blastapi.io, etc.public-rpc.com) either answers without an
+  // `access-control-allow-origin` header — which no browser can use, at any price — or could
+  // not be confirmed to serve chain 61 at all. Shipping one anyway would not be redundancy:
+  // an endpoint that cannot answer is a guaranteed wasted round-trip in front of the one that
+  // can, and an endpoint serving the WRONG chain would put another network's state into every
+  // ETC balance and position read, silently. Absence is the honest state.
+  //
+  // This asserts the promotion actually happened, so the dead host cannot come back by merge.
+  // If a browser-usable second ETC endpoint is ever verified, set it and tighten this to the
+  // `toBeTruthy()` shape the covered mainnets use.
+  it('ETC (61): etcdesktop is the primary, and no unverified failover was invented', async () => {
     const { NETWORKS } = await import('../../config/networks')
-    expect(NETWORKS[61].rpcFailoverUrl).toBe('https://etc.etcdesktop.com')
+    expect(NETWORKS[61].rpcUrl).toBe('https://etc.etcdesktop.com')
+    expect(NETWORKS[61].rpcUrl).not.toBe('https://etc.rivet.link')
+    expect(NETWORKS[61].rpcFailoverUrl).toBeNull()
+  })
+
+  it('ETC (61): VITE_RPC_URL_ETC_FAILOVER can still supply one', async () => {
+    vi.resetModules()
+    vi.stubEnv('VITE_RPC_URL_ETC_FAILOVER', 'https://ops-supplied.example.invalid/etc')
+    const { NETWORKS } = await import('../../config/networks')
+    expect(NETWORKS[61].rpcFailoverUrl).toBe('https://ops-supplied.example.invalid/etc')
   })
 })
 

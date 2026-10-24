@@ -8,7 +8,7 @@
  * SellConfirm.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
 import { bpsToPct } from '../../lib/predict/builderFee'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'

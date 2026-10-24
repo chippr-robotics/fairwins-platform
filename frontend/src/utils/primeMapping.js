@@ -7,7 +7,7 @@
  * @module primeMapping
  */
 
-import { isAddress } from 'ethers'
+import { isAddress } from 'viem'
 import {
   hashToPrime,
   computeMarketHash,

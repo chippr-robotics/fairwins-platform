@@ -26,13 +26,13 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 105 |
-| With a member-facing flow | 83 |
-| Member-facing flows | 173 |
-| 🟢 covered | 160 |
-| 🟡 partial | 3 |
-| 🔴 absent | 3 |
-| ⚪ out of scope | 7 |
+| Spec directories | 115 |
+| With a member-facing flow | 91 |
+| Member-facing flows | 214 |
+| 🟢 covered | 193 |
+| 🟡 partial | 5 |
+| 🔴 absent | 7 |
+| ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
 The last row is the honest read of the suite: those flows have passing tests that do not
@@ -40,7 +40,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Custody — member funds are escrowed, moved, bridged, swept or sent
 
-70 flows — 🟢 59 · 🟡 3 · 🔴 1 · ⚪ 7 · covered-but-not-proven 0
+89 flows — 🟢 72 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
 
 ### `001-cypress-e2e-flows` — Core wager lifecycle (create → accept → resolve → claim/refund)
 
@@ -195,7 +195,7 @@ establish the outcome. They are listed in full at the end of this document.
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
 | `transfer.send-from-home` | Send funds to someone from the home screen | 🟢 covered | settled | `on-chain` | `33-transfers-swap-vouchers.cy.js` (TR-01) |  |
-| `pay.group-settlement` | Settle a group payment - one batched transaction (passkey), one MultiSend proposal (vault), N separate consecutive-nonce proposals when the vault policy denies batches, or sequential sends with per-recipient outcomes | 🟡 partial | settled | `on-chain` | `41-group-settlement.cy.js` (GS-01, GS-02, GS-03) | the PASSKEY batched rail (one UserOp carrying every payment). sendPasskeyBatch reaches the chain only through bundlerClient.sendUserOperation after chooseRoute finds a healthy relayer or bundler, and its self-funded fallback drops the paymaster rather than the bundler - so a batch cannot be self-submitted and this rail needs the PASSKEY_FULL_STACK harness (now the cypress-passkey-full-stack job). The three rails a classic or vault member actually uses are covered and settled on chain. |
+| `pay.group-settlement` | Settle a group payment - one batched transaction (passkey), one MultiSend proposal (vault), N separate consecutive-nonce proposals when the vault policy denies batches, or sequential sends with per-recipient outcomes | ⚪ out-of-scope | none | — (proposed: on-chain) | — | Withdrawn by #1441: a member cannot reach a group payment from any surface, so nothing settles one. The engine is untouched and the spec moved to withdrawn/41-group-settlement.cy.js, guarded by GROUP_PAY_ENABLED rather than deleted - GS-01/02/03 settle on chain again the moment it flips (#1538). Still absent when it does: the PASSKEY batched rail (one UserOp carrying every payment). sendPasskeyBatch reaches the chain only through bundlerClient.sendUserOperation after chooseRoute finds a healthy relayer or bundler, and its self-funded fallback drops the paymaster rather than the bundler - so a batch cannot be self-submitted and this rail needs the PASSKEY_FULL_STACK harness (now the cypress-passkey-full-stack job). The three rails a classic or vault member actually uses are covered and settled on chain. |
 
 ### `061-bitcoin-transactions` — Bitcoin
 
@@ -292,6 +292,13 @@ establish the outcome. They are listed in full at the end of this document.
 | `native.passkey-signin` | A member signs in on the native app with the platform passkey ceremony and lands on the SAME account they hold on the web channel, PRF-derived keys intact; an unsupported device refuses with a named reason (unit: src/test/native/passkeyBridge.test.js; device leg: staged manual protocol in docs/runbooks/native-release-operations.md) | 🔴 absent | none | — (proposed: account-native) | #1389 |  |
 | `native.ble-signing` | Ledger signing over the native Bluetooth rail with physical confirmation on the device screen | ⚪ out-of-scope | none | — (proposed: account-native) | — | Requires a physical Nano X and a human pressing its buttons - automation cannot confirm on a device screen. Protocol arithmetic and error normalization are unit-pinned (src/test/native/ledgerBleRung.test.js); the device run is the staged manual addendum in docs/runbooks/hardware-wallet-staging-validation.md, required before store submission. |
 
+### `102-multisig-chain-abstraction` — Multisig chain abstraction — one vault, every network
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `custody.cross-chain-approve` | Approve a proposal on another network from the queue — the wallet is switched at tap time, a refusal is stated and nothing is signed | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-04) |  |
+| `custody.sheet-approve-execute` | Approve and execute a proposal from the vault sheet's queue (money path) | 🟢 covered | settled | `on-chain` | `29-protect-custody.cy.js` (CV-08) |  |
+
 ### `103-funding-pools` — Funding pools (Request ▸ Pool)
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
@@ -302,9 +309,51 @@ establish the outcome. They are listed in full at the end of this document.
 | `funding.deadline-refund` | A pool nobody closes refunds after the settle deadline | 🟢 covered | settled | `on-chain` | `39-funding-pools.cy.js` (FP-04) |  |
 | `funding.organizer-refund` | The organizer refunds everyone from an open pool | 🟢 covered | settled | `on-chain` | `39-funding-pools.cy.js` (FP-05) |  |
 
+### `104-passkey-account-recovery` — Passkey account recovery — find the account, never guess it
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `passkey.recover-account-by-lookup` | A member signing in on a new device reaches the account their passkey controls, including when that passkey was added to the account later rather than being the key that created it | 🔴 absent | none | — (proposed: on-chain) | #1504 |  |
+| `passkey.recover-never-wrong-account` | A passkey whose account cannot be verified never opens a session on an unverified address; the member is told what could not be confirmed, and an unreachable chain reads as unverified rather than as no account existing | 🟢 covered | flow | `account-native` | `account-recovery.cy.js` (REC-01, REC-02) |  |
+| `passkey.recover-by-address` | A member relinks by entering their account address, and is signed in only when the chain lists the recovered key among that account's current owners | 🟡 partial | smoke | `account-native` | `account-recovery.cy.js` (REC-03) | The chain agreeing. This tier reaches no RPC, so what is proven is the form, the refusal of a malformed address, and that the address is handed on to be CHECKED — never that a verified address opens a session on the account it names. That needs a deployed account whose owner set includes a key this browser has no record of, i.e. the full-stack passkey tier. |
+
+### `105-multichain-vault-creation` — Guided Multichain Vault Creation — One Vault, Chosen Networks
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `custody.create-flow-guided` | A non-technical member walks the four-sheet flow (type presets, rules tile grid with live summary, cohort network multi-select) with every refusal stated in plain language and no network question before a signature needs one | 🟢 covered | flow | `no-chain` | `41-protect-vault-actions.cy.js` (VA-02, VA-03, VA-04); `43-vault-create-flow.cy.js` (CF-01, CF-02, CF-03) |  |
+| `custody.create-vault-multichain` | The flow deploys the vault and the deployed address IS the predicted one, with per-network status reaching Live from a real receipt | 🟡 partial | settled | `on-chain` | `29-protect-custody.cy.js` (CV-01) | deployment to a SECOND network in the same run (identical address, wallet switch mid-orchestration, per-network failure isolation) — the on-chain tier runs one private chain per leg, so the multi-network half is the staged manual protocol in docs/runbooks/multichain-vault-staging-validation.md (#1491); the state machine and CREATE2 identity across chainIds are Vitest-proven |
+| `custody.create-rules-install` | The chosen rules install on each network after deployment — directly where the creator alone meets the threshold, queued as awaiting-approval where co-owners must sign — and an over-cap send is refused by the realized policy | 🟢 covered | settled | `on-chain` | `44-vault-rules-lanes.cy.js` (RL-01, RL-02) |  |
+| `custody.create-passkey-batch` | A passkey member creates a governed vault in ONE sendCalls batch (deploy + both rule installs), landing at the predicted address with the record written from it — and a chain with no bundler states the write-rail reason on its chip instead of attempting the batch | 🟢 covered | settled | `account-native` | `vault-create-batch.cy.js` (PVC-01) |  |
+| `custody.deploy-later` | From Details, a vault with a creation record deploys to a cohort network it is not on yet at the SAME address; a drifted owner set is disclosed as the original arrangement first; a vault without a record gets the honest reason, never a dead control | 🟡 partial | flow | `on-chain` | `44-vault-rules-lanes.cy.js` (RL-01, RL-02) | the replay deployment itself and FR-019 already-live need a SECOND custody network, which the one-chain full tier cannot host — staged manual protocol (docs/runbooks/multichain-vault-staging-validation.md, #1491). The record gate is chain-proven: the record holder is OFFERED Deploy for the missing cohort network (RL-01) and the no-record co-owner gets the honest FR-018 reason (RL-02); gating, disclosure and orchestrator handoff stay Vitest/component-proven (VaultDetailsView.test.jsx). |
+| `custody.vault-details-one-card` | Details renders ONE card — compact network status rows, shared facts stated once with drift naming the differing network and coverage naming the unread one — never a repeated per-network card or an up-front switch gate | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-06, VS-12) |  |
+| `custody.queue-readability` | Queue chips (All / Needs you / per-network) filter the rows without touching the four-state per-chain read disclosure; recognised proposals read in plain language and unknown calldata keeps the honest raw row | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-11) |  |
+
+### `108-multi-currency-wrap` — Multi-currency wrap/unwrap — the asset is the entry point
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `trade.wrap-multi-currency-picker` | The Wrap view offers every cohort chain's base coin the member holds from one trading-view-style picker (icon, symbol, network, balance), with unreadable balances shown as unread (never zero) and unconfigured wrappers honestly absent | 🟢 covered | flow | `no-chain` | `48-wrap-multi-currency.cy.js` (WMC-01, WMC-02, WMC-03, WMC-04) |  |
+| `trade.wrap-cross-chain-submit` | Selecting a coin whose chain differs from the wallet's switches the wallet at submit time (settle loop), wraps against that chain's own wrapped-native contract, and a refused switch names both chains and sends nothing | 🟢 covered | settled | `on-chain` | `45-wrap-cross-chain.cy.js` (WXC-01, WXC-02, WXC-03) |  |
+
+### `110-multichain-write-seam` — Seamless multichain UX — chain-abstracted writes on a single EVM seam
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `multichain.claim-on-action-chain` | With the wallet on network B, tapping Claim on a wager living on network A resolves the target chain from the wager, moves the wallet through the one switch-and-settle seam, and completes the claim as a real settled transaction — no in-app 'switch network' step | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
+| `multichain.intent-signs-without-switch` | A relayed EIP-712 intent targeting network A is signed while connected to network B with no network change requested at all — the chain lives in the signature domain | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
+
+### `111-sigil-cold-signer` — Sigil cold signer in Protect ▸ Off chain
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `sigil.pair-and-add` | Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only; the pairing token device-scoped) | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-01, SIG-04) |  |
+| `sigil.sign-message` | Acting as the Sigil account, Protect ▸ Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address | 🟢 covered | settled | `no-chain` | `51-protect-sigil.cy.js` (SIG-03) |  |
+| `sigil.operate-as-send` | Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log | 🟢 covered | settled | `on-chain` | `46-sigil-operate-as-send.cy.js` (SGO-01) |  |
+
 ## Disclosure — a member consents to a cost
 
-13 flows — 🟢 13 · 🟡 0 · 🔴 0 · ⚪ 0 · covered-but-not-proven 0
+20 flows — 🟢 19 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -334,7 +383,8 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `pay.group-recipient-list` | Build a multi-recipient payment: add/remove rows, per-chain refusals, and the confirm disclosure (total, breakdown, rail, fee) | 🟢 covered | flow | `no-chain` | `41-group-pay.cy.js` (GP-01, GP-02, GP-03, GP-04, GP-05, GP-06, GP-07, GP-08, GP-09) |  |
+| `pay.group-affordance-withdrawn` | The send surfaces offer no multi-recipient control, and a single-recipient send is unchanged | 🟢 covered | flow | `no-chain` | `41-group-pay.cy.js` (GP-10, GP-11) |  |
+| `pay.group-recipient-list` | Build a multi-recipient payment: add/remove rows, per-chain refusals, and the confirm disclosure (total, breakdown, rail, fee) | ⚪ out-of-scope | none | — (proposed: no-chain) | — | Withdrawn by #1441: no send surface renders the multi-recipient control, so there is no member-facing flow to drive. GROUP_PAY_ENABLED in frontend/src/lib/payments/groupPay.js is the one lever; fast/41-group-pay.cy.js is guarded by the same constant rather than deleted, and its GP-10/GP-11 assert the withdrawal itself. Restoring it is #1538. |
 
 ### `060-platform-fee-wrapper` — Platform fees
 
@@ -360,13 +410,34 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `assistant.opt-in` | The assistant does not exist until Settings turns it on, and stops existing when it is turned off | 🟢 covered | flow | `no-chain` | `38-assistant.cy.js` (AS-01) |  |
+| `assistant.opt-in` | The assistant does not exist until Tools ▸ Assistant turns it on, and stops existing when it is turned off | 🟢 covered | flow | `no-chain` | `38-assistant.cy.js` (AS-01) |  |
 | `assistant.honest-unreachable` | An unreachable assistant service is named and retryable, and never answered for | 🟢 covered | flow | `no-chain` | `38-assistant.cy.js` (AS-02) |  |
-| `assistant.memory-clear` | Conversation memory is device-local, counted in Settings, and clearable to nothing | 🟢 covered | settled | `no-chain` | `38-assistant.cy.js` (AS-03) |  |
+| `assistant.memory-clear` | Conversation memory is device-local, counted on the Assistant tab, and clearable to nothing | 🟢 covered | settled | `no-chain` | `38-assistant.cy.js` (AS-03) |  |
+
+### `104-guttertoken-assistant-rail` — GutterToken assistant rail and client-side tools
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `byok.key-lifecycle` | Save a GutterToken key only when GutterToken accepts it, keep it when GutterToken cannot be reached, and remove it | 🟢 covered | settled | `no-chain` | `47-assistant-rails.cy.js` (GT-01, GT-02) |  |
+| `byok.non-member-chat` | A non-member with a saved key gets an answer straight from GutterToken, with no request to the FairWins chat route | 🟢 covered | settled | `no-chain` | `47-assistant-rails.cy.js` (GT-03) |  |
+| `byok.honest-failures` | GutterToken's 403 and 429 each get their own sentence and action, and neither produces a reply bubble | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-04) |  |
+| `provider.choice` | A paid member switches rails, and the badge and the transport agree about which one answered | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-05) |  |
+
+### `110-multichain-write-seam` — Seamless multichain UX — chain-abstracted writes on a single EVM seam
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `multichain.refused-switch-discloses` | A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface) | 🟢 covered | flow | `no-chain` | `50-multichain-write-seam.cy.js` (MCW-01, MCW-02, MCW-03) |  |
+
+### `111-sigil-cold-signer` — Sigil cold signer in Protect ▸ Off chain
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `sigil.failure-vocabulary` | An unpaired bridge, a missing disk, no bridge at all, and an exhausted disk each render a named state and sign nothing | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-02, SIG-04) |  |
 
 ## Access — gating, identity and permission
 
-47 flows — 🟢 46 · 🟡 0 · 🔴 1 · ⚪ 0 · covered-but-not-proven 1
+51 flows — 🟢 49 · 🟡 0 · 🔴 2 · ⚪ 0 · covered-but-not-proven 1
 
 ### `003-polymarket-only-oracle-ui` — Polymarket-only oracle UI
 
@@ -402,6 +473,7 @@ establish the outcome. They are listed in full at the end of this document.
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
 | `addressbook.save-and-use-contact` | Save a contact and address a wager or transfer to it | 🟢 covered | settled | `no-chain` | `34-member-surfaces.cy.js` (MS-01) |  |
+| `addressbook.export-import-roundtrip` | Export the address book to a plain-text file and import it back, with no wallet signature | 🟢 covered | settled | `no-chain` | `34-member-surfaces.cy.js` (MS-07) |  |
 
 ### `022-membership-purchase-progress` — Membership purchase progress
 
@@ -530,9 +602,27 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `native.lifecycle-lock` | Backgrounding the native app past the lock threshold re-prompts before any wallet surface on foreground (unit: src/test/native/lifecycle.test.js + the native case in src/test/applock/AppLockOverlay.test.jsx; the release smoke jobs prove launch/render/lifecycle-survival but cannot reach a signed-in lock) | 🔴 absent | none | — (proposed: no-chain) | #1389 |  |
 
+### `102-multisig-chain-abstraction` — Multisig chain abstraction — one vault, every network
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `custody.acting-from-sheet` | Choose the acting account from the vault sheet; the header follows and the switcher lists the vault once | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-07) |  |
+
+### `104-guttertoken-assistant-rail` — GutterToken assistant rail and client-side tools
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `controls.moved-to-tools` | The agent controls live on Tools ▸ Assistant, Settings no longer carries them, and the old Settings hashes redirect | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-07) |  |
+
+### `110-multichain-write-seam` — Seamless multichain UX — chain-abstracted writes on a single EVM seam
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `multichain.rail-unavailable-before-tap` | An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out — never a submit-time chain-support error | 🔴 absent | none | — (proposed: account-native) | #1552 |  |
+
 ## Information — read-only surfaces
 
-39 flows — 🟢 39 · 🟡 0 · 🔴 0 · ⚪ 0 · covered-but-not-proven 12
+50 flows — 🟢 50 · 🟡 0 · 🔴 0 · ⚪ 0 · covered-but-not-proven 12
 
 ### `005-multi-recipient-encryption` — Multi-recipient encryption
 
@@ -605,6 +695,12 @@ establish the outcome. They are listed in full at the end of this document.
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
 | `account.see-stats` | See your wager record and balances | 🟢 covered | smoke | `no-chain` | `13-dashboard.cy.js` (DSH-10, DSH-11, DSH-12) |  |
+
+### `021-address-book` — Address book
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `addressbook.estate-screening-pill` | Enter an address and see whether it is flagged on any list on any network — never a false green | 🟢 covered | settled | `no-chain` | `34-member-surfaces.cy.js` (MS-06); `31-identity-access.cy.js` (CM-01) |  |
 
 ### `023-oracle-graph-gating` — Oracle graph gating
 
@@ -733,6 +829,31 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `activity.multi-chain-history` | See activity across chains, with an unreadable chain named rather than empty | 🟢 covered | flow | `no-chain` | `36-activity-and-oracle-gating.cy.js` (MC-01, MC-02) |  |
 
+### `102-multisig-chain-abstraction` — Multisig chain abstraction — one vault, every network
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `custody.vault-cards` | See one compact card per vault across every network it lives on | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-01) |  |
+| `custody.vault-sheet-queue` | Open the vault sheet and read the pending queue with each proposal's network tagged, an unreadable network named | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-02, VS-03) |  |
+| `custody.vault-style` | Style the vault card from the sheet; the card behind it updates | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-05) |  |
+| `custody.vault-details` | Read the vault's networks and owners, cross-referenced to the address book, and add an unknown owner in place | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-06) |  |
+| `custody.remove-all-networks` | Remove a vault from Protect on every network after confirmation | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-08) |  |
+| `custody.load-all-networks` | Load a vault address and have it added on every network it exists on, without picking one | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-09) |  |
+| `wallet.balance-display` | Balances in Wrap and Transfer fit the screen (display formatter) | 🟢 covered | flow | `no-chain` | `42-protect-vault-sheet.cy.js` (VS-10) |  |
+
+### `104-guttertoken-assistant-rail` — GutterToken assistant rail and client-side tools
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `tools.honest-progress` | A tool round shows what is being read and reports a failed read as could not be read, never as zero | 🟢 covered | flow | `no-chain` | `47-assistant-rails.cy.js` (GT-06) |  |
+
+### `109-token-news` — Token news on portfolio and trade surfaces
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `news.portfolio-token-card` | Selecting a portfolio token shows that asset's latest news with link-out attribution; an unreadable feed renders a sentence + retry (never an empty feed pretending to be no news), an unmapped asset renders honest absence, and the module off hides the card | 🟢 covered | flow | `no-chain` | `49-token-news.cy.js` (TN-01, TN-03, TN-04, TN-04b, TN-06) |  |
+| `news.trade-pair-feed` | Selecting a trade pair shows the pair's token news below the amount entry under the same three-state honesty; items are text with attribution, never rendered HTML | 🟢 covered | flow | `no-chain` | `49-token-news.cy.js` (TN-05, TN-05b) |  |
+
 ## No member consequence
 
 4 flows — 🟢 3 · 🟡 0 · 🔴 1 · ⚪ 0 · covered-but-not-proven 0
@@ -779,6 +900,8 @@ Listed so the gate can tell "correctly omitted" from "forgotten".
 | `099-network-status-miniapp` — Network status mini-app | Spec landed in release 1.14.0; the mini-app package has no member surface yet. Flows are owed when the package ships (#1364). |
 | `100-passkey-solana` — Passkey-native Solana | Spec + plan landed in release 1.14.0; no member surface exists yet. Implementation follows the constitution-checked plan (#1364). |
 | `101-passkey-zcash` — Passkey-native Zcash | Spec + plan landed in release 1.14.0; no member surface exists yet. Implementation follows the constitution-checked plan (#1364). |
+| `106-gateway-caller-auth` — Gateway caller authentication | Gateway-side caller-identity tiers, quota re-keying and enforcement — server behaviour with no member surface of its own, covered by 34 gateway vitest files (test/identity/). The one member-visible artifact today is the invisible, silently-degrading Turnstile widget (aria-hidden until a surface opts into interactive escalation); member-facing flows arrive when a surface adopts it and when IDENTITY_ENFORCE changes refusal paths on the Predict/Collect/BTC write flows already rowed under specs 055-057/061. |
+| `107-keyed-rpc-access` — Keyed RPC access | Runtime-issued read-only RPC credentials. Dormant end to end until an issuance endpoint is configured (#1438 runbook); every client failure mode falls back to the public default the app uses today, so there is no member-distinguishable flow yet. Covered by gateway vitest (test/access.test.js) and frontend vitest (src/test/network/issuedAccess.test.js); a member-facing degradation-disclosure flow gets a row when the disclosure surface ships. |
 
 ## Covered but not proven
 

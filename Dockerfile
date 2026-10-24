@@ -1,6 +1,6 @@
 # Multi-stage build for React frontend with Vite
 # Stage 1: Build the React application
-FROM node:22-alpine AS build
+FROM node:22.23.3-alpine3.24 AS build
 
 # Build from the REPO ROOT, not frontend/ (spec 075). There is one root lockfile now, so
 # `COPY frontend/package*.json` matched only package.json and `npm ci` failed outright with
@@ -13,6 +13,9 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY frontend/package.json ./frontend/
 COPY packages/intent-types/package.json ./packages/intent-types/
+# spec 104: frontend/src/lib/assistant imports @fairwins/assistant-contract — same dangling-
+# symlink hazard the gateway Dockerfile documents; omit this and vite dies at resolve time.
+COPY packages/assistant-contract/package.json ./packages/assistant-contract/
 COPY tools/miniapp-build/package.json ./tools/miniapp-build/
 
 # Native-module toolchain (spec 085): @trezor/connect-web transitively pulls `usb`, whose install
@@ -26,6 +29,7 @@ RUN npm ci --workspace frontend --include-workspace-root=false
 # directory exists — a missing one yields a DANGLING symlink and an install that looks clean,
 # which is exactly how the relay-gateway image built successfully and then crashed on boot.
 COPY packages/intent-types/ ./packages/intent-types/
+COPY packages/assistant-contract/ ./packages/assistant-contract/
 COPY tools/miniapp-build/ ./tools/miniapp-build/
 
 # Source + tenant manifests (spec 072 — the tenant-branding plugin resolves tenants/ as a
@@ -77,9 +81,28 @@ ARG VITE_BITCOIN_GATEWAY_URL
 # Passkey ERC-4337 bundler URL(s), comma-separated (spec 041). Unset => passkeyConfig(137) is null,
 # so passkey smart accounts stay disabled on Polygon.
 ARG VITE_BUNDLER_URLS_POLYGON
+# The same, per chain (#1501). One alto process serves one chain, so each chain that gains a bundler
+# needs its own URL — and its own ARG here, because docker DROPS a --build-arg the Dockerfile never
+# declared, with only a warning. Unset => passkeyConfig(<chain>) is null and passkey stays dark
+# there, which is the honest default. ETC 61 and Mordor 63 are deliberately absent: they lack
+# opcodes that block features, and are out of scope for the bundler rollout.
+ARG VITE_BUNDLER_URLS_MAINNET
+ARG VITE_BUNDLER_URLS_OPTIMISM
+ARG VITE_BUNDLER_URLS_BASE
+ARG VITE_BUNDLER_URLS_ARBITRUM
+ARG VITE_BUNDLER_URLS_AMOY
 # Sponsored-paymaster endpoint (spec 050): the relay-gateway's /v1/paymaster. Set => passkey UserOps
 # are gasless (FairWins sponsors gas); unset => the account self-funds and the UI discloses honestly.
+# DELIBERATELY POLYGON + AMOY ONLY. Sponsorship is not being extended with the bundler rollout: on
+# every other chain a passkey member pays their own gas, which the confirm surfaces already disclose
+# from `sponsorPaymasterUrl` being absent. Adding an ARG for a chain with no paymaster would invite
+# someone to set it and quietly promise sponsorship that does not exist.
 ARG VITE_SPONSOR_PAYMASTER_POLYGON
+ARG VITE_SPONSOR_PAYMASTER_AMOY
+# Non-production marker (FR-026d). It had NO ARG until #1501's build-arg gate found it: staging set
+# it, docker dropped it, and the banner warning that staging sends REAL mainnet transactions never
+# rendered once.
+ARG VITE_STAGING_BANNER
 # Perps position management (spec 083). Read-only perps market data needs only VITE_RELAYER_URL;
 # this flag is what lets a member OPEN, CLOSE, REDUCE or PROTECT a leveraged position from the app.
 # Unset (the default) => the Perps view renders exactly as spec 082 shipped it: pairs, insights and
@@ -111,7 +134,14 @@ ENV VITE_WAGER_SOURCE=${VITE_WAGER_SOURCE}
 ENV VITE_RELAYER_URL=${VITE_RELAYER_URL}
 ENV VITE_BITCOIN_GATEWAY_URL=${VITE_BITCOIN_GATEWAY_URL}
 ENV VITE_BUNDLER_URLS_POLYGON=${VITE_BUNDLER_URLS_POLYGON}
+ENV VITE_BUNDLER_URLS_MAINNET=${VITE_BUNDLER_URLS_MAINNET}
+ENV VITE_BUNDLER_URLS_OPTIMISM=${VITE_BUNDLER_URLS_OPTIMISM}
+ENV VITE_BUNDLER_URLS_BASE=${VITE_BUNDLER_URLS_BASE}
+ENV VITE_BUNDLER_URLS_ARBITRUM=${VITE_BUNDLER_URLS_ARBITRUM}
+ENV VITE_BUNDLER_URLS_AMOY=${VITE_BUNDLER_URLS_AMOY}
 ENV VITE_SPONSOR_PAYMASTER_POLYGON=${VITE_SPONSOR_PAYMASTER_POLYGON}
+ENV VITE_SPONSOR_PAYMASTER_AMOY=${VITE_SPONSOR_PAYMASTER_AMOY}
+ENV VITE_STAGING_BANNER=${VITE_STAGING_BANNER}
 ENV VITE_PERPS_MANAGE_ENABLED=${VITE_PERPS_MANAGE_ENABLED}
 ENV VITE_APP_VERSION=${VITE_APP_VERSION}
 ENV VITE_GIT_SHA=${VITE_GIT_SHA}
@@ -120,7 +150,7 @@ ENV VITE_GIT_SHA=${VITE_GIT_SHA}
 RUN npm run build
 
 # Stage 2: Serve with nginx
-FROM nginx:alpine
+FROM nginx:1.30.5-alpine
 
 # Install envsubst for runtime environment variable substitution
 RUN apk add --no-cache gettext

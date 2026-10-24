@@ -1,6 +1,6 @@
 {
   "name": "fairwins-relay-gateway",
-  "version": "1.15.2",
+  "version": "1.19.1",
   "private": true,
   "description": "FairWins intent relay gateway (spec 036): policy front-end for the OSS submission engine. Recovers/screens the SIGNER, validates intent binding, dedups, rate-limits, then hands built calldata to OpenZeppelin Relayer. Untrusted-by-design: can censor, never steal.",
   "type": "module",
@@ -17,6 +17,7 @@
     "lint": "echo 'no standalone linter wired; relies on repo-level review' && exit 0"
   },
   "dependencies": {
+    "@fairwins/assistant-contract": "*",
     "@fairwins/intent-types": "*",
     "@google-cloud/kms": "^6.0.0",
     "@polymarket/builder-signing-sdk": "^1.0.0",

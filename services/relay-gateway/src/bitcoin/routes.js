@@ -15,6 +15,7 @@
 import crypto from 'node:crypto'
 import express from 'express'
 import { GatewayError } from '../errors.js'
+import { callerQuotaKey } from '../identity/quotaKey.js'
 import { BitcoinRequestError } from './client.js'
 import {
   MAX_ADDRESSES_PER_REQUEST,
@@ -68,7 +69,9 @@ export function createBitcoinRouter(config, { esploraClients, stampsClient, cach
     return client
   }
 
-  const quotaKey = (req) => req.ip ?? 'unknown'
+  // Keyed on the resolved caller (spec 106, FR-011) rather than on `req.ip` alone — see
+  // identity/quotaKey.js for why the network address is a fallback and not the default.
+  const quotaKey = callerQuotaKey
 
   /** Read pre-flight: per-IP + global read quota. */
   function guard(req) {

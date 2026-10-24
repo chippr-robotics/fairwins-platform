@@ -50,3 +50,18 @@
   background: rgba(71, 85, 105, 0.3);
   border-color: var(--text-secondary);
 }
+
+/* The estate `screened` verdict (issue #1458). Quiet by design — it is the reassuring state, and
+   it must not compete with a flag two rows away — but present, because a clear answer rendered as
+   silence is indistinguishable from an address nothing ever checked. */
+.ab-tag-clear {
+  color: var(--success-text);
+  background: var(--success-bg);
+  border-color: var(--success-color);
+}
+
+:root.theme-dark .ab-tag-clear {
+  color: var(--success-color);
+  background: var(--success-bg);
+  border-color: var(--success-color);
+}

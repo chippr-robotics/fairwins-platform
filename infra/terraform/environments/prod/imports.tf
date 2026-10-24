@@ -377,3 +377,13 @@ import {
 #   to = module.monitoring[0].google_monitoring_alert_policy.probe_failing[0]
 #   id = "projects/chippr-bots-site-wp/alertPolicies/15034287693947745231"
 # }
+
+# ── Spec 107: keyed RPC issuance signing key ──────────────────────────────────────────────────
+# Created manually during the operator ceremony on #1468 (the key had to exist the moment it was
+# generated — its public half went to the provider in the same session). Adopted rather than
+# recreated: recreating would destroy the container holding the only copy of the private key.
+
+import {
+  to = google_secret_manager_secret.managed["fairwins-rpc-access-signing-key"]
+  id = "projects/chippr-bots-site-wp/secrets/fairwins-rpc-access-signing-key"
+}

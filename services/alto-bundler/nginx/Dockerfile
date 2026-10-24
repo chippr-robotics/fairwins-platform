@@ -2,7 +2,7 @@
 # A thin nginx that validates Cloudflare's X-Origin-Auth header, then proxies to the alto sidecar on
 # localhost:3000. Deployed as the INGRESS container of a multi-container Cloud Run service; alto runs
 # alongside it as a localhost-only sidecar (see ../deploy/service.yaml).
-FROM nginx:1.27-alpine
+FROM nginx:1.30.5-alpine
 
 # `envsubst` ships in the gettext package on alpine.
 RUN apk add --no-cache gettext

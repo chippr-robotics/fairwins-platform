@@ -85,7 +85,7 @@ const CHAIN_ID_BY_HOST = [
   [/optimism-rpc\.publicnode\.com/, '0xa'],
   [/base-rpc\.publicnode\.com/, '0x2105'],
   [/arbitrum-one-rpc\.publicnode\.com/, '0xa4b1'],
-  [/etc\.rivet\.link/, '0x3d'],
+  [/etc\.etcdesktop\.com/, '0x3d'],
 ]
 
 /**
@@ -97,7 +97,7 @@ const CHAIN_ID_BY_HOST = [
  * honest error rather than as fabricated DAOs.
  */
 function stubChainReads(answers) {
-  cy.intercept({ method: 'POST', url: /publicnode\.com|etc\.rivet\.link/ }, (req) => {
+  cy.intercept({ method: 'POST', url: /publicnode\.com|etc\.etcdesktop\.com/ }, (req) => {
     const entry = CHAIN_ID_BY_HOST.find(([pattern]) => pattern.test(req.url))
     const chainHex = entry ? entry[1] : '0x89'
     const isRegistryHost = /polygon-bor-rpc\.publicnode\.com/.test(req.url)

@@ -1,0 +1,151 @@
+<mxfile host="app.diagrams.net" agent="FairWins architecture workbook" version="24.7.17">
+  <diagram id="fw-systems" name="Systems view">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1100" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+
+        <mxCell id="title" value="FairWins — Systems View (deployment topology)" style="text;html=1;fontSize=20;fontStyle=1;align=left;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="700" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="subtitle" value="Shared GCP project chippr-bots-site-wp · us-central1 · staging commit 57676112" style="text;html=1;fontSize=12;fontColor=#5A6B72;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="700" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="member" value="Member&#10;browser / PWA / native shell&#10;&#10;HOLDS THE ONLY MEMBER KEYS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=2;fontSize=12;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="140" width="200" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="ops" value="Operator workstation&#10;(impersonation, never a key file)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F1E6;strokeColor=#A46A21;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="40" y="800" width="200" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="floppy" value="Floppy keystore&#10;air-gapped admin mnemonic" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F1E6;strokeColor=#A46A21;fontSize=11;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="890" width="200" height="60" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cf" value="Cloudflare — front door for fairwins.app" style="swimlane;html=1;startSize=30;fillColor=#FFF6E6;strokeColor=#A46A21;strokeWidth=2;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="300" y="120" width="300" height="180" as="geometry" />
+        </mxCell>
+        <mxCell id="cfgeo" value="firewall-custom phase&#10;geo gate → HTTP 451&#10;(a LEGAL control, CODEOWNERS)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="cf">
+          <mxGeometry x="20" y="40" width="260" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="cfxoa" value="late-transform phase&#10;injects X-Origin-Auth&#10;(both rulesets AUTHORITATIVE for their phase)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="cf">
+          <mxGeometry x="20" y="105" width="260" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gcp" value="GCP project chippr-bots-site-wp — SHARED with clearpath-* / fukuii-* / kings-edge-* / a public WordPress VM  ⇒  IAM must be ADDITIVE ONLY" style="swimlane;html=1;startSize=40;fillColor=#F5F7F8;strokeColor=#5A6B72;strokeWidth=2;fontStyle=1;fontSize=11;verticalAlign=top;" vertex="1" parent="1">
+          <mxGeometry x="660" y="100" width="880" height="700" as="geometry" />
+        </mxCell>
+
+        <mxCell id="cr" value="Cloud Run — static SPA&#10;:8080&#10;ONE IMAGE PER COHORT&#10;(Vite bakes VITE_NETWORK_ID)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=2;fontSize=11;" vertex="1" parent="gcp">
+          <mxGeometry x="30" y="60" width="220" height="90" as="geometry" />
+        </mxCell>
+
+        <mxCell id="vpc" value="custom VPC 10.10.0.0/24 · network tag fairwins-edge" style="swimlane;html=1;startSize=26;fillColor=#EDF1F2;strokeColor=#5A6B72;dashed=1;fontSize=11;fontStyle=2;" vertex="1" parent="gcp">
+          <mxGeometry x="30" y="180" width="500" height="480" as="geometry" />
+        </mxCell>
+
+        <mxCell id="gwvm" value="GCE e2-small — fairwins-gateway&#10;systemd: fairwins-stack@gateway" style="swimlane;html=1;startSize=40;fillColor=#FFFFFF;strokeColor=#2E7D8C;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="vpc">
+          <mxGeometry x="20" y="40" width="460" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="gnx" value="host nginx :443 / :80&#10;Cloudflare Origin CA cert&#10;THE ONLY EXTERNALLY-BOUND LISTENER" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="gwvm">
+          <mxGeometry x="15" y="50" width="200" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="gns" value="ONE shared network namespace&#10;relay-gateway :8788 (loopback)&#10;counters :9091 (unpublished)&#10;OZ Relayer :8080 · redis :6379&#10;finops-exporter :9464 (loopback)&#10;Grafana Alloy :12345 (loopback)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;fontSize=10;align=left;spacingLeft=8;" vertex="1" parent="gwvm">
+          <mxGeometry x="235" y="50" width="210" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="e-gnx-gns" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;endArrow=block;" edge="1" parent="gwvm" source="gnx" target="gns">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="bvm" value="GCE e2-small — fairwins-bundler&#10;systemd: fairwins-stack@bundler" style="swimlane;html=1;startSize=40;fillColor=#FFFFFF;strokeColor=#2E7D8C;strokeWidth=2;fontSize=11;fontStyle=1;" vertex="1" parent="vpc">
+          <mxGeometry x="20" y="265" width="460" height="190" as="geometry" />
+        </mxCell>
+        <mxCell id="bnx" value="host nginx&#10;:443 / :80" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="bvm">
+          <mxGeometry x="15" y="55" width="120" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="olock" value="origin-lock nginx&#10;:8080&#10;(loopback-published)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="bvm">
+          <mxGeometry x="160" y="55" width="130" height="60" as="geometry" />
+        </mxCell>
+        <mxCell id="alto" value="alto v1.2.7 :3000&#10;EntryPoint v0.6&#10;CHAIN 137 ONLY&#10;one executor EOA per chain" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;fontSize=10;" vertex="1" parent="bvm">
+          <mxGeometry x="315" y="45" width="130" height="80" as="geometry" />
+        </mxCell>
+        <mxCell id="e-bnx-olock" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;endArrow=block;" edge="1" parent="bvm" source="bnx" target="olock">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-olock-alto" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;endArrow=block;" edge="1" parent="bvm" source="olock" target="alto">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="altonote" value="single-alto-gate.sh — at most ONE alto per (chain, executor EOA); fails CLOSED when it cannot read state" style="text;html=1;fontSize=9;fontColor=#8A3324;align=left;" vertex="1" parent="bvm">
+          <mxGeometry x="15" y="130" width="430" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="sm" value="Secret Manager&#10;→ tmpfs env files via fetch-secrets.sh&#10;(refuses non-tmpfs, refuses set -x)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F1E6;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="gcp">
+          <mxGeometry x="570" y="200" width="270" height="70" as="geometry" />
+        </mxCell>
+        <mxCell id="kms" value="Cloud KMS — EC_SIGN_SECP256K1_SHA256&#10;relayer gas key · paymaster signer&#10;non-exportable; NO rotation_period declared" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F4F1E6;strokeColor=#8A3324;strokeWidth=2;fontSize=10;" vertex="1" parent="gcp">
+          <mxGeometry x="570" y="295" width="270" height="75" as="geometry" />
+        </mxCell>
+        <mxCell id="mon" value="Cloud Monitoring&#10;THE ONLY THING THAT PAGES&#10;probes assert on CONTENT (0x5FF137D4, &quot;rpc&quot;:&quot;up&quot;)&#10;— a bare 200 proves nothing here" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF1F2;strokeColor=#5A6B72;fontSize=10;" vertex="1" parent="gcp">
+          <mxGeometry x="570" y="395" width="270" height="85" as="geometry" />
+        </mxCell>
+        <mxCell id="ar" value="Artifact Registry&#10;+ Cloud Build (owns the IMAGE;&#10;Terraform owns the SHAPE)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF1F2;strokeColor=#5A6B72;fontSize=10;" vertex="1" parent="gcp">
+          <mxGeometry x="570" y="505" width="270" height="70" as="geometry" />
+        </mxCell>
+
+        <mxCell id="chains" value="Public networks" style="swimlane;html=1;startSize=30;fillColor=#F0EDF5;strokeColor=#41236D;strokeWidth=2;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="660" y="830" width="880" height="200" as="geometry" />
+        </mxCell>
+        <mxCell id="rpc" value="RPC providers&#10;QuickNode (keyed, 50 req/s SHARED)&#10;publicnode · ETC Coop / rivet&#10;ETC 61 + Mordor 63: NO commercial provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;fontSize=10;" vertex="1" parent="chains">
+          <mxGeometry x="30" y="45" width="250" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="estate" value="On-chain estate — 8 EVM chains&#10;137 whole estate · 63 nearly all · 80002 core only&#10;61 custody+account only · 1/10/8453/42161 routers+fees&#10;THE ONLY PLACE VALUE IS CUSTODIED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8E3F0;strokeColor=#41236D;strokeWidth=2;fontSize=10;" vertex="1" parent="chains">
+          <mxGeometry x="310" y="45" width="290" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="btc" value="Bitcoin&#10;(non-EVM: string network ids)&#10;Esplora / mempool.space" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="chains">
+          <mxGeometry x="630" y="45" width="220" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="ipfs" value="IPFS / Pinata — NO FALLBACK: wager terms, open challenges, encrypted backup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBEAE6;strokeColor=#8A3324;strokeWidth=2;fontSize=10;" vertex="1" parent="chains">
+          <mxGeometry x="30" y="148" width="820" height="36" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="HTTPS 443" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;strokeWidth=2;endArrow=block;fontSize=10;" edge="1" parent="1" source="member" target="cf">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="443 — Cloudflare ranges ONLY" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;strokeWidth=2;endArrow=block;fontSize=10;" edge="1" parent="1" source="cf" target="cr">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="443 — Cloudflare ranges ONLY" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;strokeWidth=2;endArrow=block;fontSize=10;exitX=0.5;exitY=1;exitDx=0;exitDy=0;" edge="1" parent="1" source="cf" target="gwvm">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="direct JSON-RPC — NEVER through us&#10;(self-submit always available)" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#41236D;strokeWidth=3;dashed=1;endArrow=block;fontSize=10;" edge="1" parent="1" source="member" target="chains">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value=":22 from 35.235.240.0/20 ONLY&#10;IAP tunnel — NO public SSH" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#A46A21;strokeWidth=2;endArrow=block;fontSize=10;" edge="1" parent="1" source="ops" target="vpc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="pays gas" style="edgeStyle=orthogonalEdgeStyle;html=1;strokeColor=#2E7D8C;endArrow=block;fontSize=10;" edge="1" parent="1" source="bvm" target="rpc">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+
+        <mxCell id="legend" value="Legend" style="swimlane;html=1;startSize=26;fillColor=#FFFFFF;strokeColor=#5A6B72;fontSize=11;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="300" y="700" width="300" height="250" as="geometry" />
+        </mxCell>
+        <mxCell id="lg1" value="Teal = FairWins-operated, optional" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;fontSize=10;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="35" width="270" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lg2" value="Amber = edge / secret / legal control" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;fontSize=10;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="72" width="270" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lg3" value="Purple = public network / custody of value" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E8E3F0;strokeColor=#41236D;fontSize=10;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="109" width="270" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lg4" value="Red border = open finding (see Annex 09)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FBEAE6;strokeColor=#8A3324;strokeWidth=2;fontSize=10;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="146" width="270" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="lg5" value="Dashed = key/secret delivery, or a path that&#10;bypasses FairWins infrastructure entirely" style="text;html=1;fontSize=9;align=left;fontColor=#5A6B72;" vertex="1" parent="legend">
+          <mxGeometry x="15" y="185" width="270" height="40" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

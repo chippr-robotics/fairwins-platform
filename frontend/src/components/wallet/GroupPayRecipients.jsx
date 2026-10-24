@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { isAddress } from 'ethers'
+import { isAddress } from 'viem'
 import AddressInput from '../ui/AddressInput'
 import AddressBookButton from '../ui/AddressBookButton'
 import { MAX_GROUP_RECIPIENTS, makeRecipient } from '../../lib/payments/groupPay'
@@ -18,6 +18,13 @@ import './GroupPay.css'
  * resolution priority (address book > callsign > ENS > raw) and the address book picker. A row
  * carries BOTH what was typed (`raw`, so an ENS name stays visible) and what it resolved to
  * (`address`, which is what gets paid) — never one standing in for the other.
+ *
+ * ISSUE #1441 — `available` withdraws the whole thing. When it is false this renders NOTHING, and
+ * it first empties any list that already exists: rows left in the parent's state while the control
+ * is gone would still be submitted, which is the one way hiding a control can be worse than
+ * leaving it. Availability is `groupPayAvailability` (see `lib/payments/groupPay.js`), so today it
+ * is false everywhere; the prop defaults to true so the component's own tests still drive the list
+ * that #1538 turns back on.
  */
 export default function GroupPayRecipients({
   recipients = [],
@@ -28,6 +35,7 @@ export default function GroupPayRecipients({
   disabled = false,
   idPrefix = 'gp',
   startIndex = 2,
+  available = true,
 }) {
   // The cap counts the form's own recipient too — "up to N recipients" means N payments.
   const atCap = recipients.length + 1 >= MAX_GROUP_RECIPIENTS
@@ -59,6 +67,16 @@ export default function GroupPayRecipients({
 
   const add = useCallback(() => commit([...latest.current, makeRecipient()]), [commit])
   const remove = useCallback((id) => commit(latest.current.filter((r) => r.id !== id)), [commit])
+
+  // Withdrawn (#1441): drop any rows the member had already added — the availability of the rail
+  // can change under a draft (a different asset, a different acting account) — then render nothing.
+  // Hooks above this line, always: the early return below must not change the hook order.
+  useEffect(() => {
+    if (available || recipients.length === 0) return
+    commit([])
+  }, [available, recipients.length, commit])
+
+  if (!available) return null
 
   return (
     <div className="gp-list">

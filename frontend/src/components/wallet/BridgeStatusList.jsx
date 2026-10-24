@@ -41,7 +41,7 @@
  * job, and it is the opposite of an invented "no transfers yet".
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { useWallet } from '../../hooks/useWalletManagement'
 import { NETWORKS } from '../../config/networks'
 import { getTransactionUrl } from '../../config/blockExplorer'

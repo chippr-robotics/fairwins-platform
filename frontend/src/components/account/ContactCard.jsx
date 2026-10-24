@@ -9,6 +9,8 @@
 
 import { useState } from 'react'
 import { addressKey } from '../../lib/addressBook/addressBookStore'
+import { NO_SOURCE } from '../../hooks/useEstateScreening'
+import { worstVerdict } from '../../lib/screening/verdict'
 import RestrictionTag from './RestrictionTag'
 
 function shorten(addr) {
@@ -16,16 +18,7 @@ function shorten(addr) {
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`
 }
 
-const noStatus = () => 'clear'
-
-// Worst screening status across a contact's addresses, for the contact-level flag.
-const STATUS_RANK = { restricted: 3, uncertain: 2, loading: 1, clear: 0 }
-function worstStatus(statuses) {
-  return statuses.reduce(
-    (worst, s) => ((STATUS_RANK[s] || 0) > (STATUS_RANK[worst] || 0) ? s : worst),
-    'clear',
-  )
-}
+const noVerdict = () => null
 
 function initialsOf(name) {
   const words = (name || '').trim().split(/\s+/).filter(Boolean)
@@ -68,7 +61,11 @@ function IconCheck() {
 
 export default function ContactCard({
   contact,
-  getStatus = noStatus,
+  // Estate verdicts (issue #1458): `getVerdict` for the whole address, `getVerdictOn` for one
+  // network's lists. Both answer null while the sweep runs, which renders as the loading tag —
+  // never as a clean bill.
+  getVerdict = noVerdict,
+  getVerdictOn = noVerdict,
   networkName = (id) => `Chain ${id}`,
   onEdit,
   onDeleteContact,
@@ -76,8 +73,8 @@ export default function ContactCard({
 }) {
   const [copiedKey, setCopiedKey] = useState(null)
   const [expanded, setExpanded] = useState(false)
-  const statuses = contact.addresses.map((a) => getStatus(a.address, a.chainId))
-  const flag = worstStatus(statuses)
+  const rowVerdicts = contact.addresses.map((a) => getVerdictOn(a.address, a.chainId))
+  const flag = worstVerdict(contact.addresses.map((a) => getVerdict(a.address))) || 'loading'
   const primary = contact.addresses[0]
   const netCount = contact.addresses.length
   const detailsId = `ab-details-${contact.id}`
@@ -118,8 +115,8 @@ export default function ContactCard({
               dropped). Renaming it here renames it everywhere the vault appears. */}
           {isVault && <span className="ab-contact-tag">Multisig</span>}
         </div>
-        {/* Contact-level screening flag: worst status across the contact's
-            addresses (FR-012). RestrictionTag renders nothing when clear. */}
+        {/* Contact-level screening flag: the worst verdict across the contact's addresses
+            (FR-012), over every list on every cohort chain — not just the wallet's. */}
         <div className="ab-contact-flag">
           <RestrictionTag status={flag} />
         </div>
@@ -159,8 +156,10 @@ export default function ContactCard({
                 <li key={key} className="ab-address-row">
                   <div className="ab-address-netlabel">
                     <span>{networkName(a.chainId)}</span>
-                    {statuses[i] && statuses[i] !== 'clear' && (
-                      <RestrictionTag status={statuses[i]} />
+                    {rowVerdicts[i] === NO_SOURCE ? (
+                      <span className="ab-address-nosource">No screening source on this network</span>
+                    ) : (
+                      <RestrictionTag status={rowVerdicts[i] || 'loading'} />
                     )}
                   </div>
                   <div className="ab-address-main">

@@ -21,7 +21,7 @@
  * caller that can read the contract should prefer what the contract says about
  * itself and fall back to these.
  */
-import { NETWORKS } from './networks'
+import { NETWORKS, cohortChainIds } from './networks'
 import { getContractAddressForChain } from './contracts'
 
 /**
@@ -53,6 +53,42 @@ export function getWrappedNative(chainId) {
 /** Whether this network has a wrapped native coin the app can wrap into. */
 export function hasWrappedNative(chainId) {
   return getWrappedNative(chainId) !== null
+}
+
+/**
+ * Every coin the Wrap surface may offer (spec 108) — one option per cohort chain with a
+ * configured wrapper, in SelectableAsset shape (spec 064) so `UniversalAssetSelect`
+ * renders it directly.
+ *
+ * This lives HERE, beside the resolver, on purpose: the file that owns "what is the
+ * wrapped form of this chain's coin?" also owns "which coins are offered", so a chain
+ * can never be wrappable in the picker and unresolvable at submit. The list is
+ * cohort-scoped (`cohortChainIds()`, never `listSupportedChainIds()` — constitution III
+ * forbids reads crossing the testnet/mainnet boundary) and a chain with no configured
+ * wrapper is ABSENT, not a disabled row: there is no address to disable honestly.
+ *
+ * @returns {Array<{ key: string, chainId: number, kind: 'native', symbol: string,
+ *   name: string, networkName: string, decimals: number,
+ *   wrapped: { chainId: number, address: string, symbol: string, name: string, decimals: number } }>}
+ */
+export function listWrappableCoins() {
+  const out = []
+  for (const chainId of cohortChainIds()) {
+    const wrapped = getWrappedNative(chainId)
+    if (!wrapped) continue
+    const net = NETWORKS[chainId]
+    out.push({
+      key: `native:${chainId}`,
+      chainId: Number(chainId),
+      kind: 'native',
+      symbol: net.nativeCurrency.symbol,
+      name: net.nativeCurrency.name,
+      networkName: net.name,
+      decimals: net.nativeCurrency.decimals ?? 18,
+      wrapped,
+    })
+  }
+  return out
 }
 
 export default getWrappedNative

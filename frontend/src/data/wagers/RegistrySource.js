@@ -18,10 +18,10 @@
  * a wallet on testnet never reads mainnet wagers (or vice versa).
  */
 
-import { ethers } from 'ethers'
+import { zeroAddress } from 'viem'
 import { getContractAddressForChain } from '../../config/contracts'
-import { getNetwork, getCurrentChainId } from '../../config/networks'
-import { makeReadProvider } from '../../utils/rpcProvider'
+import { getCurrentChainId } from '../../config/networks'
+import { readContract } from '../../lib/chains/readContract'
 import { WAGER_REGISTRY_ABI } from '../../abis/WagerRegistry'
 import { upsertCache } from './cacheStore'
 import { applyFilters, paginate } from './sortFilter'
@@ -52,17 +52,24 @@ function resolveChainId(chainId) {
   return chainId != null ? chainId : getCurrentChainId()
 }
 
-function getProvider(chainId) {
-  const net = getNetwork(chainId)
-  return makeReadProvider(net?.rpcUrl, chainId)
-}
-
-function getRegistry(chainId, provider) {
+/**
+ * A reader bound to ONE chain's registry (spec 110). The chain is the argument it always
+ * should have been: this file's own header is about a testnet wallet never reading mainnet
+ * wagers, and that is now a property of the call rather than of a provider built alongside it.
+ */
+function getRegistry(chainId) {
   const address = getContractAddressForChain('wagerRegistry', chainId)
   if (!address) {
     throw new Error(`wagerRegistry not deployed on chain ${chainId}`)
   }
-  return new ethers.Contract(address, WAGER_REGISTRY_ABI, provider)
+  const call = (functionName) => (...args) =>
+    readContract(chainId, { address, abi: WAGER_REGISTRY_ABI, functionName, args })
+  return {
+    getUserWagerCount: call('getUserWagerCount'),
+    getUserWagerIds: call('getUserWagerIds'),
+    getUserWagers: call('getUserWagers'),
+    getWager: call('getWager'),
+  }
 }
 
 function toWager(id, raw) {
@@ -70,8 +77,8 @@ function toWager(id, raw) {
   const isIpfs = Boolean(metadataUri && String(metadataUri).startsWith('ipfs://'))
   const ipfsCid = isIpfs ? String(metadataUri).slice('ipfs://'.length) : null
 
-  const opponent = raw.opponent && raw.opponent !== ethers.ZeroAddress ? raw.opponent : null
-  const winner = raw.winner && raw.winner !== ethers.ZeroAddress ? raw.winner : null
+  const opponent = raw.opponent && raw.opponent !== zeroAddress ? raw.opponent : null
+  const winner = raw.winner && raw.winner !== zeroAddress ? raw.winner : null
   const status = STATUS_BY_ENUM[Number(raw.status)] || 'open'
 
   // v2 carries explicit accept/resolve deadlines on-chain (the subgraph does
@@ -90,7 +97,7 @@ function toWager(id, raw) {
     opponent,
     participants: [raw.creator, opponent].filter(Boolean).map((p) => String(p).toLowerCase()),
     arbitrator:
-      raw.arbitrator && raw.arbitrator !== ethers.ZeroAddress ? raw.arbitrator : null,
+      raw.arbitrator && raw.arbitrator !== zeroAddress ? raw.arbitrator : null,
     // Raw integer token units, matching SubgraphSource (formatting happens in
     // the card using the token's decimals).
     stakeAmount: String(raw.creatorStake ?? 0),
@@ -162,8 +169,7 @@ export async function listPage({
   }
 
   const cid = resolveChainId(chainId)
-  const provider = getProvider(cid)
-  const contract = getRegistry(cid, provider)
+  const contract = getRegistry(cid)
 
   const all = await fetchAllForUser(contract, userAddress)
   if (all.length) upsertCache(userAddress, all)
@@ -178,13 +184,12 @@ export async function getById(id, userAddress, opts = {}) {
   if (import.meta.env.VITE_SKIP_BLOCKCHAIN_CALLS === 'true') return null
 
   const cid = resolveChainId(opts.chainId)
-  const provider = getProvider(cid)
-  const contract = getRegistry(cid, provider)
+  const contract = getRegistry(cid)
 
   try {
     const raw = await contract.getWager(id)
     // An unset wager returns a zero-address creator.
-    if (!raw?.creator || raw.creator === ethers.ZeroAddress) return null
+    if (!raw?.creator || raw.creator === zeroAddress) return null
     const wager = toWager(String(id), raw)
     if (userAddress) upsertCache(userAddress, [wager])
     return wager

@@ -1306,4 +1306,79 @@ describe('MyMarketsModal', () => {
       }
     })
   })
+
+  /*
+   * THE LIST IS THE ESTATE (spec 110 T040).
+   *
+   * The context reads every cohort chain, and the modal used to filter that back down to the
+   * wallet's chain — which silently undid the feature: a member still watched their wagers
+   * disappear when they switched networks, which is the behaviour T040 exists to end.
+   *
+   * The whole existing suite passed through that filter without noticing, because `useWallet`
+   * is mocked here with NO `chainId` and the filter's own guard read
+   * `m.chainId == null || !chainId || m.chainId === chainId` — with `chainId` undefined every
+   * wager fell through the `!chainId` arm. So these tests pin the wallet to a REAL chain that
+   * is not the wagers' chain. A fixture that leaves `chainId` undefined cannot fail this way
+   * and is why the defect reached CI.
+   */
+  describe('Estate-wide list (spec 110 T040)', () => {
+    const MEMBER = '0x1234567890123456789012345678901234567890'
+
+    const wagerOn = (chainId, id, description) => ({
+      id,
+      uniqueId: `${chainId}-0xREG-${id}`,
+      chainId,
+      contractAddress: '0xREG',
+      description,
+      creator: MEMBER,
+      participants: [MEMBER, '0x00000000000000000000000000000000000000aa'],
+      tradingEndTime: BigInt(Math.floor(Date.now() / 1000) + 86400 * 7),
+      status: 'active',
+      marketType: 'friend',
+    })
+
+    beforeEach(() => {
+      // The wallet sits on Polygon; every wager below is somewhere else.
+      useWallet.mockReturnValue({ isConnected: true, account: MEMBER, chainId: 137 })
+    })
+
+    it('shows a wager held on a chain the wallet is not connected to', async () => {
+      const user = userEvent.setup()
+      await act(async () => {
+        renderWithProviders(
+          <MyMarketsModal
+            isOpen={true}
+            onClose={mockOnClose}
+            friendMarkets={[wagerOn(8453, '1', 'Wager on Base')]}
+          />
+        )
+      })
+
+      await user.click(screen.getByRole('tab', { name: /created/i }))
+      expect(await screen.findByText('Wager on Base')).toBeInTheDocument()
+    })
+
+    it('keeps both wagers when two chains issue the same wager id', async () => {
+      // `id` is a per-registry counter, so wager #5 on Base and wager #5 on Arbitrum are two
+      // different wagers. Deduping on `marketType-id` — which was correct while the list could
+      // only hold one chain — drops one of them outright.
+      const user = userEvent.setup()
+      await act(async () => {
+        renderWithProviders(
+          <MyMarketsModal
+            isOpen={true}
+            onClose={mockOnClose}
+            friendMarkets={[
+              wagerOn(8453, '5', 'Wager five on Base'),
+              wagerOn(42161, '5', 'Wager five on Arbitrum'),
+            ]}
+          />
+        )
+      })
+
+      await user.click(screen.getByRole('tab', { name: /created/i }))
+      expect(await screen.findByText('Wager five on Base')).toBeInTheDocument()
+      expect(await screen.findByText('Wager five on Arbitrum')).toBeInTheDocument()
+    })
+  })
 })

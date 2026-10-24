@@ -21,6 +21,57 @@ The binding standards live in `.specify/memory/constitution.md`. Every plan must
 pass a constitution check; read it before planning or implementing. Per-feature
 artifacts live under `specs/<feature>/`.
 
+**Several agents work this repo at once. Before you start any of the above, read
+`docs/developer-guide/multi-agent-workflow.md`** — it is the coordination protocol,
+and two of its rules change what you do on step 2:
+
+- **A spec number is claimed by MERGING a reservation PR to `staging`**, never by
+  computing it. `create-new-feature.sh` answers `max(existing) + 1`, which is right
+  exactly once per merge — two agents who ask before either has merged both get the
+  same number and both checked. That is how `017`, `041`, `050`, `102` and `104`
+  each came to name two unrelated features — `104` twice over on 2026-09-04/05,
+  *while this gate was in review*. Open a PR into `staging` containing ONLY the
+  reservation — `specs/<NNN>-<slug>/spec.md` plus its `matrix.json` row and the
+  regenerated `e2e-coverage-matrix.md` (`npm run e2e:matrix`; `check:e2e-matrix`
+  fails a spec dir with no row) — label it `spec-reservation`, merge it, then plan.
+  `npm run check:specs` (CI job *Spec Registry*) fails the second claimant.
+- **An issue's state is its ASSIGNEE, its linked PRs and whether it is closed** —
+  never a status label. There is no Projects v2 write tool (`issue_write` reaches
+  Type, Priority, Effort and the dates; Status lives on the project item), and this
+  repo deliberately does NOT paper over that with a mirrored `status:*` label: that
+  is a second copy of state GitHub already holds, and it reads as "in progress"
+  forever once an agent stops mid-task. Claim by **assigning yourself**, release it
+  by unassigning if you walk away, and close by putting **`Closes #N`** in the PR
+  body. GitHub itself honours closing keywords only on the DEFAULT branch (`main`)
+  and every feature PR here targets `staging`, so `close-linked-issues.yml` does it
+  on the staging merge instead — **read the issue back afterwards** to confirm it
+  actually closed. The project board moves itself — GitHub's built-in *item closed* /
+  *PR merged* workflows set Done — so never claim you moved a card.
+
+Branch from `staging`, never from `main`. Delegated work gets a **sub-issue**, and a
+subagent's report is a claim — read the diff and run the gates before accepting it.
+
+## Specialist subagents
+
+Project subagents live in `.claude/agents/` (routing + roster: `.claude/agents/README.md`).
+The main session orchestrates; subagents cannot spawn subagents.
+
+| Agent | Use it for | When |
+| :-- | :-- | :-- |
+| `keel` (opus) | Value-bearing contracts: wagers, pools, staking, liquidity, bridge, clearpath, tokens, naming, FeeRouter mechanics, membership fund paths, `upgradeable/` | **Before** the edit |
+| `augur` (opus) | Oracle adapters + resolution paths, open challenges, pending-resolution truth | **Before** the edit |
+| `custos` (opus) | Custody guards, roles/authority, SanctionsGuard, MiniAppRegistry curation, `lib/custody`, `lib/screening` | **Before** the edit |
+| `latch` (opus) | ERC-4337 account + paymaster contract, privacy registries, passkeys, hardware/Sigil, recovery, backup, verify | **Before** the edit |
+| `relay` | relay-gateway, oz-relayer, alto, mcp-server, `packages/*` (intent-types, assistant-contract, abi), subgraph | On the change |
+| `teller` | Fee rates/caps + disclosure, membership pricing, FinOps | On the change |
+| `mark` | Tenants, deployments, deploy scripts, infra/, secrets, CI workflows, release train, native shells, lockfile | On the change |
+| `satchel` | Bitcoin, Solana, cohort/estate reads, portfolio aggregation | On the change |
+| `glass` | React UI, mini-app host, a11y, brand, tenant theming | On the change |
+| `witness` | Read-only: diff vs invariants + narrowest real gates | **After** every change |
+
+A subagent's report is a claim until `witness` has run the gates. The Copilot
+`smart-contract-security` agent remains the contract merge gate.
+
 ## Repository map
 
 - `contracts/` — active Solidity (wagers, oracles, access, privacy). `mocks/` is
@@ -38,6 +89,8 @@ artifacts live under `specs/<feature>/`.
 - `npm run test:frontend` — frontend tests
 - `npm run frontend` — run the frontend dev server
 - `npm run sync:frontend-contracts` — regenerate frontend contract artifacts
+- `npm run check:specs` — spec-number registry gate (run before opening a reservation PR)
+- `npm run check:ci-gating` — guards the E2E shard bypass (see the multi-agent guardrail)
 - Only run the **full** frontend suite (`vitest run` with no filter) in CI — locally it
   OOMs this environment. Scope local runs to specific files/dirs
   (`npx vitest run src/test/foo.test.js`).
@@ -48,6 +101,65 @@ artifacts live under `specs/<feature>/`.
   Slither/Medusa, and get a security review (`.github/agents/`).
 - Never commit secrets or private keys; admin keys use the floppy keystore flow.
 - CI fails loudly — don't add `continue-on-error` to lint/test/build/security.
+- **Multi-agent coordination (issue #1460) has one document and two gates.**
+  `docs/developer-guide/multi-agent-workflow.md` is the protocol; everything below is
+  the part that is enforced rather than agreed. (1) **`specs/` is a shared namespace
+  and a number is claimed by a MERGE, not a calculation** — `check:specs`
+  (`scripts/specs/check-spec-registry.js`, CI job *Spec Registry*) fails a second
+  claimant, enforces `NNN-kebab-case`, and requires a reserved number to carry a
+  `spec.md` (a reservation with no spec is indistinguishable from an abandoned one).
+  The five pre-gate collisions are frozen in `LEGACY_COLLISIONS` under rule S-04,
+  which fails if an entry outlives the collision it excuses, so the list shrinks when
+  a pair is renumbered. **Adding to it is not a way to get green**: once the gate is
+  on `staging`, S-01 fails before a second claimant can merge, so a new entry could
+  only describe a collision the gate was never able to see. `create-new-feature.sh` now numbers against `origin/staging` and
+  `origin/main`, not just the local checkout, because each agent's container was
+  cloned at a different moment. (2) **`specs/**` is its own change-detection filter**
+  in `ci-manager.yml`: it had none, so a PR that only reserved a number ran ZERO
+  jobs — and with required checks in force `skipped` satisfies them, so the one PR
+  type whose entire purpose is claiming a number was the one type the gate could
+  never see. **There is NO status mirror, on purpose.** An agent cannot
+  write the project's Status field, and the fix is not a `status:*` label copied onto
+  the board by a workflow — that was built for this feature and deliberately removed.
+  A mirror is a second copy of state the repo already holds and it drifts the instant
+  an agent stops mid-task, leaving the board confidently wrong. State is read from
+  the **assignee** (the claim — release it if you abandon the work), the **linked
+  PRs**, and **open/closed**. Note the MCP server exposes no Projects v2 tool, but the
+  GraphQL API does (`updateProjectV2ItemFieldValue`, `project` scope, **classic PAT or
+  GitHub App token — never `GITHUB_TOKEN`**); we deliberately drive nothing with it,
+  because GitHub's own built-in project workflows already set Todo/Done for free and
+  store nothing in this repo. Only "In Progress" has no built-in, and it is left
+  manual rather than bought with a PAT. **GitHub closes nothing on a feature merge
+  here**: it
+  honours closing keywords only on the default branch (`main`), and PR #1461 merged
+  with `Closes #1460` while the issue stayed open with `closed_by_pull_requests: 0`.
+  `.github/workflows/close-linked-issues.yml` does it on the `staging` merge instead
+  (parser: `scripts/ci/parse-closing-keywords.js`). **PUT THE KEYWORD AT THE START OF
+  A LINE** — the parser follows GitHub's rules except that a keyword only counts
+  line-anchored (a list marker or bold is fine). That narrowing was bought on the
+  first live run: #1462's body said in PROSE that negation is not interpreted, using
+  the words "does not fix #123", and the parser extracted 123 — harmless only because
+  #123 was already closed. GitHub can match anywhere because its UI shows linked
+  issues before you merge; nothing shows you what this does, and the costs are not
+  symmetric (an unclosed issue is visible, a wrongly-closed one is silent). It also
+  never closes a PR — `gh issue view` resolves PR numbers, so the caller checks the
+  REST issues endpoint for a `pull_request` key. Keep writing `Closes #N`, use
+  `Part of #N` for work a PR only advances, and READ THE ISSUE BACK after the merge —
+  an automation nobody verifies is a second thing that can be quietly wrong.
+  (3) **The Cypress tiers SKIP for a change that cannot reach the running app** —
+  ci-manager's `app` path filter, consumed by `test.yml` as `run_e2e`. A docs-only PR
+  was spending 12 fast legs + 4 on-chain shards + the passkey full stack to prove
+  markdown changes no pixels. **`app` is a NEGATIVE list** (`'**'` minus known-inert
+  paths) and that shape IS the safety: an unrecognised path matches `**` and RUNS the
+  suite. Inverting it to a positive allowlist is a one-line, tidier-looking edit that
+  makes every unlisted path skip — and a skipped job SATISFIES a required check, so
+  it would merge green having tested nothing. `npm run check:ci-gating` (C-01…C-05,
+  own must-fail fixtures) is what stops that; a skipped tier is also NAMED in the run
+  summary, because "passed" and "never ran" must not look alike. `blocked` is the one label, because an open assigned issue that is
+  stuck has no other representation — and it is meaningless without a comment naming
+  the blocker. Board columns are moved by a human. Sizing and priority are set at
+  triage on the **Effort** and **Priority** issue fields (the `size:*` label is the
+  t-shirt shorthand; the field is what the board reads).
 - **Upgradeable contracts (UUPS, specs 025 + 027):** both `WagerRegistry` (spec 025)
   and `MembershipManager` (spec 027) are **UUPS proxies at stable addresses** — logic
   is swappable, state is preserved. New upgradeable
@@ -234,6 +346,22 @@ artifacts live under `specs/<feature>/`.
   lives in the **Tools** nav group (tab id `custody` unchanged). See
   `docs/developer-guide/protect-policies.md` + `docs/runbooks/protect-policy-operations.md` +
   `specs/068-protect-multi-chain-policies/`.
+- **A vault is an ADDRESS; a network is a property of a TRANSACTION (spec 102).** Protect ▸ On chain
+  renders ONE compact `AccountCard` per vault address (`useCustodyVaults().groups`, view over the
+  unchanged `(chainId,address)` reference store — never key the store by address), loading adds the
+  vault on EVERY network the probe finds it on (never a "pick a network" prompt), and every per-vault
+  action lives in the `VaultSheet` (Queue / Style / Details). The Queue reads every instance through
+  `useVaultQueueAcrossChains` — four-state per chain (`read`/`unreadable`/`not-configured`/
+  `not-supported`), each row tagged with its `NetworkPill`, a total missing a chain labelled partial
+  and NAMED. Approve/Execute/Cancel on another chain's row SWITCHES THE WALLET AT TAP TIME and runs
+  the action after the connected-chain `useVaultProposals` rebinds — never with a stale signer, never
+  silently on refusal (a per-row alert names both chains). `operateAsVault({ address, chainIds })`:
+  `active.chainId` follows the wallet's chain where the vault exists, else the pin; vault-mode
+  `submit` switches first (settle loop, `useEarnSend.sendOnChain` precedent) and keeps spec 088's
+  no-fall-through. Cosmetics stay ONE address-keyed profile. Balances in Wrap/Transfer/asset picker
+  render through `lib/format/amount.js#formatUnitsForDisplay` (null stays null, never `|| 0`; what is
+  SENT is never rounded). See `docs/developer-guide/protect-policies.md` § "One vault, every network"
+  + `specs/102-multisig-chain-abstraction/`.
 - **Protect ▸ Verify (message signing) is FRONTEND-ONLY and has THREE verdicts, never two.**
   Members sign an arbitrary message to prove control of an account and check other people's proofs
   (`frontend/src/lib/verify/`, surfaced by `components/custody/VerifySection.jsx`). Verification
@@ -268,6 +396,33 @@ artifacts live under `specs/<feature>/`.
   `window.__fwHardwareTestAdapter__` seam is `import.meta.env.DEV`-guarded and dead-code-eliminated
   from production bundles. See `docs/developer-guide/hardware-wallets.md` +
   `docs/runbooks/hardware-wallet-staging-validation.md` + `specs/085-hardware-wallet-protect/`.
+- **Sigil (spec 111) is a THIRD vendor behind the spec-085 seam, reached through a LOOPBACK BRIDGE.**
+  Sigil (chippr-robotics/sigil) is a 2-of-2 MPC ECDSA signer whose cold half is presignature shares on
+  a floppy. `sigil-daemon` speaks newline-JSON on a Unix socket and signs a raw 32-byte PREHASH,
+  returning low-S `r‖s` with NO `v`. Four rules:
+  (1) **Every digest is built in the browser**: tx keccak, EIP-191, and EIP-712 `0x1901‖domainSeparator‖hashStruct`
+  (`lib/hardware/sigilAdapter.js`). `v` is RECOVERED against the disk's public key and never taken from
+  the transport, and a signature recovering to neither parity is refused. This is what makes every EVM
+  action available on every EVM chain through the unchanged `HardwareSigner`.
+  (2) **The bridge is `services/sigil-bridge`**, dependency-free and NOT a workspace member (the
+  mcp-server precedent), outside Sigil's TCB because Sigil's constitution forbids HTTP inside it. Its
+  refusals are the feature:
+  - Origin allowlist (never a wildcard), bearer pairing token, Host check (DNS rebinding), JSON-only bodies;
+  - **no route and no daemon-client function that imports key material**;
+  - disk states refused BY NAME before a presignature is spent.
+
+  (3) **The pairing token is a device credential** under the spec-069 rules:
+  - held in `fw_global_prefs.sigil_bridge`;
+  - **deliberately absent from `syncedObjects.js`**;
+  - sent in the header only, never in a URL;
+  - redacted to `…` + 4 characters.
+
+  The spec-085 store keeps public metadata only, with `path` = `sigil:<child id>` (one account per disk).
+  (4) **Sigil's `proof_hash` is NOT a proof of execution today.** The daemon's proving is a stub, so the
+  bridge does not forward it and the app claims nothing about it until chippr-robotics/sigil#67 lands.
+  The e2e tiers run the REAL bridge in front of a stand-in daemon (`cypress/support/tasks/sigil.js`).
+  Keep it that way: do not replace it with the spec-085 adapter seam, which cannot sign. See
+  `docs/developer-guide/sigil-cold-signer.md` + `specs/111-sigil-cold-signer/`.
 - **Legacy account recovery (spec 062) is FRONTEND-ONLY** — the **Recovery** section (renamed from
   "Backup & Security"; tab id `security` + `backup` alias unchanged). Members import an old EOA
   **private key** or **BIP-39 word list**; the secret is encrypted at rest (AES-GCM under a
@@ -501,7 +656,7 @@ artifacts live under `specs/<feature>/`.
   discloses the reload instead of implying an instant switch. See
   `docs/developer-guide/network-endpoints.md` + `specs/069-network-endpoints-user-panel/`.
 
-- **Native release channels (spec 103): the app ships as Capacitor iOS/Android shells beside the
+- **Native release channels (spec 102): the app ships as Capacitor iOS/Android shells beside the
   web/PWA, and FIVE rules govern every change.** (1) **Seam-only native logic**:
   `frontend/src/lib/native/runtime.js` is the ONE runtime/capability read (three-state,
   `available` only when the bridging plugin confirmed itself — never fabricate); the four gaps
@@ -526,9 +681,30 @@ artifacts live under `specs/<feature>/`.
   reason in place (`NativeCapabilityNotice`), the FR-015 stale-build floor renders NOTHING when
   unknowable (a network failure is not a fact about the member's build), and device-bound flows
   (BLE signing, real passkey PRF) are staged MANUAL protocols in the runbooks, never fake CI
-  coverage. Capacitor deps are pinned EXACT under the spec-075 lockfile rules. See
+  coverage. Capacitor deps are pinned EXACT under the spec-075 lockfile rules. **The native jobs
+  only ever run on a push to `main`** (release.yml's sole trigger), so they are unexercised by every
+  PR that precedes them — all four failed the first time they executed (v1.16.0, 2026-09-04) and
+  skipped `Publish release`, minting no version at all. Two toolchain facts hold them up:
+  **Java 21** (`capacitor-android` compiles at 21; an older JDK says `invalid source release: 21`)
+  and **the newest Xcode on the image** — Capacitor 8 ships its Swift API as prebuilt XCFrameworks,
+  and an older compiler reads a binary Swift module through its `.swiftinterface`, SILENTLY DROPPING
+  declarations it cannot parse. That does not present as "Xcode too old": it presents as
+  `CAPPluginCall has no member 'reject'` in EVERY third-party plugin at once, each looking
+  independently stale. Excluding the first one (bluetooth-le) just moved the failure to the second
+  (passkey) — **two current plugins failing identically is the host, not the guests** — and would
+  have dropped Ledger-over-BLE on iOS for a cause that was never real.
+  `native-prepare` selects the newest Xcode and prints it with `swift --version`, so a log always
+  says what built the app (confirmed on Xcode 26.6 / Swift 6.3.3: every plugin error vanished
+  with both plugins present, so Ledger over BLE works in the native iOS shell and
+  `exclude-ios-spm-plugins.js` excludes NOTHING — its list is deliberately empty). **Never name a simulator device** either — `name:iPhone 15` broke
+  on an image whose newest are iPhone 17s; compile against `generic/platform=iOS Simulator` and
+  let the smoke pick an available iPhone by UDID. **`native-build.yml` now compiles both shells BEFORE main** — on a path-filtered pull
+  request and on every push to `staging` — and it plus all four release jobs prepare the shell
+  through the ONE composite `.github/actions/native-prepare`: an early check that prepares
+  differently from the release would pass while the release fails, so change the preparation in the
+  action, never in a caller. See
   `docs/developer-guide/native-channels.md` + `docs/runbooks/native-release-operations.md` +
-  `specs/103-capacitor-channels/`.
+  `specs/102-capacitor-channels/`.
 - **Cloud infrastructure is DECLARATIVE (spec 087), and the GCP project is SHARED.** Terraform
   (`infra/terraform/`) provisions; Ansible (`infra/ansible/`) converges node interiors. Six rules,
   each of which has a way to be silently wrong:
@@ -551,9 +727,20 @@ artifacts live under `specs/<feature>/`.
   (4) **Terraform owns Cloud Run SHAPE; Cloud Build owns the IMAGE.** The `ignore_changes` set
   (`image`, `revision`, `client`, `client_version`) is gate-enforced — without it every merge reports
   drift, and drift nobody reads is worse than none. The pipeline correspondingly must not set shape
-  flags. **The Cloud Run alto bundler must stay decommissioned** (G-11): re-arming it puts two
-  executors on ONE EOA — colliding nonces, stuck bundles, both instances healthy-looking, no in-band
-  detection.
+  flags. **AT MOST ONE ALTO PER (CHAIN, EXECUTOR EOA)** (G-11). Two altos sharing an
+  executor key are two senders on ONE EOA — colliding nonces, stuck bundles, both instances
+  healthy-looking, **no in-band detection**. Note what the invariant is *not*: it was written as
+  "the Cloud Run alto bundler must stay decommissioned", which is a fact about one named service and
+  is **satisfied by an estate that violates the real rule** — a second VM alto for chain 8453 beside
+  the existing 8453 alto breaks it while Cloud Run stays dark. Keeping Cloud Run decommissioned
+  remains required (it was one of three re-arming paths, and `single-alto-gate.sh` steps 1–2 still
+  enforce it); it is a consequence of the rule, not the rule. Enforcement is per-chain: each alto
+  declares `FW_CHAIN_ID`, the gate permits at most one per chain and only chains the host is
+  *declared* to serve, and an alto it cannot attribute is **refused rather than assumed safe**.
+  Matching is on the image REPOSITORY, never a pinned tag — a duplicate mid-upgrade runs a different
+  tag, which is exactly when you need to see it. **One executor key per chain, never shared**: that
+  is what turns a mis-wired RPC from a silent nonce war on someone else's chain into an unfunded EOA
+  whose bundles simply never land.
   (4a) **The five Terraform modules live in the private `chippr-robotics/chippr-tf-modules`**, pinned
   by **commit SHA** (a tag can be repointed, a commit cannot; G-16 enforces the pin). Add new modules
   THERE, not to `infra/terraform/modules/`, which now holds only a pointer — a local module is
@@ -637,9 +824,13 @@ artifacts live under `specs/<feature>/`.
   (5) **`infra/grafana/` IS GENERATED AND COMMITTED** — never hand-edit it (C5 regenerate-and-diff),
   and a dashboard edited in the Grafana UI is drift that the next provision overwrites. Four sources
   are catalogued `planned` — they show as NOT YET LIVE, declare no metric, and contribute nothing to
-  any total — and they split two ways: `miniapp licenses` / `wager platform fee` exist NOWHERE (no
-  contract has a fee), while `x402-agent-payments` / `assistant-model-api` are **built and offered on
-  no deployment** (specs 096/095, flags commented out in `infra/vm/gateway/docker-compose.yml`).
+  any total — and they split three ways: `miniapp licenses` / `wager platform fee` exist NOWHERE (no
+  contract has a fee); `assistant-model-api` is **built and offered on no deployment** (spec 095, flag
+  commented out in `infra/vm/gateway/docker-compose.yml`; `x402-agent-payments` sat beside it until
+  its deployment switched it on and promoted it to `live` in the same change); and
+  `referral-guttertoken` (spec 104) is **readable by nobody and not cash** — in-kind GutterToken credit
+  on FairWins' own account, no balance/referral endpoint exists to collect it, and its code lives in
+  the tenant manifest where C2b cannot see it, so it is catalogued on purpose and never a USD line.
   **A gate that cannot see the source is not protection**, and the second group is why: C2's only
   discovery route was a FeeRouter `keccakId('x.y')` over two files, so the x402 rail — which takes
   USDC straight to the treasury and registers no `serviceId` — was invisible BY CONSTRUCTION and sat
@@ -654,7 +845,23 @@ artifacts live under `specs/<feature>/`.
   moment the rail is switched on, not after. **Cost discovery is NOT automatable** (`fetch(vendor)`
   looks identical metered or free) and is deliberately left to `basis` + review; do not add a
   heuristic over outbound calls. `npm run test:finops-gate` drives each rule against a
-  must-fail fixture. The exporter is
+  must-fail fixture.
+  (6) **THE EXPORTER MUST BE READABLE BEFORE IT IS COMPLETE, and every honesty rule above is a rule
+  about a SERVED metric.** `app.listen()` comes BEFORE the first `collectAll()`; every collection is
+  deadline-bounded (120s, `reading.js#attempt`); every `scanLogs` refuses past 50,000 accumulated
+  entries and NAMES the too-wide `address`/`topics`. Narrow a log filter ON CHAIN — every indexed
+  parameter the RPC can match is one it must match — because the memory cost lives in what you ASK
+  FOR and no assertion about the returned value can see it. The x402 collector asked Polygon USDC
+  for every `Transfer` and filtered in JS (~1.1M logs, ~635 MB of JSON, 192 MB container): OOM-killed
+  **5,966 consecutive times, always before the port opened**, so the exporter served not one scrape
+  and all 25 sources — 24 of them healthy — read "no data" on every dashboard. FR-001 fabricated no
+  zero throughout, and could not: "absent means unknown" is only legible when something is there to
+  be absent from. Its test fake (`getLogs: async () => logs`) returned the same array for any
+  filter, so the suite could not tell a treasury-scoped scan from a chain-wide one — assert on the
+  REQUEST. Also: `NODE_OPTIONS=--max-old-space-size` is set on the container because **V8 sizes its
+  heap from HOST RAM, not the cgroup**, and every source reusing the flat-subscription modeller MUST
+  have a `flatSubscriptions` key (a missing one falls through to the QuickNode credit path and
+  blames `QUICKNODE_API_KEY` for an unrelated vendor). The exporter is
   **read-only by construction** (no signer, no write route), binds loopback only, and
   `fetch-secrets.sh` refuses to boot if key material reaches its env. See
   `docs/developer-guide/finops.md` + `docs/runbooks/finops-operations.md` + `specs/089-finops-dashboard/`.
@@ -761,7 +968,7 @@ artifacts live under `specs/<feature>/`.
   not lines in a document. See `specs/094-e2e-coverage-expansion/`.
 - **The member API (spec 095) authenticates with member-SIGNED capability tokens, and nothing on it
   signs or moves value.** A "private API key" is an off-chain EIP-712 `ApiKeyGrant` the member signs
-  in-app (Settings ▸ API access) — the gateway stores nothing to issue one; the struct/domain have
+  in-app (Tools ▸ Assistant ▸ API access since spec 104) — the gateway stores nothing to issue one; the struct/domain have
   ONE source, `@fairwins/intent-types/offchain` (deliberately OUTSIDE `CONTRACT_VERIFIED_TYPES`: the
   parity gate would demand Solidity that must not exist; `services/relay-gateway/test/memberApiAuth.test.js`
   is their gate instead). The gateway module (`services/relay-gateway/src/memberApi/`,
@@ -777,7 +984,7 @@ artifacts live under `specs/<feature>/`.
   (`services/mcp-server/`) is DEPENDENCY-FREE and deliberately NOT a workspace member (lockfile
   hazard, spec 075) — do not add it to `workspaces` or give it dependencies; it consumes the API
   with the member's own token and cannot sign. Mini-app packages still cannot sign — the api-access
-  console deep-links to the host Settings card for every key ceremony.
+  console deep-links to the host's Assistant-tab card for every key ceremony.
   **Spec 096 adds a SECOND rail on those same operations — x402 pay-per-request
   (`services/relay-gateway/src/x402/`, `X402_ENABLED`, default off) — and it NEVER applies to a
   member: the bearer token is checked first, so a valid `fw1` token never reaches the paywall even
@@ -799,11 +1006,203 @@ artifacts live under `specs/<feature>/`.
   a tool argument. See `docs/developer-guide/member-api.md` + `docs/developer-guide/mcp-server.md` +
   `docs/developer-guide/agentic-chat.md` + `docs/developer-guide/agentic-payments.md` +
   `specs/095-member-api-agentic-access/` + `specs/096-x402-agentic-payments/`.
+- **The assistant has TWO rails and ONE tool table (spec 104), and it lives on a Tools tab.** The
+  Assistant and API access cards moved from Settings to **Tools ▸ Assistant** (`/wallet?tab=assistant`;
+  card ids `assistant-prefs`/`api-access` unchanged, the old `?tab=settings#…` links redirect). A
+  member picks who answers: **FairWins assistant (membership)** — the spec-095 gateway rail, paid
+  member only, FairWins pays Anthropic under the token budget — or **GutterToken (your credits)** —
+  bring-your-own-key: the member pastes an `sk-…` key from `app.guttertokens.com` and the BROWSER calls
+  `https://api.guttertokens.com/v1/messages` directly (open CORS; `connect-src https:` already admits
+  it). On that rail **FairWins is not in the path**: it never holds, forwards or sees the key or a
+  message, charges nothing, cannot read the balance, and therefore **never renders a rate or a
+  "credits remaining" figure** (the link out is the disclosure; token counts a reply reported may be
+  shown, a dollar figure may not). Non-members get the GutterToken rail only; the launcher gate is
+  `feature ∧ wallet ∧ opted-in ∧ (key present ∨ membership active-paid)` IN THAT ORDER, so a member
+  with a key never pays the membership read and `unreadable` still renders nothing. Honest states,
+  never a fabricated reply: `401` ⇒ `key_invalid` (re-enter), `403 insufficient_quota` ⇒
+  `out_of_credit` (link to top up), `429` ⇒ GutterToken's per-source-IP limit, `503`/transport ⇒
+  unreachable. **Key store rules are absolute** (spec-069 RPC-credential precedent, NOT the spec-062
+  vault): wallet-scoped `userStorage` key `assistant_guttertoken_key_v1`, device-only, **deliberately
+  absent from `lib/backup/syncedObjects.js`** (a test asserts it), redacted to `sk-…` + 4 chars at
+  EVERY display/log/audit boundary, never in a URL or an error message; save = `^sk-` shape + one
+  `GET /v1/models` (401 refuses, unreachable saves with the failure shown). The tenant feature
+  `assistant-byok` (on for `fairwins`, requires `assistant`) gates the option; the signup link is
+  `https://app.guttertokens.com/signup`, `?ref=<code>` from `settings.assistant.guttertokenReferralCode`
+  in the manifest (optional, validator-gated, none registered yet), disclosed in words; signup itself
+  is GutterToken's (SIWE `personal_sign` inside ITS session, `window.ethereum` only) — FairWins can
+  never sign a member in there, passkey members sign up by E-MAIL, and GutterToken's own passkey login
+  is unrelated to ours; the credit is
+  catalogued as FinOps `referral-guttertoken`, `planned` because no collector can read it. **Both rails
+  carry TOOLS, executed in the browser** (client-side loop, ≤ `MAX_TOOL_ROUNDS` = 4 rounds/turn;
+  gateway ceiling `ASSISTANT_MAX_ROUNDS`, default 4, max 8): `get_profile`/`get_membership`/
+  `get_wagers`/`get_fees` are ordinary member-API reads under the 24 h grant (OPTIONAL on the
+  GutterToken rail — offered from the panel; without it only the public tools), `get_gateway_status`/
+  `get_prediction_markets`/`get_perps_pairs` are public, `find_in_app` is a local lookup over the nav
+  index (descriptive, never authoritative). **`@fairwins/assistant-contract` is the ONE source** of
+  prompt + tool defs + honest result wording, consumed by the gateway (which attaches tools
+  SERVER-SIDE on the FairWins rail and REFUSES client-supplied `tools`), the frontend, and — as the
+  vendored `services/mcp-server/src/toolDefs.snapshot.json`, gated both directions by
+  `services/relay-gateway/test/mcpToolParity.test.js` — the dependency-free MCP server, which keeps
+  `build_intent` as its own MCP-ONLY tool. **No `build_intent` and no `navigate` in the in-app
+  assistant** — tool results carry counterparty-authored text (prompt injection), a result never makes
+  the app DO anything, and `replyLinks.js` stays the only path from model text to a click. **The
+  member's surface is never in the system prompt** — the prompt is frozen per thread (cache prefix)
+  and the path rides as a trailing text block on the last user message; a grant arriving mid-thread
+  starts a new thread. Memory stays text-only and device-local. Legal was AMENDED in place (privacy
+  §2/§5: GutterToken is NOT our processor; terms §4.3(5)/§4.6; risk §13) — the document hash is the
+  version. See `docs/developer-guide/agentic-chat.md` § Providers/Tools +
+  `docs/research/guttertoken-assistant-integration.md` + `specs/104-guttertoken-assistant-rail/`.
 
 <!-- SPECKIT START -->
+- **A vault is CREATED everywhere it will live, from one flow (spec 105).** Creation is the
+  guided four-sheet flow (`components/custody/createflow/`), and the connected chain gates neither
+  Create nor Load. Same-address multichain rests on ONE rule: the deployment initializer is the
+  chain-independent spec-043 encoding (owners + threshold + canonical fallback handler) with a
+  per-vault saltNonce — **never put a policy setup in a multichain initializer** (realized rules
+  embed the chain's own stable address; byte-different initializer ⇒ different CREATE2 address).
+  Rules are ONE semantic config (`vaultRulesConfig.realizeRules`: banded everyday lane +
+  identical-scope full-vote big-send lane + catch-all) installed POST-deploy per network through
+  the vault's own threshold machinery — direct where the creator alone meets threshold, queued
+  "awaiting approval" (never shown active) where co-owners must sign. The creation record
+  (`vaultCreationRecords`, synced, IMMUTABLE — the replay input for "Add a network") is what makes
+  deploy-later possible; absence gets the honest FR-018 reason, owner drift gets the
+  original-arrangement disclosure. Deployment status is re-derived from the chain on reopen
+  (`deriveNetworkStatus`): a failed probe is `unreadable`, an occupied predicted address is
+  `already-live` (success). Details is ONE card (network status rows + shared facts with drift
+  NAMED + coverage labelled); the Queue's chips/decoded rows (`describeProposal` — null over a
+  guess) never touch the four-state read honesty. See
+  `docs/developer-guide/protect-policies.md` § "One vault, created everywhere" +
+  `specs/105-multichain-vault-creation/`.
+- **A custody write's RAIL is a property of the SIGNER, not the login.**
+  `lib/chains/writeRail.js#resolveWriteRail` is the one answer to "can this session sign a vault
+  action on this chain?", and it checks for a signer FIRST. Branching on `loginMethod === 'passkey'`
+  — which `WalletContext` itself documents as "INFORMATIONAL ONLY … no feature may branch on it" —
+  refused members who could perfectly well act: **ETC 61 and Mordor 63 have no bundler**, so the
+  passkey UserOp rail cannot submit there, and every approve/execute/cancel died inside
+  `sendPasskeyBatch` with a chain-support error the member had asked no question to receive — while
+  an injected wallet, a Ledger, or an unlocked recovered account signs `approveHash` natively and
+  pays the fee in ETC. Rules: (1) a signer, if present, is used, on every EVM chain the vault lives
+  on; (2) the passkey rail is the fallback and is offered ONLY where `isPasskeySupported(chainId)`;
+  (3) an unavailable rail is stated BEFORE the tap — `useVaultProposals` returns `writeRail` and the
+  Queue renders the reason in place of buttons that would throw — and that state is **not**
+  "view-only", which means *not an owner* and is a different fact; (4) the reason NAMES the way out
+  ("connect a wallet that can sign there"), never just the obstacle. `requireWriteRail` is the
+  throwing form inside the action callbacks, so any caller that gets past the UI fails with the same
+  sentence. See `docs/developer-guide/protect-policies.md` § "The write rail is a property of the
+  signer".
+- **Address screening asks EVERY list on EVERY cohort chain, and green means all of them answered
+  (spec 021 amendment, issue #1458).** `lib/screening/sources.js` is the registry — the FairWins
+  `SanctionsGuard` where deployed, the Chainalysis oracle where published (Base is at a DIFFERENT
+  address from the other four), and the NATIVE issuer freeze lists (Circle `isBlacklisted`, Tether
+  `isBlackListed` — different selectors; a bridged token has neither). Every row was verified by a
+  live read before it was written; a wrong row costs a member a source silently, so verify before
+  adding one. `verdict.js` derives ONE word from the readings and never stores it: `flagged` on ANY
+  hit, `screened` ONLY when every configured source answered clear (`unreadable === 0` — a list
+  that did not answer is not a list that said no), `partial` otherwise, `unscreened` when nothing
+  answered; chains with no source are UNCOVERED, never clear. The sweep (`screenEstate.js`) is
+  cohort-bounded, per-source failure-isolated, deadline-bounded (8 s) and never rejects; providers
+  come from `readProviderFor`. **Two hooks, on purpose**: `useAddressScreening` stays the PER-CHAIN
+  live read that gates a submission on the chain the value moves on (FR-013 here, and **spec 067**
+  FR-032 for the forced submit-time re-read on Bridge/Supply — the contract will repeat that exact
+  read), and `useEstateScreening` feeds the advisory `ScreeningPill` under
+  every address field via `AddressScreenNotice`, which now renders for every valid address (a
+  clear answer that rendered as silence was indistinguishable from no screen at all). The pill is
+  icon + word, `role="alert"` when flagged, and expands to the per-source rows; the no-chain e2e
+  tier answers `0x` to every read, so there it must be amber, never green (`MS-06`). Nothing here
+  enforces — the guard and the issuing token do. No subgraph, no off-chain provider: the source
+  shape is what a BYO provider would implement, behind a member-held credential.
+  **The roster is `screeningChainIds()` — the cohort MINUS `isLocalOnlyChain`** — because a source
+  a shipped build can never reach is not a degraded source, it is not a source: chain 1337 is
+  `isTestnet: true`, carries a guard, and lives at `http://127.0.0.1:8545`, so every testnet build
+  told every member that a Hardhat guard "could not be read" and could never reach green (QA round;
+  Amoy's build default was also dead and now points at publicnode like every other chain here).
+  **The book and the inline address-field addon read the SAME sweep**: `AddressBookPanel` and
+  `AddressInputBookAddon` use `useEstateScreeningMany` — they asked the per-chain hook, which can
+  only answer for the wallet's chain, so a book full of contacts rendered "Unscreened" whenever the
+  wallet was elsewhere or absent. **The MODAL picker (`AddressBookButton`) was missed by that
+  migration** and still calls `useAddressScreening().getStatus`, so it reproduces the original
+  amber-everything behaviour off the wallet's chain on all ten surfaces that mount it (issue #1571). `getVerdictOn` has a THIRD answer, `no-source`, distinct from both a verdict and a
+  still-running null. **The summary line names sources only when FLAGGED** — naming every
+  unreachable one turned the notice into a paragraph; the names live one tap away, and the
+  `ScreeningStatusBar` (one segment per source, `role="img"` labelled with the summary) carries the
+  shape. The notice has **no ⓘ**: that bubble was taller than a phone and clipped by the scrolling
+  modal it sat in; the explainer stays on the Address Book header, and `InfoTip` now sits above the
+  assistant launcher (1350) and scrolls internally. See
+  `docs/developer-guide/address-screening.md`.
+- **A passkey's account is LOOKED UP, never derived (spec 104).** `lib/passkey/accountLookup.js` is
+  the one seam that answers "which account does this key control?", and its `Resolution` type has
+  four shapes of which **only `resolved` carries an address** — three of its four constructors take
+  no address at all, so "return the derived one anyway" has nowhere to live (the spec-089
+  `reading.js` device). That is the whole point: `resolveAccountForCredential` used to derive an
+  address assuming the key was the account's **sole initial owner at nonce 0** and return it even
+  when the chain said nothing was deployed there, which signed a member whose passkey had been
+  ADDED to an existing account into a brand-new empty one, silently — a zero balance they read as
+  their money being gone. Five rules: (1) **a session opens only on `resolved`, or on a counterfactual the
+  MEMBER accepted** — everything else raises `AccountUnresolved` carrying the outcome, so the
+  surface offers recovery instead of a dead end. The exception is not a loophole, it is the case the
+  blunt rule broke: `none-found` also describes a member who signed up on another device and has not
+  spent, whose account is real and simply holds no code, so the derived address is OFFERED, labelled
+  not-yet-used, and opened only on `acceptCounterfactual` — safe because it is a deterministic
+  function of the key (the same address their first device showed). `unverified` gets no such offer:
+  an unreachable chain says nothing about whether an account exists; (2) **`unverified` is NEVER `none-found`** — an unreachable chain is not evidence of
+  absence, and the two lead to different member actions (retry vs. recover), exactly as spec 095
+  keeps `auth_unverifiable` out of the denial path and spec 084 keeps a third verdict; (3)
+  **verification is against the CURRENT owner set** and `ownerIndex` is whatever the chain reported,
+  never 0 by assumption (spec 045 FR-009); (4) **an address is a HINT, never a claim** — a member's
+  typed address takes the identical confirmation a searched candidate takes, which is what stops
+  "type any address" being a way into someone else's account; (5) **every leg is deadline-bounded
+  and expires to `unverified`** — the direct lesson of v1.16.1, where an unbounded wait on an
+  external system turned one failure into a permanent lockout. Derivation survives ONLY for
+  `mode: 'sign-up'`, where the member asked to create an account. Reads go through the spec-069 seam
+  (`defaultPublicClient` no longer builds a transport from `NETWORKS[chainId].rpcUrl`). Discovery
+  (nonce enumeration + an `AccountCreated` scan) is Release 2 and is **blocked on recording
+  `deployBlocks.accountFactory`** — absent on every chain today, and `deployBlocks?.X || 0` makes
+  that a silent scan from block 0, not a loud failure. Keys added to an account after creation are
+  undiscoverable by design (`AddOwner` has no address to filter on, the subgraph indexes no account
+  entities) and are covered by the address path. See
+  `docs/developer-guide/passkey-account-recovery.md` + `specs/104-passkey-account-recovery/`.
+
+- **Wrap is multi-currency, and the ASSET is the entry point (spec 108).** Trade ▸ Wrap offers every
+  cohort chain's base coin with a configured wrapper — the candidate list is
+  `config/wrappedNative.js#listWrappableCoins()` (`cohortChainIds().filter(hasWrappedNative)`,
+  SelectableAsset-shaped), living beside the ONE resolver on purpose so "offered" and "resolvable"
+  cannot drift; an unconfigured chain is ABSENT, never a disabled row (no guessed wrapper ever
+  receives funds). Picker balances ride `useWrapCoinOptions` → `readBalancesSettled` +
+  `getReadProvider` with per-chain failure isolation — `null` survives to the row ("—"), never a
+  fabricated zero, and an unreadable chain stays selectable. `useWrapNative({ chainId })` re-binds
+  every read to the TARGET and retargets the write per rail: classic cross-chain
+  switches-then-settles (the spec-102 / `useEarnSend` device — refusal names BOTH chains and sends
+  nothing), passkey batches pin the target via the `sendCalls` `{ chainId }` override gated on
+  `isPasskeySupported` (unavailable is stated BEFORE the tap with the seam's own reason),
+  vault/legacy/hardware keep their refusals with the picker pinned to the acting chain. Changing the
+  coin CLEARS the amount — a MAX quoted on one chain never rides to another. No target passed =
+  wallet's chain, byte-compatible with every pre-108 caller. See
+  `docs/developer-guide/wrap-native.md` + `specs/108-multi-currency-wrap/`.
+
+- **Token news (spec 109) is the fourth read-proxy, and the ASSET-IDENTITY MAPPING is ours.**
+  `services/relay-gateway/src/news/` (`NEWS_ENABLED`, default off) proxies the keyless Alphaday
+  `/items/news/?tags=<slug>` — **the vendor has no CORS** (a browser can never call it directly)
+  **and no contract identity anywhere** (tags/coins are slug+ticker only), so
+  `frontend/src/config/newsAssets.js` holds the curated `(chainId,address)→slug` table beside the
+  asset registry (spec-108 offered-beside-resolvable precedent), every row probe-verified, and a
+  missing row IS "not covered" — resolved client-side with NO network call; never a ticker
+  heuristic (a garbage slug fails closed to `[]` upstream, verified). Cache TTL is clamped
+  **≥ 300 s** (the vendor itself serves `max-age=300` — lower buys load, not freshness),
+  single-flight per slug, serve-stale ≤ 10× TTL then `unreadable`, never stale-as-live. The
+  `FeedReading` has three states + a DISTINCT honest-empty (`read` with `items: []` — sparse
+  long-tail coverage is content, not failure; ages always shown). News is ADVISORY-ONLY: no value
+  path gates on it, items render title/source/age/link-out as TEXT (vendor `image`/`icon`/HTML
+  never forwarded), and the assistant gets exactly ONE public tool, `get_token_news`
+  (tool-pull; never in a prompt, never pre-loaded — spec-104 injection posture) with the MCP
+  snapshot regenerated. **No datastore, no member-keyed interest record, no FeeRouter service, no
+  key anywhere**; FinOps entry `alphaday-news-api` (`modelled` $0) ships with the module. The
+  parked graph/retrieval layer is #1504-lineage/#1513 — do not reintroduce it here. See
+  `docs/developer-guide/token-news.md` + `specs/109-token-news/` (research.md carries the probe
+  evidence).
+
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/103-capacitor-channels/plan.md
+at specs/109-token-news/plan.md
 <!-- SPECKIT END -->
 - **Workstation credentials live in Secret Manager, never in `.env` (spec 097).** The machine the
   platform is administered FROM is a production surface — it can read a funded deploy key that also

@@ -31,8 +31,15 @@ vi.mock('../../connectors/passkey', () => ({ readSession: () => ({ credentialId:
 // No test may reach a real network. `readProvider` is null by default, which stands for "this
 // chain has no route" — the honest unverifiable case — and a test that wants the on-chain leg to
 // actually answer sets it to a stub.
+//
+// Mocked at the CHAIN SEAM since spec 110: the module resolves its read client through
+// `getPublicClient(chainId)`, so a fake on the retired `utils/rpcProvider` would sit there looking
+// wired up while the real client answered — the failure mode this migration keeps meeting.
 let readProvider = null
-vi.mock('../../utils/rpcProvider', () => ({ getReadProvider: () => readProvider }))
+vi.mock('../../lib/chains/publicClient', async (orig) => ({
+  ...(await orig()),
+  getPublicClient: () => readProvider,
+}))
 
 import { cohortChainIds } from '../../config/networks'
 import VerifySection from '../../components/custody/VerifySection'

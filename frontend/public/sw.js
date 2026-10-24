@@ -90,6 +90,15 @@ function isMiniAppPackageUrl(rawUrl) {
   return CID_PATTERN.test(segments[1])
 }
 
+/** Is this one of our own URLs? Same parse guard as above — an unparseable URL is not ours. */
+function isSameOrigin(rawUrl) {
+  try {
+    return new URL(rawUrl).origin === self.location.origin
+  } catch {
+    return false
+  }
+}
+
 /**
  * Move `url` to the head of the LRU index and report what that pushes out.
  *
@@ -257,15 +266,33 @@ self.addEventListener('fetch', (event) => {
     return
   }
 
+  // Everything past this point is an offline fallback for THIS origin's own shell. A
+  // cross-origin GET — an analytics beacon, a CDN font, a third-party pixel — has no entry
+  // in our cache and no offline story, so intercepting it can only make things worse, and
+  // did: `respondWith` rejects the request outright when its promise resolves to
+  // `undefined`, which is exactly what `caches.match` returns on a miss. One beacon
+  // stopped by a content blocker therefore became a pair of console errors on every load
+  // ("resulted in a network error response: the promise was rejected", then "Failed to
+  // convert value to 'Response'"). Declining to intercept leaves the browser to fail it
+  // natively and silently, precisely as it would with no worker installed.
+  //
+  // Mini-app packages are the one deliberately cross-origin class this worker must serve,
+  // and they are matched above, before this guard.
+  if (!isSameOrigin(request.url)) return
+
   if (request.mode === 'navigate') {
     event.respondWith(
-      fetch(request).catch(() =>
-        caches.match(request).then((cached) => cached || caches.match('/index.html'))
+      fetch(request).catch(async () =>
+        (await caches.match(request)) || (await caches.match('/index.html')) || Response.error()
       )
     )
     return
   }
 
-  // Non-navigation GETs: try network, fall back to any cached shell asset if offline.
-  event.respondWith(fetch(request).catch(() => caches.match(request)))
+  // Non-navigation same-origin GETs: try network, fall back to any cached shell asset if
+  // offline. `Response.error()` is the floor — a cache miss must surface as the network
+  // failure it actually is, never as `undefined`, which `respondWith` cannot convert.
+  event.respondWith(
+    fetch(request).catch(async () => (await caches.match(request)) || Response.error())
+  )
 })

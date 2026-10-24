@@ -3,7 +3,7 @@
 The public interfaces off-chain integrators (frontend, indexers, bots) build
 against. Source of truth: `contracts/interfaces/` and
 `contracts/oracles/IOracleAdapter.sol`. Deployed addresses live in
-[`deployments/`](https://github.com/chippr-robotics/prediction-dao-research/tree/main/deployments)
+[`deployments/`](https://github.com/chippr-robotics/fairwins-platform/tree/main/deployments)
 and are tabulated in the [Smart Contracts guide](../developer-guide/smart-contracts.md#deployed-addresses).
 
 > **Upgradeability.** `WagerRegistry` (spec 025) and `MembershipManager`

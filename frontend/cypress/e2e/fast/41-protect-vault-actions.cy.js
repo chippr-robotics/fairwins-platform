@@ -3,9 +3,10 @@
 // Fast-tier E2E for the Protect vault ActionSheet (release 1.14.0, specs 043/049/068).
 //
 // Runs WITHOUT a chain. Everything asserted here is decided in the client before any signature:
-// which of the four vault actions the sheet offers, why it closes the others, and the creation
-// defaults that changed — a majority threshold, a starter policy preselected, and the refusal of
-// the one configuration this flow will not produce (a single owner, a single approval, no policy).
+// which of the four vault actions the sheet offers, why it closes the others, and the guided
+// creation flow's own contract (spec 105) — presets that resolve the arrangement, the rules tile
+// grid with its live summary, and the refusal of the one configuration the flow will not produce
+// (a single owner, a single approval, no rules).
 //
 // Deliberately no-chain per the tier admission rule: nothing below submits a transaction or costs
 // a member anything. The deploy itself, the guard that ends up in the vault's storage slot, and the
@@ -13,9 +14,9 @@
 //
 // Sub-issue of #1228. Flows:
 //   VA-01 custody.vault-action-sheet   — one door, four actions
-//   VA-02 custody.create-vault         — starter policy is the default, and says what it enforces
-//   VA-03 custody.create-vault         — threshold follows the owner list until the member sets one
-//   VA-04 custody.create-vault         — 1-of-1 with no policy is refused, honestly
+//   VA-02 custody.create-vault         — the rules grid + live summary (spec 105 sheet 2)
+//   VA-03 custody.create-vault         — presets resolve the arrangement (spec 105 sheet 1)
+//   VA-04 custody.create-vault         — 1-of-1 with no rules is refused, honestly
 //   VA-05 custody.vault-action-sheet   — closed actions are shown with their reason, never hidden
 //
 // Checklist: VA-01..VA-06
@@ -43,14 +44,17 @@ const openSheet = () => cy.get('[data-testid="custody-open-vault-actions"]').cli
 function openCreate() {
   openSheet()
   cy.get('[data-testid="vault-action-create"]').click()
-  // The sheet's panel scrolls (max-height 85vh); an element below its fold is reachable by the
-  // member but "not visible" to Cypress until scrolled — so bring it into view first.
-  cy.get('form.custody-create').scrollIntoView().should('be.visible')
+  // Spec 105 — creation is the guided four-sheet flow; the first sheet is the type picker.
+  cy.get('[data-testid="create-step-type"]').scrollIntoView().should('be.visible')
 }
 
 function addOwner(address) {
-  cy.get('form.custody-create').contains('button', 'Add owner').click()
-  cy.get('form.custody-create input[id^="owner-"]').last().clear().type(address)
+  cy.get('[data-testid="create-step-type"]').contains('button', 'Add owner').click()
+  cy.get('[data-testid="create-step-type"] input[id^="create-owner-"]').last().clear().type(address)
+}
+
+function setOwner(i, address) {
+  cy.get(`#create-owner-${i}`).clear().type(address)
 }
 
 describe('Protect — vault ActionSheet (release 1.14.0)', () => {
@@ -78,70 +82,78 @@ describe('Protect — vault ActionSheet (release 1.14.0)', () => {
   // ---------------------------------------------------------------------------
   // VA-02 — the starter policy is the default, and it states what it will enforce
   // ---------------------------------------------------------------------------
-  it('[VA-02] preselects a starter policy and shows the rules it will deploy', () => {
+  it('[VA-02] the rules grid opens pre-filled and its summary states the arrangement (spec 105)', () => {
     openProtect()
     openCreate()
-    cy.get('#vault-policy-starter').should('be.checked')
-    cy.get('#vault-policy-none').should('not.be.checked')
-    // The summary is rendered from the ENCODED rules, so it cannot claim something the deployed
-    // vault will not enforce.
-    cy.get('form.custody-create')
-      .contains(/these rules will be active from the first transaction/i)
-      .scrollIntoView()
-      .should('be.visible')
-    cy.get('form.custody-create').contains(/must pass between fund movements/i).should('exist')
-    cy.get('form.custody-create').contains('button', 'Create vault').should('not.be.disabled')
+    setOwner(0, OWNER_B)
+    setOwner(1, OWNER_C)
+    cy.contains('button', 'Next: set rules').click()
+    cy.get('[data-testid="create-step-rules"]').should('be.visible')
+    // The tiles state their CURRENT values; the summary is rebuilt from the same config that will
+    // be realized on every network, so it cannot claim something the rules will not enforce.
+    cy.get('[data-testid="rule-tile-cap"]').should('contain.text', '$500')
+    cy.get('[data-testid="rule-tile-wait"]').should('contain.text', '1 hour')
+    cy.get('[data-testid="rules-summary"]').should('contain.text', 'Up to 500 of everyday money')
+    cy.get('[data-testid="rules-summary"]').should('contain.text', 'no back-to-back moves')
+    // Editing a tile updates the summary before anything is signed.
+    cy.get('[data-testid="rule-tile-cap"]').click()
+    cy.get('input[aria-label="Daily cap amount"]').clear().type('250')
+    cy.get('[data-testid="rules-summary"]').should('contain.text', 'Up to 250 of everyday money')
   })
 
   // ---------------------------------------------------------------------------
   // VA-03 — the threshold suggestion follows the owner list, then stops
   // ---------------------------------------------------------------------------
-  it('[VA-03] suggests a majority threshold that follows the owner list until the member sets one', () => {
+  it('[VA-03] presets resolve the arrangement — only Complex ever shows a threshold control (spec 105)', () => {
     openProtect()
     openCreate()
-    cy.get('#vault-threshold').should('have.value', '1') // one owner
+    // Joint: exactly two owners, one signature, no threshold control anywhere.
+    cy.get('[data-testid="create-step-type"]').contains('[role="radio"]', 'Joint account')
+      .should('have.attr', 'aria-checked', 'true')
+    cy.get('input[id^="create-owner-"]').should('have.length', 2)
+    cy.get('input[type="number"]').should('not.exist')
 
-    addOwner(OWNER_B)
-    cy.get('#vault-threshold').should('have.value', '1') // ceil(2/2)
-
-    addOwner(OWNER_C)
-    cy.get('#vault-threshold').should('have.value', '2') // ceil(3/2)
-    cy.get('form.custody-create').contains(/suggested: 2 of 3 owners/i).scrollIntoView().should('be.visible')
-
-    // Once the member states a number it is theirs — adding a fourth owner must not move it.
-    cy.get('#vault-threshold').type('{selectall}3').should('have.value', '3')
+    // Controlled: everyone signs — n of n follows the owner list.
+    cy.get('[data-testid="create-step-type"]').contains('[role="radio"]', 'Controlled').click()
+    setOwner(0, OWNER_B)
+    setOwner(1, OWNER_C)
+    cy.contains(/all 2 owners must sign every move/i).should('exist')
     addOwner(OWNER_D)
-    cy.get('#vault-threshold').should('have.value', '3')
-    cy.get('form.custody-create').contains(/suggested:/i).should('not.exist')
+    cy.contains(/all 3 owners must sign every move/i).should('exist')
+
+    // Complex: the member picks m of n, defaulted to a majority, and their number then sticks.
+    cy.get('[data-testid="create-step-type"]').contains('[role="radio"]', 'Complex').click()
+    cy.get('input[type="number"]').should('have.value', '2') // ceil(3/2)
+    cy.get('input[type="number"]').type('{selectall}3').should('have.value', '3')
+    addOwner('0x00000000000000000000000000000000000000AA')
+    cy.get('input[type="number"]').should('have.value', '3')
   })
 
   // ---------------------------------------------------------------------------
   // VA-04 — the 1-of-1-with-no-policy refusal, and both ways out of it
   // ---------------------------------------------------------------------------
-  it('[VA-04] refuses a single-owner vault with no policy, and says what to do instead', () => {
+  it('[VA-04] refuses a single-owner single-signature vault with no rules, and says what to do instead', () => {
     openProtect()
     openCreate()
+    // A one-owner Complex vault with the rules switched off is the one configuration the flow
+    // will not produce (spec 105 FR-003).
+    cy.get('[data-testid="create-step-type"]').contains('[role="radio"]', 'Complex').click()
+    cy.contains('button', 'Next: set rules').click()
+    cy.get('[data-testid="rule-tile-cap"]').click()
+    cy.get('input[aria-label="Daily cap amount"]').clear()
+    cy.get('[data-testid="rule-tile-wait"]').click()
+    cy.contains('[role="radio"]', 'No wait').click()
+    cy.get('[data-testid="rule-tile-allowed"]').click()
+    cy.contains('[role="radio"]', /Everything — one set of rules/).click()
+    cy.contains('button', 'Next: pick networks').click()
+    cy.get('[role="alert"]').should('contain.text', 'wallet wearing a vault badge')
+    cy.get('[data-testid="create-step-networks"]').should('not.exist')
 
-    cy.get('#vault-policy-none').click().should('be.checked')
-    cy.get('form.custody-create')
-      .contains(/not safer than an ordinary account/i)
-      .scrollIntoView()
-      .should('be.visible')
-    cy.get('form.custody-create').contains(/add a second owner, or keep a policy/i).should('exist')
-    cy.get('form.custody-create').contains('button', 'Create vault').should('be.disabled')
-    cy.get('form.custody-create').contains('button', 'Preview address').should('be.disabled')
-
-    // Way out #1 — a second owner, so one stolen key is not enough.
-    addOwner(OWNER_B)
-    cy.get('form.custody-create').contains(/not safer than an ordinary account/i).should('not.exist')
-    cy.get('form.custody-create').contains('button', 'Create vault').should('not.be.disabled')
-
-    // Way out #2 — keep a policy, so the chain limits what one key can do.
-    cy.get('form.custody-create [aria-label="Remove owner 2"]').click()
-    cy.get('form.custody-create').contains('button', 'Create vault').should('be.disabled')
-    cy.get('#vault-policy-starter').click().should('be.checked')
-    cy.get('form.custody-create').contains(/not safer than an ordinary account/i).should('not.exist')
-    cy.get('form.custody-create').contains('button', 'Create vault').should('not.be.disabled')
+    // Way out — keep at least one rule, and the same tap proceeds.
+    cy.get('[data-testid="rule-tile-cap"]').click()
+    cy.get('input[aria-label="Daily cap amount"]').type('500')
+    cy.contains('button', 'Next: pick networks').click()
+    cy.get('[data-testid="create-step-networks"]').should('be.visible')
   })
 
   // ---------------------------------------------------------------------------
@@ -168,7 +180,7 @@ describe('Protect — vault ActionSheet (release 1.14.0)', () => {
     openCreate()
     cy.get('[data-testid="vault-action-back"]').click()
     cy.get('[data-testid="vault-action-create"]').should('be.visible')
-    cy.get('form.custody-create').should('not.exist')
+    cy.get('[data-testid="create-step-type"]').should('not.exist')
 
     // The shell's own Escape/backdrop handling has unit coverage (ActionSheet); what matters here
     // is that closing this sheet forgets where the member was.
@@ -177,7 +189,7 @@ describe('Protect — vault ActionSheet (release 1.14.0)', () => {
     // Reopening lands on the chooser, never on a form the member walked away from.
     openSheet()
     cy.get('[data-testid="vault-action-create"]').should('be.visible')
-    cy.get('form.custody-create').should('not.exist')
+    cy.get('[data-testid="create-step-type"]').should('not.exist')
   })
 
   // ---------------------------------------------------------------------------

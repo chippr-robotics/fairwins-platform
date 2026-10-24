@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import Button from '../ui/Button'
 import SensitiveValue from '../common/SensitiveValue'
 import { useWallet } from '../../hooks/useWalletManagement'
@@ -68,7 +68,7 @@ export default function PoolResolutionActions({
         return {
           address: p.address,
           label: p.nickname.label,
-          amount: prior != null ? ethers.formatUnits(BigInt(prior), decimals) : '',
+          amount: prior != null ? formatUnits(BigInt(prior), decimals) : '',
         }
       })
     })
@@ -77,7 +77,7 @@ export default function PoolResolutionActions({
   const setRow = (i, k) => (e) => setRows((rs) => rs.map((r, j) => (j === i ? { ...r, [k]: e.target.value } : r)))
 
   const filled = rows.filter((r) => r.amount && Number(r.amount) > 0)
-  const entries = filled.map((r) => ({ winner: r.address, amount: ethers.parseUnits(String(r.amount || '0'), decimals) }))
+  const entries = filled.map((r) => ({ winner: r.address, amount: parseUnits(String(r.amount || '0'), decimals) }))
   const anyFilled = filled.length > 0
   const sum = anyFilled ? payoutMatrixSum(entries) : 0n
   const sumOk = anyFilled && sum === escrow
@@ -225,7 +225,7 @@ export default function PoolResolutionActions({
           <h2>{isRevision ? 'Update the proposed payout' : 'Propose the payout'}</h2>
           <p>
             One row per member, in your rank order. Enter each member&apos;s amount; the total must equal the
-            escrow (<SensitiveValue>{`${ethers.formatUnits(escrow, decimals)} ${summary.tokenSymbol}`}</SensitiveValue>). Leave a member blank to
+            escrow (<SensitiveValue>{`${formatUnits(escrow, decimals)} ${summary.tokenSymbol}`}</SensitiveValue>). Leave a member blank to
             give them no payout — their wallet address is their claim.
           </p>
           {rows.length === 0 && <p className="pool-hint">Waiting for members to join…</p>}
@@ -243,7 +243,7 @@ export default function PoolResolutionActions({
           <div className="pool-propose-controls">
             {anyFilled && !sumOk && (
               <span className="form-error" role="alert">
-                Total <SensitiveValue>{ethers.formatUnits(sum, decimals)}</SensitiveValue> ≠ escrow <SensitiveValue>{ethers.formatUnits(escrow, decimals)}</SensitiveValue>
+                Total <SensitiveValue>{formatUnits(sum, decimals)}</SensitiveValue> ≠ escrow <SensitiveValue>{formatUnits(escrow, decimals)}</SensitiveValue>
               </span>
             )}
             <Button data-testid="propose-outcome" onClick={propose} disabled={!sumOk || busy}>
@@ -258,7 +258,7 @@ export default function PoolResolutionActions({
         <div className="pool-claim" data-testid="claim-form">
           <h2>Claim your winnings</h2>
           {myAmount != null && myAmount > 0n && (
-            <p data-testid="claim-amount">Your share: <SensitiveValue as="strong">{`${ethers.formatUnits(myAmount, decimals)} ${summary.tokenSymbol}`}</SensitiveValue></p>
+            <p data-testid="claim-amount">Your share: <SensitiveValue as="strong">{`${formatUnits(myAmount, decimals)} ${summary.tokenSymbol}`}</SensitiveValue></p>
           )}
           <Button data-testid="claim" onClick={claim} disabled={busy || status === 'claiming'}>
             {busy || status === 'claiming' ? 'Claiming…' : 'Claim to my wallet'}

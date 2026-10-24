@@ -8,6 +8,7 @@ import AssetDetailSheet from './AssetDetailSheet'
 import { formatAssetAmount } from '../../lib/portfolio/aggregate'
 import SensitiveValue from '../common/SensitiveValue'
 import { useCollectiblesValuation } from '../../hooks/useCollectibles'
+import { useIssuedAccessDisclosure } from '../../hooks/useIssuedAccessDisclosure'
 import { computeCollectiblesValuation } from '../../lib/collectibles/valuation'
 import './Portfolio.css'
 
@@ -261,6 +262,12 @@ function SelfLoadingPortfolioPanel() {
 }
 
 function PortfolioBody({ portfolio }) {
+  // Issued-access disclosure (spec 107 FR-028, #1471): the ONE state worth a sentence is
+  // `degraded` — keyed reads were tried for a chain and FAILED, so it is reading on public
+  // capacity right now. Declined chains (ETC/Mordor — no keyed endpoint exists, by design) and
+  // everything else render as silence: public capacity is their normal, and apologising for it
+  // would be the false-degradation twin of the false zero.
+  const issuedAccess = useIssuedAccessDisclosure(portfolio.chainIds)
   // Decided HERE (not inside the row) so the Digital Collectibles section keeps
   // its honest "No assets in this category." message when the row is absent.
   const collectiblesValuation = useCollectiblesValuation()
@@ -320,6 +327,11 @@ function PortfolioBody({ portfolio }) {
 
   return (
     <div className="portfolio-root">
+      {issuedAccess.names.length > 0 && (
+        <p className="portfolio-state portfolio-state-degraded" role="status" data-testid="issued-access-degraded">
+          {`Faster keyed reads are temporarily unavailable for ${issuedAccess.names.join(', ')} — using public networks, which may be slower. Balances shown are still live reads.`}
+        </p>
+      )}
       {portfolio.categories.map((group) => (
         <CategorySection
           key={group.category.id}

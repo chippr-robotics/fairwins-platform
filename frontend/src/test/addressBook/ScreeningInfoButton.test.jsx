@@ -12,10 +12,11 @@ describe('ScreeningInfoButton (iteration 2)', () => {
     await user.click(screen.getByRole('button', { name: 'How address screening works' }))
     const dialog = screen.getByRole('dialog')
     expect(dialog).toBeInTheDocument()
+    expect(dialog).toHaveTextContent(/Every list, every network/i)
+    expect(dialog).toHaveTextContent(/Green means all of them answered clear/i)
     expect(dialog).toHaveTextContent(/Advisory only/i)
     expect(dialog).toHaveTextContent(/on-chain guard/i)
     expect(dialog).toHaveTextContent(/Fails closed/i)
-    expect(dialog).toHaveTextContent(/Network-scoped/i)
   })
 
   it('links to the address-book guide', async () => {

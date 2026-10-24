@@ -17,6 +17,26 @@ log_format fairwins_edge '$remote_addr cf_ip=$http_cf_connecting_ip '
                          'cf_country=$http_cf_ipcountry "$request" $status '
                          '$body_bytes_sent rt=$request_time "$http_user_agent"';
 
+# --- Rate-limit key: the real client, not Cloudflare ---
+# Every request arrives from a Cloudflare egress IP, so $remote_addr is the SAME small set of
+# addresses for every visitor on Earth — limiting on it would throttle the whole world together.
+# CF-Connecting-IP carries the actual client. Cloudflare OVERWRITES that header on every proxied
+# request, so a client cannot forge it through the edge; and a request that did not come through
+# the edge is already refused by the origin lock above. The fallback to $remote_addr keeps the
+# zone well-defined in local/dev where no edge is in front.
+map $http_cf_connecting_ip $limit_client_ip {
+    default  $http_cf_connecting_ip;
+    ""       $remote_addr;
+}
+
+# --- Rate limit for the authenticated Pinata proxy ---
+# This route spends a platform credential, so it is metered. 1r/s sustained with a burst of 5 is
+# far above real use (a member pins on wager creation and on backup — single-digit pins per
+# session) and far below what a scripted caller would want. 1 MB of shared memory holds ~16k
+# distinct clients; exceeding the zone fails closed with 503, which is the correct direction for
+# a credential-spending route.
+limit_req_zone $limit_client_ip zone=pinata_pin:1m rate=1r/s;
+
 server {
     listen 8080;
     server_name _;
@@ -33,41 +53,66 @@ server {
         return 200 "ok\n";
     }
 
-    # Pinata API proxy - bypasses CORS restrictions
-    # JWT is injected at container startup via envsubst
-    location /api/pinata/ {
-        # Origin lock: only Cloudflare-proxied requests may use the authenticated proxy.
+    # --- Pinata pinning proxy (authenticated; the JWT is injected at container startup) ---
+    #
+    # This proxy holds a PLATFORM CREDENTIAL and injects it server-side, so it is a route that
+    # spends FairWins' Pinata account on behalf of whoever calls it. It is therefore scoped to
+    # exactly one upstream operation, answers only same-origin callers, and is rate limited.
+    #
+    # It previously proxied `/api/pinata/` -> `.../pinning/` with a TRAILING SLASH, which is a
+    # path-wildcard passthrough into Pinata's entire `pinning/` namespace — `unpin/{cid}` and
+    # `pinList` included — and then set `Access-Control-Allow-Origin: *`, which invited any
+    # website's JavaScript to drive it. Its only control was the origin lock, and that header
+    # proves a request transited Cloudflare, not who sent it: Cloudflare injects it zone-wide,
+    # for an attacker's request exactly as for ours.
+    #
+    # Four changes, each closing one of those:
+    #
+    #  1. EXACT LOCATION, EXACT UPSTREAM. `location =` plus a full upstream path. The client uses
+    #     precisely one endpoint (frontend/src/utils/ipfsService.js:316, pinJSONToIPFS) and now
+    #     that is the only one reachable. Everything else under /api/pinata/ 404s at the SPA
+    #     route below. Widening this is a deliberate act, not a side effect of a trailing slash.
+    #
+    #  2. NO CORS HEADERS AT ALL. The client fetches the RELATIVE path `/api/pinata` (see
+    #     frontend/src/constants/ipfs.js:18), so this is a SAME-ORIGIN request and needs no CORS
+    #     headers whatsoever — `ACAO: *` was never required for the app to work, only for other
+    #     origins to use it. Dropping every `add_header` here also restores inheritance of the
+    #     server-level security headers, which the old block silently suppressed (nginx replaces
+    #     inherited add_header directives when a location declares its own).
+    #
+    #  3. POST ONLY. pinJSONToIPFS is a POST. `limit_except` refuses the rest.
+    #
+    #  4. RATE LIMITED AND BODY CAPPED, so a caller who does get through cannot drain the
+    #     account or push arbitrarily large pins. See the zone definition above.
+    #
+    # Local dev is unaffected: USE_PROXY is `PROD && !VITE_PINATA_JWT`
+    # (frontend/src/constants/ipfs.js:22), so a dev build talks to Pinata directly and never
+    # reaches this block.
+    location = /api/pinata/pinJSONToIPFS {
+        # Origin lock stays as a first filter. It is necessary and NOT sufficient — it proves the
+        # request came through our edge, and nothing about who sent it.
         if ($origin_denied) { return 403; }
 
-        # Proxy to Pinata API
-        proxy_pass https://api.pinata.cloud/pinning/;
+        limit_except POST { deny all; }
+
+        limit_req zone=pinata_pin burst=5 nodelay;
+        limit_req_status 429;
+        client_max_body_size 256k;   # pinned JSON is small; anything larger is not our client
+
+        proxy_pass https://api.pinata.cloud/pinning/pinJSONToIPFS;
         proxy_ssl_server_name on;
 
-        # Set required headers
         proxy_set_header Host api.pinata.cloud;
         proxy_set_header Authorization "Bearer ${VITE_PINATA_JWT}";
         proxy_set_header Content-Type "application/json";
-
-        # Remove headers that might cause issues
+        # Do not forward the caller's Origin/Referer upstream, and do not let Pinata's own CORS
+        # headers reach the browser — this response is same-origin and needs none.
         proxy_set_header Origin "";
+        proxy_set_header Referer "";
         proxy_hide_header Access-Control-Allow-Origin;
+        proxy_hide_header Access-Control-Allow-Methods;
+        proxy_hide_header Access-Control-Allow-Headers;
 
-        # Add CORS headers for browser
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Content-Type, Authorization" always;
-
-        # Handle preflight requests
-        if ($request_method = 'OPTIONS') {
-            add_header Access-Control-Allow-Origin "*";
-            add_header Access-Control-Allow-Methods "GET, POST, OPTIONS";
-            add_header Access-Control-Allow-Headers "Content-Type, Authorization";
-            add_header Content-Length 0;
-            add_header Content-Type text/plain;
-            return 204;
-        }
-
-        # Timeouts for upload operations
         proxy_connect_timeout 60s;
         proxy_send_timeout 60s;
         proxy_read_timeout 60s;
@@ -143,6 +188,12 @@ server {
     # potentially trustworthy. A LAN address like http://192.168.1.5:8545 is still blocked by the
     # browser as mixed content — the endpoint form says so instead of letting it fail silently.
     #
+    # `https://challenges.cloudflare.com` (spec 106, FR-018) is the Turnstile widget — the ONE
+    # named script host granted for proof-of-human, in script-src (the api.js loader) and
+    # frame-src (the challenge iframe). A single named host is the opposite of the scheme-wide
+    # `https:` grant the rule above forbids: it names exactly one origin, operated by the edge
+    # provider already in front of this app. Pinned as a counted exception by
+    # src/test/nginxCspScriptSrc.test.js — widening beyond the pinned list fails the build.
     # `blob:` in script-src (spec 073) is what lets a verified mini-app package run. Packages are
     # fetched as BYTES over connect-src, checked against the on-chain manifestHash and per-file
     # sha256 digests, and only then wrapped in a Blob and dynamically imported
@@ -152,7 +203,7 @@ server {
     # `https:` in script-src, i.e. any origin may serve executable code. That is the line spec 069
     # drew when it confined the scheme-wide grant to connect-src, and it stays drawn.
     # Gated by src/test/nginxCspScriptSrc.test.js.
-    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://*.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.seadn.io https://openseauserdata.com https://explorer-api.walletconnect.com https://explorer-api.walletconnect.org https://ipfs.fairwins.app https://gateway.pinata.cloud https://ipfs.io https://cloudflare-ipfs.com https://*.tile.openstreetmap.org; font-src 'self' data: https://fonts.gstatic.com https://fonts.googleapis.com https://fonts.reown.com; connect-src 'self' https://relay.fairwins.app https://bundler.fairwins.app https://fairwins-alto-bundler-266380754692.us-central1.run.app https://api.studio.thegraph.com https://rpc-amoy.polygon.technology https://polygon-amoy.infura.io https://polygon-bor-rpc.publicnode.com https://rpc.mordor.etccooperative.org https://etc.rivet.link https://ethereum-rpc.publicnode.com https://ethereum-sepolia-rpc.publicnode.com https://ethereum-hoodi-rpc.publicnode.com https://arbitrum-one-rpc.publicnode.com https://base-rpc.publicnode.com https://optimism-rpc.publicnode.com https: http://localhost:* http://127.0.0.1:* https://ipfs.fairwins.app https://gateway.pinata.cloud https://ipfs.io https://cloudflare-ipfs.com https://api.coingecko.com https://gamma-api.polymarket.com https://clob.polymarket.com https://polymarket.com https://api.morpho.org https://api.merkl.xyz wss://relay.walletconnect.com wss://relay.walletconnect.org https://relay.walletconnect.com https://relay.walletconnect.org https://rpc.walletconnect.com https://rpc.walletconnect.org https://explorer-api.walletconnect.com https://explorer-api.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org https://pulse.walletconnect.com https://pulse.walletconnect.org https://api.web3modal.com https://api.web3modal.org https://keys.walletconnect.com https://keys.walletconnect.org https://notify.walletconnect.com https://notify.walletconnect.org https://echo.walletconnect.com https://echo.walletconnect.org https://push.walletconnect.com https://push.walletconnect.org https://*.cloudflareinsights.com; frame-src https://verify.walletconnect.com https://verify.walletconnect.org https://connect.trezor.io;" always;
+    add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' blob: https://challenges.cloudflare.com https://*.cloudflareinsights.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: blob: https://*.seadn.io https://openseauserdata.com https://explorer-api.walletconnect.com https://explorer-api.walletconnect.org https://ipfs.fairwins.app https://gateway.pinata.cloud https://ipfs.io https://cloudflare-ipfs.com https://*.tile.openstreetmap.org; font-src 'self' data: https://fonts.gstatic.com https://fonts.googleapis.com https://fonts.reown.com; connect-src 'self' https://relay.fairwins.app https://bundler.fairwins.app https://fairwins-alto-bundler-266380754692.us-central1.run.app https://api.studio.thegraph.com https://rpc-amoy.polygon.technology https://polygon-amoy.infura.io https://polygon-bor-rpc.publicnode.com https://rpc.mordor.etccooperative.org https://etc.etcdesktop.com https://ethereum-rpc.publicnode.com https://ethereum-sepolia-rpc.publicnode.com https://ethereum-hoodi-rpc.publicnode.com https://arbitrum-one-rpc.publicnode.com https://base-rpc.publicnode.com https://optimism-rpc.publicnode.com https: http://localhost:* http://127.0.0.1:* https://ipfs.fairwins.app https://gateway.pinata.cloud https://ipfs.io https://cloudflare-ipfs.com https://api.coingecko.com https://gamma-api.polymarket.com https://clob.polymarket.com https://polymarket.com https://api.morpho.org https://api.merkl.xyz wss://relay.walletconnect.com wss://relay.walletconnect.org https://relay.walletconnect.com https://relay.walletconnect.org https://rpc.walletconnect.com https://rpc.walletconnect.org https://explorer-api.walletconnect.com https://explorer-api.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org https://pulse.walletconnect.com https://pulse.walletconnect.org https://api.web3modal.com https://api.web3modal.org https://keys.walletconnect.com https://keys.walletconnect.org https://notify.walletconnect.com https://notify.walletconnect.org https://echo.walletconnect.com https://echo.walletconnect.org https://push.walletconnect.com https://push.walletconnect.org https://*.cloudflareinsights.com; frame-src https://challenges.cloudflare.com https://verify.walletconnect.com https://verify.walletconnect.org https://connect.trezor.io;" always;
     add_header Referrer-Policy "strict-origin-when-cross-origin" always;
     # HSTS: force HTTPS on this host. Once every *.fairwins.app subdomain is confirmed
     # HTTPS-only, strengthen to "max-age=31536000; includeSubDomains; preload" and submit

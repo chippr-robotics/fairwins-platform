@@ -1,5 +1,5 @@
 import { useState, useCallback, useMemo, useEffect, useRef } from 'react'
-import { isAddress } from 'ethers'
+import { isAddress } from 'viem'
 import { useSwitchChain } from 'wagmi'
 import { useOpenChallengeCreate, OPEN_RESOLUTION_TYPES } from '../../hooks/useOpenChallengeCreate'
 import { useWeb3 } from '../../hooks/useWeb3'

@@ -67,6 +67,9 @@ export const NAV_ITEM_TERMS = {
   security: ['recovery', 'restore', 'passkey', 'keys', 'access'],
   reports: ['tax', 'taxes', 'csv', 'export', 'capital gains', 'cost basis', 'statement', 'accounting'],
   apps: ['mini-apps', 'miniapps', 'catalog', 'store', 'token mint', 'clearpath', 'ipfs'],
+  // Spec 104. The tab is the AGENT controls — a member typing "guttertoken" or "api key" is
+  // asking where the assistant's rail and their own tools' keys are configured.
+  assistant: ['ai', 'chat', 'bot', 'agent', 'guttertoken', 'byok', 'credits', 'own key', 'provider', 'api key', 'mcp'],
   settings: ['preferences', 'options', 'configuration'],
   network: [
     'rpc',
@@ -229,7 +232,7 @@ export const NAV_DESTINATIONS = [
     summary: 'Cold storage: add and use Ledger or Trezor accounts.',
     path: '/wallet?tab=custody',
     hash: '#custody-offchain',
-    keywords: ['hardware wallet', 'ledger', 'trezor', 'cold storage', 'offline', 'off chain', 'device', 'usb wallet'],
+    keywords: ['hardware wallet', 'ledger', 'trezor', 'sigil', 'floppy', 'mpc', 'cold signer', 'cold storage', 'offline', 'off chain', 'device', 'usb wallet'],
   },
 
   // ─── Tools ▸ Recovery (specs 032 / 045 / 062) — AccordionSection cards ────────────────────
@@ -373,28 +376,40 @@ export const NAV_DESTINATIONS = [
     hash: '#notification-profiles',
     keywords: ['notifications', 'alerts', 'push', 'profiles', 'quiet hours', 'reminders'],
   },
-  // Spec 095. The `id` of a Settings destination IS the AccordionSection's card id — that is what
-  // `accordionSectionForHash` returns and what `data-attention` matches — so these are named after
-  // the cards, not after the tab that holds them.
+  // Spec 095 / 104. These cards live on the ASSISTANT tab (Tools) since spec 104 — the `id` of a
+  // destination IS the AccordionSection's card id, which is what `accordionSectionForHash` returns
+  // and what `data-attention` matches, so they are named after the cards, not after the tab. The
+  // ids did not change when the cards moved: WalletPage redirects `?tab=settings#assistant-prefs`
+  // and `#api-access` here by asking THIS index whether the assistant tab owns the hash.
   {
     id: 'assistant-prefs',
-    navId: 'settings',
+    navId: 'assistant',
     section: true,
     label: 'Assistant',
-    summary: 'The AI assistant, what it sends, and what this device remembers.',
-    path: '/wallet?tab=settings',
+    summary: 'The AI assistant, who answers it, what it sends, and what this device remembers.',
+    path: '/wallet?tab=assistant',
     hash: '#assistant-prefs',
-    keywords: ['ai', 'assistant', 'chat', 'agent', 'memory', 'privacy', 'bot', 'help'],
+    keywords: ['ai', 'assistant', 'chat', 'agent', 'memory', 'privacy', 'bot', 'help', 'guttertoken', 'byok', 'credits', 'own key', 'provider', 'answered by'],
+  },
+  {
+    id: 'guttertoken-key',
+    navId: 'assistant',
+    section: true,
+    label: 'GutterToken key',
+    summary: 'Your own GutterToken key, so the assistant runs on your prepaid credits.',
+    path: '/wallet?tab=assistant',
+    hash: '#guttertoken-key',
+    keywords: ['guttertoken', 'gutter token', 'byok', 'bring your own key', 'own key', 'credits', 'prepaid', 'api key', 'model', 'provider', 'top up'],
   },
   {
     id: 'api-access',
-    navId: 'settings',
+    navId: 'assistant',
     section: true,
     label: 'API access',
     summary: 'Private API keys for your own tools and AI agents.',
-    path: '/wallet?tab=settings',
+    path: '/wallet?tab=assistant',
     hash: '#api-access',
-    keywords: ['api', 'key', 'api key', 'token', 'mcp', 'agent', 'programmatic', 'developer', 'openapi', 'integration'],
+    keywords: ['api', 'key', 'api key', 'token', 'mcp', 'agent', 'programmatic', 'developer', 'openapi', 'integration', 'byok', 'provider'],
   },
   // Spec 041 amendment. Members look for this by what it does ("lock", "screen lock", "idle
   // timeout"), not by its card name — and "auto lock" is what every other app calls it.

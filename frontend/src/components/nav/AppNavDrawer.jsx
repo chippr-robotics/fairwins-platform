@@ -376,7 +376,15 @@ export default function AppNavDrawer() {
         className={`app-nav-drawer ${isOpen ? 'open' : ''} ${collapsed ? 'collapsed' : ''} ${
           density === 'compact' ? 'app-nav-drawer--compact' : ''
         }`}
-        aria-hidden={isMobile && !isOpen}
+        // `inert`, NOT `aria-hidden`. The closed mobile drawer is translated off-canvas but
+        // its buttons stay in the DOM and in the tab order, so `aria-hidden` claimed the
+        // subtree was hidden from assistive technology while a real, focusable control sat
+        // inside it — and the browser refuses that combination outright ("Blocked aria-hidden
+        // on an element because its descendant retained focus"), leaving the region exposed
+        // after all. `inert` states the same intent and actually enforces it: the subtree is
+        // removed from the accessibility tree AND from focus, so a keyboard user cannot tab
+        // into a panel they cannot see. React 19 renders it as a real boolean attribute.
+        inert={isMobile && !isOpen}
         aria-label="Site navigation"
       >
         <div className="app-nav-drawer-header">

@@ -160,7 +160,7 @@ function buildDetail(kind) {
   resetIds()
   const L = layout()
   const panels = []
-  const label = kind === 'revenue' ? 'Revenue' : 'Cost'
+  const label = kind === 'revenue' ? 'Revenue' : kind === 'usage' ? 'Usage' : 'Cost'
 
   panels.push(
     headerPanel({
@@ -173,6 +173,12 @@ function buildDetail(kind) {
   )
 
   panels.push(partialTotalPanel({ kind, gridPos: L.full(6) }))
+
+  // ABOVE the per-source panels, not below them. A blank panel sends the reader looking for why,
+  // and the answer has to be on the way down rather than past twenty panels they have to scroll
+  // through first — which is how the QuickNode and Grafana Cloud panels both read as "no data"
+  // with nothing on the page saying that one was broken and the other was never wired.
+  panels.push(healthPanel({ kind, gridPos: L.full(8) }))
 
   // Two per row, in catalogue order.
   const entries = SOURCES.filter((s) => s.kind === kind && s.status !== 'retired')
@@ -226,6 +232,7 @@ const artifacts = [
   ['dashboards/finops-overview.json', buildOverview()],
   ['dashboards/finops-revenue.json', buildDetail('revenue')],
   ['dashboards/finops-cost.json', buildDetail('cost')],
+  ['dashboards/finops-usage.json', buildDetail('usage')],
   ['alerts/finops-alerts.json', buildAlertRules(SOURCES)],
 ]
 

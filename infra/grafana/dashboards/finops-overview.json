@@ -65,7 +65,7 @@
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -123,7 +123,7 @@
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -181,7 +181,7 @@
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -308,7 +308,7 @@
       },
       "type": "table",
       "title": "Source health — read / unreadable / not-configured",
-      "description": "configured=1 & up=1 → read. configured=1 & up=0 → UNREADABLE (a real problem). configured=0 → not-configured (a feature that has not been wired up; not an outage).",
+      "description": "configured=1 & up=1 → read. configured=1 & up=0 → UNREADABLE (a real problem). configured=0 → not-configured (a feature that has not been wired up; not an outage). This is the panel that tells you which of those a blank panel above is: they look identical everywhere else, and they are not the same thing to act on.",
       "gridPos": {
         "h": 9,
         "w": 24,

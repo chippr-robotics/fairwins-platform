@@ -1,5 +1,5 @@
 /**
- * AssistantLauncher (spec 095) — the floating button that opens the assistant.
+ * AssistantLauncher (specs 095 + 104) — the floating button that opens the assistant.
  *
  * Mounted once in `App.jsx`'s `AppLayout`, beside `AppNavDrawer`: the only place that renders on
  * every in-app route and on no landing or legal page.
@@ -9,9 +9,12 @@
  *   1. the tenant enables the `assistant` feature,
  *   2. a wallet is connected,
  *   3. this account has opted in (default OFF),
- *   4. that account's membership is READABLE and ACTIVE.
- * Membership is a chain read, so it is gated behind the preference: an opted-out member costs no
- * RPC call at all, which is why the membership hook lives in a child component rather than here.
+ *   4. SOMETHING CAN ANSWER: a saved GutterToken key on the GutterToken preference, OR an active,
+ *      READABLE membership (research § 4.4 — `key ∨ membership`, short-circuiting).
+ * Membership is a chain read, so it is gated behind everything that can be decided from local
+ * state: a member with a key on the GutterToken rail NEVER pays the RPC call, which is why the
+ * membership hook lives in a child component that the key path does not mount at all. The
+ * decision itself belongs to `resolveProvider`; this component only orders the two evaluations.
  *
  * THE THREE MEMBERSHIP STATES COLLAPSE TO "NOTHING" HERE, AND THAT IS DELIBERATE. Pending renders
  * nothing (a button that appears a second late is better than one that appears and then vanishes);
@@ -31,12 +34,15 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import PropTypes from 'prop-types'
 import { useWallet } from '../../hooks/useWalletManagement'
 import { useNavDrawer } from '../../contexts/NavDrawerContext.js'
 import useRoleDetails from '../../hooks/useRoleDetails'
 import { isFeatureEnabled } from '../../config/tenant'
 import NavIcon from '../nav/NavIcon'
 import { isAssistantEnabled, subscribeAssistantPrefs } from '../../lib/assistant/assistantPrefs'
+import { subscribeGutterTokenKey } from '../../lib/assistant/guttertokenKeyStore'
+import { resolveProvider } from '../../lib/assistant/resolveProvider'
 import { clearSession } from '../../lib/assistant/assistantClient'
 import { useBottomNavOffset } from '../../lib/assistant/useBottomNavOffset'
 import AssistantPanel from './AssistantPanel'
@@ -50,10 +56,11 @@ const IDLE_RETURN_MS = 1200
 export default function AssistantLauncher() {
   const { address: account, isConnected } = useWallet()
 
-  // The preference lives outside React state (a wallet-scoped store shared with the Settings card),
-  // so subscribe rather than poll.
-  const [, bumpPrefs] = useState(0)
-  useEffect(() => subscribeAssistantPrefs(() => bumpPrefs((n) => n + 1)), [])
+  // The preference and the key live outside React state (wallet-scoped stores shared with the
+  // Assistant tab), so subscribe rather than poll.
+  const [, bump] = useState(0)
+  useEffect(() => subscribeAssistantPrefs(() => bump((n) => n + 1)), [])
+  useEffect(() => subscribeGutterTokenKey(() => bump((n) => n + 1)), [])
 
   // The session token is held in module memory; an account change must not leave the previous
   // account's credential loaded.
@@ -66,18 +73,37 @@ export default function AssistantLauncher() {
   if (!isConnected || !account) return null
   if (!isAssistantEnabled(account)) return null
 
+  // The cheap half of the disjunction: resolved with membership UNKNOWN. If local state alone
+  // already yields a rail (a saved key on the GutterToken preference), the membership read is
+  // never mounted. Anything else — including "pending" — goes to the half that reads the chain.
+  const local = resolveProvider({ account, membership: null })
+  if (local.provider === 'guttertoken') return <Launcher />
+
   return <MemberLauncher />
 }
 
 /**
- * The half that costs a membership read. Split out so the hook only ever mounts for an account that
- * has already opted in — `useRoleDetails` resolves the ACTING account itself, so this takes no
- * props.
+ * The half that costs a membership read. Split out so the hook only ever mounts for an account
+ * that has opted in AND has no local rail — `useRoleDetails` resolves the ACTING account itself,
+ * so this takes no props.
  */
 function MemberLauncher() {
-  const { getRoleDetails } = useRoleDetails()
+  const { address: account } = useWallet()
+  const { getRoleDetails, refresh } = useRoleDetails()
   const membership = getRoleDetails('WAGER_PARTICIPANT')
 
+  // Pending (null) and unreadable both render nothing. Unreadable is NOT a denial — it is simply not
+  // an answer, and an entry point is the wrong place to say so. `resolveProvider` returns no
+  // provider for either, so both fall through the same gate as "not a member, no key".
+  const { provider } = resolveProvider({ account, membership })
+  if (!provider) return null
+
+  return <Launcher membership={membership} onRetryMembership={refresh} />
+}
+
+/** The button itself plus its panel. `membership` is `undefined` on the key path, and the panel
+ *  reads it for itself when opened — the grant offer needs it; the entry point does not. */
+function Launcher({ membership, onRetryMembership = null }) {
   const { isOpen: drawerOpen } = useNavDrawer()
   const { offset, navPresent } = useBottomNavOffset()
 
@@ -109,10 +135,6 @@ function MemberLauncher() {
 
   const close = useCallback(() => setPanelOpen(false), [])
 
-  // Pending (null) and unreadable both render nothing. Unreadable is NOT a denial — it is simply not
-  // an answer, and an entry point is the wrong place to say so.
-  if (!membership || membership.readable === false || !membership.isActive) return null
-
   const hidden = drawerOpen || panelOpen || scrolledAway
 
   return (
@@ -136,7 +158,18 @@ function MemberLauncher() {
       >
         <NavIcon name="chat" size={22} />
       </button>
-      <AssistantPanel open={panelOpen} onClose={close} surface={typeof window !== 'undefined' ? window.location.pathname : null} />
+      <AssistantPanel
+        open={panelOpen}
+        onClose={close}
+        surface={typeof window !== 'undefined' ? window.location.pathname : null}
+        membership={membership}
+        onRetryMembership={onRetryMembership}
+      />
     </>
   )
+}
+
+Launcher.propTypes = {
+  membership: PropTypes.shape({ isActive: PropTypes.bool, readable: PropTypes.bool }),
+  onRetryMembership: PropTypes.func,
 }

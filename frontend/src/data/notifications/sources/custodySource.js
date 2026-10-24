@@ -17,7 +17,7 @@
  * baseline taken half-way through would emit invented "a transaction was executed" entries as the scan caught
  * up with history the member has already seen.
  */
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
 import { getProvider } from '../../../utils/blockchainService'
 import { getContractAddressForChain, getDeploymentBlockForChain } from '../../../config/contracts'
 import { getSafeContracts } from '../../../config/safeContracts'
@@ -44,7 +44,7 @@ export const custodySource = {
     const hubAddress = getContractAddressForChain('safeProposalHub', chainId)
     const fromBlock = getDeploymentBlockForChain('safeProposalHub', chainId)
     // Until the hub is deployed + its block recorded, there is nothing to read (and we never scan genesis).
-    if (!hubAddress || !ethers.isAddress(hubAddress) || !fromBlock) return EMPTY
+    if (!hubAddress || !isAddress(hubAddress) || !fromBlock) return EMPTY
 
     const refs = loadVaultReferences(account).filter((r) => r.chainId === Number(chainId))
     if (refs.length === 0) return EMPTY
@@ -52,7 +52,7 @@ export const custodySource = {
     // Spec 049 — policy engine coordinates (optional; policy diffing no-ops when absent).
     const guardAddress = getContractAddressForChain('safePolicyGuard', chainId)
     const guardFromBlock = getDeploymentBlockForChain('safePolicyGuard', chainId)
-    const policyEnabled = !!guardAddress && ethers.isAddress(guardAddress) && !!guardFromBlock
+    const policyEnabled = !!guardAddress && isAddress(guardAddress) && !!guardFromBlock
 
     let provider
     try {

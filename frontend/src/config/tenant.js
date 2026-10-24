@@ -119,6 +119,22 @@ export function knownFeatureIds() {
 }
 
 /**
+ * The tenant's assistant settings block (spec 104), or `{}`.
+ *
+ * The block is OPTIONAL and no tenant ships one today, so every read of it has to survive its
+ * absence — which is why this returns an object rather than letting a caller reach through
+ * `settings.assistant.x` and throw on a manifest that never declared it. The only member today is
+ * `guttertokenReferralCode`, a public identity value (never a credential) that the schema
+ * constrains to `^[A-Za-z0-9_-]{1,64}$` because it is interpolated into a URL.
+ *
+ * @returns {{guttertokenReferralCode?: string}}
+ */
+export function tenantAssistantSettings() {
+  const assistant = ACTIVE_TENANT.settings?.assistant
+  return assistant && typeof assistant === 'object' && !Array.isArray(assistant) ? assistant : {}
+}
+
+/**
  * Chain ids the tenant enables for a cohort ('mainnet' | 'testnet'). Callers
  * must still intersect with the build cohort rules (spec 071) — a tenant list
  * never crosses the testnet/mainnet boundary.

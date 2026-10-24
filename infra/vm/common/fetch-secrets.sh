@@ -7,7 +7,7 @@
 #   1. PER-CONTAINER SCOPING. Cloud Run scoped each secret to exactly one container. The VM must not
 #      widen that. The internet-facing container never receives the other container's credential:
 #        gateway VM: gateway.env (the gateway's own credentials)   engine.env (API_KEY,
-#                    WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY — the exported SA key holding
+#                    WEBHOOK_SIGNING_KEY, STORAGE_ENCRYPTION_KEY, GCP_PRIVATE_KEY — the exported SA key holding
 #                    cloudkms.signerVerifier on BOTH hot gas keys; the public-facing gateway
 #                    container MUST NOT see it)   finops.env / alloy.env (vendor READ tokens)
 #        bundler VM: nginx.env (ORIGIN_LOCK_SECRET only)   alto.env (the executor key + alto's
@@ -143,10 +143,71 @@ case "$ROLE" in
     emit "$GW" RPC_URL_PRIMARY_137       QUICKNODE_POLYGON_API       latest optional \
       "chain 137 reads fall back to the public endpoints in RPC_URLS_137"
 
+    # ── Keyed RPC issuance (spec 107, #1469) ─────────────────────────────────────────────────
+    # Both OPTIONAL by the never-stranded rule: either absent => POST /v1/access/rpc answers 503
+    # access_unconfigured and the SPA keeps reading public capacity exactly as it does today.
+    #
+    # RPC_ACCESS_SIGNING_KEY is KEY MATERIAL (an ES256 private key, PEM). It signs the short-lived
+    # read-only JWTs browsers present at the provider; its public twin lives on issuance endpoint
+    # 657013 under kid k1. Never echoed, never in a URL, never logged — the gateway loads it at
+    # boot and fails the deploy loudly if it is present but unusable.
+    emit "$GW" RPC_ACCESS_SIGNING_KEY    fairwins-rpc-access-signing-key latest optional \
+      "keyed RPC issuance answers 503 access_unconfigured; the SPA reads public capacity"
+    # The FR-026 enforcement check (is the endpoint ACTUALLY demanding the credential, with the
+    # read-only whitelist switched ON?) reads the provider's admin API. Delivered from
+    # finops-quicknode-key — ALREADY granted to this node for the exporter, and verified live to
+    # read per-endpoint security state — rather than granting the account-wide QUICKNODE_ADMIN_API
+    # to the public-facing container for nothing. Note this response carries live endpoint tokens
+    # in plaintext; the gateway's verifier destructures the flags it needs and drops the body.
+    emit "$GW" RPC_ACCESS_ADMIN_KEY      finops-quicknode-key        latest optional \
+      "enforcement reads become unverifiable, which REFUSES issuance; SPA falls back to public capacity"
+
     log "engine container:"
     emit "$EN" API_KEY                   relay-engine-api-key        2      required
     emit "$EN" WEBHOOK_SIGNING_KEY       relay-webhook-secret        2      required
     emit "$EN" GCP_PRIVATE_KEY           relay-engine-gcp-private-key latest required
+    # #1652: the key the engine encrypts its signer + notification records with at rest in redis
+    # (OZ Relayer v1.4.0 src/utils/encryption.rs: base64 of exactly 32 bytes).
+    #
+    # OPTIONAL, AND IT IS THE SWITCH. Every boot resets the checkout to origin/main (startup.sh), so
+    # this file reaches the VM at the first reboot after promotion, whether or not an operator has
+    # created the secret version. `required` would turn that into a die() here and the WHOLE stack
+    # down — gateway, paymaster and engine — for a storage-mode upgrade. Instead, redis storage is
+    # enabled only when the key exists: absent => no REPOSITORY_STORAGE_TYPE line, the engine keeps
+    # today's in-memory behaviour, and this journal line names why. Creating version 1 during the
+    # drained rollout window (runbook "Storage mode") is the deliberate act that switches storage.
+    #
+    # PINNED TO VERSION 1, not latest: a ROTATION of this key makes every encrypted record already in
+    # redis undecryptable, so adding a version must never silently change what a restart reads.
+    # Rotating means a reviewed edit of this pin PLUS a one-shot storage reset on a drained lane.
+    #
+    # The payload must carry NO trailing newline (create it with printf / tr -d '\n'): emit() writes
+    # it verbatim between quotes, and a newline inside the base64 is a different, invalid key.
+    #
+    # ONE-WAY ONCE ARMED. Optional is right only BEFORE the cutover. After it, a transient gcloud/IAM
+    # failure would otherwise boot the engine in-memory, ignoring everything in redis, with nothing but
+    # a journal line to say so. So the first successful arm writes a marker on PERSISTENT disk (RUN_DIR
+    # is tmpfs), and from then on the key is required like every other engine credential. A deliberate
+    # rollback removes the marker (runbook: Storage mode, Rollback).
+    STATE_DIR="${FW_STATE_DIR:-/var/lib/fairwins}"
+    ARMED="${STATE_DIR}/engine-storage-armed"
+    if [ -f "$ARMED" ]; then
+      emit "$EN" STORAGE_ENCRYPTION_KEY  relay-engine-storage-key    1      required
+    else
+      emit "$EN" STORAGE_ENCRYPTION_KEY  relay-engine-storage-key    1      optional \
+        "engine stays on IN-MEMORY storage; create relay-engine-storage-key version 1 to switch to redis (runbook: Storage mode)"
+    fi
+    if grep -q '^STORAGE_ENCRYPTION_KEY=' "$EN"; then
+      # The engine needs base64 of exactly 32 bytes (v1.4.0 src/utils/encryption.rs). An empty or
+      # newline-terminated payload would arm redis and then crash-loop the engine; refuse it here, by name.
+      key="$(sed -n "s/^STORAGE_ENCRYPTION_KEY='\(.*\)'$/\1/p" "$EN")"
+      [ "$(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ] \
+        || die "relay-engine-storage-key:1 is not base64 of 32 bytes (empty, or a trailing newline?) — recreate it per the runbook"
+      unset key
+      printf "REPOSITORY_STORAGE_TYPE='redis'\n" >>"$EN"
+      mkdir -p "$STATE_DIR" && : >"$ARMED"
+      log "  REPOSITORY_STORAGE_TYPE <- redis (storage key present; armed marker ${ARMED})"
+    fi
 
     # server.js:48-61 prefers PM_SIGNER_PRIVATE_KEY over PM_SIGNER_KMS_KEY with NO guard and NO
     # warning. A raw key present anywhere in the gateway's environment silently downgrades paymaster
@@ -180,6 +241,17 @@ case "$ROLE" in
     emit "$FO" RPC_URL_PRIMARY_137        QUICKNODE_POLYGON_API     latest optional \
       "chain 137 reads fall back to the public endpoints in RPC_URLS_137"
     emit "$FO" POLYMARKET_API_KEY         POLYMARKET_API_KEY        latest optional
+    # A THIRD Pinata credential, and the distinction is the point. `fairwins-pinata-jwt` (workstation,
+    # `publish` profile) and the SPA's VITE_PINATA_JWT both authorise pinJSONToIPFS/pinFileToIPFS —
+    # they can WRITE to a member-facing store. Neither may ever land here: the exporter's guarantee is
+    # that it holds nothing capable of changing anything (FR-026), and the guard below only catches
+    # things named like signing keys, so a pinning JWT would sail straight past it.
+    #
+    # finops-pinata-read-jwt must be a Pinata key scoped to data/userPinnedDataTotal AND NOTHING
+    # ELSE. Absent ⇒ the pinata source reads not-configured, which costs a storage figure and
+    # nothing else. Create it per docs/runbooks/finops-operations.md#pinata-cost.
+    emit "$FO" FINOPS_PINATA_READ_JWT     finops-pinata-read-jwt    latest optional \
+      "the pinata cost/usage source reads not-configured"
 
     log "alloy container:"
     emit "$AY" GRAFANA_CLOUD_PROM_TOKEN   finops-grafana-cloud-token latest optional

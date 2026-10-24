@@ -32,7 +32,11 @@
  * Uniswap-capable network from its own RPC, and only writes need the wallet there (FR-050).
  */
 import { useState, useEffect, useMemo, useCallback, useRef } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { eventScanHandle } from '../../lib/chains/eventScan'
+import { getLogsRange } from '../../lib/chains/logRange'
+import { getAddress } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { LIQUIDITY_ROUTER_ABI } from '../../abis/LiquidityRouter'
 import { FEE_SERVICES, fetchFeeQuote } from '../../lib/fees/feeQuote'
@@ -153,11 +157,28 @@ export default function SupplyTab({
   const [capDrafts, setCapDrafts] = useState({})
 
   const routerRead = useMemo(
-    () => (routerAddr && readProvider ? new ethers.Contract(routerAddr, LIQUIDITY_ROUTER_ABI, readProvider) : null),
-    [routerAddr, readProvider],
+    () =>
+      routerAddr && readProvider
+        ? (functionName, args = []) =>
+            readContract(scopeChainId, {
+              address: routerAddr,
+              abi: LIQUIDITY_ROUTER_ABI,
+              functionName,
+              args,
+            })
+        : null,
+    [routerAddr, readProvider, scopeChainId],
   )
   const write = useCallback(
-    () => new ethers.Contract(routerAddr, LIQUIDITY_ROUTER_ABI, signer),
+    (functionName, args = []) =>
+      signer.sendTransaction({
+        to: routerAddr,
+        data: encodeFunctionData({
+          abi: normalizeAbi(LIQUIDITY_ROUTER_ABI),
+          functionName,
+          args,
+        }),
+      }),
     [routerAddr, signer],
   )
 
@@ -178,21 +199,21 @@ export default function SupplyTab({
       // is stopped (FR-050 no-mixing, FR-052 as-of).
       setState(null)
       setLastReadAt(null)
-      const paused = await routerRead.paused()
+      const paused = await routerRead('paused')
       const [feeRouter, positionManager, sanctionsGuard, maxFeeBps, count] = await Promise.all([
-        safe(routerRead.feeRouter()),
-        safe(routerRead.positionManager()),
-        safe(routerRead.sanctionsGuard()),
-        safe(routerRead.MAX_FEE_BPS()),
-        safe(routerRead.poolCount()),
+        safe(routerRead('feeRouter')),
+        safe(routerRead('positionManager')),
+        safe(routerRead('sanctionsGuard')),
+        safe(routerRead('MAX_FEE_BPS')),
+        safe(routerRead('poolCount')),
       ])
 
       const pools = []
       let poolsComplete = count !== undefined
       if (count !== undefined) {
         const n = Number(count)
-        const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(routerRead.poolAt(i))))
-        const raws = await Promise.all(ids.map((id) => (id ? safe(routerRead.getPool(id)) : Promise.resolve(undefined))))
+        const ids = await Promise.all(Array.from({ length: n }, (_, i) => safe(routerRead('poolAt', [BigInt(i)]))))
+        const raws = await Promise.all(ids.map((id) => (id ? safe(routerRead('getPool', [id])) : Promise.resolve(undefined))))
         for (let i = 0; i < n; i += 1) {
           const id = ids[i]
           const raw = raws[i]
@@ -272,17 +293,19 @@ export default function SupplyTab({
   }, [routerAddr, readProvider, scopeChainId, liveFeeRouter])
 
   const fetchHistory = useCallback(async () => {
-    if (!routerRead || !readProvider) return
+    if (!routerAddr || !readProvider) return
     setHistory({ entries: null, error: null })
     setHistory(
       await loadRouterHistory({
-        contract: routerRead,
+        chainId: scopeChainId,
+        address: routerAddr,
+        abi: LIQUIDITY_ROUTER_ABI,
         provider: readProvider,
         eventNames: HISTORY_EVENTS,
         describe: describeLiquidityEvent(scopeChainId),
       }),
     )
-  }, [routerRead, readProvider, scopeChainId])
+  }, [routerAddr, readProvider, scopeChainId])
 
   /**
    * Per-pool supplied totals and position counts (FR-048), aggregated from the router's own
@@ -296,12 +319,28 @@ export default function SupplyTab({
    * being retired (FR-024).
    */
   const fetchActivity = useCallback(async () => {
-    if (!routerRead || !readProvider) return
+    if (!routerAddr || !readProvider) return
     setActivity({ byPool: null, error: null })
     try {
-      const latest = await readProvider.getBlockNumber()
-      const fromBlock = Math.max(0, Number(latest) - TOTALS_LOOKBACK_BLOCKS)
-      const evs = (await routerRead.queryFilter(routerRead.filters.LiquiditySupplied(), fromBlock, 'latest')) || []
+      const handle = eventScanHandle(scopeChainId, {
+        address: routerAddr,
+        abi: LIQUIDITY_ROUTER_ABI,
+      })
+      if (!handle) return
+      const latest = Number(await handle.provider.getBlockNumber())
+      const fromBlock = Math.max(0, latest - TOTALS_LOOKBACK_BLOCKS)
+      // Bisects on refusal. An RPC that caps log ranges used to land in the catch below, which
+      // reports the totals as UNREADABLE — correct, but it meant this panel could never show a
+      // figure on such a chain.
+      const logs = await getLogsRange(
+        handle.provider,
+        routerAddr,
+        fromBlock,
+        latest,
+        2000,
+        handle.filters.LiquiditySupplied().getTopicFilter(),
+      )
+      const evs = logs.map((log) => ({ ...log, args: handle.interface.parseLog(log).args }))
       const byPool = {}
       for (const ev of evs) {
         const poolId = ev.args?.poolId
@@ -325,7 +364,7 @@ export default function SupplyTab({
       // made at the moment an operator decides whether to retire it.
       setActivity({ byPool: null, error: e?.message || String(e) })
     }
-  }, [routerRead, readProvider])
+  }, [routerAddr, readProvider, scopeChainId])
 
   /**
    * How much sits in each curated BRIDGE pool, read from the HubPool itself (FR-048).
@@ -354,6 +393,7 @@ export default function SupplyTab({
       bridgePools.map(async (pool) => {
         // Per-pool, so one unreadable HubPool never blanks the others.
         const info = await readPooledToken({
+          chainId: scopeChainId,
           provider: readProvider,
           hubPool: pool.poolAddress,
           l1Token: pool.token0,
@@ -363,7 +403,7 @@ export default function SupplyTab({
     )
     // Stale runs drop their result rather than overwriting a newer network's.
     if (run === bridgePoolsRun.current) setBridgeSizes(Object.fromEntries(entries))
-  }, [readProvider, state?.pools])
+  }, [readProvider, state?.pools, scopeChainId])
 
   // ── THE FEE QUOTE GETS ITS OWN EFFECT, AND THAT SPLIT IS THE WHOLE POINT ──────────────────────
   //
@@ -406,13 +446,13 @@ export default function SupplyTab({
   useEffect(() => {
     let live = true
     setAuthority(null)
-    readRouterAuthority({ provider: readProvider, routerAddress: routerAddr, account }).then((a) => {
+    readRouterAuthority({ chainId: scopeChainId, provider: readProvider, routerAddress: routerAddr, account }).then((a) => {
       if (live) setAuthority(a)
     })
     return () => {
       live = false
     }
-  }, [readProvider, routerAddr, account])
+  }, [readProvider, routerAddr, account, scopeChainId])
 
   const refresh = () => {
     fetchState()
@@ -427,14 +467,14 @@ export default function SupplyTab({
   const togglePause = () => {
     const fn = state?.paused ? 'unpause' : 'pause'
     runTx(
-      () => write()[fn](),
+      () => write(fn),
       state?.paused ? 'New Uniswap supplies resumed' : 'New Uniswap supplies paused',
     ).then(refresh)
   }
 
   const setPoolEnabled = (pool, enabled) =>
     runTx(
-      () => write().setPoolEnabled(pool.poolId, enabled),
+      () => write('setPoolEnabled', [pool.poolId, enabled]),
       enabled ? 'Pool reopened to new deposits' : 'Pool retired — closed to new deposits, existing positions untouched',
     ).then(refresh)
 
@@ -475,7 +515,7 @@ export default function SupplyTab({
       setFormError(e.message)
       return
     }
-    runTx(() => write().setPoolLimit(pool.poolId, max0, max1), 'Per-transaction deposit caps updated').then(refresh)
+    runTx(() => write('setPoolLimit', [pool.poolId, max0, max1]), 'Per-transaction deposit caps updated').then(refresh)
   }
 
   /**
@@ -497,8 +537,17 @@ export default function SupplyTab({
       setFormError(`No read connection to ${networkName(scopeChainId)}, so the pool cannot be checked from here.`)
       return
     }
-    const pool = new ethers.Contract(forms.poolAddress, POOL_ABI, readProvider)
-    const [token0, token1, feeTier] = await Promise.all([safe(pool.token0()), safe(pool.token1()), safe(pool.fee())])
+    const askPool = (functionName) =>
+      readContract(scopeChainId, {
+        address: getAddress(forms.poolAddress.trim()),
+        abi: POOL_ABI,
+        functionName,
+      })
+    const [token0, token1, feeTier] = await Promise.all([
+      safe(askPool('token0')),
+      safe(askPool('token1')),
+      safe(askPool('fee')),
+    ])
     if (!token0 || !token1 || feeTier === undefined) {
       setFormError(
         'That address did not answer as a Uniswap V3 pool. Check it is the POOL, not the token pair or the position manager.',
@@ -527,7 +576,7 @@ export default function SupplyTab({
         setFormError('A trading pool needs its Uniswap fee tier (500, 3000 or 10000). The router rejects a listing without one.')
         return
       }
-    } else if (forms.token1 && forms.token1 !== ethers.ZeroAddress) {
+    } else if (forms.token1 && forms.token1 !== zeroAddress) {
       setFormError('A bridge pool has exactly one asset — leave the second asset empty. The router rejects a two-legged bridge listing.')
       return
     }
@@ -542,16 +591,22 @@ export default function SupplyTab({
     }
     runTx(
       () =>
-        write().listPool({
-          kind,
-          enabled: forms.enabled,
-          feeTier: kind === POOL_KIND.TRADING_LP ? Number(forms.feeTier) : 0,
-          token0: forms.token0,
-          token1: kind === POOL_KIND.TRADING_LP ? forms.token1 : ethers.ZeroAddress,
-          poolAddress: forms.poolAddress,
-          maxDeposit0PerTx: max0,
-          maxDeposit1PerTx: max1,
-        }),
+        write('listPool', [
+          {
+            kind,
+            // `Boolean`/`getAddress` are not decoration (spec 110, divergences 16 and 18). viem's
+            // encoder REFUSES an all-uppercase address that `isValidAddr` accepts, and refuses
+            // anything that is not a real boolean for a `bool` — where ethers coerced both. The
+            // validator and the encoder have to agree, or a listing fails between them.
+            enabled: Boolean(forms.enabled),
+            feeTier: kind === POOL_KIND.TRADING_LP ? Number(forms.feeTier) : 0,
+            token0: getAddress(forms.token0.trim()),
+            token1: kind === POOL_KIND.TRADING_LP ? getAddress(forms.token1.trim()) : zeroAddress,
+            poolAddress: getAddress(forms.poolAddress.trim()),
+            maxDeposit0PerTx: max0,
+            maxDeposit1PerTx: max1,
+          },
+        ]),
       'Pool listing saved',
     ).then(refresh)
   }
@@ -562,7 +617,9 @@ export default function SupplyTab({
       setFormError(`Enter a valid, non-zero address for the ${label} — the contract rejects malformed and zero addresses.`)
       return
     }
-    runTx(() => write()[fn](value), `${label} updated`).then(refresh)
+    // A fund-path address (feeRouter / positionManager / sanctionsGuard). Normalised, not just
+    // validated — repointing one of these is the change that is not reversible.
+    runTx(() => write(fn, [getAddress(value.trim())]), `${label} updated`).then(refresh)
   }
 
   /* ------------------------------------------------------------------------------- render */
@@ -1092,7 +1149,7 @@ function describeLiquidityEvent(scopeChainId) {
           // `PoolListed` now carries `enabled` (added after the T150 security review), so this row
           // can state availability truthfully. It previously could not — the event omitted the field,
           // so a naive ternary reported every listed pool as open, including one listed closed.
-          after: `${args.enabled ? 'open to new deposits' : 'retired'}, ${tokenLabel(scopeChainId, args.token0)}${args.token1 && args.token1 !== ethers.ZeroAddress ? ` / ${tokenLabel(scopeChainId, args.token1)}` : ''}`,
+          after: `${args.enabled ? 'open to new deposits' : 'retired'}, ${tokenLabel(scopeChainId, args.token0)}${args.token1 && args.token1 !== zeroAddress ? ` / ${tokenLabel(scopeChainId, args.token1)}` : ''}`,
         }
       case 'PoolEnabledChanged':
         return {

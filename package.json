@@ -1,7 +1,7 @@
 {
-  "name": "prediction-dao-research",
-  "version": "1.15.2",
-  "description": "Futarchy Prediction DAO with privacy-preserving mechanisms",
+  "name": "fairwins-platform",
+  "version": "1.19.1",
+  "description": "FairWins — self-custody digital asset infrastructure: embedded wallets, policy-governed custody, payments, markets connectivity and compliance, available white-label",
   "private": true,
   "workspaces": [
     "frontend",
@@ -83,6 +83,10 @@
     "purchase:friend-market": "npx hardhat run ./scripts/operations/purchase-friend-market-membership.js --network mordor",
     "create:friend-bet": "npx hardhat run ./scripts/operations/create-friend-market-bet.js --network mordor",
     "check:deps": "node scripts/deps/check-dependency-hygiene.js",
+    "check:docs-warnings": "node scripts/docs/check-docs-warnings.mjs",
+    "test:docs-warnings": "node --test \"scripts/docs/__tests__/*.test.mjs\"",
+    "check:chainlink-closure": "node scripts/security/chainlink-closure.js",
+    "dismiss:alerts": "node scripts/security/dismiss-alerts.js",
     "check:iac": "node scripts/infra/check-iac-guardrails.js",
     "audit:admin-roles": "node scripts/ops/audit-admin-roles.js",
     "ops:revoke-stale-admin": "node scripts/ops/revoke-stale-admin.js",
@@ -90,13 +94,18 @@
     "e2e:matrix": "node scripts/e2e/generate-coverage-matrix.js",
     "check:e2e-matrix": "node scripts/e2e/generate-coverage-matrix.js --check",
     "check:e2e-trackers": "node scripts/e2e/check-absent-trackers.js",
+    "check:specs": "node scripts/specs/check-spec-registry.js",
+    "check:ci-gating": "node scripts/ci/check-ci-gating.js",
+    "check:build-args": "node scripts/ci/check-build-args.js && node --test scripts/ci/__tests__/check-build-args.test.js",
+    "test:ci": "node --test \"scripts/ci/__tests__/*.test.js\"",
+    "test:specs": "node --test \"scripts/specs/__tests__/*.test.js\"",
     "e2e:split": "node scripts/e2e/split-full-tier.js",
     "e2e:split:fast": "node scripts/e2e/split-fast-tier.js",
     "finops:generate": "node scripts/finops/generate-dashboards.js",
     "finops:provision": "node scripts/finops/provision-grafana.js",
     "test:finops": "npm test --workspace fairwins-finops-exporter",
     "test:iac-guardrails": "node --test \"scripts/infra/__tests__/*.test.js\"",
-    "test:finops-gate": "node --test \"scripts/finops/__tests__/*.test.mjs\"",
+    "test:finops-gate": "node --test --test-concurrency=1 \"scripts/finops/__tests__/*.test.mjs\"",
     "test:mcp": "node --test \"services/mcp-server/test/*.test.js\"",
     "build:miniapps": "npm run build --workspace @fairwins/miniapp-token-mint && npm run build --workspace @fairwins/miniapp-clearpath && npm run build --workspace @fairwins/miniapp-api-access",
     "deps:reinstall": "bash scripts/deps/reinstall.sh",
@@ -111,6 +120,12 @@
     "secrets:doctor": "node scripts/secrets/doctor.js",
     "secrets:migrate": "node scripts/secrets/migrate.js",
     "check:env-hygiene": "node scripts/secrets/check-env-hygiene.js",
+    "check:dep-alerts": "node scripts/security/check-dependency-alerts.js",
+    "check:dep-alerts:live": "node scripts/security/check-dependency-alerts.js --live",
+    "check:version-pins": "node scripts/deps/check-version-pins.js",
+    "check:version-pins:live": "node scripts/deps/check-version-pins.js --live",
+    "test:version-pins": "node --test \"scripts/deps/__tests__/*.test.js\"",
+    "test:dep-alerts": "node --test \"scripts/security/__tests__/*.test.js\"",
     "test:secrets": "node --test \"scripts/secrets/__tests__/*.test.js\""
   },
   "keywords": [
@@ -167,6 +182,12 @@
     "@safe-global/safe-contracts": {
       "ethers": "$ethers"
     },
+    "@coinbase/cdp-sdk": {
+      "axios": "^1.19.0"
+    },
+    "@stellar/stellar-sdk": {
+      "toml": "^4.2.0"
+    },
     "@ledgerhq/hw-app-eth": {
       "axios": "^1.19.0"
     },
@@ -181,7 +202,8 @@
       "immutable": "^5.1.9",
       "js-yaml": "^4.3.1",
       "undici": "^7.29.0",
-      "yaml": "^2.9.0"
+      "yaml": "^2.9.0",
+      "decompress": "npm:@xhmikosr/decompress@^11.1.4"
     },
     "gluegun": {
       "cross-spawn": "^7.0.6",
@@ -196,7 +218,11 @@
     "protobufjs": "^7.5.6",
     "ipfs-unixfs": {
       "protobufjs": "^6.11.4"
-    }
+    },
+    "@coinbase/cdp-sdk": {
+      "axios": "^1.20.0"
+    },
+    "@grpc/grpc-js": "^1.14.5"
   },
   "engines": {
     "node": ">=22.0.0"

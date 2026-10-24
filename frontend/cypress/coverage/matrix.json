@@ -523,6 +523,31 @@
           "tests": [
             "frontend/cypress/e2e/fast/34-member-surfaces.cy.js::MS-01"
           ]
+        },
+        {
+          "id": "addressbook.estate-screening-pill",
+          "name": "Enter an address and see whether it is flagged on any list on any network \u2014 never a false green",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "settled",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/34-member-surfaces.cy.js::MS-06",
+            "frontend/cypress/e2e/fast/31-identity-access.cy.js::CM-01"
+          ],
+          "note": "Issue #1458. MS-06 runs in a world where every contract read answers 0x, so every source is unreadable and the pill must be amber (Unscreened/Partly screened), never green, with each source's 'Could not read' row named. CM-01 models the FairWins guard answering not-allowed and asserts the alert names that guard. The positive path against the live Chainalysis oracle and the Circle/Tether freeze lists was verified by hand (SC-009) and cannot run in CI without a real mainnet endpoint."
+        },
+        {
+          "id": "addressbook.export-import-roundtrip",
+          "name": "Export the address book to a plain-text file and import it back, with no wallet signature",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "settled",
+          "risk": "access",
+          "tests": [
+            "frontend/cypress/e2e/fast/34-member-surfaces.cy.js::MS-07"
+          ],
+          "note": "Issue #1550. The export is deliberately PLAIN JSON: the old design derived its key from a wallet signature, and a passkey session has no ethers signer, so both buttons threw 'Wallet not connected' at a member who was plainly signed in. MS-07 asserts the exported bytes carry the nickname and address in readable form (that IS the change), that the same bytes restore the book after a wipe, and that a pre-#1550 encrypted envelope is refused without ever claiming the member is disconnected. The tier's mock wallet HAS a signer, so it exercises the AEAD-failure branch; the no-signer branch (a passkey session, where the refusal must name the file's own encryption) is asserted in frontend/src/test/addressBook/addressBookFile.test.js and AddressBookImportExport.test.jsx, both of which run with signer: null."
         }
       ]
     },
@@ -1576,38 +1601,38 @@
           ]
         },
         {
-          "id": "pay.group-recipient-list",
-          "name": "Build a multi-recipient payment: add/remove rows, per-chain refusals, and the confirm disclosure (total, breakdown, rail, fee)",
+          "id": "pay.group-affordance-withdrawn",
+          "name": "The send surfaces offer no multi-recipient control, and a single-recipient send is unchanged",
           "status": "covered",
           "tier": "no-chain",
           "depth": "flow",
           "risk": "disclosure",
           "tests": [
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-01",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-02",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-03",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-04",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-05",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-06",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-07",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-08",
-            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-09"
+            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-10",
+            "frontend/cypress/e2e/fast/41-group-pay.cy.js::GP-11"
           ]
+        },
+        {
+          "id": "pay.group-recipient-list",
+          "name": "Build a multi-recipient payment: add/remove rows, per-chain refusals, and the confirm disclosure (total, breakdown, rail, fee)",
+          "status": "out-of-scope",
+          "tier": "none",
+          "depth": "none",
+          "risk": "disclosure",
+          "tests": [],
+          "proposedTier": "no-chain",
+          "reason": "Withdrawn by #1441: no send surface renders the multi-recipient control, so there is no member-facing flow to drive. GROUP_PAY_ENABLED in frontend/src/lib/payments/groupPay.js is the one lever; fast/41-group-pay.cy.js is guarded by the same constant rather than deleted, and its GP-10/GP-11 assert the withdrawal itself. Restoring it is #1538."
         },
         {
           "id": "pay.group-settlement",
           "name": "Settle a group payment - one batched transaction (passkey), one MultiSend proposal (vault), N separate consecutive-nonce proposals when the vault policy denies batches, or sequential sends with per-recipient outcomes",
-          "status": "partial",
-          "tier": "on-chain",
-          "depth": "settled",
+          "status": "out-of-scope",
+          "tier": "none",
+          "depth": "none",
           "risk": "custody",
-          "tests": [
-            "frontend/cypress/e2e/full/41-group-settlement.cy.js::GS-01",
-            "frontend/cypress/e2e/full/41-group-settlement.cy.js::GS-02",
-            "frontend/cypress/e2e/full/41-group-settlement.cy.js::GS-03"
-          ],
-          "issue": "#1400",
-          "missing": "the PASSKEY batched rail (one UserOp carrying every payment). sendPasskeyBatch reaches the chain only through bundlerClient.sendUserOperation after chooseRoute finds a healthy relayer or bundler, and its self-funded fallback drops the paymaster rather than the bundler - so a batch cannot be self-submitted and this rail needs the PASSKEY_FULL_STACK harness (now the cypress-passkey-full-stack job). The three rails a classic or vault member actually uses are covered and settled on chain."
+          "tests": [],
+          "proposedTier": "on-chain",
+          "reason": "Withdrawn by #1441: a member cannot reach a group payment from any surface, so nothing settles one. The engine is untouched and the spec moved to withdrawn/41-group-settlement.cy.js, guarded by GROUP_PAY_ENABLED rather than deleted - GS-01/02/03 settle on chain again the moment it flips (#1538). Still absent when it does: the PASSKEY batched rail (one UserOp carrying every payment). sendPasskeyBatch reaches the chain only through bundlerClient.sendUserOperation after chooseRoute finds a healthy relayer or bundler, and its self-funded fallback drops the paymaster rather than the bundler - so a batch cannot be self-submitted and this rail needs the PASSKEY_FULL_STACK harness (now the cypress-passkey-full-stack job). The three rails a classic or vault member actually uses are covered and settled on chain."
         }
       ]
     },
@@ -2607,7 +2632,7 @@
       "flows": [
         {
           "id": "assistant.opt-in",
-          "name": "The assistant does not exist until Settings turns it on, and stops existing when it is turned off",
+          "name": "The assistant does not exist until Tools \u25b8 Assistant turns it on, and stops existing when it is turned off",
           "status": "covered",
           "tier": "no-chain",
           "depth": "flow",
@@ -2631,7 +2656,7 @@
         },
         {
           "id": "assistant.memory-clear",
-          "name": "Conversation memory is device-local, counted in Settings, and clearable to nothing",
+          "name": "Conversation memory is device-local, counted on the Assistant tab, and clearable to nothing",
           "status": "covered",
           "tier": "no-chain",
           "depth": "settled",
@@ -2682,7 +2707,7 @@
             "frontend/cypress/e2e/full/39-api-access-console.cy.js::API-09",
             "frontend/cypress/e2e/full/39-api-access-console.cy.js::API-10"
           ],
-          "note": "The console is a spec-073 registry package, so its surface only exists where a registry can be written to and package bytes can be served: the on-chain tier publishes api-access through publish:local:miniapps and launches it through the real submit/approve/launchable path, with only the IPFS transport and the member API stubbed (bodies copied from services/relay-gateway/src/memberApi/). API-06 reads the permission set out of the manifest the chain committed to \u2014 no wallet:submit, no contracts \u2014 and API-10 asserts the key ceremony lands on the HOST Settings card, because a package cannot sign. API-08 reads the app's store namespace back out of localStorage to prove the bearer token was never persisted. The unconfigured-gateway branch of the host card is NOT reachable from any e2e build (no dev server produces relayerBaseUrl() === ''), so it is held at unit level in frontend/src/test/ApiAccessPanel.test.jsx instead."
+          "note": "The console is a spec-073 registry package, so its surface only exists where a registry can be written to and package bytes can be served: the on-chain tier publishes api-access through publish:local:miniapps and launches it through the real submit/approve/launchable path, with only the IPFS transport and the member API stubbed (bodies copied from services/relay-gateway/src/memberApi/). API-06 reads the permission set out of the manifest the chain committed to \u2014 no wallet:submit, no contracts \u2014 and API-10 asserts the key ceremony lands on the HOST's api-access card \u2014 on Tools \u25b8 Assistant since spec 104, card id unchanged \u2014 because a package cannot sign. API-08 reads the app's store namespace back out of localStorage to prove the bearer token was never persisted. The unconfigured-gateway branch of the host card is NOT reachable from any e2e build (no dev server produces relayerBaseUrl() === ''), so it is held at unit level in frontend/src/test/ApiAccessPanel.test.jsx instead."
         }
       ]
     },
@@ -2905,6 +2930,553 @@
           "tests": [
             "frontend/cypress/e2e/full/39-funding-pools.cy.js::FP-05"
           ]
+        }
+      ]
+    },
+    {
+      "id": "102-multisig-chain-abstraction",
+      "title": "Multisig chain abstraction \u2014 one vault, every network",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "custody.vault-cards",
+          "name": "See one compact card per vault across every network it lives on",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-01"
+          ]
+        },
+        {
+          "id": "custody.vault-sheet-queue",
+          "name": "Open the vault sheet and read the pending queue with each proposal's network tagged, an unreadable network named",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-02",
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-03"
+          ]
+        },
+        {
+          "id": "custody.cross-chain-approve",
+          "name": "Approve a proposal on another network from the queue \u2014 the wallet is switched at tap time, a refusal is stated and nothing is signed",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-04"
+          ]
+        },
+        {
+          "id": "custody.sheet-approve-execute",
+          "name": "Approve and execute a proposal from the vault sheet's queue (money path)",
+          "status": "covered",
+          "tier": "on-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/29-protect-custody.cy.js::CV-08"
+          ]
+        },
+        {
+          "id": "custody.vault-style",
+          "name": "Style the vault card from the sheet; the card behind it updates",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-05"
+          ]
+        },
+        {
+          "id": "custody.vault-details",
+          "name": "Read the vault's networks and owners, cross-referenced to the address book, and add an unknown owner in place",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-06"
+          ]
+        },
+        {
+          "id": "custody.acting-from-sheet",
+          "name": "Choose the acting account from the vault sheet; the header follows and the switcher lists the vault once",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "access",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-07"
+          ]
+        },
+        {
+          "id": "custody.remove-all-networks",
+          "name": "Remove a vault from Protect on every network after confirmation",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-08"
+          ]
+        },
+        {
+          "id": "custody.load-all-networks",
+          "name": "Load a vault address and have it added on every network it exists on, without picking one",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-09"
+          ]
+        },
+        {
+          "id": "wallet.balance-display",
+          "name": "Balances in Wrap and Transfer fit the screen (display formatter)",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-10"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "104-guttertoken-assistant-rail",
+      "title": "GutterToken assistant rail and client-side tools",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "byok.key-lifecycle",
+          "name": "Save a GutterToken key only when GutterToken accepts it, keep it when GutterToken cannot be reached, and remove it",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "settled",
+          "risk": "disclosure",
+          "tests": [
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-01",
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-02"
+          ],
+          "note": "The key spends the member's OWN prepaid GutterToken credit, so the two save outcomes are asserted apart: a 401 refuses the save and stores nothing, while an unreachable GutterToken saves WITH the failure shown (spec 069's rule \u2014 a timeout is a fact about the network, not about the key). GT-01 then sweeps the DOM for the raw key and proves the only storage entry holding it is the wallet-scoped assistant_guttertoken_key_v1; GT-02 removes it and reads the absence back from storage, not from the card's own state."
+        },
+        {
+          "id": "byok.non-member-chat",
+          "name": "A non-member with a saved key gets an answer straight from GutterToken, with no request to the FairWins chat route",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "settled",
+          "risk": "disclosure",
+          "tests": [
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-03"
+          ],
+          "note": "SC-001, and the absence is the assertion: the gateway chat route is intercepted only so the spec can prove it received nothing, while the reply is served from the intercepted api.guttertokens.com POST. Membership answers tier 0 at the RPC transport, so the launcher is reached by the key alone."
+        },
+        {
+          "id": "byok.honest-failures",
+          "name": "GutterToken's 403 and 429 each get their own sentence and action, and neither produces a reply bubble",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "disclosure",
+          "tests": [
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-04"
+          ],
+          "note": "SC-002. An empty balance is the member's own money running out, so it names the balance and links to GutterToken billing; a 429 is GutterToken's per-network rate limit and carries the Retry-After it sent. Both are asserted with .assistant-panel__message--assistant absent \u2014 an invented reply is the one failure a member cannot detect."
+        },
+        {
+          "id": "provider.choice",
+          "name": "A paid member switches rails, and the badge and the transport agree about which one answered",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "disclosure",
+          "tests": [
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-05"
+          ],
+          "note": "The badge is a claim about where the member's words went and who paid, so it is checked against the request counters on both endpoints rather than against itself: on GutterToken the gateway chat route stays at zero calls, and on FairWins api.guttertokens.com does."
+        },
+        {
+          "id": "tools.honest-progress",
+          "name": "A tool round shows what is being read and reports a failed read as could not be read, never as zero",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-06"
+          ],
+          "note": "The model asks for two reads in one round; the member API answers one and refuses the other. The refused one must render as 'could not be read' in both the live progress row and the Sources line \u2014 an unreadable chain is not an empty one, and the panel never gets to fill the gap with a zero."
+        },
+        {
+          "id": "controls.moved-to-tools",
+          "name": "The agent controls live on Tools \u25b8 Assistant, Settings no longer carries them, and the old Settings hashes redirect",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "access",
+          "tests": [
+            "frontend/cypress/e2e/fast/47-assistant-rails.cy.js::GT-07"
+          ],
+          "note": "SC-005. Both halves are asserted, because a tab that renders the cards while Settings still renders them too is two homes for one control: the redirect is read off the resolved URL, and the card lands OPEN rather than at a closed heading."
+        }
+      ]
+    },
+    {
+      "id": "104-passkey-account-recovery",
+      "title": "Passkey account recovery \u2014 find the account, never guess it",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "passkey.recover-account-by-lookup",
+          "name": "A member signing in on a new device reaches the account their passkey controls, including when that passkey was added to the account later rather than being the key that created it",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "on-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1504",
+          "note": "Blocked on T-101: accountFactory has no recorded deploy block on any chain, so a log scan has no floor -- and this repo degrades that silently (deployBlocks?.X || 0 starts at block 0) rather than loudly. Release 1 confirms a single derived candidate and reports none-found honestly for every other shape."
+        },
+        {
+          "id": "passkey.recover-never-wrong-account",
+          "name": "A passkey whose account cannot be verified never opens a session on an unverified address; the member is told what could not be confirmed, and an unreachable chain reads as unverified rather than as no account existing",
+          "status": "covered",
+          "tier": "account-native",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/passkey/account-recovery.cy.js::REC-01",
+            "frontend/cypress/e2e/passkey/account-recovery.cy.js::REC-02"
+          ],
+          "note": "The no-chain tier is the right home AND the natural one: it runs with no RPC reachable, which is exactly the condition that produces the unverified verdict, so the environment generates the state rather than a stub asserting it does. REC-01 pins the regression (no session row, header still offering connection); REC-02 pins that an unreachable network never reads as \"you have no account\"."
+        },
+        {
+          "id": "passkey.recover-by-address",
+          "name": "A member relinks by entering their account address, and is signed in only when the chain lists the recovered key among that account's current owners",
+          "status": "partial",
+          "tier": "account-native",
+          "proposedTier": "on-chain",
+          "depth": "smoke",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/passkey/account-recovery.cy.js::REC-03"
+          ],
+          "issue": "#1504",
+          "note": "The member-facing half is covered without a chain: the form, the refusal of a malformed address in words rather than colour, and the address being handed on to be CHECKED rather than trusted. The half that needs a chain -- a real deployed account confirming the key and a session opening on it -- belongs to the full-stack passkey tier.",
+          "missing": "The chain agreeing. This tier reaches no RPC, so what is proven is the form, the refusal of a malformed address, and that the address is handed on to be CHECKED \u2014 never that a verified address opens a session on the account it names. That needs a deployed account whose owner set includes a key this browser has no record of, i.e. the full-stack passkey tier."
+        }
+      ]
+    },
+    {
+      "id": "105-multichain-vault-creation",
+      "title": "Guided Multichain Vault Creation \u2014 One Vault, Chosen Networks",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "custody.create-flow-guided",
+          "name": "A non-technical member walks the four-sheet flow (type presets, rules tile grid with live summary, cohort network multi-select) with every refusal stated in plain language and no network question before a signature needs one",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/41-protect-vault-actions.cy.js::VA-02",
+            "frontend/cypress/e2e/fast/41-protect-vault-actions.cy.js::VA-03",
+            "frontend/cypress/e2e/fast/41-protect-vault-actions.cy.js::VA-04",
+            "frontend/cypress/e2e/fast/43-vault-create-flow.cy.js::CF-01",
+            "frontend/cypress/e2e/fast/43-vault-create-flow.cy.js::CF-02",
+            "frontend/cypress/e2e/fast/43-vault-create-flow.cy.js::CF-03"
+          ]
+        },
+        {
+          "id": "custody.create-vault-multichain",
+          "name": "The flow deploys the vault and the deployed address IS the predicted one, with per-network status reaching Live from a real receipt",
+          "status": "partial",
+          "tier": "on-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/29-protect-custody.cy.js::CV-01"
+          ],
+          "issue": "#1491",
+          "missing": "deployment to a SECOND network in the same run (identical address, wallet switch mid-orchestration, per-network failure isolation) \u2014 the on-chain tier runs one private chain per leg, so the multi-network half is the staged manual protocol in docs/runbooks/multichain-vault-staging-validation.md (#1491); the state machine and CREATE2 identity across chainIds are Vitest-proven"
+        },
+        {
+          "id": "custody.create-rules-install",
+          "name": "The chosen rules install on each network after deployment \u2014 directly where the creator alone meets the threshold, queued as awaiting-approval where co-owners must sign \u2014 and an over-cap send is refused by the realized policy",
+          "status": "covered",
+          "tier": "on-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/44-vault-rules-lanes.cy.js::RL-01",
+            "frontend/cypress/e2e/full/44-vault-rules-lanes.cy.js::RL-02"
+          ],
+          "note": "CV-01 deliberately creates with rules OFF (it asserts the no-rules initializer stays byte-identical to spec 043); RL-01/RL-02 are the rules-ON legs \u2014 direct and queued installs read back from the guard's own getRules, and the lanes govern real transfers (banded-lane allow, big-send refusal on one approval, full-vote completion by the executing co-owner)."
+        },
+        {
+          "id": "custody.create-passkey-batch",
+          "name": "A passkey member creates a governed vault in ONE sendCalls batch (deploy + both rule installs), landing at the predicted address with the record written from it \u2014 and a chain with no bundler states the write-rail reason on its chip instead of attempting the batch",
+          "status": "covered",
+          "tier": "account-native",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/passkey/vault-create-batch.cy.js::PVC-01"
+          ],
+          "issue": "#1454",
+          "note": "Runs only on the cypress-passkey-full-stack job (bundler + gateway). The batch is possible because the CREATE2 address is known before deployment; the vault, its guard slot and the realized lanes are read back from the chain, and the reference + creation record are asserted to carry the PREDICTED address, never one parsed from a receipt. The batch composition itself (every call addressed, one sendCalls) is pinned by useVaultDeployment.test.jsx."
+        },
+        {
+          "id": "custody.deploy-later",
+          "name": "From Details, a vault with a creation record deploys to a cohort network it is not on yet at the SAME address; a drifted owner set is disclosed as the original arrangement first; a vault without a record gets the honest reason, never a dead control",
+          "status": "partial",
+          "tier": "on-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/44-vault-rules-lanes.cy.js::RL-01",
+            "frontend/cypress/e2e/full/44-vault-rules-lanes.cy.js::RL-02"
+          ],
+          "issue": "#1491",
+          "missing": "the replay deployment itself and FR-019 already-live need a SECOND custody network, which the one-chain full tier cannot host \u2014 staged manual protocol (docs/runbooks/multichain-vault-staging-validation.md, #1491). The record gate is chain-proven: the record holder is OFFERED Deploy for the missing cohort network (RL-01) and the no-record co-owner gets the honest FR-018 reason (RL-02); gating, disclosure and orchestrator handoff stay Vitest/component-proven (VaultDetailsView.test.jsx)."
+        },
+        {
+          "id": "custody.vault-details-one-card",
+          "name": "Details renders ONE card \u2014 compact network status rows, shared facts stated once with drift naming the differing network and coverage naming the unread one \u2014 never a repeated per-network card or an up-front switch gate",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-06",
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-12"
+          ]
+        },
+        {
+          "id": "custody.queue-readability",
+          "name": "Queue chips (All / Needs you / per-network) filter the rows without touching the four-state per-chain read disclosure; recognised proposals read in plain language and unknown calldata keeps the honest raw row",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/42-protect-vault-sheet.cy.js::VS-11"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "106-gateway-caller-auth",
+      "title": "Gateway caller authentication",
+      "memberFacing": false,
+      "reason": "Gateway-side caller-identity tiers, quota re-keying and enforcement \u2014 server behaviour with no member surface of its own, covered by 34 gateway vitest files (test/identity/). The one member-visible artifact today is the invisible, silently-degrading Turnstile widget (aria-hidden until a surface opts into interactive escalation); member-facing flows arrive when a surface adopts it and when IDENTITY_ENFORCE changes refusal paths on the Predict/Collect/BTC write flows already rowed under specs 055-057/061.",
+      "flows": []
+    },
+    {
+      "id": "107-keyed-rpc-access",
+      "title": "Keyed RPC access",
+      "memberFacing": false,
+      "reason": "Runtime-issued read-only RPC credentials. Dormant end to end until an issuance endpoint is configured (#1438 runbook); every client failure mode falls back to the public default the app uses today, so there is no member-distinguishable flow yet. Covered by gateway vitest (test/access.test.js) and frontend vitest (src/test/network/issuedAccess.test.js); a member-facing degradation-disclosure flow gets a row when the disclosure surface ships.",
+      "flows": []
+    },
+    {
+      "id": "108-multi-currency-wrap",
+      "title": "Multi-currency wrap/unwrap \u2014 the asset is the entry point",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "trade.wrap-multi-currency-picker",
+          "name": "The Wrap view offers every cohort chain's base coin the member holds from one trading-view-style picker (icon, symbol, network, balance), with unreadable balances shown as unread (never zero) and unconfigured wrappers honestly absent",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/48-wrap-multi-currency.cy.js::WMC-01",
+            "frontend/cypress/e2e/fast/48-wrap-multi-currency.cy.js::WMC-02",
+            "frontend/cypress/e2e/fast/48-wrap-multi-currency.cy.js::WMC-03",
+            "frontend/cypress/e2e/fast/48-wrap-multi-currency.cy.js::WMC-04"
+          ],
+          "note": "WMC-02 pins null-not-zero for an unreadable chain and the switch disclosure; WMC-04 pins the refused-switch wording (both chains named, nothing sent) via the mock wallet's rejectChainSwitch."
+        },
+        {
+          "id": "trade.wrap-cross-chain-submit",
+          "name": "Selecting a coin whose chain differs from the wallet's switches the wallet at submit time (settle loop), wraps against that chain's own wrapped-native contract, and a refused switch names both chains and sends nothing",
+          "status": "covered",
+          "tier": "on-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/45-wrap-cross-chain.cy.js::WXC-01",
+            "frontend/cypress/e2e/full/45-wrap-cross-chain.cy.js::WXC-02",
+            "frontend/cypress/e2e/full/45-wrap-cross-chain.cy.js::WXC-03"
+          ],
+          "note": "The member signs something that costs money, so execution lives here (e2e policy rule 2). WXC-01 starts the mock wallet on Mordor and wraps the local chain's coin \u2014 the switch-then-settle path against a real deposit(), asserted by the wrapped balance read back from the chain; WXC-03 closes the 1:1 round trip."
+        }
+      ]
+    },
+    {
+      "id": "109-token-news",
+      "title": "Token news on portfolio and trade surfaces",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "news.portfolio-token-card",
+          "name": "Selecting a portfolio token shows that asset's latest news with link-out attribution; an unreadable feed renders a sentence + retry (never an empty feed pretending to be no news), an unmapped asset renders honest absence, and the module off hides the card",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-01",
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-03",
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-04",
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-04b",
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-06"
+          ],
+          "issue": "#1465"
+        },
+        {
+          "id": "news.trade-pair-feed",
+          "name": "Selecting a trade pair shows the pair's token news below the amount entry under the same three-state honesty; items are text with attribution, never rendered HTML",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "information",
+          "tests": [
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-05",
+            "frontend/cypress/e2e/fast/49-token-news.cy.js::TN-05b"
+          ],
+          "issue": "#1465"
+        }
+      ]
+    },
+    {
+      "id": "110-multichain-write-seam",
+      "title": "Seamless multichain UX \u2014 chain-abstracted writes on a single EVM seam",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "multichain.claim-on-action-chain",
+          "name": "With the wallet on network B, tapping Claim on a wager living on network A resolves the target chain from the wager, moves the wallet through the one switch-and-settle seam, and completes the claim as a real settled transaction \u2014 no in-app 'switch network' step",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "on-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1552",
+          "note": "T040 has LANDED: the list is estate-wide, every wager carries its chain, and Claim/Refund/Resolve resolve the registry from the wager\\u2019s chain (hooks/useWagerChain.js). The blocker is no longer the product \\u2014 this row is now WRITABLE and wants an on-chain spec: a wager on chain A claimed with the wallet on chain B, asserted by reading the payout back from A. Unit coverage exists (src/test/wagers/useWagerChain.test.jsx, estateWagers.test.js); the money path does not, and the e2e policy requires it here."
+        },
+        {
+          "id": "multichain.refused-switch-discloses",
+          "name": "A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface)",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "disclosure",
+          "tests": [
+            "frontend/cypress/e2e/fast/50-multichain-write-seam.cy.js::MCW-01",
+            "frontend/cypress/e2e/fast/50-multichain-write-seam.cy.js::MCW-02",
+            "frontend/cypress/e2e/fast/50-multichain-write-seam.cy.js::MCW-03"
+          ],
+          "issue": "#1552",
+          "note": "MCW-03 compares the SENTENCES across two unrelated write surfaces, not just that each names both chains \u2014 and found VaultQueueView still carrying a private copy on its first run. The composer is now lib/chains/submitOn.js#chainSwitchRefusal."
+        },
+        {
+          "id": "multichain.rail-unavailable-before-tap",
+          "name": "An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out \u2014 never a submit-time chain-support error",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "account-native",
+          "depth": "none",
+          "risk": "access",
+          "tests": [],
+          "issue": "#1552",
+          "note": "Live in code (VaultQueueView `vault-queue-norail`, WrapView `wrap-rail-unavailable`) but unreachable by a test today: the only branch any surface can reach is passkey-on-a-bundlerless-chain, which needs a REAL passkey identity (loginMethod comes from the wagmi connector, so the no-chain tier cannot produce one without testing its own fake). The account-native tier can, but `dev:e2e:passkey` configures a bundler on Amoy only and Amoy is the chain it connects to, so no bundlerless chain is reachable there either. The signer half (\"vault signer elsewhere\") is not wired: no surface passes `walletChainId`/`canSwitchChain` to resolveWriteRail, so reachability is `unchecked` in production and cross-chain vault rows switch AT the tap instead (covered by VS-04/MCW-01)."
+        },
+        {
+          "id": "multichain.intent-signs-without-switch",
+          "name": "A relayed EIP-712 intent targeting network A is signed while connected to network B with no network change requested at all \u2014 the chain lives in the signature domain",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "on-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1552",
+          "note": "Blocked on T028/T041, not on a test. `useGaslessWrite` accepts `cfg.chainId` (T027) but ALL 22 production call sites omit it, so every intent is still signed against the ambient chain domain. Only the unit suite exercises the target-chain path today."
+        }
+      ]
+    },
+    {
+      "id": "111-sigil-cold-signer",
+      "title": "Sigil cold signer in Protect \u25b8 Off chain",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "sigil.pair-and-add",
+          "name": "Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only; the pairing token device-scoped)",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-01",
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-04"
+          ],
+          "issue": "#1633",
+          "note": "No adapter seam: the real Sigil adapter talks to the REAL services/sigil-bridge, which talks to a stand-in daemon on a real Unix socket (cypress/support/tasks/sigil.js). SIG-01 asserts nothing was signed while adding."
+        },
+        {
+          "id": "sigil.failure-vocabulary",
+          "name": "An unpaired bridge, a missing disk, no bridge at all, and an exhausted disk each render a named state and sign nothing",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
+          "risk": "disclosure",
+          "tests": [
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-02",
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-04"
+          ],
+          "issue": "#1633"
+        },
+        {
+          "id": "sigil.sign-message",
+          "name": "Acting as the Sigil account, Protect \u25b8 Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/fast/51-protect-sigil.cy.js::SIG-03"
+          ],
+          "issue": "#1633",
+          "note": "Found and fixed a spec-088 defect on the way: the deferred-signing dialog rendered UNDER the sheet that asked for it (ActionSheet ceremony tier)."
+        },
+        {
+          "id": "sigil.operate-as-send",
+          "name": "Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log",
+          "status": "covered",
+          "tier": "on-chain",
+          "depth": "settled",
+          "risk": "custody",
+          "tests": [
+            "frontend/cypress/e2e/full/46-sigil-operate-as-send.cy.js::SGO-01"
+          ],
+          "issue": "#1633"
         }
       ]
     }

@@ -18,14 +18,30 @@ browser ─▶ bundler.fairwins.app ─▶ Cloudflare (Transform Rule: +X-Origin
 |---|---|
 | `nginx/bundler.conf.template` | origin-lock map (`$origin_denied`, `map_hash_bucket_size 128`) + **CORS allow-list** (`$cors_allow_origin`) + `/healthz` exempt + proxy to `127.0.0.1:3000` |
 | `nginx/docker-entrypoint.sh` | derives `ORIGIN_LOCK_ENABLED` from whether `ORIGIN_LOCK_SECRET` is set (fail-open, never a 403-brick); trims the secret |
-| `nginx/Dockerfile` | `nginx:1.27-alpine` + `envsubst` |
+| `nginx/Dockerfile` | `nginx:1.30.5-alpine` + `envsubst` |
 | `cloudbuild.yaml` | manual/isolated rollout — build the nginx image + `gcloud run services replace` the full 2-container spec |
 | `deploy/service.yaml` | multi-container Cloud Run (nginx ingress + alto sidecar) — **alto env reconciled to live `alto:v1.2.7` / Polygon 137 (2026-07-06)** |
 
-**Auto-deploy:** the root `cloudbuild.yaml` (fired by the `^main$` Cloud Build trigger on every merge)
-builds `alto-bundler-nginx:$COMMIT_SHA` and `gcloud run services replace`s this service — so merging a
-change here rolls the bundler out automatically. (It redeploys on *every* main merge; add a
-`--included-files services/alto-bundler/**` trigger later if you want to scope it.)
+> ## ⚠ THE CLOUD RUN BUNDLER IS DECOMMISSIONED. DO NOT REDEPLOY IT.
+>
+> Everything below describing a live Cloud Run service is a HISTORICAL RECORD of how the bundler
+> used to run. The bundler now runs on the **`fairwins-bundler` GCE VM** (`infra/vm/bundler/`).
+>
+> **Never run `gcloud run services replace` for `fairwins-alto-bundler`, and never re-add its build
+> step.** Guardrail G-11 exists because two alto instances on ONE executor EOA collide nonces and
+> stall bundles while both look healthy from outside — there is no in-band detection, so the damage
+> is discovered by members failing to transact. `cloudbuild.yaml` records the deletion in place
+> ("Alto ERC-4337 bundler — REMOVED, and it must stay removed"), `deploy/service.yaml` carries the
+> same banner, and `infra/vm/bundler/single-alto-gate.sh` refuses to start the VM stack if the Cloud
+> Run service is found armed.
+>
+> This paragraph previously read as an *instruction* to auto-deploy via `gcloud run services
+> replace`. Following it would have re-armed precisely what the guardrail forbids.
+
+**Deploying a change today:** edit `infra/vm/bundler/`, then follow
+`docs/runbooks/credential-rotation.md` § "Deploying a change to the VMs" — update the node's
+checkout, rsync the deployed copies, restart `fairwins-secrets@bundler` then
+`fairwins-stack@bundler`. No Cloud Build step deploys the bundler.
 
 The origin lock is **fail-open by design**: no `ORIGIN_LOCK_SECRET` → `ORIGIN_LOCK_ENABLED=0` → all
 traffic allowed. Mounting the Secret-Manager `origin-lock-secret` is the single switch that arms it, so

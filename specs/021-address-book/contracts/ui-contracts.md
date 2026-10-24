@@ -12,7 +12,12 @@
 - CRUD: add/edit/delete contact; add/edit/delete address (via `ContactEditModal`)
   (FR-004). Network field defaults to the active chain (FR-003).
 - Search box filters contacts/addresses (FR-015 within the panel).
-- Import/Export buttons drive `addressBookCrypto` and the merge-conflict flow.
+- Import/Export buttons drive `addressBookFile` (plain text since issue #1550) and the
+  merge-conflict flow. Each carries an icon beside its word label, and an `aria-label`
+  because `.ab-btn-label` is hidden below 640px — an icon-only button with an
+  `aria-hidden` icon has no accessible name (FR-033). Neither is gated on a wallet
+  signer. A standing note beside them states that an export is readable by anyone who
+  opens it (FR-031).
 - Screens visible addresses on open via `useAddressScreening` (FR-010, Q5).
 - Empty state when the book is empty; no-wallet state consistent with other My
   Account sections (edge case).

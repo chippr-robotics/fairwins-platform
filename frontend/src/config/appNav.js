@@ -135,6 +135,9 @@ const NAV_FEATURE_IDS = {
   // one place rather than being re-derived at each conversion.
   clearpath: 'clearpath',
   tokens: 'token-mint',
+  // Assistant (spec 104) — the agent controls tab. Same feature id the launcher already gates on,
+  // so a tenant without the assistant has no tab, no launcher and no `?tab=assistant` panel.
+  assistant: 'assistant',
 }
 
 export function isNavItemEnabledForTenant(id) {
@@ -200,6 +203,13 @@ const RAW_NAV_GROUPS = [
       // mini-app that has not been registered would make the catalog claim a verified package
       // exists when none does — the one thing this surface must never do.
       { id: 'apps', label: 'Apps', icon: 'grid' },
+      // Assistant (spec 104) — the AGENT controls: which rail answers (FairWins membership or the
+      // member's own GutterToken credits), the GutterToken key, and API access for the member's
+      // own tools. These used to be two cards in Settings; they are not "how this app looks",
+      // they are things that act on the member's behalf, which is what Tools holds. The card ids
+      // (`assistant-prefs`, `api-access`) are unchanged, so the old Settings deep links redirect
+      // here (WalletPage) rather than dying.
+      { id: 'assistant', label: 'Assistant', icon: 'chat' },
       // 'network' deliberately absent (spec 069): network settings moved to the account
       // button beside Settings. The app reads every supported network at once, so the
       // active chain is a per-transaction detail rather than a tool you go to — and the

@@ -10,13 +10,20 @@
 // globally-mounted SignerRequestHost renders the right dialog (passphrase/biometric unlock, or
 // device connect), and `attachActingSigner` resolves the send and caches the signer for the
 // session. Cancelling the dialog rejects the pending action — never a silent hang.
+//
+// Spec 102 (D6, FR-013) — acting as a vault binds to the ADDRESS. `active.chainIds` is every chain
+// the vault exists on at switch time; `active.chainId` is the wallet's chain when the vault has an
+// instance there, else the vault's pinned chain. A wallet chain change re-evaluates that with no
+// prompt: it follows the wallet where the vault exists, and holds the pin where it does not (so a
+// send auto-switches back — useActiveAccount). Consumers that read `active.chainId` keep working.
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useWallet } from '../hooks'
 import { CustodyContext } from './CustodyContext'
+import { pickVaultChain } from '../lib/custody/vaultGroups'
 
 export function CustodyProvider({ children }) {
-  const { address } = useWallet()
+  const { address, chainId: walletChainId } = useWallet()
   const [active, setActive] = useState({ mode: 'personal' })
   // Spec 062: when a recovered legacy account HAS been unlocked, the ethers signer lives here in
   // MEMORY ONLY — never persisted, never serialized, cleared on any identity change. It is the
@@ -78,18 +85,44 @@ export function CustodyProvider({ children }) {
     }
   }, [address, setHardwareSigner, cancelSignerRequest])
 
+  /**
+   * Operate as a vault. `chainIds` is every chain the vault is on; it defaults to `[chainId]` so
+   * the single-chain callers (VaultActionSheet, TransferForm's picker) keep working unchanged.
+   * The resolved `chainId` prefers an explicit `chainId` the vault is on, then the wallet's chain,
+   * then the first instance (`pickVaultChain`).
+   */
   const operateAsVault = useCallback((vault) => {
-    if (!vault?.address || vault.chainId == null) return
+    if (!vault?.address) return
+    const chainIds = (Array.isArray(vault.chainIds) && vault.chainIds.length > 0
+      ? vault.chainIds
+      : vault.chainId != null
+        ? [vault.chainId]
+        : []
+    ).map(Number).filter(Number.isFinite)
+    if (chainIds.length === 0) return
     setLegacySigner(null)
     setHardwareSigner(null)
     cancelSignerRequest('The acting account changed.')
     setActive({
       mode: 'vault',
       vaultAddress: vault.address,
-      chainId: Number(vault.chainId),
+      chainIds,
+      chainId: pickVaultChain({ chainIds, walletChainId, preferred: vault.chainId }),
       label: vault.label || '',
     })
-  }, [setHardwareSigner, cancelSignerRequest])
+  }, [setHardwareSigner, cancelSignerRequest, walletChainId])
+
+  // Spec 102 FR-013 — the acting vault follows the wallet's chain where it EXISTS there, and holds
+  // its pin otherwise. Functional update + identity return so a no-op change re-renders nothing.
+  useEffect(() => {
+    const wallet = Number(walletChainId)
+    if (!Number.isFinite(wallet)) return
+    setActive((a) =>
+      a.mode === 'vault' && Array.isArray(a.chainIds) && a.chainIds.includes(wallet) && a.chainId !== wallet
+        ? { ...a, chainId: wallet }
+        : a,
+    )
+  }, [walletChainId])
 
   const operateAsPersonal = useCallback(() => {
     setLegacySigner(null)

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useChainId } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { getNetwork, getCurrentChainId } from '../config/networks'
 import logger from '../utils/logger'
 
@@ -172,7 +172,7 @@ function categoriesKeyOf(categories) {
  *     usePolymarketSearch({ limit, categories: ['sports'] })
  */
 export function usePolymarketSearch({ limit = DEFAULT_SEARCH_LIMIT, categories = [] } = {}) {
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
   const apiBase = apiBaseFor(chainId)
   const catKey = categoriesKeyOf(categories)
@@ -262,7 +262,7 @@ export function usePolymarketSearch({ limit = DEFAULT_SEARCH_LIMIT, categories =
  *     usePolymarketTopMarkets({ categories: ['politics', 'sports'], limit: 12 })
  */
 export function usePolymarketTopMarkets({ categories = [], limit = DEFAULT_BROWSE_LIMIT } = {}) {
-  const wagmiChainId = useChainId()
+  const wagmiChainId = useWalletChainId()
   const chainId = wagmiChainId || getCurrentChainId()
   const apiBase = apiBaseFor(chainId)
   const catKey = categoriesKeyOf(categories)

@@ -13,7 +13,7 @@
  *
  * Status is carried by TEXT, not colour alone (constitution V).
  */
-import { ethers } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { networkName } from '../../lib/chains/estate'
 import { isRead, isNotDeployed, partialLabel, formatUnitAmount } from '../../lib/chains/chainReadResult'
 import './ChainStateTable.css'
@@ -35,7 +35,7 @@ export default function ChainStateTable({ results = [], caption, totals = null, 
             <tr key={r.chainId} className={`chain-state-row is-${r.status}`}>
               <th scope="row">{networkName(r.chainId)}</th>
               <td>
-                {isRead(r) && <span className="chain-state-value">{formatUnitAmount(r, ethers.formatUnits)}</span>}
+                {isRead(r) && <span className="chain-state-value">{formatUnitAmount(r, formatUnits)}</span>}
                 {isNotDeployed(r) && (
                   <span className="chain-state-absent">Not deployed on this network</span>
                 )}
@@ -72,7 +72,7 @@ export default function ChainStateTable({ results = [], caption, totals = null, 
               results.find((r) => r.unit?.symbol === symbol)?.unit?.decimals ?? 0
             return (
               <p key={symbol} className="chain-state-total">
-                <strong>{ethers.formatUnits(amount, decimals)} {symbol}</strong>
+                <strong>{formatUnits(amount, decimals)} {symbol}</strong>
                 <span className="chain-state-total-scope"> across {symbol} networks</span>
               </p>
             )

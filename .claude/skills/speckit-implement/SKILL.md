@@ -212,6 +212,36 @@ Check if `.specify/extensions.yml` exists in the project root.
     To execute: `/{command}`
     ```
 
+## Working with subagents (this repository)
+
+Full protocol: `docs/developer-guide/multi-agent-workflow.md`.
+
+When you delegate a task to a subagent, the task has a **sub-issue** (see `/speckit-taskstoissues`)
+and the sub-issue is where its state lives — not in your context, which the next agent will not have.
+
+- **Handing it out**: **assign** the sub-issue (to yourself if the subagent has no identity). The
+  assignee is the claim — there is deliberately no status label.
+- **Getting it back**: the subagent's report is a **claim, not a result**. Before you accept it:
+  read the *diff* rather than the summary; run the gates the change touched (`monorepo-verify`
+  skill names which gate proves what); check for an assertion that cannot fail — a test behind a
+  precondition guard ending in `expect(true).to.be.true` reports as coverage and proves nothing;
+  and check it did not widen the scope, because a subagent that also refactored something has done
+  two things, one of which nobody reviewed.
+- **If it is wrong**: say what is wrong on the sub-issue and hand it back. Silently fixing it means
+  the next identical task is delegated with the same instructions.
+- **When it is right**: put **`Closes #<sub-issue>`** in the PR body. GitHub honours closing
+  keywords only on the default branch (`main`) and feature PRs target `staging`, so
+  `close-linked-issues.yml` applies them on the merge instead. **Read the issue back afterwards** —
+  it is a workflow, workflows fail, and an automation nobody verifies is a second thing that can be
+  quietly wrong.
+- **If it stalls**: `blocked` **plus a comment naming the blocker**, removed when it clears.
+- **If you abandon it**: **unassign** and say why. An assignee is only useful while it is true.
+
+There is no status label, on purpose. The GitHub MCP server cannot write Projects v2, and a
+`status:*` label mirrored onto the board is a second copy of state the repo already holds — it
+drifts the moment an agent stops mid-task, and the board then shows the wrong answer confidently.
+Moving cards is a human task.
+
 ## Completion Report
 
 Report final status with summary of completed work.
@@ -220,5 +250,10 @@ Report final status with summary of completed work.
 
 - [ ] All tasks in tasks.md completed and marked `[X]`
 - [ ] Implementation validated against specification, plan, and test coverage
+- [ ] Every sub-issue reviewed against its diff (not its report), and assigned/unassigned truthfully
+- [ ] The PR body carries `Closes #N` for the parent and every sub-issue it finishes
+- [ ] After the merge, each of those issues was read back and confirmed closed
+- [ ] Anything stuck carries `blocked` and a comment naming the blocker
+- [ ] Scope left undone is stated explicitly and has a follow-up issue
 - [ ] Extension hooks dispatched or skipped according to the rules in Mandatory Post-Execution Hooks above
 - [ ] Completion reported to user with summary of completed work

@@ -26,22 +26,33 @@ services:
   # ---- namespace owner: the policy gateway (the only public surface) ----
   gateway:
     container_name: fairwins-gateway-gateway
-    # agentic-096 (staging 7d5f2c10): the first image carrying spec 095's member API and spec 096's
-    # x402 rail, plus the spec-089 FinOps catalogue work and the member-API quota/spend bounds from
-    # #1311. Verified before push: /status returns a `memberApi` block (with x402 nested inside it)
-    # that the live perps-083 does not. Digest sha256:c57e88ae0960519ef461a7316f782281e0f1bcccc499a…
+    # spec109-7110b663 (#1544, spec-109 go-live): the first image carrying the token-news read
+    # proxy (services/relay-gateway/src/news/). Verified before push, on the built image itself:
+    # /status returns a `news` block ({enabled, killed, cacheTtlMs: 300000}) that the previous pin
+    # spec107-1ac148bf does not, and GET /v1/news/137/native?slug=matic-network answered a `read`
+    # envelope with live items. Digest sha256:1f5e5ca951fd16fbe6f6d7658834546e6232bfccae9056305…
     #
-    # The member API and the x402 rail were switched ON in the same change that promoted
-    # `x402-agent-payments` to a live FinOps source — shipping a revenue path and the thing that
-    # watches it together is what the C2b gate exists to force. ASSISTANT_ENABLED is still off;
-    # see the flag block below for why that one is not a flag flip.
-    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-relay-gateway:agentic-096
+    # That `news` block is itself part of this build: newsStatus() shipped with 109 exported and
+    # never called, so /status could not distinguish an image carrying the module from one
+    # predating it — the pre-pin check the NEWS_ENABLED note below tells you to run had no signal
+    # to read. Wiring it in is what makes the ritual performable, not a cosmetic addition.
+    #
+    # Carries everything the previous two pins did: spec 095's member API, spec 096's x402 rail,
+    # the spec-089 FinOps catalogue work and the member-API quota/spend bounds from #1311; the
+    # spec-107 keyed-RPC issuance; and the spec 082/083 perps proxy. ASSISTANT_ENABLED is still
+    # off; see the flag block below for why that one is not a flag flip.
+    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-relay-gateway:spec109-7110b663
     restart: unless-stopped
     pull_policy: missing
     ports:
       - "127.0.0.1:8788:8788"
     env_file:
       - /run/fairwins/gateway.env   # gateway credentials only. MUST NOT contain GCP_PRIVATE_KEY.
+    volumes:
+      # The SIGHUP reload source (spec 106 FR-014): env_file above is read by compose ON THE HOST
+      # at container create; this read-only mount is what lets the RUNNING process re-read the
+      # same file. ro on purpose — the gateway consumes configuration, it never writes it.
+      - /run/fairwins/gateway.env:/run/fairwins/gateway.env:ro
     environment:
       PORT: "8788"
       ENABLED_CHAIN_IDS: "63,137"
@@ -125,6 +136,47 @@ services:
       BTC_ENABLED: "true"
       BTC_ESPLORA_URL: "https://mempool.space/api"
       BTC_STAMPS_URL: "https://stampchain.io"
+      # ---- Caller identity (spec 106) — OBSERVE MODE ----
+      # Two switches, deliberately (the spec's staged deploy): ENABLED resolves every caller's tier
+      # and reports it (X-FairWins-Tier + the gated /status block) while changing NO status code;
+      # ENFORCE is the second, separate step, taken only after the tier model has been watched
+      # against real traffic. A safety layer that starts refusing the moment it deploys fails in
+      # the shape "the product is broken" — so ENFORCE stays commented until observe-mode data
+      # says otherwise. Both reload via SIGHUP (RELOAD_ENV_FILE below), no container replacement.
+      IDENTITY_ENABLED: "true"
+      # IDENTITY_ENFORCE: "true"
+      # ---- Keyed RPC issuance (spec 107, #1469) ----
+      # POST /v1/access/rpc mints short-lived READ-ONLY ES256 JWTs for the dedicated issuance
+      # endpoint (657013 — provisioned and live-fire verified on #1468: one token spans all five
+      # EVM mainnets, bare URL answers 401, eth_sendRawTransaction answers -32611 WITH a valid
+      # token, expiry enforced). Credentials arrive via fetch-secrets (RPC_ACCESS_SIGNING_KEY +
+      # RPC_ACCESS_ADMIN_KEY in gateway.env); with either absent this whole block is inert and the
+      # route answers 503 access_unconfigured. The URLs below are PUBLIC information by design —
+      # stand-alone mode means the URL carries no credential and only a valid JWT is served.
+      # One endpoint id everywhere => the FR-026 enforcement verdict is checked once and its cache
+      # serves all five chains.
+      RPC_ACCESS_ENABLED: "true"
+      RPC_ACCESS_SIGNING_KID: "k1"
+      RPC_ACCESS_ENDPOINT_ID_1: "657013"
+      RPC_ACCESS_ENDPOINT_URL_1: "https://small-white-general.quiknode.pro/"
+      RPC_ACCESS_ENDPOINT_ID_10: "657013"
+      RPC_ACCESS_ENDPOINT_URL_10: "https://small-white-general.optimism.quiknode.pro/"
+      RPC_ACCESS_ENDPOINT_ID_137: "657013"
+      RPC_ACCESS_ENDPOINT_URL_137: "https://small-white-general.matic.quiknode.pro/"
+      RPC_ACCESS_ENDPOINT_ID_8453: "657013"
+      RPC_ACCESS_ENDPOINT_URL_8453: "https://small-white-general.base-mainnet.quiknode.pro/"
+      RPC_ACCESS_ENDPOINT_ID_42161: "657013"
+      RPC_ACCESS_ENDPOINT_URL_42161: "https://small-white-general.arbitrum-mainnet.quiknode.pro/"
+      # ---- Operability (specs 106/107) ----
+      # SIGHUP re-reads the allowlisted operational switches from this file — which is the SAME
+      # file env_file: reads at container create, mounted read-only below so the running process
+      # can re-read it. Kill switches, enable flags and ceilings only; fund-path config
+      # deliberately never reloads (policy/reload.js is the allowlist).
+      RELOAD_ENV_FILE: "/run/fairwins/gateway.env"
+      # Usage counters for the FinOps gateway-upstream-usage source (#1447): per-tier and
+      # per-upstream request counts as JSON. Compose-network internal — this port is deliberately
+      # NOT in ports: above and must never be published to the host.
+      METRICS_PORT: "9091"
       # ---- Perps read proxy (specs 082 + 083) ----
       # READ-ONLY BY CONSTRUCTION: this module has no write route at all. It proxies three PUBLIC
       # venue APIs (Gains, GMX, Hyperliquid) for market data and a member's own positions, and holds
@@ -146,6 +198,30 @@ services:
       # rather than carrying a code that earns nothing. GMX's UI fee is NOT here — it rides on-chain
       # calldata from the SPA (uiFeeReceiver), never a gateway request.
       # PERPS_GAINS_REFERRER / PERPS_GMX_REF_CODE / PERPS_HL_BUILDER_ADDRESS: unset on purpose.
+      # ---- Token news read proxy (spec 109) ----
+      # READ-ONLY BY CONSTRUCTION, like perps above: no write route, no credential of any kind. It
+      # proxies the KEYLESS Alphaday tags feed, which is why there is no NEWS_API_KEY to wire — the
+      # vendor needs none, and it has no CORS, which is why the proxy exists at all rather than the
+      # browser calling it directly.
+      #
+      # REQUIRES AN IMAGE CONTAINING THE NEWS MODULE — and as of the pin above it has one
+      # (spec109-7110b663, #1544). This flag was inert from #1543 until that repin, because the
+      # previous pin spec107-1ac148bf PREDATED spec 109: `/v1/news/*` did not exist there and
+      # answered 404, not 503. The SPA reads a 404 as not-configured — absence, rendering nothing
+      # — so that window was silent rather than showing every member a failure they could not act
+      # on. Keep that branch: it is what makes the NEXT such window safe, not dead code.
+      #
+      # The rule survives the fix: before pinning any future tag, boot the image and confirm
+      # /status carries a `news` block, exactly as the perps note above describes. A flag with no
+      # code behind it looks enabled and does nothing.
+      #
+      # FinOps: the cost source `alphaday-news-api` is already catalogued LIVE (basis modelled, $0
+      # on the vendor's free tier), so no C2b promotion rides on this switch — there is no payee,
+      # no fee and no revenue path anywhere in the module.
+      NEWS_ENABLED: "true"
+      # Cache TTL is CLAMPED to >= 300000 ms in config (the vendor itself serves max-age=300), so a
+      # lower value here buys load, not freshness, and is logged once on boot when clamped. Left
+      # unset to take that floor. NEWS_BASE_URL is likewise unset: the default is the vendor.
     cpus: 0.5
     mem_limit: 320m
     healthcheck:
@@ -170,7 +246,10 @@ services:
     network_mode: "service:gateway"
     depends_on:
       redis:
-        condition: service_started
+        # service_healthy, not service_started (#1652): the engine now reads its whole state from
+        # redis at boot, and redis replays its AOF first. Booting against a redis that is still
+        # loading answers LOADING errors, which would crash-loop the engine until it is ready.
+        condition: service_healthy
     env_file:
       - /run/fairwins/engine.env    # API_KEY, WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY — engine ONLY
     environment:
@@ -179,6 +258,37 @@ services:
       METRICS_ENABLED: "false"
       LOG_LEVEL: "info"
       REDIS_URL: "redis://localhost:6379"     # correct verbatim — shared namespace
+      # ---- Persistent engine state (#1652) ----
+      # The engine's repositories (relayers, TRANSACTIONS, signers, notifications, networks, the nonce
+      # counter) live in redis instead of process memory, so a restart no longer forgets pending
+      # transactions or their webhooks (OZ Relayer v1.4.0 src/config/server_config.rs
+      # get_repository_storage_type; src/bootstrap/initialize_app_state.rs initialize_repositories).
+      #
+      # STORAGE_ENCRYPTION_KEY is REQUIRED in this mode — initialize_repositories refuses to boot
+      # without it — and arrives via engine.env (fetch-secrets.sh: relay-engine-storage-key). It
+      # encrypts the signer and notification records at rest, bound to the key prefix, so the prefix
+      # below is pinned here rather than left to an upstream default that could change under us.
+      #
+      # THE SWITCH IS ARMED BY THE SECRET, NOT BY THIS FILE. REPOSITORY_STORAGE_TYPE is deliberately
+      # NOT set here: fetch-secrets.sh writes REPOSITORY_STORAGE_TYPE=redis into engine.env only when
+      # relay-engine-storage-key has a version, and `environment:` would override env_file if it were
+      # set below. Every boot pulls origin/main (startup.sh), so a hard dependency on a secret an
+      # operator has not created yet would take the WHOLE stack — gateway and paymaster included —
+      # down at the first reboot after promotion. Absent key => the engine keeps today's in-memory
+      # behaviour and the journal says why; adding the secret version during the drained rollout
+      # window is the deliberate act that switches storage (runbook "Storage mode").
+      #
+      # THE CONSEQUENCE: once redis holds data the engine SKIPS config.json on boot
+      # (src/bootstrap/config_processor.rs process_config_file). A config.json edit no longer takes
+      # effect on restart. Cap changes use PATCH /api/v1/relayers/<id>; network changes (features,
+      # blocktime, confirmations) and signer/notification changes need a deliberate one-shot reset.
+      # See docs/runbooks/relayer-operations.md "Storage mode".
+      REDIS_KEY_PREFIX: "oz-relayer"
+      # MUST stay "false" in git. true drops relayers, TRANSACTIONS, signers, notifications, networks,
+      # plugins and API keys on EVERY boot (config_processor.rs, drop_all_entries), which forgets every
+      # pending transaction — the exact thing redis storage exists to prevent. A reset is a one-shot,
+      # reviewed, drained-lane operation described in the runbook, never a standing setting.
+      RESET_STORAGE_ON_START: "false"
       GCP_PRIVATE_KEY_ID: "4f206bc79b3f42976c9c49a30d485e3b304b750f"
       GCP_CLIENT_EMAIL: "fairwins-relay-engine@chippr-bots-site-wp.iam.gserviceaccount.com"
     volumes:
@@ -195,9 +305,35 @@ services:
       - /opt/fairwins/repo/services/oz-relayer/deploy/production/config.json:/app/config/config.json:ro
     cpus: 0.35
     mem_limit: 320m
+    labels:
+      com.fairwins.service: "relay-engine"
+    # ENGINE LOGS GO TO CLOUD LOGGING (#1653); only this service. The engine's most important failure
+    # is silent: a lane stuck at gas_price_cap logs "skipping resubmission" and nothing else (upstream
+    # OpenZeppelin/openzeppelin-relayer#808), and under json-file that line never left the VM. The
+    # gcplogs driver ships every engine line to Cloud Logging as logName
+    # projects/chippr-bots-site-wp/logs/gcplogs-docker-driver, filterable by container name.
+    # Filter + proposed log metric / alert: docs/runbooks/relayer-operations.md "Engine logs".
+    #
+    # `docker logs` KEEPS WORKING: gcplogs cannot be read back, so Docker (20.10+, "dual logging")
+    # also writes a local copy and serves `docker logs` from it. probe.sh reads exactly that, so the
+    # on-VM stuck-lane check stays as the backstop. The cache-* options below size that local copy to
+    # the same 3 x 10 MB the json-file driver had, instead of the 5 x 20 MB default.
+    #
+    # mode non-blocking: the engine must never stall on its own stdout because Cloud Logging is slow
+    # or unreachable. The cost is dropped lines once the 4 MB buffer fills, which is acceptable: logs
+    # are the diagnosis, never the relay path (never-stranded). Dropped lines are still in the local copy.
+    #
+    # gcplogs authenticates as the VM's service account via the metadata server; that account already
+    # holds roles/logging.logWriter for the Ops Agent (infra/terraform/environments/prod/main.tf).
     logging:
-      driver: json-file
-      options: { max-size: "10m", max-file: "3" }
+      driver: gcplogs
+      options:
+        gcp-project: "chippr-bots-site-wp"
+        labels: "com.fairwins.service"
+        mode: "non-blocking"
+        max-buffer-size: "4m"
+        cache-max-size: "10m"
+        cache-max-file: "3"
 
   # ---- FinOps exporter (spec 089), INSIDE the gateway's namespace ----
   #
@@ -209,7 +345,26 @@ services:
   # key material ever lands there.
   finops:
     container_name: fairwins-gateway-finops
-    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-finops-exporter:finops-089
+    # finops-52fdb6e2 — adds the two fixes that the first working image exposed (#1586):
+    #   * QuickNode reads `data.credits_used`, the field the API actually returns. The `quicknode`
+    #     source was `unreadable` for its whole life behind five guessed field names.
+    #   * The boot fan-out is bounded (4 concurrent) and outbound RPC paced (25/s, HALF the 50 req/s
+    #     the keyed endpoint shares with the gateway and bundler). On finops-8e9c1730 the unbounded
+    #     `Promise.all` took eleven sources `unreadable` with `-32007` for ~2 minutes per restart.
+    # Smoked under this file's own --memory 384m: healthz in 2s, still serving after 60s,
+    # oom=false restarts=0. A local boot with the deployed config shape hit 0 rate-limit errors.
+    #
+    # finops-8e9c1730 was the first image that SERVES. The pin before it (spec107-1ac148bf, 2026-09-05)
+    # was OOM-killed before app.listen() on every boot: 5,966 restarts, not one scrape, every FinOps
+    # panel blank. Verified on the built image itself under this file's own --memory 384m, twice:
+    # healthz in 2s, still serving /metrics after a 60s settle window, oom=false restarts=0. The
+    # PREVIOUS pin fails that same check at 384m — double the ceiling it actually died at — which is
+    # how we know the limit below is headroom and the fix is the x402 log filter.
+    #
+    # Also carries what spec107-1ac148bf predated: the spec-109 alphaday entry (dead on arrival — it
+    # had no flatSubscriptions key and reported a QuickNode credential as its problem), the #1539
+    # executor-nonce series, and the newly catalogued pinata + thegraph sources.
+    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-finops-exporter:finops-52fdb6e2
     restart: unless-stopped
     pull_policy: missing
     network_mode: "service:gateway"
@@ -218,6 +373,10 @@ services:
     environment:
       PORT: "9464"
       FINOPS_BIND_HOST: "127.0.0.1"
+      # Gateway usage counters (spec 106/#1447): the gateway-upstream-usage source. Reaches the
+      # gateway's compose-internal counters port by service name; unset would read not-configured,
+      # which is honest, but this node runs both halves so it is wired on.
+      FINOPS_GATEWAY_METRICS_URL: "http://gateway:9091/counters"
       # The build's cohort. Reads never cross the testnet/mainnet boundary (constitution III).
       FINOPS_COHORT_CHAIN_IDS: "63,137"
       RPC_URLS_63: "https://rpc.mordor.etccooperative.org,https://geth-mordor.etc-network.info"
@@ -259,18 +418,47 @@ services:
       # Unset ⇒ usage is still reported, no dollar figure is invented.
       # The zone is on Cloudflare's FREE plan, so 0 here is an ASSERTED zero, not an unset default —
       # which is the distinction the collector draws: unset reports `not-configured`, 0 reports a
-      # modelled cost of nothing. QuickNode stays unset until the account upgrade, and correctly
-      # reports `not-configured` rather than inventing a figure.
+      # modelled cost of nothing.
       CLOUDFLARE_ZONE_ID: "a548702815279eab4646275cde3be103"
       FINOPS_CLOUDFLARE_PLAN_USD: "0"
+      # Same asserted zero, for the plan this whole system runs on (FR-029 — a FinOps system that
+      # hides its own cost is not credible). Operator-confirmed free tier, 2026-09-11; unset was
+      # reporting `not-configured`, which is honest but indistinguishable on a panel from the
+      # QuickNode source beside it that is genuinely broken.
+      FINOPS_GRAFANA_PLAN_USD: "0"
+      # The Graph: an asserted zero, and the evidence is IN THE REPO rather than on a billing page.
+      # Every configured subgraphUrl in frontend/src/config/networks.js points at
+      # api.studio.thegraph.com — Subgraph Studio, the free development tier, which consumes no GRT.
+      # This is therefore a property of the endpoint we call, not a guess about an account.
+      #
+      # It stops being true the moment a subgraphUrl becomes gateway.thegraph.com: query fees are
+      # then paid in GRT from a billing balance on ARBITRUM ONE (L1 GRT does not pay them), and the
+      # free allowance FAILS rather than billing over. `check:finops` C6 fails on exactly that
+      # combination, so this line cannot quietly outlive the tier it describes.
+      FINOPS_THEGRAPH_PLAN_USD: "0"
+      # V8 SIZES ITS HEAP FROM HOST RAM, NOT THE CGROUP. Without this, Node looks at the VM's
+      # ~2 GB and targets a heap far above the container ceiling, so it feels no pressure to
+      # collect and simply grows until the kernel kills it — which is precisely what happened
+      # here: OOM-killed at exactly 192 MiB, 5,966 times, always before `app.listen()`, so the
+      # exporter never served a scrape and every FinOps panel read "no data". Keep this BELOW
+      # mem_limit: the ceiling has to leave room for the non-heap side (sockets, buffers, the
+      # BigQuery client) or V8 stays under its own limit while the cgroup still kills the process.
+      NODE_OPTIONS: "--max-old-space-size=256"
     cpus: 0.2
-    mem_limit: 192m
+    # 384m, not 192m. Measured: module load alone (ethers + @google-cloud/bigquery + express) is
+    # ~87 MB before a single collector runs, and the fan-out across ~25 sources sits on top of that.
+    # 192m left no headroom at all, so any transient allocation was fatal rather than collected.
+    # Host has ~880 MB free with the rest of the stack running, so this is affordable headroom, not
+    # a licence to grow: NODE_OPTIONS above keeps V8 collecting well under it.
+    mem_limit: 384m
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:9464/healthz | grep -q '\"status\":\"ok\"' || exit 1"]
       interval: 60s
       timeout: 10s
       retries: 3
-      start_period: 60s     # the first collectAll() fans out across every source before listening
+      # The listener now comes up BEFORE the first collection rather than behind it, so this is a
+      # real liveness window again instead of a race against a fan-out across every vendor.
+      start_period: 30s
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -311,24 +499,57 @@ services:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
 
-  # ---- ephemeral redis, INSIDE the gateway's namespace ----
+  # ---- persistent redis, INSIDE the gateway's namespace ----
+  #
+  # The engine's state store since #1652 (it was ephemeral before: --save "" --appendonly no, with the
+  # engine holding its records in memory and redis carrying only the job queue). Now it carries
+  # transaction records and the nonce counter, so:
+  #   * AOF is ON (appendfsync everysec: at most ~1 s of writes lost on a hard crash) and the data
+  #     lives on the named volume redis-data. "docker compose down" (the unit's ExecStop) keeps named
+  #     volumes; only "down -v" would delete it — never add -v to the unit.
+  #   * noeviction is MANDATORY. Any LRU/LFU policy would silently evict transaction records or
+  #     queue jobs under memory pressure. With noeviction a full redis fails writes LOUDLY instead.
+  #     (It is also redis's default; it is stated so a future edit has to remove it on purpose.)
+  #   * maxmemory 96mb sits under mem_limit 192m: the gap is for the AOF-rewrite fork and buffers,
+  #     so hitting the limit is a redis error (visible) rather than a cgroup OOM-kill (a restart that
+  #     looks like a crash). Records for final-state transactions expire after
+  #     TRANSACTION_EXPIRATION_HOURS (default 4), so the working set is small.
+  # Do NOT change this image string without the version-pin gate (scripts/deps/version-pins.json).
   redis:
     container_name: fairwins-gateway-redis
-    image: redis:7-alpine
+    image: redis:7.4.11-alpine
     restart: unless-stopped
     pull_policy: missing
     network_mode: "service:gateway"
     depends_on:
       gateway:
         condition: service_started
-    # Ephemeral by design, matching Cloud Run: no persistence, nothing to restore. The engine's
-    # in-flight state is reconstructible from chain.
-    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    command:
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "yes"
+      - --appendfsync
+      - everysec
+      - --maxmemory
+      - 96mb
+      - --maxmemory-policy
+      - noeviction
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      # redis-cli ping answers LOADING (non-zero) while the AOF replays, PONG once it can serve.
+      test: ["CMD-SHELL", "redis-cli ping | grep -q PONG || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+      start_period: 5s
     # NOTE: do NOT add `read_only: true` + `cap_drop: ALL` here. redis:7-alpine's entrypoint runs
     # `find . \! -user redis -exec chown redis '{}' +` as root; with CAP_CHOWN dropped that returns
     # EPERM and the container never starts. This was a reproduced boot-fatal defect in an earlier draft.
     cpus: 0.15
-    mem_limit: 128m
+    mem_limit: 192m
     logging:
       driver: json-file
       options: { max-size: "10m", max-file: "3" }
@@ -340,3 +561,8 @@ services:
 # data collected during the incident somebody later wants to look at.
 volumes:
   alloy-data:
+  # The engine's state (#1652): relayers, transactions, signers, nonce counter, job queue. This volume
+  # IS the record of what is in flight, so unlike the old ephemeral redis it must survive a stack
+  # restart. The chain remains the source of truth for settlement; losing this volume forgets pending
+  # transactions and their webhooks (their intents stay "submitted"), exactly as pre-#1652 did.
+  redis-data:

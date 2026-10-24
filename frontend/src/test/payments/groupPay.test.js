@@ -25,6 +25,9 @@ import {
   validateRecipients,
   selectGroupRail,
   describeRail,
+  groupPayAvailability,
+  GROUP_PAY_ENABLED,
+  GROUP_UNAVAILABLE,
 } from '../../lib/payments/groupPay'
 
 const A = '0x1111111111111111111111111111111111111111'
@@ -281,5 +284,76 @@ describe('describeRail', () => {
     expect(d.submissionLine).toMatch(/3 separate/i)
     expect(d.feeLine).toMatch(/POL/)
     expect(d.outcomeLine).toMatch(/continue|rest|each/i)
+  })
+})
+
+/*
+ * Issue #1441 — whether the affordance is OFFERED, which is a different question from which rail
+ * would carry it. The flag answers the first for the whole app today; the per-rail rules under it
+ * are what #1538 turns back on, and they are tested here rather than left to be written later
+ * against a surface nobody can see.
+ */
+describe('groupPayAvailability', () => {
+  it('is withdrawn by default, because GROUP_PAY_ENABLED is false', () => {
+    expect(GROUP_PAY_ENABLED).toBe(false)
+    const a = groupPayAvailability({ rail: GROUP_RAIL.BATCH_PASSKEY, chainId: 137 })
+    expect(a.available).toBe(false)
+    expect(a.code).toBe(GROUP_UNAVAILABLE.WITHDRAWN)
+    // The member is told it is not available — never that their account or network is at fault.
+    expect(a.reason).toMatch(/not available yet/i)
+  })
+
+  it('withdraws on every rail, so no surface can find a way through', () => {
+    for (const rail of Object.values(GROUP_RAIL)) {
+      expect(groupPayAvailability({ rail, chainId: 137 }).available).toBe(false)
+    }
+  })
+
+  describe('once enabled (#1538)', () => {
+    const on = (args) => groupPayAvailability({ enabled: true, chainId: 137, ...args })
+
+    it('offers the passkey batch rail where the UserOp can actually be submitted', () => {
+      expect(on({ rail: GROUP_RAIL.BATCH_PASSKEY, passkeySupported: true }).available).toBe(true)
+    })
+
+    it('refuses the passkey batch rail on a chain with no bundler, and names the way out', () => {
+      const a = on({ rail: GROUP_RAIL.BATCH_PASSKEY, passkeySupported: false })
+      expect(a.available).toBe(false)
+      expect(a.code).toBe(GROUP_UNAVAILABLE.CHAIN_NO_BATCH)
+      expect(a.reason).toMatch(/switch to a network/i)
+    })
+
+    it('offers the vault rail — its MultiSend shape is a later, disclosed read (#1368)', () => {
+      expect(on({ rail: GROUP_RAIL.VAULT_PROPOSAL }).available).toBe(true)
+    })
+
+    it('refuses the sequential rail: N transactions is not a batch, whatever the copy says', () => {
+      const a = on({ rail: GROUP_RAIL.SEQUENTIAL })
+      expect(a.available).toBe(false)
+      expect(a.code).toBe(GROUP_UNAVAILABLE.NO_BATCH_RAIL)
+    })
+
+    it('passes a refused rail\'s own reason through rather than inventing a second one', () => {
+      const a = on({ rail: GROUP_RAIL.REFUSED, railReason: 'Switch to the vault\'s network.' })
+      expect(a.available).toBe(false)
+      expect(a.code).toBe(GROUP_UNAVAILABLE.RAIL_REFUSED)
+      expect(a.reason).toBe('Switch to the vault\'s network.')
+    })
+
+    it('refuses a non-EVM asset before the rail is even consulted', () => {
+      for (const args of [
+        { rail: GROUP_RAIL.BATCH_PASSKEY, assetKind: 'btc-native' },
+        { rail: GROUP_RAIL.BATCH_PASSKEY, chainId: 'bitcoin' },
+        { rail: GROUP_RAIL.BATCH_PASSKEY, chainId: null },
+      ]) {
+        const a = on(args)
+        expect(a.available).toBe(false)
+        expect(a.code).toBe(GROUP_UNAVAILABLE.NON_EVM)
+      }
+    })
+
+    it('refuses an unrecognised rail rather than falling through to available (spec 088 FR-002)', () => {
+      expect(on({ rail: 'something-new' }).available).toBe(false)
+    })
   })
 })

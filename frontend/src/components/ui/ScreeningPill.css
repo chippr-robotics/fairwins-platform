@@ -1,0 +1,121 @@
+/* ScreeningPill — spec 021 amendment (issue #1458). Colour is the accent; the word and the icon
+   are the message. Every fill is an OPAQUE status token (spec 090 rule 3), and the label colour
+   is the token paired with that fill, so contrast holds over any panel in either theme. */
+
+.screen-pill-wrap {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.35rem;
+  max-width: 100%;
+}
+
+/* index.css puts `padding: 0.6em 1.2em` on every button — restate the pill's own. */
+.screen-pill,
+button.screen-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  line-height: 1;
+  padding: 0.28rem 0.6rem;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  white-space: nowrap;
+  cursor: default;
+  min-height: 24px;
+}
+
+button.screen-pill {
+  cursor: pointer;
+}
+
+button.screen-pill:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.screen-pill-screened {
+  color: var(--success-text);
+  background: var(--success-bg);
+  border-color: var(--success-color);
+}
+
+.screen-pill-flagged {
+  color: var(--danger-text);
+  background: var(--danger-bg);
+  border-color: var(--danger-color);
+}
+
+.screen-pill-partial,
+.screen-pill-unscreened {
+  color: var(--warning-text);
+  background: var(--warning-bg);
+  border-color: var(--warning-color);
+}
+
+.screen-pill-loading {
+  color: var(--text-secondary);
+  background: var(--bg-tertiary);
+  border-color: var(--border-color);
+}
+
+.screen-pill-details {
+  list-style: none;
+  margin: 0;
+  padding: 0.4rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-size: 0.78rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-secondary);
+  max-width: 100%;
+  /*
+   * ONE ROW PER SOURCE PER CHAIN, and the estate only gains chains — so this list's height is a
+   * function of the deployment, not of the design. Unbounded, it outgrew the address-book modal
+   * it opens inside and spilled past the viewport; on the phone profile the browser then reports
+   * it as covered by the modal backdrop, which is the same "taller than a phone, clipped by the
+   * scrolling modal" failure the InfoTip bubble already hit. It scrolls internally instead, so no
+   * number of networks can push its own contents out of reach.
+   */
+  max-height: min(42vh, 22rem);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.screen-pill-row {
+  display: grid;
+  grid-template-columns: minmax(6rem, auto) minmax(0, 1fr);
+  column-gap: 0.6rem;
+  row-gap: 0.1rem;
+  align-items: baseline;
+}
+
+.screen-pill-net {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.screen-pill-source {
+  color: var(--text-primary);
+}
+
+.screen-pill-answer {
+  grid-column: 2;
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
+}
+
+.screen-pill-row-flagged .screen-pill-answer {
+  color: var(--danger-text);
+  font-weight: 600;
+}
+
+.screen-pill-row-unreadable .screen-pill-answer,
+.screen-pill-row-uncovered .screen-pill-answer {
+  color: var(--warning-text);
+}

@@ -18,6 +18,7 @@ import { useEffectiveAccount } from '../../hooks/useEffectiveAccount'
 import { useAccountAssets } from '../../hooks/useAccountAssets'
 import usePortfolio from '../../hooks/usePortfolio'
 import { useAddressScreening } from '../../hooks/useAddressScreening'
+import AddressScreenNotice from '../ui/AddressScreenNotice'
 import { useGroupPay } from '../../hooks/useGroupPay'
 import { GROUP_RAIL, validateRecipients } from '../../lib/payments/groupPay'
 import { useNotification } from '../../hooks/useUI'
@@ -25,6 +26,7 @@ import { extractAddressFromScan } from '../../lib/addressBook/scanAddress'
 import { useBitcoinWallet } from '../../hooks/useBitcoinWallet'
 import { getBitcoinNetwork } from '../../config/bitcoinNetworks'
 import BitcoinSendPanel from './BitcoinSendPanel'
+import { formatDecimalForDisplay } from '../../lib/format/amount'
 
 const short = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 const toNum = (v) => (v == null || v === '' ? null : Number(v))
@@ -90,11 +92,8 @@ export default function TransferForm({ onSent }) {
   const [extraRecipients, setExtraRecipients] = useState([])
   const [groupScreening, setGroupScreening] = useState({})
   const [groupResult, setGroupResult] = useState(null)
-  const groupPay = useGroupPay()
 
   const connectedChainId = Number(chainId)
-  const groupBusy = groupPay.status === 'screening' || groupPay.status === 'submitting'
-  const busy = status === 'signing' || status === 'submitting' || status === 'pending' || groupBusy
 
   useEffect(() => { refreshBalances() }, [refreshBalances])
 
@@ -199,6 +198,14 @@ export default function TransferForm({ onSent }) {
 
   const isBitcoinAsset = selectedAsset?.kind === 'btc-native'
   const onConnectedChain = selectedAsset && Number(selectedAsset.chainId) === connectedChainId
+
+  // Group pay (release 1.14.0): dormant until the member adds a second recipient. It is handed
+  // the selected asset because issue #1441's availability is a fact about the asset's own
+  // NETWORK, not only about the acting identity — hence its position here, after the selection.
+  const groupPay = useGroupPay({ asset: selectedAsset })
+  const groupBusy = groupPay.status === 'screening' || groupPay.status === 'submitting'
+  const busy = status === 'signing' || status === 'submitting' || status === 'pending' || groupBusy
+
   // Bitcoin is never gasless (FR-015) — both the badge and the dropdown's
   // per-option marker must say so, whatever the EVM quote would claim.
   const gaslessForOption = useCallback(
@@ -497,13 +504,15 @@ export default function TransferForm({ onSent }) {
               </button>
             </div>
             <QRScanner isOpen={scanOpen} onClose={() => setScanOpen(false)} onScanSuccess={handleScan} />
+            {/* Estate-wide advisory screen (issue #1458): every list on every cohort chain. */}
+            <AddressScreenNotice address={toResolved} chainId={assetChainId} />
+            {/* The per-chain `screening` read is a SEPARATE fact: it is the guard on the chain the
+                value moves on, the read the contract will repeat, and it is what withholds the
+                button — so its refusal is stated as its own alert, next to the button it disables. */}
             {screening === 'restricted' && (
               <div className="pt-notice pt-notice-error" role="alert">
-                This address is flagged by sanctions screening. Transfers to it are blocked.
+                This address is flagged by sanctions screening on this network. Sending is withheld: the on-chain guard would refuse it.
               </div>
-            )}
-            {screening === 'uncertain' && toResolved && (
-              <span className="pt-hint">Screening unavailable — proceed with care.</span>
             )}
             {isGroup && issuesFor(PRIMARY_ID).map((issue) => (
               <div
@@ -515,7 +524,8 @@ export default function TransferForm({ onSent }) {
               </div>
             ))}
 
-            {/* Rows 2..N. Absent — and inert — until the member presses Add. */}
+            {/* Rows 2..N. Withdrawn entirely while `available` is false (#1441); otherwise
+                absent — and inert — until the member presses Add. */}
             <GroupPayRecipients
               recipients={extraRecipients}
               onChange={setExtraRecipients}
@@ -524,6 +534,7 @@ export default function TransferForm({ onSent }) {
               symbol={symbol}
               disabled={busy}
               idPrefix="pt"
+              available={Boolean(groupPay.available)}
             />
           </div>
 
@@ -547,7 +558,7 @@ export default function TransferForm({ onSent }) {
             </div>
             <span className="pt-hint" id="pt-amount-hint">
               {bal != null
-                ? <>Balance: <SensitiveValue>{bal}</SensitiveValue> {symbol}</>
+                ? <>Balance: <SensitiveValue>{formatDecimalForDisplay(bal)}</SensitiveValue> {symbol}</>
                 : 'Loading balance…'}
               {overBalance && ' · exceeds balance'}
             </span>

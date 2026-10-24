@@ -183,3 +183,122 @@
     scroll-behavior: auto;
   }
 }
+
+/* --- Spec 104: provider badge, chooser, grant offer, tool progress -------- */
+
+/* The header subline. Names the rail every time the panel opens; small text, so --accent-color
+   (Teal 700), never --brand-primary. */
+.assistant-panel__provider {
+  color: var(--accent-color);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  margin: -0.35rem 0 0.7rem;
+}
+
+.assistant-panel__choose,
+.assistant-panel__gate {
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+}
+
+.assistant-panel__choice {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+/* A Link styled as the sheet's `.btn`: ActionSheet paints the tones, this only makes an anchor
+   sit in the row like its sibling buttons. */
+.assistant-sheet .assistant-panel__linkbtn {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  min-height: 36px;
+  text-decoration: none;
+}
+
+/* The grant offer is an OPAQUE info surface — an alpha tint's contrast would depend on the
+   thread behind it. */
+.assistant-panel__offer {
+  background: var(--info-bg);
+  border: 1px solid var(--info-color);
+  border-radius: var(--radius-md);
+  color: var(--info-text);
+  margin-bottom: 0.7rem;
+  padding: 0.6rem 0.7rem;
+}
+
+.assistant-panel__offer p {
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin: 0 0 0.5rem;
+}
+
+.assistant-panel__offer-actions,
+.assistant-panel__error-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.assistant-panel__notice {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.45;
+  margin: 0.6rem 0 0;
+  padding: 0.45rem 0.65rem;
+}
+
+/* Tool progress: one row per read while the turn runs. */
+.assistant-panel__progress {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.assistant-panel__progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.assistant-panel__progress-row {
+  align-items: center;
+  color: var(--text-secondary);
+  display: flex;
+  font-size: 0.82rem;
+  gap: 0.5rem;
+}
+
+.assistant-panel__sources {
+  color: var(--text-muted);
+  font-size: 0.76rem;
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* "read" / "could not be read" — opaque status chips, never a zero. */
+.assistant-panel__chip {
+  border-radius: var(--radius-full);
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  white-space: nowrap;
+}
+
+.assistant-panel__chip--read {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.assistant-panel__chip--unreadable {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}

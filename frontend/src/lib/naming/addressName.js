@@ -10,7 +10,7 @@
  * separate function from `deriveNickname`, which is keyed on a Semaphore identity commitment and is
  * pool-scoped. This one is address-keyed and pure client-side display — never written to chain.
  */
-import { keccak256, toUtf8Bytes, getBigInt } from 'ethers'
+import { keccak256, stringToBytes } from 'viem'
 import { ADJECTIVES, NOUNS } from '../pools/nicknameWords'
 
 const DOMAIN = 'FAIRWINS_ADDRESS_NAME_v1'
@@ -28,7 +28,7 @@ export function deriveAddressName(address) {
   }
   // Lowercase so a checksummed `0xAbC…` and a lowercase `0xabc…` — the same account — hash identically.
   const normalized = address.toLowerCase()
-  const h = getBigInt(keccak256(toUtf8Bytes(DOMAIN + normalized)))
+  const h = BigInt(keccak256(stringToBytes(DOMAIN + normalized)))
 
   const adjCount = BigInt(ADJECTIVES.length)
   const nounCount = BigInt(NOUNS.length)

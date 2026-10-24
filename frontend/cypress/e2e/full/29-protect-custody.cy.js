@@ -28,7 +28,7 @@
  *   CV-06 custody.multi-chain-vault-list — a chain that cannot be read is NAMED, not shown empty
  *   CV-07 custody.policy-v1-enforced   — the spec-049 guard still refuses what breaks its rules
  *
- * Checklist: CV-01..CV-07
+ * Checklist: CV-01..CV-08
  */
 
 import { FIRST_MATCH_SCENARIOS } from '../../../src/test/fixtures/policyScenarios'
@@ -55,7 +55,11 @@ const GUARD_V2 = '0xc01E5F3EAFd2C0138e98382A3F54B6CeB3dc05cf'
  * The PENDING queue only. History rows carry the same `custody-proposal-row` class, so an
  * unscoped count says "still queued" about a proposal that executed a minute ago.
  */
-const PENDING_ROW = '.custody-proposal-list:not(.custody-proposal-list--history) .custody-proposal-row'
+// Spec 102 — the queue lives in the vault sheet's Queue view: one row per pending proposal, on
+// every network the vault is on, each tagged with its chain.
+const PENDING_ROW = '[data-testid="vault-panel-queue"] [data-testid="vault-queue-row"]'
+const CARD = '[data-testid^="vault-card-"]'
+const MENU = '[data-testid^="vault-menu-"]'
 
 const fixture = (action, args = {}) =>
   cy.task('custodyFixture', { action, args }).then((r) => {
@@ -267,18 +271,56 @@ function loadVault(address, label = 'E2E Vault') {
     cy.get('#load-label').clear().type(label)
     cy.contains('button', /^Load/).click()
   })
-  cy.get('.custody-vault-card', { timeout: 30000 }).should('have.length.at.least', 1)
+  /*
+   * 60s, matching CV-01's card wait: loading probes the vault on every custody network before a
+   * card can list, and on a loaded runner that read burst has exceeded 30s (CV-02, 2026-09-06)
+   * while the same machinery passed in the same run — the deadline was the flake, not the load.
+   */
+  cy.get(CARD, { timeout: 60000 }).should('have.length.at.least', 1)
 }
 
-/** Expand the one vault card, so its detail and proposal queue mount. */
-function openVaultCard() {
-  cy.get('.custody-vault-card').first().then(($card) => {
-    if ($card.attr('data-open') !== 'true') {
-      cy.wrap($card).find('.acc__trigger').first().click()
+/**
+ * Spec 102 — a vault card no longer expands; its "⋯" opens the vault sheet, and the proposal
+ * queue is the sheet's Queue view. Opens the FIRST card's sheet (these flows hold one vault).
+ */
+/**
+ * Wait for the HUB to have recorded `expected` proposals before the queue is read.
+ *
+ * Spec 102 — the Queue view reads when it OPENS (and on Refresh); it does not poll. Opening it
+ * while a proposal is still being mined would assert against a queue that is honestly reporting
+ * what the chain said a moment earlier, so the wait belongs before the read rather than as a
+ * retry around it.
+ */
+function waitForProposalCount(address, expected, tries = 60) {
+  return fixture('proposalCount', { address, hub: HUB }).then(({ count }) => {
+    if (count >= expected) return count
+    if (tries <= 0) {
+      throw new Error(`the hub recorded ${count} proposal(s) for ${address}, expected ${expected}`)
+    }
+    cy.wait(1000, { log: false })
+    return waitForProposalCount(address, expected, tries - 1)
+  })
+}
+
+function openVaultCard(view = 'queue') {
+  cy.get('body').then(($b) => {
+    if ($b.find('[data-testid="vault-panel-' + view + '"]').length === 0) {
+      if ($b.find('.vault-sheet').length === 0) cy.get(MENU, { timeout: 30000 }).first().click()
+      cy.get('[data-testid="vault-tab-' + view + '"]', { timeout: 20000 }).click()
     }
   })
-  cy.get('.custody-vault-card').first().should('have.attr', 'data-open', 'true')
+  /*
+   * Asserted by the TAB's own state, not the panel's visibility: the sheet is `position: fixed`
+   * with `max-height: 85vh; overflow-y: auto`, so a panel taller than that — Details, which
+   * carries a policy panel per network — is judged "not visible" by Cypress even though every
+   * part of it is reachable by scrolling (and Cypress scrolls to it before each click below).
+   * What this helper needs to establish is that the sheet is SHOWING this view.
+   */
+  cy.get('[data-testid="vault-tab-' + view + '"]', { timeout: 20000 })
+    .should('have.attr', 'aria-selected', 'true')
+  cy.get('[data-testid="vault-panel-' + view + '"]', { timeout: 20000 }).should('exist').scrollIntoView()
 }
+
 
 describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
   beforeEach(() => {
@@ -289,49 +331,66 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
   // ---------------------------------------------------------------------------
   // CV-01 — create a vault and its owner set, judged by the deployed Safe
   // ---------------------------------------------------------------------------
-  it('[CV-01] creates a 2-of-2 vault on chain and lists it', () => {
+  it('[CV-01] creates a 2-of-2 vault on chain through the guided flow and lists it', () => {
     openProtect()
 
-    // Custody must be OFFERED here at all — without the Safe estate this reads as "New vaults
-    // cannot be created on this network" and everything below is moot.
     cy.get('.custody-onchain').should('be.visible')
     openVaultAction('create')
 
-    cy.get('form.custody-create').within(() => {
-      cy.get('#owner-0').clear().type(OWNER_A)
-      cy.contains('button', 'Add owner').click()
-      cy.get('#owner-1').clear().type(OWNER_B)
-      /*
-       * Replace the selection in ONE action. The field's onChange runs the value through
-       * `Number(...)`, so an empty intermediate state becomes 0 and the next keystroke lands
-       * beside it ("2" after a clear reads as "20"). Asserted, because the wizard silently
-       * disables Create when threshold > owners.
-       */
-      cy.get('#vault-threshold').type('{selectall}2').should('have.value', '2')
-      cy.get('#vault-label').type('E2E Vault')
-      /*
-       * Release 1.14.0 preselects a starter policy for every new vault, so this test — which is
-       * about the SAFE the wizard deploys, not about policy — opts out explicitly. The guard
-       * assertion below is what that choice means on chain. (A 1-of-1 could not opt out at all;
-       * this vault has two owners.)
-       */
-      cy.get('#vault-policy-none').click().should('be.checked')
-      cy.contains('button', 'Create vault').click()
-    })
+    // Sheet 1 — "Controlled": everyone must approve (2 owners ⇒ 2-of-2). No bare threshold typed.
+    cy.get('[data-testid="create-step-type"]').as('typeSheet')
+    cy.get('@typeSheet').contains('[role="radio"]', 'Controlled').click()
+    cy.get('#create-owner-0').clear().type(OWNER_A)
+    cy.get('#create-owner-1').clear().type(OWNER_B)
+    cy.get('@typeSheet').contains(/all 2 owners must sign/i).should('exist')
+    cy.get('#create-vault-label').type('E2E Vault')
+    cy.contains('button', 'Next: set rules').click()
 
-    cy.get('.custody-vault-card', { timeout: 60000 }).should('have.length.at.least', 1)
-    cy.get('.custody-vault-card__label').should('contain.text', 'E2E Vault')
+    /*
+     * Sheet 2 — switch every rule OFF. This test judges the SAFE the flow deploys; with rules on,
+     * a 2-of-2 would queue their installation for the co-owner (spec 105 FR-010), and the guard
+     * assertion below is about the no-rules path staying byte-identical to spec 043.
+     */
+    cy.get('[data-testid="create-step-rules"]').should('be.visible')
+    cy.get('[data-testid="rule-tile-cap"]').click()
+    cy.get('input[aria-label="Daily cap amount"]').clear()
+    cy.get('[data-testid="rule-tile-wait"]').click()
+    cy.contains('[role="radio"]', 'No wait').click()
+    cy.get('[data-testid="rule-tile-allowed"]').click()
+    cy.contains('[role="radio"]', /Everything — one set of rules/).click()
+    cy.contains('button', 'Next: pick networks').click()
 
-    // The card is a claim; the chain is the fact. Read the deployed Safe back.
-    cy.get('.custody-vault-card').first().invoke('attr', 'data-attention').then((address) => {
-      fixture('vaultInfo', { address }).then((info) => {
-        expect(info.version, 'a real Safe v1.4.1').to.equal('1.4.1')
-        expect(info.threshold, 'threshold as entered').to.equal(2)
-        expect(info.owners.map((o) => o.toLowerCase()), 'both owners').to.have.members([
-          OWNER_A.toLowerCase(), OWNER_B.toLowerCase(),
-        ])
-        expect(info.guard, 'a vault created with "No policy" carries no guard')
-          .to.equal('0x0000000000000000000000000000000000000000')
+    // Sheet 3 — the local chain is preselected; the app orchestrates and reports live status.
+    cy.get('[data-testid="create-step-networks"]').should('be.visible')
+    cy.get('[data-testid="deploy-button"]').click()
+    // The predicted address renders before any signature lands (FR-007)…
+    cy.get('[data-testid="predicted-address"] code', { timeout: 30000 }).should('contain.text', '0x')
+    // …and the network row reaches LIVE from a real receipt, never a timer.
+    cy.get('[data-testid^="deploy-status-"]', { timeout: 60000 }).should('contain.text', 'Live')
+    cy.contains('button', 'Continue').click()
+
+    // Sheet 4 — done: one address, one badge.
+    cy.get('[data-testid="create-step-done"]').should('be.visible')
+    cy.get('[data-testid="create-step-done"] code').invoke('text').then((predicted) => {
+      cy.contains('button', 'Done').click()
+
+      cy.get(CARD, { timeout: 60000 }).should('have.length.at.least', 1)
+      cy.get(`${CARD} .account-card-label`).should('contain.text', 'E2E Vault')
+
+      // The card is a claim; the chain is the fact — and the deployed address must BE the
+      // predicted one (same-address determinism is the whole feature).
+      cy.get(CARD).first().invoke('attr', 'data-testid').then((id) => {
+        const address = id.replace('vault-card-', '')
+        expect(address.toLowerCase(), 'deployed at the predicted address').to.equal(predicted.trim().toLowerCase())
+        fixture('vaultInfo', { address }).then((info) => {
+          expect(info.version, 'a real Safe v1.4.1').to.equal('1.4.1')
+          expect(info.threshold, 'Controlled ⇒ everyone signs').to.equal(2)
+          expect(info.owners.map((o) => o.toLowerCase()), 'both owners').to.have.members([
+            OWNER_A.toLowerCase(), OWNER_B.toLowerCase(),
+          ])
+          expect(info.guard, 'a vault created with rules OFF carries no guard')
+            .to.equal('0x0000000000000000000000000000000000000000')
+        })
       })
     })
   })
@@ -344,17 +403,26 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
       fixture('fundVault', { address, amount: ONE_COIN })
       openProtect()
       loadVault(address)
-      openVaultCard()
+      // Spec 102 — governance lives in the sheet's Details view, beside the owner list.
+      openVaultCard('details')
 
       // Propose lowering the threshold to 1. A 2-of-2 cannot make this change on one signature,
       // which is exactly what the test needs to observe.
-      cy.get('.custody-governance', { timeout: 20000 }).within(() => {
+      cy.get('[data-testid="vault-governance"] .custody-governance', { timeout: 20000 }).within(() => {
         cy.contains('button', 'Change threshold').click()
         cy.get('#gov-threshold').type('{selectall}1').should('have.value', '1')
         cy.contains('button', /^Propose/).click()
       })
 
-      // Queued, not applied — the vault still says 2.
+      /*
+       * Wait for the CHAIN to carry the proposal before opening the Queue. The queue reads its
+       * networks on mount and does not poll (Refresh is the member's re-read), so opening it
+       * while the propose transaction is still in flight yields an empty queue that no amount of
+       * Cypress retrying will refill — observed as a CI-only failure of this test.
+       */
+      waitForProposalCount(address, 1)
+      // Queued, not applied — the vault still says 2. The Queue view re-reads on mount.
+      openVaultCard('queue')
       cy.get(PENDING_ROW, { timeout: 60000 }).should('have.length.at.least', 1)
       fixture('vaultInfo', { address }).then((info) => {
         expect(info.threshold, 'one approval does not change a 2-of-2').to.equal(2)
@@ -399,7 +467,8 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
       cy.get('.account-address-full', { timeout: 20000 })
         .invoke('attr', 'title')
         .should('eq', address)
-      cy.get('.custody-vault-card').first().should('exist')
+      // Spec 102 — the compact card marks the vault the member is acting as.
+      cy.get(CARD).first().find('.account-card-state').should('contain.text', 'Active')
     })
   })
 
@@ -411,13 +480,15 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
       fixture('fundVault', { address, amount: ONE_COIN })
       openProtect()
       loadVault(address)
-      openVaultCard()
+      openVaultCard('details')
 
       // A vault starts with no guard, and migration is vault-consented — never release-time.
       fixture('vaultInfo', { address }).then((info) => {
         expect(info.guard, 'no guard before the owners adopt one').to.equal(NO_GUARD)
       })
 
+      // Spec 105 — the policy panel sits behind the one "Manage rules" disclosure in Details.
+      cy.get('[data-testid="vault-manage-rules"] > summary', { timeout: 20000 }).click()
       cy.get('.custody-policy', { timeout: 20000 }).within(() => {
         cy.contains('button', /Add rules|Upgrade to ordered rules/).click()
         cy.contains('button', 'Add a rule').click()
@@ -435,6 +506,8 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
        * once, and the vault is governed only after BOTH land — asserted below, because a test that
        * executed one and saw a guard would be describing a product that cannot exist.
        */
+      waitForProposalCount(address, 2)
+      openVaultCard('queue')
       cy.get(PENDING_ROW, { timeout: 60000 }).should('have.length', 2)
       fixture('vaultInfo', { address }).then((info) => {
         expect(info.guard, 'still ungoverned on one approval').to.equal(NO_GUARD)
@@ -468,7 +541,8 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
       fixture('fundVault', { address, amount: (10n * 10n ** 18n).toString() })
       openProtect()
       loadVault(address, 'Policy Vault')
-      openVaultCard()
+      // Spec 102 — the policy panel lives in the sheet's Details view, per network.
+      openVaultCard('details')
 
       /*
        * The rules come from the SHARED scenario table (src/test/fixtures/policyScenarios.js), the
@@ -480,6 +554,8 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
        * every coin transfer and rule 002 is unreachable for them. That is what separates this
        * engine from a best-match or last-match one.
        */
+      // Spec 105 — the policy panel sits behind the one "Manage rules" disclosure in Details.
+      cy.get('[data-testid="vault-manage-rules"] > summary', { timeout: 20000 }).click()
       cy.get('.custody-policy', { timeout: 20000 }).within(() => {
         cy.contains('button', /Add rules|Upgrade to ordered rules|Change rules/).click()
         SCENARIO.rules.forEach((r) => addCoinRule(r.perTx))
@@ -491,6 +567,8 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
        * Asserted before executing anything, so "only one was created" fails here saying that,
        * rather than later as a vault that mysteriously ends up ungoverned.
        */
+      waitForProposalCount(address, 2)
+      openVaultCard('queue')
       cy.get(PENDING_ROW, { timeout: 60000 }).should('have.length', 2)
 
       // 1-of-1: proposing already recorded the only approval the vault needs, so each step is
@@ -558,15 +636,15 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
 
       // BOTH vaults are listed. The estate is the member's, not the connected chain's — a vault
       // vanishing because its chain is unreachable would read as "my funds are gone".
-      cy.get('.custody-vault-card', { timeout: 30000 }).should('have.length', 2)
+      cy.get(CARD, { timeout: 30000 }).should('have.length', 2)
 
       // The unreachable one is named, with its chain, rather than rendered as an empty vault.
-      cy.contains('.custody-vault-card', 'Polygon Vault')
+      cy.contains(CARD, 'Polygon Vault')
         .should('contain.text', 'Polygon')
         .and('contain.text', 'unreachable')
 
       // …and the readable one is unaffected: per-vault failure isolation, not a global error.
-      cy.contains('.custody-vault-card', 'Local Vault').should('not.contain.text', 'unreachable')
+      cy.contains(CARD, 'Local Vault').should('not.contain.text', 'unreachable')
     })
   })
 
@@ -590,7 +668,6 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
 
       openProtect()
       loadVault(address, 'Legacy Policy Vault')
-      openVaultCard()
 
       // Over the v1 per-transaction limit: the guard refuses, and nothing moves.
       fixture('vaultInfo', { address }).then((beforeVault) => {
@@ -604,6 +681,52 @@ describe('Protect — Safe custody (specs 043 / 049 / 068)', () => {
           })
         })
       })
+    })
+  })
+
+  // ---------------------------------------------------------------------------
+  // CV-08 — the vault sheet's Queue is the money path (spec 102)
+  // ---------------------------------------------------------------------------
+  it('[CV-08] approves and executes a transfer from the vault sheet queue, tagged with its network', () => {
+    fixture('createVault', { owners: [OWNER_A, OWNER_B], threshold: 2 }).then(({ address }) => {
+      fixture('fundVault', { address, amount: (2n * 10n ** 18n).toString() })
+      openProtect()
+      loadVault(address, 'Sheet Vault')
+
+      // Owner A proposes an ordinary transfer while acting as the vault (the one send path).
+      cy.visit('/wallet?tab=paytransfer')
+      actAsVault('Sheet Vault')
+      cy.get('[aria-label="Asset to send"]', { timeout: 20000 }).click()
+      cy.get('.uas-search').type(NATIVE_SYMBOL)
+      cy.get('[role="option"]').first().click()
+      cy.get('#pt-to', { timeout: 20000 }).clear().type(PAYEE)
+      cy.get('#pt-amount').clear().type('0.5')
+      cy.contains('.pt-actions button', 'Preview').click()
+      cy.get('.pt-preview').should('contain.text', 'Vault proposal')
+      cy.contains('.pt-actions button', 'Propose').click()
+      cy.get('.notification-message', { timeout: 30000 }).should('contain.text', 'Proposed sending')
+
+      // The sheet's Queue shows it, tagged with the network it is on, one approval short.
+      cy.visit('/wallet?tab=custody')
+      cy.get('.custody-panel', { timeout: 20000 }).should('be.visible')
+      openVaultCard('queue')
+      cy.get(PENDING_ROW, { timeout: 60000 }).should('have.length', 1)
+      cy.get(PENDING_ROW).first().find('.ab-net-pill').should('exist')
+      cy.get(PENDING_ROW).first().should('contain.text', '1/2 approvals')
+      cy.get('[data-testid="vault-queue-summary"]').should('contain.text', '1 pending')
+      fixture('vaultInfo', { address }).then((info) => {
+        expect(info.nonce, 'nothing executed on one approval').to.equal(0)
+      })
+
+      // Owner B approves and executes from THEIR sheet; the chain is the judge.
+      fixture('nativeBalance', { address: PAYEE }).then((before) => {
+        asCoOwner(address)
+        approveAndExecuteTop(address, 1)
+        waitForBalanceAbove(PAYEE, before.balance)
+      })
+      // Executed proposals leave the queue.
+      openVaultCard('queue')
+      cy.get('[data-testid="vault-panel-queue"]', { timeout: 60000 }).should('not.contain.text', '1/2 approvals')
     })
   })
 })

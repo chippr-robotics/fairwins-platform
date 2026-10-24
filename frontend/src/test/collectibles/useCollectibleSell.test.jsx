@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
-import { useChainId } from 'wagmi'
+import { setWalletChain } from '../helpers/walletChain'
 import { WalletContext } from '../../contexts/WalletContext.js'
 import { useCollectibleSell } from '../../hooks/useCollectibleSell'
 
@@ -41,7 +41,7 @@ const price = { amount: '10', currency: 'POL', decimals: 18, native: true }
 
 beforeEach(() => {
   vi.clearAllMocks()
-  useChainId.mockReturnValue(137)
+  setWalletChain(137)
 })
 
 describe('useCollectibleSell — list', () => {
@@ -94,7 +94,7 @@ describe('useCollectibleSell — list', () => {
   })
 
   it('prompts a network switch when the wallet is on the wrong chain (FR-021)', async () => {
-    useChainId.mockReturnValue(1) // wallet on Ethereum, item on Polygon
+    setWalletChain(1) // wallet on Ethereum, item on Polygon
     const switchChain = vi.fn().mockResolvedValue()
     const deps = makeDeps()
     const { result } = renderHook(() => useCollectibleSell(ITEM, { deps }), { wrapper: wrapperFor({ switchChain }) })

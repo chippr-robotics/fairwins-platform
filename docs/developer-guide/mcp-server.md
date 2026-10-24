@@ -151,11 +151,74 @@ Every tool calls the gateway over HTTPS with JSON-schema'd inputs.
 | `get_gateway_status` | `/status` | Public. Works with no token. |
 | `get_prediction_markets` | `/v1/polymarket/137/markets?q=` | Public. |
 | `get_perps_pairs` | `/v1/perps/pairs` | Public. |
+| `get_token_news` | `/v1/news/{chainId}/{asset}?slug=` | Public (spec 109). The caller passes the vendor tag `slug`; the app resolves it from its curated mapping, an external caller states it. |
 
 `build_intent` is the only tool that touches a write path, and it stops one step short of one.
 The typed data goes back to the member, who signs it in their wallet and submits it themselves or
 through the public relay endpoint. The tool description says so in words, because the description
 is what the model reads before deciding what to claim it did.
+
+### Shared tool table (spec 104)
+
+The seven read tools are no longer defined here. Their `name`/`title`/`description`/`inputSchema`
+come from **`src/toolDefs.snapshot.json`** — a vendored copy of `TOOL_DEFS` in
+`@fairwins/assistant-contract`, the one table the in-app assistant offers to the model as well. This
+server may take no dependency and sits outside the npm workspace, so it cannot import the package;
+the snapshot is the same shape the repo uses for the EIP-712 structs, and
+`services/relay-gateway/test/mcpToolParity.test.js` deep-equals it against the package in **both
+directions** (plus this server's `ROUTE_PATHS` against the gateway's `contract.js` and the
+honest-failure sentence against `results.js`), so a drift fails CI rather than showing two
+different tables for one gateway. Only the transport *bindings* live in `tools.js`: an
+`exec.kind: 'route'` entry becomes `api.get(ROUTE_PATHS[route])` with the token, a `'public'` entry
+a token-less GET with its path parameters filled from the arguments (or the schema's `default`).
+Never edit a description in the snapshot by hand — change the package and re-vendor with the
+one-liner in the parity test's header.
+
+Two entries are deliberately asymmetric. **`build_intent` is MCP-only** and stays defined in
+`tools.js`: it is the one tool that returns something a member could sign, and the in-app assistant
+does not carry it because in the browser the member *can* sign (research § 8.4) — here the boundary
+is physical, an MCP client holds no wallet. **`find_in_app` is in the snapshot and not served
+here**: it is `auth: 'local'`, searching the SPA's navigation index in the member's browser, and
+there is no gateway route behind it; the server skips every local entry and a client asking for it
+gets the ordinary "unknown tool" answer.
+
+## The MCP server after spec 104
+
+Spec 104 gave the **in-app assistant** tools of its own, and the question it had to answer first was
+how this server relates to that. The answer: **the assistant needed the MCP server's tool table,
+not its transport.** This server is JSON-RPC framing around `fetch`; the browser already has
+`fetch` and the member's grant, so running it in the SPA would have gained nothing, and routing the
+in-app assistant through it (Anthropic's MCP connector) would have put a spending-adjacent
+credential in a request body transiting a third party. So the roles are now:
+
+- **This server is the door for external agents** — Claude Desktop, Claude Code, anything speaking
+  MCP that a member runs against their own account. Unchanged in role and in every invariant above:
+  zero dependencies, never mints a token, never signs, never pays. Once the hosted instance ships
+  ([runbook §3.8](../runbooks/member-api-operations.md)), a remote-server entry joins the client
+  examples; that is where Anthropic's MCP connector becomes available to *external* agents.
+- **The in-app assistant is a second client of the same tools**, executed in the member's own
+  browser on both of its rails ([Agentic Assistant › Tools](agentic-chat.md#tools)). Its tool
+  executions arrive at the gateway as the same member-API traffic this server generates — already
+  authenticated, scoped, quota'd and audited, with no new route.
+- **The tool table has ONE source**, `@fairwins/assistant-contract` (`packages/assistant-contract/`):
+  names, descriptions, input schemas, the `exec` binding data and the honest result wording — the
+  "this is an UNKNOWN, not an empty result" sentence this server coined is now exported from there
+  verbatim. This server cannot import that package (it may take no dependency), so it ships a
+  **vendored snapshot**, `src/toolDefs.snapshot.json`, and
+  `services/relay-gateway/test/mcpToolParity.test.js` fails when snapshot and package diverge in
+  either direction — the `@fairwins/intent-types` / `TypehashParity` pattern, reused.
+- **`build_intent` is MCP-only, on purpose.** It is absent from the package table and from the
+  in-app assistant: in the browser the member *can* sign, which is exactly why the first in-app
+  tool that returns typed data would be followed by a request for a button that signs it. Here it
+  remains what it always was — typed data handed to a human who signs elsewhere. It lives in this
+  server's own `tools.js`, beside the snapshot, and the parity test knows it is not expected in the
+  package. The two prompts (`wager-review`, `portfolio-briefing`) likewise stay here and double as
+  the panel's suggested starters, so the phrasing that tells a model to name an unreadable chain is
+  written once.
+
+Nothing about a member's key ceremony moved: keys are still created in the app (now on the
+**Tools ▸ Assistant** tab, card `api-access`), and this server still reads one from the environment
+or a request header and forwards it.
 
 ## Resources
 
@@ -195,7 +258,7 @@ Client configuration examples (Claude Desktop / Claude Code JSON) live in
 
 ## Deployment
 
-`services/mcp-server/Dockerfile` builds from a standalone context on `node:20-alpine`, runs as
+`services/mcp-server/Dockerfile` builds from a standalone context on `node:22.23.3-alpine3.24`, runs as
 `USER node`, exposes **8790**, starts in HTTP mode, and health-checks `/healthz`. It is declared in
 Terraform as a Cloud Run service (`fairwins-mcp-server`, and `-staging`) with **no secret
 environment and no dedicated service account** — the service holds nothing, because the
@@ -227,13 +290,15 @@ mode is unavailable and members run the server locally over **stdio**, which is 
 
 `services/mcp-server/test/` under `node:test`, no runner and no dependency:
 `jsonrpc.test.js` (framing, ids, error shapes), `mcp.test.js` (handshake and method coverage),
-`tools.test.js` (input schemas and upstream failure mapping), `stdio.test.js` and `http.test.js`
+`tools.test.js` (input schemas, upstream failure mapping, and that every shared tool is served
+exactly as the snapshot defines it), `stdio.test.js` and `http.test.js`
 (both transports, including header-over-env token precedence), and `x402.test.js` (offer surfacing,
 the non-x402 402 fallback, byte-for-byte payment passthrough, and the receipt round trip).
 
 ## Related
 
 - [Member API](member-api.md) — the API this server consumes.
+- [Agentic Assistant](agentic-chat.md) — the in-app client of the same tool table (spec 104).
 - [Agentic payments](agentic-payments.md) — the pay-per-request rail this server carries payments for.
 - [Member API Operations](../runbooks/member-api-operations.md) — enabling and incident response.
 - [Assistant & API access](../user-guide/assistant-and-api.md) — connecting an MCP client, for members.

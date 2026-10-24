@@ -1,0 +1,101 @@
+<mxfile host="app.diagrams.net" agent="FairWins architecture workbook" version="24.7.17">
+  <diagram id="fw-logical" name="Logical view">
+    <mxGraphModel dx="1600" dy="1100" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1050" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t" value="FairWins — Logical View (capabilities, actors, domain)" style="text;html=1;fontSize=20;fontStyle=1;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="20" width="800" height="30" as="geometry" />
+        </mxCell>
+        <mxCell id="t2" value="Technology-independent. [$] moves value · [R] read-only · [flag] can be switched off by a tenant manifest." style="text;html=1;fontSize=12;fontColor=#5A6B72;align=left;" vertex="1" parent="1">
+          <mxGeometry x="40" y="48" width="900" height="20" as="geometry" />
+        </mxCell>
+
+        <mxCell id="actors" value="ACTORS" style="swimlane;html=1;startSize=30;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=2;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="40" y="100" width="300" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="a1" value="Member — Bronze / Silver / Gold / Platinum&#10;soulbound, time-bound, one chain per cohort&#10;Silver+ = open challenges · Gold+ = callsign" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="40" width="270" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="a2" value="Visitor (tier None) — reads public surfaces only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;fontSize=9;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="103" width="270" height="32" as="geometry" />
+        </mxCell>
+        <mxCell id="a3" value="Counterparty · Arbitrator · Claim-code bearer&#10;resolution authority FIXED AT CREATION" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;fontSize=9;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="143" width="270" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="a4" value="Pool organizer + members (public addresses,&#10;NO anonymity layer) · Funding-pool contributor" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;fontSize=9;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="193" width="270" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="a5" value="Vault owner / co-owner / approver&#10;an approver counts ONLY while still an owner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;fontSize=9;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="243" width="270" height="42" as="geometry" />
+        </mxCell>
+        <mxCell id="a6" value="DELEGATED — CANNOT SIGN&#10;AI agent (member's fw1 token) · x402 payer&#10;actor field FORCED to the token/payer account" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EDF5;strokeColor=#41236D;strokeWidth=2;fontSize=9;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="293" width="270" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="a7" value="OPERATORS — deliberately non-overlapping&#10;Guardian: pause, NOT freeze&#10;Moderator: freeze, NOT pause or seize&#10;Compliance: deny-list only&#10;Upgrader: logic only&#10;Admin: config + roles&#10;NO ROLE CAN MOVE AN ESCROWED STAKE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=5;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="356" width="270" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="a8" value="Relayer · Paymaster · Tenant operator&#10;ALL OPTIONAL — self-submit always remains" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#EDF1F2;strokeColor=#5A6B72;dashed=1;fontSize=9;" vertex="1" parent="actors">
+          <mxGeometry x="15" y="469" width="270" height="40" as="geometry" />
+        </mxCell>
+
+        <mxCell id="caps" value="CAPABILITY MAP (as shipped)" style="swimlane;html=1;startSize=30;fillColor=#F5F7F8;strokeColor=#5A6B72;strokeWidth=2;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="380" y="100" width="560" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="q" value="QUICK ACCESS&#10;Payments — Pay · Request · Pool [$] · Wager [$]&#10;Accounts — Portfolio · Activity · Stats [R]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="caps">
+          <mxGeometry x="15" y="40" width="530" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="f" value="FINANCE&#10;Earn — Lend · Rewards · Stake · Supply [$]&#10;Trade — Swap · Wrap [$] · Perps [R, read-only by spec]&#10;Collect — NFT portfolio [R] · sell-side [$]&#10;Predict — Polymarket CLOB [$] — POLYGON ONLY&#10;Transfer — Send (incl. Bitcoin) · Bridge · Wagers [$]" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=5;" vertex="1" parent="caps">
+          <mxGeometry x="15" y="98" width="260" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="tl" value="TOOLS&#10;Protect — On chain (Safe vaults) [$] · Verify [R]&#10;         · Off chain (hardware) [$]&#10;Address Book [R] · Recovery [$] · Reporting [R]&#10;Apps (mini-app catalogue) · Assistant (2 rails)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#2E7D8C;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=5;" vertex="1" parent="caps">
+          <mxGeometry x="285" y="98" width="260" height="110" as="geometry" />
+        </mxCell>
+        <mxCell id="ab" value="ACCOUNT BUTTON — deliberately NOT in the menu&#10;My Account · Membership [$] · Network · Settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6B72;dashed=1;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="caps">
+          <mxGeometry x="15" y="216" width="530" height="40" as="geometry" />
+        </mxCell>
+        <mxCell id="op" value="OPERATOR — nine admin mini-apps behind a Control Room, 18 views.&#10;adminApps.js is the ONLY app→view→gate matrix.&#10;Incident Response · Compliance · Membership &amp; Revenue · Liquidity&#10;Protocol Config · Maintenance (PERMISSIONLESS, own app on purpose)&#10;Identity · Access Control · Infrastructure&#10;Entry has THREE outcomes: granted / denied / could-not-verify." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;verticalAlign=top;spacingTop=5;" vertex="1" parent="caps">
+          <mxGeometry x="15" y="264" width="530" height="105" as="geometry" />
+        </mxCell>
+        <mxCell id="absent" value="THREE DIFFERENT REASONS A SURFACE CAN BE ABSENT, never collapsed into one blank:&#10;tenant has not enabled it  ·  the chain lacks the capability  ·  the module is unconfigured" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=2;fontSize=9;" vertex="1" parent="caps">
+          <mxGeometry x="15" y="378" width="530" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="flags" value="Tenant-optional: wagers · pools · predict · collect · earn · staking · swap · bridge · protect&#10;callsigns · miniapps · clearpath · token-mint · bitcoin · recovery · assistant · assistant-byok · news&#10;Never flagged (core): send · Accounts · Address Book · Reporting · Membership · Network · Settings" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#5A6B72;fontSize=8;align=left;spacingLeft=6;" vertex="1" parent="caps">
+          <mxGeometry x="15" y="436" width="530" height="55" as="geometry" />
+        </mxCell>
+
+        <mxCell id="dom" value="DOMAIN ENTITIES — terminal states in bold" style="swimlane;html=1;startSize=30;fillColor=#F0EDF5;strokeColor=#41236D;strokeWidth=2;fontStyle=1;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="980" y="100" width="570" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="d1" value="WAGER  None → Open → Active → {RESOLVED (after claim) | DRAW | REFUNDED | CANCELLED}&#10;Two absolute deadlines. After resolveDeadline ANYONE can claimRefund — the never-stranded net." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="40" width="540" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d2" value="WAGER POOL  JoiningOpen → JoiningClosed → {RESOLVED | CANCELLED}&#10;Creator proposes the payout matrix; members approve to a threshold. Creator CANNOT force a payout." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="93" width="540" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d3" value="FUNDING POOL  Open → {CLOSED | REFUNDING} — both terminal&#10;Organizer closes at any time and the pot pays the ORGANIZER'S OWN address: no recipient arg, no sweep.&#10;⌊N/2⌋+1 of contributors by COUNT, or the deadline, flips it to Refunding (pull-based)." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="146" width="540" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="d4" value="MEMBERSHIP  None ⇄ tier → NONE (30-day expiry or revoke). Soulbound.&#10;VOUCHER: transferable ERC-721 that confers NOTHING while held → BURNED on redeem." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="209" width="540" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d5" value="VAULT = an ADDRESS. A network is a property of a TRANSACTION.&#10;PROPOSAL status is DERIVED, never stored: pending → ready → executed | failed | superseded&#10;POLICY RULES: ordered array, replaced atomically, first-match-governs, NO MATCH ⇒ DENIAL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFF6E6;strokeColor=#A46A21;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="262" width="540" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="d6" value="MINI-APP RECORD  Pending / Approved / Suspended / DEPRECATED (terminal)&#10;'launchable' IS the serving decision — a Pending record with a prior approval is a LIVE app." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#41236D;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="325" width="540" height="45" as="geometry" />
+        </mxCell>
+        <mxCell id="d7" value="SCREENING VERDICT — derived, NEVER stored&#10;flagged (any source says listed) · screened (EVERY source answered clear — the only green)&#10;partial · unscreened · no-source. A list that did not answer is NOT a list that said no." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=2;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="378" width="540" height="55" as="geometry" />
+        </mxCell>
+        <mxCell id="d8" value="API KEY GRANT — scopes are read/build/assistant only. THERE IS NO write: SCOPE.&#10;Revocation is in-process and every surface says durable:false; expiry is the binding limit." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#F0EDF5;strokeColor=#41236D;fontSize=9;align=left;spacingLeft=6;" vertex="1" parent="dom">
+          <mxGeometry x="15" y="441" width="540" height="45" as="geometry" />
+        </mxCell>
+
+        <mxCell id="inv" value="TWENTY CROSS-CUTTING INVARIANTS (full statements in 01 §4) — the seven a reviewer should test first:&#10;P10 no custody: the member is the depositor; the ABSENCE of a rescue function is the control   ·   P1 never stranded: every deadline has a refund path   ·   P3 a zero is never an absence: read | not-configured | unreadable, and only 'read' carries a value&#10;P5 three verdicts wherever a negative could be a network failure   ·   P6 fees disclosed before signature, maxFeeBps is a consent ceiling   ·   P8 screening INSIDE the privileged wrapper, not beside it   ·   P11 the policy guard is deliberately not upgradeable   ·   P9 a testnet build cannot read mainnet" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#E6F2F4;strokeColor=#2E7D8C;strokeWidth=3;fontSize=10;align=left;spacingLeft=10;verticalAlign=middle;" vertex="1" parent="1">
+          <mxGeometry x="40" y="650" width="1510" height="110" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

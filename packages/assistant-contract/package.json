@@ -1,0 +1,26 @@
+{
+  "name": "@fairwins/assistant-contract",
+  "private": true,
+  "type": "module",
+  "description": "The single definition of the FairWins assistant's system prompt, tool table and honest result wording (spec 104). Zero runtime dependencies; resolvable by plain Node and by Vite. Consumed by the relay gateway (FairWins rail), the frontend (both rails) and, as a vendored snapshot gated by a parity test, the dependency-free MCP server.",
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./prompt": "./src/prompt.js",
+    "./tools": "./src/tools.js",
+    "./results": "./src/results.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "src"
+  ],
+  "//gates": [
+    "No test script here, matching @fairwins/intent-types and @fairwins/finops-catalogue. This package is",
+    "correct only relative to its consumers: the gateway that attaches the tools and executes the prompt,",
+    "the browser loop that executes them against the member API, and the MCP server that ships a vendored",
+    "copy because it may not take a dependency (spec 095 R4). The gates are:",
+    "  services/relay-gateway/test/assistantContract.test.js  (tool routes exist in contract.js ROUTES)",
+    "  services/relay-gateway/test/mcpToolParity.test.js      (services/mcp-server/src/toolDefs.snapshot.json == this table)"
+  ],
+  "version": "1.19.1"
+}

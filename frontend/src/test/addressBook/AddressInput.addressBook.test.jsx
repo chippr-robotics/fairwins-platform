@@ -25,9 +25,12 @@ vi.mock('../../hooks/useAddressBook', () => ({
 }))
 
 let statusMap = {}
-vi.mock('../../hooks/useAddressScreening', () => ({
-  useAddressScreening: () => ({
-    getStatus: (addr) => statusMap[addr?.toLowerCase()] || 'clear',
+vi.mock('../../hooks/useEstateScreening', async (importOriginal) => ({
+  ...(await importOriginal()),
+  useEstateScreeningMany: () => ({
+    getVerdict: (addr) => statusMap[addr?.toLowerCase()] || 'screened',
+    getVerdictOn: (addr) => statusMap[addr?.toLowerCase()] || 'screened',
+    resultFor: () => null,
   }),
 }))
 
@@ -55,10 +58,10 @@ describe('AddressInput — address book extension (US3)', () => {
     expect(screen.getByRole('textbox')).toHaveValue(A1)
   })
 
-  it('surfaces a warning for a restricted resolved address (FR-016)', () => {
-    statusMap = { [RESTRICTED.toLowerCase()]: 'restricted' }
+  it('surfaces a warning for a flagged resolved address (FR-016)', () => {
+    statusMap = { [RESTRICTED.toLowerCase()]: 'flagged' }
     render(<Controlled initial={RESTRICTED} />)
-    expect(screen.getByText('Restricted')).toBeInTheDocument()
+    expect(screen.getByText('Flagged')).toBeInTheDocument()
   })
 
   it('is unchanged when the address book is disabled (regression guard)', async () => {

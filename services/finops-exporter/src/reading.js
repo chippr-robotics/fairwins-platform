@@ -77,14 +77,40 @@ export function redact(text) {
 }
 
 /**
+ * How long one collection may run before it is reported `unreadable` rather than waited on.
+ *
+ * A VENDOR THAT NEVER ANSWERS IS NOT DISTINGUISHABLE FROM ONE THAT SAID NO, and both are
+ * `unreadable` — but only if something eventually says so. Without a deadline a hung fetch or an
+ * RPC that accepts a connection and goes quiet holds its source's in-flight slot forever, so that
+ * source is never polled again and its last reading ages silently while every other source looks
+ * healthy. The staleness signal exists, but a never-resolving promise is the one failure it cannot
+ * see, because nothing ever writes a new reading for it to be stale about.
+ *
+ * Generous on purpose: the slowest legitimate collector is the BigQuery billing query. This is a
+ * backstop against a hang, not a latency budget.
+ */
+const DEFAULT_DEADLINE_MS = 120_000
+
+/**
  * Run a collector function and normalize ANY throw into `unreadable` (FR-007).
  *
  * Failure isolation lives here rather than in each collector so that a collector cannot forget it.
  * One vendor being down must never fail the scrape or hide the other twenty-four sources.
  */
-export async function attempt(fn) {
+export async function attempt(fn, { deadlineMs = DEFAULT_DEADLINE_MS } = {}) {
+  let timer
   try {
-    const result = await fn()
+    const result = await Promise.race([
+      fn(),
+      new Promise((resolve) => {
+        timer = setTimeout(
+          () => resolve(unreadable(`collector did not answer within ${Math.round(deadlineMs / 1000)}s`)),
+          deadlineMs,
+        )
+        // Never hold the event loop open for the deadline itself.
+        timer.unref?.()
+      }),
+    ])
     // A collector that returns nothing has a bug; reporting `read` with undefined would be worse
     // than reporting it unreadable, because it would enter the totals.
     if (!result || typeof result.state !== 'string') {
@@ -93,5 +119,7 @@ export async function attempt(fn) {
     return result
   } catch (err) {
     return unreadable(err?.message ?? err)
+  } finally {
+    clearTimeout(timer)
   }
 }

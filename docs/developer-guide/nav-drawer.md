@@ -142,6 +142,15 @@ renamed to "Payments" and "Accounts"; the ids stayed so `/app`, `?tab=account&vi
 landing-view preference and every saved deep link keep resolving. `navSearchIndex.js` carries the
 former names as search terms, so a member who types "home" or "portfolio" still lands on them.
 
+**Tools gained an `assistant` item in spec 104** (`/wallet?tab=assistant`), which hosts the
+assistant's preferences — including the provider choice between the FairWins rail and the member's
+own GutterToken credits — and the API access console, both moved there from Settings. It is an
+ordinary Tools row: it obeys the tenant filter (`assistant` feature; the GutterToken option inside it
+is additionally gated by `assistant-byok`), it folds with the section, and it adds nothing to the
+drawer's resting height beyond one row. The `settings` tab keeps every other card, and the
+`?tab=settings#assistant-prefs` / `#api-access` deep links redirect to the new tab so saved links
+keep resolving.
+
 The mini-app catalog entry lives **inside Tools**. Spec 073 had already collapsed the Apps group to
 that single entry — which apps exist is decided by the on-chain registry, so the nav can only name
 the door — and a group that can never hold a second row does not earn a heading, a rule and a fold.

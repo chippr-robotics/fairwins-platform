@@ -601,7 +601,7 @@ module.exports = {
     // Ethereum Classic mainnet (chainId 61). MAINNET — deploy.js requires
     // CONFIRM_MAINNET=true. Explorer verification is Blockscout (etc.blockscout.com).
     etc: {
-      url: process.env.ETC_RPC_URL || "https://etc.rivet.link",
+      url: process.env.ETC_RPC_URL || "https://etc.etcdesktop.com", // was etc.rivet.link (NXDOMAIN)
       chainId: 61,
       accounts: floppyKeys,
       ...(process.env.GAS_PRICE_WEI ? { gasPrice: Number(process.env.GAS_PRICE_WEI) } : {}),

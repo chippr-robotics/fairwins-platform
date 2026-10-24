@@ -1,5 +1,6 @@
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { Interface } from 'ethers'
+import { encodeFunctionData } from 'viem'
+import { normalizeAbi } from '../lib/chains/readContract'
 import { WalletContext } from '../contexts/WalletContext'
 import { useTransfer } from './useTransfer'
 import { useActiveAccount } from './useActiveAccount'
@@ -15,9 +16,11 @@ import {
   GROUP_RAIL,
   classifyRecipientAddress,
   describeRail,
+  groupPayAvailability,
   parseAmountUnits,
   selectGroupRail,
 } from '../lib/payments/groupPay'
+import { isPasskeySupported } from '../config/passkeySupport'
 
 /**
  * useGroupPay (release 1.14.0) — pay N recipients with one asset, on whatever rail the acting
@@ -49,7 +52,7 @@ import {
  *   SKIPPED with its reason and the rest go through.
  */
 
-const ERC20_IFACE = new Interface(TRANSFER_ABI)
+const ERC20_ABI = normalizeAbi(TRANSFER_ABI)
 const OP_STATE = Object.freeze({ INCLUDED: 'included', FAILED: 'failed' })
 
 export const GROUP_OUTCOME = Object.freeze({
@@ -94,7 +97,11 @@ const summarise = (outcomes, rail, route, { shape = null, batchSupport = null } 
   skipped: outcomes.filter((o) => o.status === GROUP_OUTCOME.SKIPPED).length,
 })
 
-export function useGroupPay() {
+/**
+ * @param {{ asset?: object|null }} [opts] the asset the surface has selected, when it has one —
+ *   it is what decides whether the affordance is offered on THIS network (see `available`).
+ */
+export function useGroupPay({ asset = null } = {}) {
   // Read the wallet context DIRECTLY with a null fallback, the way useEffectiveAccount does: this
   // hook is mounted by two broad send surfaces, and it must not hard-crash one of them in an
   // isolated component test where no WalletProvider is present.
@@ -112,6 +119,29 @@ export function useGroupPay() {
   const railInfo = useMemo(
     () => selectGroupRail({ actingType, isPasskey, canActAsVault }),
     [actingType, isPasskey, canActAsVault],
+  )
+
+  /*
+   * Issue #1441 — is the multi-recipient affordance OFFERED here at all? Derived from the rail and
+   * the asset's own network, so a surface never renders a control whose submission would not be
+   * the one it implies. Keyed on primitives rather than the asset object: `selectedAsset` is a new
+   * object on most renders, and an availability that changed identity every render would churn
+   * every consumer's memo.
+   *
+   * `GROUP_PAY_ENABLED` is currently false, so this answers `withdrawn` on every rail. The rest of
+   * the hook is untouched and still does exactly what it did — nothing here refuses a submission.
+   */
+  const availabilityChainId = asset?.chainId ?? chainId ?? null
+  const availabilityKind = asset?.kind ?? null
+  const availability = useMemo(
+    () => groupPayAvailability({
+      rail: railInfo.rail,
+      railReason: railInfo.reason,
+      chainId: availabilityChainId,
+      assetKind: availabilityKind,
+      passkeySupported: isPasskeySupported(availabilityChainId),
+    }),
+    [railInfo, availabilityChainId, availabilityKind],
   )
 
   /*
@@ -256,7 +286,7 @@ export function useGroupPay() {
 
     const legFor = (p) => (isNative
       ? { to: p.address, value: p.units, data: '0x' }
-      : { to: asset.address, value: 0n, data: ERC20_IFACE.encodeFunctionData('transfer', [p.address, p.units]) })
+      : { to: asset.address, value: 0n, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [p.address, p.units] }) })
 
     const base = (p) => ({ id: p.id, address: p.address, amount: p.amount, symbol: asset.symbol })
 
@@ -268,7 +298,7 @@ export function useGroupPay() {
         // ONE UserOp carrying every payment.
         const calls = payable.map((p) => (isNative
           ? { target: p.address, data: '0x', value: p.units }
-          : { target: asset.address, data: ERC20_IFACE.encodeFunctionData('transfer', [p.address, p.units]), value: 0n }))
+          : { target: asset.address, data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'transfer', args: [p.address, p.units] }), value: 0n }))
 
         // One Activity record per RECIPIENT: a member who paid five people must see five
         // payments, even though they share one transaction hash.
@@ -427,6 +457,11 @@ export function useGroupPay() {
   return useMemo(() => ({
     rail: railInfo.rail,
     railReason: railInfo.reason,
+    // Issue #1441 — whether the surface should offer the affordance at all, and why not when it
+    // should not. Never a reason to hide an OUTCOME: a payment already submitted is still reported.
+    available: availability.available,
+    unavailableCode: availability.code,
+    unavailableReason: availability.reason,
     // Issue #1368 — the resolved batch shape for the vault rail, so the confirm screen can state
     // which one it will create (and why) before the member signs. Null on every other rail.
     vaultBatch: onVaultRail ? vaultBatch : null,
@@ -436,7 +471,7 @@ export function useGroupPay() {
     error,
     submitGroup: submitGroupSafely,
     reset,
-  }), [railInfo, onVaultRail, vaultBatch, status, outcomes, summary, error, submitGroupSafely, reset])
+  }), [railInfo, availability, onVaultRail, vaultBatch, status, outcomes, summary, error, submitGroupSafely, reset])
 }
 
 export default useGroupPay

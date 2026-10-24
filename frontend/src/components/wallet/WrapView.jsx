@@ -1,9 +1,13 @@
-import { useCallback, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import SensitiveValue from '../common/SensitiveValue'
+import UniversalAssetSelect from '../ui/UniversalAssetSelect'
 import { useWrapNative, WRAP_DIRECTION } from '../../hooks/useWrapNative'
+import { useWrapCoinOptions } from '../../hooks/useWrapCoinOptions'
+import { useActiveAccount } from '../../hooks/useActiveAccount'
 import { useNotification } from '../../hooks/useUI'
 import { getNetwork } from '../../config/networks'
+import { formatUnitsForDisplay } from '../../lib/format/amount'
 // The view is built on the Transfer section's `pt-*` vocabulary. It used to inherit this
 // stylesheet from PayTransferPanel; now that it also mounts under Trade (release 1.14.0) it
 // carries its own import so its styles never depend on which section mounted first.
@@ -28,17 +32,53 @@ import './PayTransfer.css'
  * that and offers nothing — no address is guessed for a contract that would receive funds.
  */
 export default function WrapView() {
-  const wrapper = useWrapNative()
   const { showNotification } = useNotification()
   const [direction, setDirection] = useState(WRAP_DIRECTION.WRAP)
   const [amount, setAmount] = useState('')
   const [formError, setFormError] = useState(null)
   const [receipt, setReceipt] = useState(null)
 
+  // Spec 108 — the ASSET is the entry point. The picker lists every cohort chain's coin
+  // (config/wrappedNative.js#listWrappableCoins via useWrapCoinOptions), and the selection
+  // decides where the wrap runs; the connected network only decides whether a switch will be
+  // asked for at submit time.
+  const { options, defaultKey } = useWrapCoinOptions({ direction })
+  const [selectedKey, setSelectedKey] = useState(null)
+  const activeKey = selectedKey ?? defaultKey
+  const selectedCoin = options.find((o) => o.key === activeKey) || null
+
+  // Acting accounts (vault / recovered / hardware) wrap on their own chain only — the picker
+  // pins to it, so the acting rails never see a foreign target (their refusals are already
+  // chain-specific and spec 102 owns multichain custody actions).
+  const { isVault: actingVault, isLegacy, isHardware } = useActiveAccount()
+  const acting = actingVault || isLegacy || isHardware
+
+  const wrapper = useWrapNative(selectedCoin ? { chainId: selectedCoin.chainId } : {})
+
   const {
     token, available, networkName, chainId, nativeSymbol, wrappedSymbol, decimals,
     nativeBalance, wrappedBalance, maxWrappable, gasReserve, sponsored, isVault, busy, status, error,
+    needsSwitch, writeRail,
   } = wrapper
+
+  // A MAX (or any amount) quoted against one chain's balance and reserve is never carried to
+  // another — changing the coin clears the form exactly as changing direction does. Only a
+  // CHANGE clears: the picker's options load asynchronously, so the default key resolving
+  // (null → first coin) is not a member action and must not wipe an amount already typed.
+  const prevKeyRef = useRef(null)
+  useEffect(() => {
+    const prev = prevKeyRef.current
+    prevKeyRef.current = activeKey
+    if (prev == null || prev === activeKey) return
+    setAmount('')
+    setFormError(null)
+    setReceipt(null)
+  }, [activeKey])
+
+  const pinPredicate = useMemo(
+    () => (acting ? (o) => o.chainId === Number(chainId) : null),
+    [acting, chainId],
+  )
 
   const wrapping = direction === WRAP_DIRECTION.WRAP
   const fromSymbol = wrapping ? nativeSymbol : wrappedSymbol
@@ -48,15 +88,18 @@ export default function WrapView() {
   // which is a different balance from the one being spent.
   const spendable = wrapping ? maxWrappable : wrappedBalance
 
+  // Display only (spec 102 FR-018): the tiles, the Balance line and the fee hint show a rounded
+  // figure so an 18-decimal balance fits a phone. MAX below still fills the full-precision
+  // amount — what is SENT is never rounded here.
   const fmt = useCallback(
-    (v) => (v == null ? null : ethers.formatUnits(v, decimals)),
+    (v) => formatUnitsForDisplay(v, decimals),
     [decimals],
   )
 
   const parsed = useMemo(() => {
     if (!amount) return null
     try {
-      const v = ethers.parseUnits(amount, decimals)
+      const v = parseUnits(amount, decimals)
       return v > 0n ? v : null
     } catch {
       return null
@@ -80,7 +123,7 @@ export default function WrapView() {
 
   const handleMax = useCallback(() => {
     if (spendable == null) return
-    setAmount(ethers.formatUnits(spendable, decimals))
+    setAmount(formatUnits(spendable, decimals))
   }, [spendable, decimals])
 
   const handleSubmit = useCallback(async () => {
@@ -112,9 +155,11 @@ export default function WrapView() {
     return (
       <div className="pt-form">
         <div className="pt-notice pt-notice-warn" role="status">
-          {networkName
-            ? `${networkName} has no wrapped coin configured in this app, so there is nothing to wrap here.`
-            : 'Connect to a network to wrap its coin.'}
+          {options.length === 0
+            ? 'No network in this build has a wrapped coin configured, so there is nothing to wrap here.'
+            : networkName
+              ? `${networkName} has no wrapped coin configured in this app, so there is nothing to wrap here.`
+              : 'Connect to a network to wrap its coin.'}
         </div>
       </div>
     )
@@ -122,9 +167,36 @@ export default function WrapView() {
 
   const explorerBase = getNetwork(chainId)?.explorer?.baseUrl
   const txUrl = receipt?.txHash && explorerBase ? `${explorerBase}/tx/${receipt.txHash}` : null
+  const railUnavailable = writeRail?.kind === 'unavailable'
 
   return (
     <div className="pt-form">
+      {/* The coin (spec 108). Any cohort chain's base coin, with the member's balance beside
+          it — the network is a property of the SELECTION, not a mode set beforehand. */}
+      <div className="pt-field" data-testid="wrap-coin-field">
+        <span className="pt-label">Coin</span>
+        <UniversalAssetSelect
+          options={options}
+          value={activeKey}
+          onChange={(option) => setSelectedKey(option.key)}
+          disabled={busy}
+          label={wrapping ? 'Coin to wrap' : 'Coin to unwrap'}
+          pin={acting ? { pinnedSymbol: nativeSymbol, pinnedNetworkName: networkName } : null}
+          pinPredicate={pinPredicate}
+          pinEmptyMessage={
+            acting
+              ? `The account you are operating as lives on ${networkName || 'its own network'}, which has no wrapped coin configured.`
+              : null
+          }
+        />
+        {selectedCoin?.readState === 'unreadable' && (
+          <span className="pt-hint">
+            {selectedCoin.networkName} could not be read just now — the balance shown as “—” is
+            unknown, not zero. You can still wrap from it.
+          </span>
+        )}
+      </div>
+
       {/* Direction. Two radio-shaped buttons rather than a swap-style pair of asset pickers:
           the two assets are fixed and the only choice is which way round they go. */}
       <div className="pt-field">
@@ -239,6 +311,12 @@ export default function WrapView() {
             {sponsored ? 'Sponsored — no network fee' : `You pay the ${nativeSymbol} network fee`}
           </span>
         </div>
+        {needsSwitch && (
+          <div className="pt-preview-row">
+            <span className="k">Network</span>
+            <span className="v">{networkName} — your wallet will be asked to switch</span>
+          </div>
+        )}
         {isVault && (
           <div className="pt-preview-row">
             <span className="k">Acting as</span>
@@ -273,24 +351,36 @@ export default function WrapView() {
         </div>
       )}
 
-      <div className="pt-actions">
-        <button
-          type="button"
-          className="pt-btn pt-btn-primary"
-          onClick={handleSubmit}
-          disabled={!canSubmit}
-        >
-          {busy
-            ? status === 'signing'
-              ? 'Confirm in wallet…'
-              : status === 'pending'
-                ? 'Confirming…'
-                : 'Submitting…'
-            : isVault
-              ? 'Propose'
-              : wrapping ? `Wrap ${nativeSymbol}` : `Unwrap ${wrappedSymbol}`}
-        </button>
-      </div>
+      {/* An unavailable rail is stated BEFORE the tap, in place of a control that would
+          throw (the write-rail rule) — and it is a rail fact about THIS chain, not
+          "view-only". */}
+      {railUnavailable ? (
+        <div className="pt-notice pt-notice-warn" role="status" data-testid="wrap-rail-unavailable">
+          {writeRail.reason} Pick a coin on a supported network, or connect a wallet that can
+          sign on {networkName}.
+        </div>
+      ) : (
+        <div className="pt-actions">
+          <button
+            type="button"
+            className="pt-btn pt-btn-primary"
+            onClick={handleSubmit}
+            disabled={!canSubmit}
+          >
+            {busy
+              ? status === 'signing'
+                ? 'Confirm in wallet…'
+                : status === 'pending'
+                  ? 'Confirming…'
+                  : 'Submitting…'
+              : isVault
+                ? 'Propose'
+                : wrapping
+                  ? `Wrap ${nativeSymbol}${needsSwitch ? ` on ${networkName}` : ''}`
+                  : `Unwrap ${wrappedSymbol}${needsSwitch ? ` on ${networkName}` : ''}`}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

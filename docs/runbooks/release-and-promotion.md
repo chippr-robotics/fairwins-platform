@@ -121,7 +121,7 @@ worked in a single run, because the grant it assumed was never made.
 gcloud builds triggers create github \
   --name=staging-branch-build \
   --repo-owner=chippr-robotics \
-  --repo-name=prediction-dao-research \
+  --repo-name=fairwins-platform \
   --branch-pattern='^staging$' \
   --build-config=cloudbuild.staging.yaml \
   --description='Build + deploy both staging services on every push to staging'

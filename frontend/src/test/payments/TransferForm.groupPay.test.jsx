@@ -36,7 +36,6 @@ const groupHolder = {}
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChainAsync: vi.fn(), isPending: false }),
-  useChainId: () => 137,
   useAccount: () => ({ address: '0xAaAa000000000000000000000000000000000001', chainId: 137 }),
 }))
 vi.mock('../../hooks/useWalletManagement', () => ({
@@ -101,6 +100,12 @@ beforeEach(() => {
   Object.assign(groupHolder, {
     rail: GROUP_RAIL.BATCH_PASSKEY,
     railReason: null,
+    // Issue #1441 withdrew the affordance behind this flag. The journeys below drive the list
+    // itself, so they set it true; the withdrawal is asserted in its own describe at the end of
+    // the file, and the DEFAULT (false) is proven at the hook and lib level.
+    available: true,
+    unavailableCode: null,
+    unavailableReason: null,
     status: 'idle',
     outcomes: null,
     summary: null,
@@ -196,5 +201,34 @@ describe('group send', () => {
     setRow(2, BTC_ADDR, '1')
     await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/bitcoin address/i))
     expect(screen.getByRole('button', { name: 'Preview' })).toBeDisabled()
+  })
+})
+
+/* Issue #1441 — the same withdrawal on Transfer ▸ Send. */
+describe('the group affordance is withdrawn (#1441)', () => {
+  beforeEach(() => { groupHolder.available = false })
+
+  it('renders no add control and no recipient rows', async () => {
+    render(<TransferForm />)
+    await waitFor(() => expect(screen.getByLabelText('To')).toBeInTheDocument())
+    expect(screen.queryByTestId('group-pay-add')).toBeNull()
+    expect(screen.queryAllByTestId('group-pay-row')).toHaveLength(0)
+  })
+
+  it('empties a list that was already drafted when the affordance goes away', async () => {
+    groupHolder.available = true
+    const user = userEvent.setup()
+    const { rerender } = render(<TransferForm />)
+    await user.type(screen.getByLabelText('To'), ONE)
+    await user.type(screen.getByLabelText('Amount'), '10')
+    fireEvent.click(screen.getByTestId('group-pay-add'))
+    setRow(2, TWO, '2')
+    await waitFor(() => expect(screen.getAllByTestId('group-pay-row')).toHaveLength(1))
+
+    groupHolder.available = false
+    rerender(<TransferForm />)
+
+    await waitFor(() => expect(screen.queryAllByTestId('group-pay-row')).toHaveLength(0))
+    expect(screen.queryByTestId('group-pay-add')).toBeNull()
   })
 })

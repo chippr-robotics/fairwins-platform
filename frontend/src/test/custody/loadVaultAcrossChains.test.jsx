@@ -7,6 +7,11 @@
 //
 // The other half of this is honesty about failure: a chain we could not reach must be reported as
 // unchecked, never folded into "no vault found", or one dead RPC tells a member their vault is gone.
+//
+// Spec 102 (US2/FR-003) — EVERY match is stored, not one "picked" chain: a Safe on Mordor and
+// Polygon becomes one vault with two instances. `picked` survives only as the instance the caller
+// confirms against; `added` lists every chain stored; `probeVault` adds new networks to a held vault
+// and `forgetVault` removes it from all of them.
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor, act } from '@testing-library/react'
@@ -23,10 +28,11 @@ const upsert = vi.fn()
 let chainState = {}
 
 vi.mock('../../hooks', () => ({ useWallet: () => walletCtx }))
+const removeRef = vi.fn()
 vi.mock('../../lib/custody/vaultReferences', () => ({
   loadVaultReferences: () => references,
   upsertVaultReference: (...a) => upsert(...a),
-  removeVaultReference: vi.fn(),
+  removeVaultReference: (...a) => removeRef(...a),
 }))
 vi.mock('../../utils/blockchainService', () => ({ getProvider: (id) => ({ tag: `rpc-${id}` }) }))
 vi.mock('../../lib/custody/policy', () => ({ readPolicy: vi.fn(), summarizeRules: vi.fn() }))
@@ -157,16 +163,34 @@ describe('loadByAddress — cross-chain search', () => {
     expect(loaded.chainId).toBe(137)
   })
 
-  it('prefers the connected chain when the address is a Safe on several', async () => {
-    chainState = { 63: safeOnMordor, 137: safeOnMordor }
+  it('adds EVERY network the address is a Safe on, confirming against the connected chain (spec 102)', async () => {
+    chainState = { 63: safeOnMordor, 137: { ...safeOnMordor, owners: [OTHER1, OTHER2] } }
+    const { result } = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let loaded
+    await act(async () => {
+      loaded = await result.current.loadByAddress(VAULT, 'Admin Safe')
+    })
+    expect(loaded.chainId).toBe(137) // the instance to confirm against: wallet is on Polygon
+    expect(loaded.matches).toHaveLength(2)
+    expect([...loaded.added].sort((a, b) => a - b)).toEqual([63, 137])
+    // BOTH references stored, role computed PER INSTANCE (owner on Mordor, view-only on Polygon).
+    expect(upsert).toHaveBeenCalledTimes(2)
+    expect(upsert).toHaveBeenCalledWith(ME, expect.objectContaining({ chainId: 63, role: 'owner', label: 'Admin Safe' }), expect.anything())
+    expect(upsert).toHaveBeenCalledWith(ME, expect.objectContaining({ chainId: 137, role: 'watch', label: 'Admin Safe' }), expect.anything())
+    expect(loaded.owner).toBe(false) // the picked (Polygon) instance's role
+  })
+
+  it('a single-network vault stores exactly one reference (byte-identical to before)', async () => {
+    chainState = { 63: safeOnMordor }
     const { result } = renderHook(() => useCustodyVaults())
     await waitFor(() => expect(result.current.loading).toBe(false))
     let loaded
     await act(async () => {
       loaded = await result.current.loadByAddress(VAULT)
     })
-    expect(loaded.chainId).toBe(137) // wallet is on Polygon
-    expect(loaded.matches).toHaveLength(2) // both offered to the caller
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(loaded.added).toEqual([63])
   })
 
   it('honours an explicit chain choice over the connected one', async () => {
@@ -213,6 +237,59 @@ describe('loadByAddress — cross-chain search', () => {
       loaded = await result.current.loadByAddress(VAULT)
     })
     expect(loaded.chainId).toBe(63)
+    expect(loaded.added).toEqual([63])
     expect(loaded.unreachable.map((u) => u.chainId)).toContain(137)
+    expect(upsert).not.toHaveBeenCalledWith(ME, expect.objectContaining({ chainId: 137 }), expect.anything())
+  })
+})
+
+describe('probeVault — "Check again" for a vault already held (spec 102 US2.4)', () => {
+  it('adds ONLY the networks that are new and leaves held references untouched', async () => {
+    references = [{ chainId: 63, address: VAULT, label: 'Admin Safe', role: 'owner', addedAt: 1 }]
+    chainState = { 63: safeOnMordor, 137: safeOnMordor }
+    const { result } = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let out
+    await act(async () => {
+      out = await result.current.probeVault(VAULT)
+    })
+    expect(out.added).toEqual([137])
+    expect(out.unreachable).toEqual([])
+    expect(upsert).toHaveBeenCalledTimes(1)
+    expect(upsert).toHaveBeenCalledWith(ME, expect.objectContaining({ chainId: 137, role: 'owner' }), expect.anything())
+  })
+
+  it('reports still-unreachable networks and adds nothing when nothing is new', async () => {
+    references = [{ chainId: 63, address: VAULT, label: '', role: 'owner', addedAt: 1 }]
+    chainState = { 63: safeOnMordor, 137: new Error('RPC down') }
+    const { result } = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    let out
+    await act(async () => {
+      out = await result.current.probeVault(VAULT)
+    })
+    expect(out.added).toEqual([])
+    expect(out.unreachable.map((u) => u.chainId)).toEqual([137])
+    expect(upsert).not.toHaveBeenCalled()
+  })
+})
+
+describe('forgetVault — removes the vault from EVERY network (spec 102 FR-015)', () => {
+  it('removes each (chainId, address) reference for the address, case-insensitively', async () => {
+    references = [
+      { chainId: 63, address: VAULT, label: '', role: 'owner', addedAt: 1 },
+      { chainId: 137, address: VAULT.toLowerCase(), label: '', role: 'watch', addedAt: 1 },
+      { chainId: 137, address: OTHER1, label: 'Other', role: 'watch', addedAt: 1 },
+    ]
+    chainState = { 63: safeOnMordor, 137: safeOnMordor }
+    const { result } = renderHook(() => useCustodyVaults())
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    await act(async () => {
+      await result.current.forgetVault(VAULT)
+    })
+    expect(removeRef).toHaveBeenCalledTimes(2)
+    expect(removeRef).toHaveBeenCalledWith(ME, 63, VAULT)
+    expect(removeRef).toHaveBeenCalledWith(ME, 137, VAULT.toLowerCase())
+    expect(removeRef).not.toHaveBeenCalledWith(ME, 137, OTHER1)
   })
 })

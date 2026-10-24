@@ -4,7 +4,7 @@ import { renderHook } from '@testing-library/react'
 // useChainTokens reads the active chain via wagmi's useChainId. Mock it to a plain value so we
 // can exercise the pure config resolution for the Ethereum family (spec 048 US3, contract C9).
 let mockChainId = 1
-vi.mock('wagmi', () => ({ useChainId: () => mockChainId }))
+vi.mock('wagmi', () => ({ useAccount: () => ({ chainId: mockChainId }) }))
 
 import { useChainTokens } from '../hooks/useChainTokens'
 

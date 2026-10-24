@@ -1,0 +1,148 @@
+name: Close Linked Issues
+
+# Issue #1460. GitHub honours closing keywords only when a PR merges into the repository's DEFAULT
+# branch. Here that is `main`, and every feature PR targets `staging` by design (spec 076) — so no
+# feature PR in this repo has ever auto-closed anything. PR #1461 merged with `Closes #1460` in its
+# body and the issue stayed open, with `closed_by_pull_requests: 0`; the later `staging` -> `main`
+# promotion does not rescue it either, because GitHub reads THAT PR's body, which names nothing.
+#
+# This restores the behaviour everyone already expects, on the branch the work actually merges into.
+#
+# It is NOT a mirror (the thing this feature exists to avoid): it writes the issue's own state once,
+# derived from the PR body at merge time, and keeps no second copy of anything. If it fails, the
+# issue is simply still open — visibly, and true.
+#
+# Scope, deliberately narrow:
+#   · merges into `staging` ONLY. `main` closes natively, and doing both would double-comment.
+#   · merged pull requests only — a PR closed WITHOUT merging closes nothing.
+#   · issues in THIS repository only (enforced in the parser, which is unit-tested).
+#   · an already-closed issue is left alone rather than re-closed and re-commented.
+#
+# Trust: the PR body is author-controlled, so a merged fork PR could name an issue it did not fix.
+# That is GitHub's own behaviour on the default branch, and the gate is the same one: somebody with
+# write access chose to merge it.
+#
+# It IS stricter than GitHub in one place — a closing keyword only counts at the START OF A LINE —
+# and that narrowing was bought on the first run. PR #1462's body explained in prose that the
+# parser does not interpret negation, using the words "does not fix #123", and the parser extracted
+# 123. Nothing was harmed only because #123 was already closed. GitHub can afford anywhere-matching
+# because its UI shows the linked issues before you merge; nothing shows you what this will do.
+# See scripts/ci/parse-closing-keywords.js for the full reasoning.
+
+# NO `branches:` FILTER on pull_request, deliberately — `test/config/CiGates.test.js` forbids one,
+# and branch-policy.yml sets the precedent: a base-branch condition decides whether a workflow RUNS,
+# which hides it, where an `if:` on the job states it. This genuinely only applies to `staging`, and
+# that lives in the job below where it is visible and testable. The workflow is two git-free API
+# calls, so running it on every closed PR costs nothing.
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: close-linked-issues-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  close:
+    name: Close issues this PR says it closes
+    # MERGED, and merged into `staging`. Both halves matter:
+    #   · a PR closed WITHOUT merging delivered nothing and closes nothing;
+    #   · a PR merged into `main` (a promotion, or a declared hotfix) is closed by GITHUB, because
+    #     `main` is the default branch — doing it here as well would double-close and double-comment.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.base.ref == 'staging'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # A parser that closes the wrong issue is worse than one that closes nothing, so its rules
+      # are driven against fixtures it must REFUSE — a number inside a code span, a number in
+      # another repository, a bare reference with no keyword. Dependency-free (node:test).
+      - name: Test the parser's rules
+        run: node --test "scripts/ci/__tests__/parse-closing-keywords.test.js"
+
+      # The body is written to a file rather than interpolated into the shell: a PR body is
+      # author-controlled text and `${{ ... }}` in a `run:` block is a shell injection.
+      - name: Read the closing keywords out of the PR body
+        id: parse
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: |
+          set -euo pipefail
+          printf '%s' "$PR_BODY" > /tmp/pr-body.md
+          node scripts/ci/parse-closing-keywords.js \
+            --repo "$GITHUB_REPOSITORY" \
+            --body-file /tmp/pr-body.md > /tmp/issues.txt
+          echo "count=$(wc -l < /tmp/issues.txt | tr -d ' ')" >> "$GITHUB_OUTPUT"
+
+      - name: Close each one
+        if: steps.parse.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          BASE: ${{ github.event.pull_request.base.ref }}
+        run: |
+          set -euo pipefail
+
+          # Rendered to a file first (a heredoc inside the loop would carry the shell's own
+          # indentation), then passed inline: gh issue close has no --comment-file flag.
+          cat > /tmp/close-comment.md <<COMMENT
+          Closed by #${PR}, merged into \`${BASE}\`.
+
+          GitHub acts on closing keywords only when a pull request merges into the repository's
+          default branch, so this was closed by \`.github/workflows/close-linked-issues.yml\`
+          instead. See \`docs/developer-guide/multi-agent-workflow.md\`.
+
+          ---
+          _Generated by [Claude Code](https://claude.ai/code)_
+          COMMENT
+          # Strip the YAML block indentation the heredoc preserved.
+          sed -i 's/^          //' /tmp/close-comment.md
+
+          while read -r n; do
+            [ -n "$n" ] || continue
+
+            # The REST issues endpoint returns a `pull_request` key for pull requests, which is the
+            # only reliable way to tell them apart: `gh issue view` RESOLVES a PR number, so the
+            # obvious check would happily close a pull request that a body happened to name.
+            state=$(gh api "repos/$REPO/issues/$n" \
+              --jq 'if has("pull_request") then "PULL_REQUEST" else .state | ascii_upcase end' \
+              2>/dev/null || echo MISSING)
+
+            if [ "$state" = "MISSING" ]; then
+              echo "::warning::#$n does not exist in $REPO — skipped."
+              continue
+            fi
+            if [ "$state" = "PULL_REQUEST" ]; then
+              echo "::warning::#$n is a pull request, not an issue — skipped."
+              continue
+            fi
+            if [ "$state" = "CLOSED" ]; then
+              echo "#$n is already closed — left alone."
+              continue
+            fi
+
+            gh issue close "$n" --repo "$REPO" --reason completed --comment "$(cat /tmp/close-comment.md)"
+
+            echo "Closed #$n."
+            echo "- Closed #$n" >> "$GITHUB_STEP_SUMMARY"
+          done < /tmp/issues.txt
+
+      - name: Say when there was nothing to close
+        if: steps.parse.outputs.count == '0'
+        run: |
+          echo "No closing keywords in the body of PR #${{ github.event.pull_request.number }}." \
+            >> "$GITHUB_STEP_SUMMARY"

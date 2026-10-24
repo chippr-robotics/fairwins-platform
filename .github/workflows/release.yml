@@ -87,25 +87,21 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      - uses: actions/setup-node@v7
+      # The SAME preparation `native-build.yml` runs on every pull request and
+      # push to staging — one definition, so an early check can never pass while
+      # the release it protects fails.
+      - uses: ./.github/actions/native-prepare
         with:
-          node-version: 22
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-        env:
-          CYPRESS_INSTALL_BINARY: '0'
-      - name: Build the web bundle for the native shell
-        run: |
-          set -euo pipefail
-          npm run build --workspace frontend
-          node scripts/native/inject-native-csp.js
-          node scripts/native/sync-native-config.js --version "${{ needs.native-gate.outputs.version }}"
-          cd frontend && npx cap sync android
+          platform: android
+          version: ${{ needs.native-gate.outputs.version }}
+      # JAVA 21, not 17: `capacitor-android` (Capacitor 8) declares source/target
+      # compatibility 21, and javac answers an older toolchain with
+      # `invalid source release: 21` — which is what failed every Android job on
+      # the v1.16.0 attempt, the first time this chain ever ran.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       # Signing is enabled by setting the ANDROID_SIGNING_SERVICE_ACCOUNT repo
       # variable (one-time operator setup — docs/runbooks/native-release-operations.md).
       # Once enabled, a missing or unreadable secret FAILS this job naming it;
@@ -163,7 +159,7 @@ jobs:
 
   ios-artifact:
     name: iOS artifact (unsigned archive)
-    runs-on: macos-14
+    runs-on: macos-latest
     needs: native-gate
     if: needs.native-gate.outputs.proceed == 'true'
     steps:
@@ -171,21 +167,12 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      - uses: actions/setup-node@v7
+      # Same shared preparation as the Android jobs and the pre-main check,
+      # including selecting the newest Xcode on the image.
+      - uses: ./.github/actions/native-prepare
         with:
-          node-version: 22
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-        env:
-          CYPRESS_INSTALL_BINARY: '0'
-      - name: Build the web bundle for the native shell
-        run: |
-          set -euo pipefail
-          npm run build --workspace frontend
-          node scripts/native/inject-native-csp.js
-          node scripts/native/sync-native-config.js --version "${{ needs.native-gate.outputs.version }}"
-          cd frontend && npx cap sync ios
+          platform: ios
+          version: ${{ needs.native-gate.outputs.version }}
       # Unsigned by design: the Apple distribution identity is operator-held
       # and never enters CI (research R8). The archive's digest still pins the
       # released bytes; signing rewrites the bundle at the operator ceremony.
@@ -229,25 +216,21 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      - uses: actions/setup-node@v7
+      # The SAME preparation `native-build.yml` runs on every pull request and
+      # push to staging — one definition, so an early check can never pass while
+      # the release it protects fails.
+      - uses: ./.github/actions/native-prepare
         with:
-          node-version: 22
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-        env:
-          CYPRESS_INSTALL_BINARY: '0'
-      - name: Build the web bundle for the native shell
-        run: |
-          set -euo pipefail
-          npm run build --workspace frontend
-          node scripts/native/inject-native-csp.js
-          node scripts/native/sync-native-config.js --version "${{ needs.native-gate.outputs.version }}"
-          cd frontend && npx cap sync android
+          platform: android
+          version: ${{ needs.native-gate.outputs.version }}
+      # JAVA 21, not 17: `capacitor-android` (Capacitor 8) declares source/target
+      # compatibility 21, and javac answers an older toolchain with
+      # `invalid source release: 21` — which is what failed every Android job on
+      # the v1.16.0 attempt, the first time this chain ever ran.
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
       - name: Enable KVM for the emulator
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -266,36 +249,15 @@ jobs:
           api-level: 34
           arch: x86_64
           disable-animations: true
-          script: |
-            cd frontend/android && ./gradlew --no-daemon assembleDebug && cd ../..
-            PKG=$(grep -oP '(?<=<string name="package_name">)[^<]+' frontend/android/app/src/main/res/values/strings.xml)
-            adb install -r frontend/android/app/build/outputs/apk/debug/app-debug.apk
-            adb logcat -c || true
-            adb shell am start -n "$PKG/.MainActivity"
-            MOUNTED=false
-            for i in $(seq 1 60); do
-              if adb logcat -d | grep -q 'fw-smoke.*shell-mounted'; then MOUNTED=true; break; fi
-              sleep 2
-            done
-            if [ "$MOUNTED" != "true" ]; then
-              echo "::error::The app shell never mounted in the WebView — dumping the tail of logcat."
-              adb logcat -d | tail -150
-              exit 1
-            fi
-            adb shell input keyevent KEYCODE_HOME
-            sleep 2
-            adb shell am start -n "$PKG/.MainActivity"
-            sleep 5
-            if adb logcat -d | grep -q 'FATAL EXCEPTION'; then
-              echo "::error::Fatal exception across the background/foreground cycle."
-              adb logcat -d | grep -A 30 'FATAL EXCEPTION'
-              exit 1
-            fi
-            echo "Smoke passed: installed, mounted, survived a lifecycle cycle."
+          # ONE LINE, deliberately. This action runs its `script:` line by line,
+          # each in its own `sh -c`, so shell variables do not survive between
+          # lines and a multi-line `for`/`if` is split mid-statement. The probe
+          # therefore lives in a file that a real shell reads whole.
+          script: bash scripts/native/android-smoke.sh
 
   native-smoke-ios:
     name: Native smoke (iOS simulator)
-    runs-on: macos-14
+    runs-on: macos-latest
     needs: native-gate
     if: needs.native-gate.outputs.proceed == 'true'
     steps:
@@ -303,37 +265,43 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-      - uses: actions/setup-node@v7
+      # Same shared preparation as the Android jobs and the pre-main check,
+      # including selecting the newest Xcode on the image.
+      - uses: ./.github/actions/native-prepare
         with:
-          node-version: 22
-          cache: 'npm'
-      - name: Install dependencies
-        run: npm ci
-        env:
-          CYPRESS_INSTALL_BINARY: '0'
-      - name: Build the web bundle for the native shell
-        run: |
-          set -euo pipefail
-          npm run build --workspace frontend
-          node scripts/native/inject-native-csp.js
-          node scripts/native/sync-native-config.js --version "${{ needs.native-gate.outputs.version }}"
-          cd frontend && npx cap sync ios
+          platform: ios
+          version: ${{ needs.native-gate.outputs.version }}
+      # The simulator is CHOSEN FROM THE IMAGE, never named in advance: a hardcoded
+      # `iPhone 15` broke the moment the runner moved to an Xcode 26 image whose
+      # newest simulators are iPhone 17s. Pick the last available iPhone by UDID
+      # and build for exactly that device, so the thing built and the thing booted
+      # cannot disagree.
       - name: Build for the simulator and probe the app
         run: |
           set -euo pipefail
+          UDID=$(xcrun simctl list devices available --json \
+            | python3 -c "import json,sys; d=json.load(sys.stdin)['devices']; \
+                p=[x for r in d.values() for x in r if x['name'].startswith('iPhone')]; \
+                print(p[-1]['udid'] if p else '')")
+          if [ -z "$UDID" ]; then
+            echo "::error::No iPhone simulator is available on this image."
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $UDID"
           xcodebuild \
             -project frontend/ios/App/App.xcodeproj \
             -scheme App \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 15' \
+            -destination "id=$UDID" \
             -derivedDataPath "$RUNNER_TEMP/dd" \
             build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO
           BUNDLE_ID=$(grep -oE 'PRODUCT_BUNDLE_IDENTIFIER = [^;]+' frontend/ios/App/App.xcodeproj/project.pbxproj | head -1 | sed 's/.*= //')
-          xcrun simctl boot 'iPhone 15' || true
-          xcrun simctl bootstatus 'iPhone 15' -b
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
           APP_PATH=$(find "$RUNNER_TEMP/dd/Build/Products" -maxdepth 2 -name 'App.app' | head -1)
-          xcrun simctl install booted "$APP_PATH"
-          xcrun simctl launch --console-pty booted "$BUNDLE_ID" > console.log 2>&1 &
+          xcrun simctl install "$UDID" "$APP_PATH"
+          xcrun simctl launch --console-pty "$UDID" "$BUNDLE_ID" > console.log 2>&1 &
           MOUNTED=false
           for i in $(seq 1 60); do
             if grep -q 'fw-smoke.*shell-mounted' console.log; then MOUNTED=true; break; fi
@@ -569,6 +537,16 @@ jobs:
           # is DERIVED from the workspace globs, so it cannot fall behind the workspace. Mini-apps
           # version independently and are deliberately untouched (FR-007).
           node scripts/release/sync-manifest-versions.js --version "$VERSION"
+
+          # ...and into the native shells (spec 103). Those version fields are SYNC-ONLY —
+          # `check:native-versions` fails on any value the sync would not have written — so a
+          # record that bumps the manifests without also running this is born unmergeable. It
+          # was: v1.16.0's record failed the gate with drift in build.gradle and project.pbxproj,
+          # because this step predates the native channels and was never extended when they
+          # landed. The shipped artifacts were never affected (`native-prepare` runs the same
+          # sync before building), which is exactly why nothing caught it earlier: the only
+          # place the omission shows up is the committed record.
+          node scripts/native/sync-native-config.js --version "$VERSION"
 
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

@@ -35,6 +35,7 @@ import { verifyRevocation } from './auth.js'
 import { buildIntent } from './intents.js'
 import { estimateTurnTokens, parseChatRequest } from './assistant.js'
 import { buildOpenApiDocument } from './openapi.js'
+import { selectTools, toolsForMessages } from '@fairwins/assistant-contract/tools'
 
 const BYTES32_RE = /^0x[0-9a-fA-F]{64}$/
 const DEFAULT_PAGE = 50
@@ -535,7 +536,14 @@ export function createMemberApiRouter(config, {
         reservation = r
       }
 
-      const result = await assistant.chat({ messages, surface })
+      // THE GATEWAY ATTACHES THE TOOL TABLE (spec 104). Never the client's: on this rail a
+      // client-supplied `tools` array would be arbitrary text into the model under FairWins'
+      // credential, and parseChatRequest has already refused one. The set is filtered to the
+      // scopes the principal actually holds — a paid x402 principal carries `assistant:chat`
+      // alone and therefore gets the public and local tools only — because offering the model a
+      // tool the gateway would then refuse reads back to it as "the member has nothing".
+      const tools = toolsForMessages(selectTools({ hasGrant: true, scopes: token.scopes }))
+      const result = await assistant.chat({ messages, surface, tools })
 
       // Settle the reservation down to what was actually billed. Absent counts stay ABSENT — the
       // reservation stands rather than collapsing to zero, because "the provider told us nothing"
@@ -557,6 +565,9 @@ export function createMemberApiRouter(config, {
         messageCount: messages.length,
         inputTokens: result.usage.inputTokens,
         outputTokens: result.usage.outputTokens,
+        // How many tools the model asked for this round — a count, never a name's arguments.
+        toolUseCount: result.content.filter((b) => b.type === 'tool_use').length,
+        stopReason: result.stopReason,
         outcome: 'answered',
       })
       res.json(result)
@@ -592,8 +603,9 @@ export function memberApiStatus(config, { killSwitch, assistantConfigured = fals
     // a claim about configuration dressed as a claim about liveness.
     enabled: Boolean(memberApi.enabled) && !memberApi.killSwitch && !killSwitch.isActive(),
     killSwitch: Boolean(memberApi.killSwitch),
-    // A boolean, never the credential and never the model id's provenance.
-    assistant: { configured: Boolean(assistantConfigured) },
+    // A boolean, never the credential and never the model id's provenance. `maxRounds` is the
+    // tool-loop ceiling the browser must respect against this gateway (spec 104) — public config.
+    assistant: { configured: Boolean(assistantConfigured), maxRounds: memberApi.assistant.maxRounds },
     // Spec 096. PUBLIC CONFIG ONLY — the prices and the network are already in every 402 body, and
     // the treasury's BALANCE is deliberately not here (see x402Status).
     x402: x402Status(config, { killSwitch }),

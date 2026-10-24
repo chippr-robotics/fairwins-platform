@@ -1,0 +1,187 @@
+/* TokenNewsCard (spec 109). Colours come ONLY from theme tokens (specs 090/091).
+ *
+ * The ranking is carried by SIZE, WEIGHT AND SPACING rather than by colour. The first pass made
+ * every title an underlined --accent-color link, which read as a wall of teal in which a one-hour
+ * report and a three-month price-prediction piece had identical visual weight — on a sheet whose
+ * job is Trade and Transfer. Titles are therefore --text-primary (13.2:1) and take their underline
+ * on hover and focus; the link affordance is structural (a list of rows whose whole content is the
+ * link), not a colour claim. Nothing here is under 18px in a brand hue, so rule (1) of spec 090
+ * never comes into play.
+ */
+
+.token-news-card {
+  margin-top: 0.75rem;
+  padding: 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--surface-color);
+}
+
+.token-news-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.token-news-title {
+  margin: 0;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+}
+
+/* Marks the featured item directly beneath it, not the card. Rendered only when there IS one. */
+.token-news-latest {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.token-news-cohort-note,
+.token-news-quiet {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.token-news-cohort-note {
+  margin-bottom: 0.5rem;
+}
+
+.token-news-unreadable p {
+  margin: 0 0 0.5rem;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+}
+
+.token-news-card .token-news-retry {
+  /* index.css sets a global button padding; scope our box explicitly (spec-081 lesson). */
+  padding: 0.35em 0.9em;
+  font-size: 0.85rem;
+}
+
+/* ── The featured item ─────────────────────────────────────────────────────────────────────── */
+
+.token-news-featured {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-bottom: 0.65rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.token-news-featured-link {
+  font-size: 1.02rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.token-news-featured-link:hover,
+.token-news-featured-link:focus-visible {
+  text-decoration: underline;
+}
+
+/* ── Recency groups and compact rows ───────────────────────────────────────────────────────── */
+
+.token-news-bucket {
+  margin: 0.7rem 0 0.1rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.token-news-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.token-news-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.token-news-group:last-of-type .token-news-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0.15rem;
+}
+
+.token-news-link {
+  /* Two lines, then ellipsis: a long headline must not turn one row into a paragraph. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.88rem;
+  line-height: 1.35;
+  color: var(--text-primary);
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+
+.token-news-link:hover,
+.token-news-link:focus-visible {
+  text-decoration: underline;
+}
+
+.token-news-meta {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+}
+
+/* ── The one disclosure ────────────────────────────────────────────────────────────────────── */
+
+.token-news-card .token-news-more {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 0.35rem;
+  padding: 0.4rem 0;
+  border: 0;
+  border-top: 1px solid var(--border-color);
+  border-radius: 0;
+  background: none;
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.token-news-card .token-news-more:hover {
+  color: var(--text-primary);
+  background: none;
+}
+
+.token-news-chevron {
+  flex: none;
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-right: 0.15rem;
+  border-right: 2px solid currentColor;
+  border-bottom: 2px solid currentColor;
+  transform: rotate(45deg);
+  transition: transform 0.15s ease;
+}
+
+.token-news-card .token-news-more[aria-expanded='true'] .token-news-chevron {
+  transform: rotate(-135deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .token-news-chevron {
+    transition: none;
+  }
+}

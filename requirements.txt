@@ -1,3 +1,7 @@
-mkdocs>=1.5.0
-mkdocs-material>=9.5.0
-pymdown-extensions>=10.7
+# The MkDocs toolchain, pinned exactly. A range means the deployed site is a function of the day
+# GitHub Actions last resolved it: the docs build installs straight from this file with no lock,
+# so `>=` made a silent theme upgrade indistinguishable from a content change. Bump a pin in a
+# reviewed PR; the build is then reproducible from the file alone.
+mkdocs==1.6.1
+mkdocs-material==9.7.7
+pymdown-extensions==11.0.2

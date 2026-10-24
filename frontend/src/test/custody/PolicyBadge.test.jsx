@@ -5,7 +5,16 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { axe } from 'vitest-axe'
 import PolicyBadge from '../../components/custody/PolicyBadge'
-import VaultList from '../../components/custody/VaultList'
+import VaultCardList from '../../components/custody/VaultCardList'
+
+// Spec 102 — the card's pending badge is a cross-chain read; this suite is about the POLICY badge.
+vi.mock('../../hooks/useVaultQueueAcrossChains', () => ({
+  useVaultQueueAcrossChains: () => ({ pending: 0, missing: [], loading: false }),
+}))
+
+vi.mock('../../components/ui/BlockiesAvatar', () => ({
+  default: () => <div data-testid="blockies" />,
+}))
 
 const A = '0x1111111111111111111111111111111111111111'
 
@@ -34,21 +43,28 @@ describe('PolicyBadge', () => {
     }
   })
 
-  it('appears inside a VaultList row when the vault carries policy data', () => {
-    const vaults = [
+  // Spec 102 — the list is one compact card per vault (VaultCardList); the badge rides the card's
+  // meta line, fed from the group's first readable instance carrying policy data.
+  it('appears on a vault card when the group carries policy data', () => {
+    const groups = [
       {
-        chainId: 1337,
+        key: A,
         address: A,
         label: 'Treasury',
-        isSafe: true,
+        instances: [],
+        chainIds: [1337],
+        readable: [{ chainId: 1337 }],
+        unreachable: [],
+        unreadable: [],
+        networkLine: 'Chain 1337',
+        threshold: { value: 1, of: 1 },
+        thresholdVaries: false,
         owners: [A],
-        threshold: 1,
-        owner: true,
         policyStatus: 'managed',
         policySummary: '1-hour delay',
       },
     ]
-    render(<VaultList vaults={vaults} activeAddress={null} onSelect={vi.fn()} />)
+    render(<VaultCardList groups={groups} actingAddress={null} onOpen={vi.fn()} />)
     expect(screen.getByText(/1-hour delay/i)).toBeInTheDocument()
   })
 

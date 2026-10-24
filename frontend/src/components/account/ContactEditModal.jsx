@@ -8,6 +8,7 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import { isValidAddress } from '../../lib/addressBook/addressBookStore'
+import AddressScreenNotice from '../ui/AddressScreenNotice'
 import { extractAddressFromScan } from '../../lib/addressBook/scanAddress'
 import QRScanner from '../ui/QRScanner'
 
@@ -146,6 +147,7 @@ export default function ContactEditModal({
                     {duplicateWarnings[i]}
                   </span>
                 )}
+                <AddressScreenNotice address={row.address} chainId={Number(row.chainId)} />
               </div>
               <div className="ab-field">
                 <label htmlFor={`ab-net-${i}`}>Network *</label>

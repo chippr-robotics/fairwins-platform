@@ -4,7 +4,7 @@
  * value and earned-so-far shown only when the data service can price them
  * ("—" otherwise — honest degradation, never a fabricated number).
  */
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import InfoTip from '../ui/InfoTip'
 import AssetLogo from '../wallet/AssetLogo'
 import SensitiveValue from '../common/SensitiveValue'

@@ -502,11 +502,26 @@ describe('POST /v1/member/assistant/chat', () => {
 
     const sent = JSON.parse(memberApiFetch.calls.at(-1).init.body)
     expect(sent.model).toBe('claude-sonnet-5')
-    expect(sent.messages).toEqual([{ role: 'user', content: 'where are my wagers?' }])
+    // Spec 104: the surface rides as a SEPARATE trailing text block on the last user message, so
+    // the system prompt stays byte-identical across turns (it is the cache prefix).
+    expect(sent.messages).toEqual([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'where are my wagers?' },
+          { type: 'text', text: '[Context: the member is currently on wallet/earn]' },
+        ],
+      },
+    ])
     // The rules that stop the assistant claiming it acted are SERVER-SIDE.
     expect(sent.system).toMatch(/You have NOT performed any action/)
     expect(sent.system).toMatch(/Never ask for, accept, or repeat a private key/)
-    expect(sent.system).toContain('wallet/earn')
+    expect(sent.system).not.toContain('wallet/earn')
+    // ...and the tool table is the gateway's, attached server-side (assistantTools.test.js has the detail).
+    expect(Array.isArray(sent.tools)).toBe(true)
+    expect(sent.tool_choice).toEqual({ type: 'auto' })
+    expect(res.body.stopReason).toBe('end_turn')
+    expect(res.body.content).toEqual([{ type: 'text', text: 'Wagers live under Transfer. Check /wallet?tab=pay.' }])
   })
 
   it('never lets message content reach the audit log', async () => {
@@ -577,7 +592,7 @@ describe('/status member API block', () => {
     expect(res.body.memberApi).toEqual({
       enabled: true,
       killSwitch: false,
-      assistant: { configured: false },
+      assistant: { configured: false, maxRounds: 4 },
       // Spec 096 added a public-config-only x402 block. Off here, and `network: null` says so —
       // the configured prices stay visible so an operator can read what WOULD be charged.
       x402: { enabled: false, killSwitch: false, network: null, priced: { read: '10000', build: '50000', assistant: '100000' } },

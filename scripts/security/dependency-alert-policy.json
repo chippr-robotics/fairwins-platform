@@ -1,0 +1,54 @@
+{
+  "$comment": [
+    "Dependency vulnerability policy (issue #1521).",
+    "",
+    "THRESHOLD. `failOn` is what makes this gate adoptable. Failing on all 45 open alerts would",
+    "have meant a gate that is red on the day it lands, and a gate that is always red gets",
+    "bypassed — which is how the repo went without one at all. Critical fails at any scope; high",
+    "fails on the runtime path only. 32 of the 45 are development-scope and none of those is",
+    "critical, so they are reported by Dependabot and do not block a merge.",
+    "",
+    "ACCEPTANCES ARE TIME-BOXED, NOT PERMANENT. Each one needs a reason, the issue tracking its",
+    "removal, and a date it stops working. The expiry is the point: an acceptance with no end date",
+    "is a silenced alert, and the gate exists because silence is what let 45 accumulate. When one",
+    "expires the gate fails and the choice comes back — fix it, or renew it deliberately.",
+    "",
+    "THE LIST MUST ONLY EVER SHRINK. D-04 removes an entry that no longer matches an open alert, so",
+    "a stale excuse cannot sit here hiding the next real finding. Same rule as LEGACY_COLLISIONS",
+    "under the spec registry's S-04.",
+    "",
+    "WHAT IS DELIBERATELY NOT HERE. The 12 OpenZeppelin alerts (#1520) are not accepted, because",
+    "they never reach the threshold: they are development-scope and not critical. They describe an",
+    "OZ 4.7.3 copy nested under @chainlink/contracts -> @arbitrum/nitro-contracts that solc never",
+    "reads: the four chainlink paths contracts/ imports close over 11 files with NO non-relative",
+    "imports at all, so that closure cannot reach node_modules. (An earlier draft said nitro is",
+    "\"reachable only from automation/**\" -- false, and corrected before any alert carried it; see",
+    "dismissals.json.) They should be DISMISSED on the alert itself, which is where the reasoning",
+    "belongs; an acceptance here would record them as tolerated risk, which is a different and",
+    "wrong claim. That dismissal is declared in `dismissals.json` and executed by",
+    "`npm run dismiss:alerts`, so the criteria that selected those twelve are reviewable — which a",
+    "click is not."
+  ],
+
+  "failOn": [
+    { "severity": "critical", "scopes": ["development", "runtime"] },
+    { "severity": "high", "scopes": ["runtime"] }
+  ],
+
+  "acceptances": [
+    {
+      "ghsa": "GHSA-v5mp-jgw5-2x6j",
+      "package": "toml",
+      "issue": 1519,
+      "expires": "2026-11-15",
+      "reason": "RENEWED 2026-10-24 as a bridge, not a re-acceptance: #1588 (merged to staging) overrides toml to ^4.2.0 under @stellar/stellar-sdk, which fixes this advisory, but Dependabot reads the default branch, so the alert stays open until staging is promoted to main. D-04 forces this entry's deletion the moment the alert closes; if it is still open at expiry, the promotion stalled and that is the thing to chase. Original rationale: toml@3.0.0 arrives through @trezor/blockchain-link -> @stellar/stellar-sdk, i.e. the spec-085 hardware-wallet seam. Prototype pollution reachable only by parsing an attacker-supplied TOML document, which that path does not do; the SDK is lazy-loaded behind connectHardware. Tracked in #1519."
+    },
+    {
+      "ghsa": "GHSA-82x6-q7mm-w9cf",
+      "package": "toml",
+      "issue": 1519,
+      "expires": "2026-11-15",
+      "reason": "RENEWED 2026-10-24 as a bridge, same as the sibling entry: fixed on staging by #1588, open only until the promotion reaches main, and D-04 removes it then. Original rationale: Same toml@3.0.0 copy as above via the Trezor SDK. Uncontrolled recursion is a denial of service against the parser, and the only documents it parses are ones the vendor SDK itself supplies. Fixed together with the sibling advisory in #1519."
+    }
+  ]
+}

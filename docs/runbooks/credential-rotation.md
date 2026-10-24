@@ -71,12 +71,16 @@ gasless relay path — the never-stranded rule.
 | Secret | Consumer | Req. | Rotate when | Breaks if wrong |
 |---|---|---|---|---|
 | `origin-lock-secret` | gateway nginx, bundler nginx | required | quarterly, or on exposure | Cloudflare→origin requests rejected. **Rotate at Cloudflare and here together** — the transform rule injects it. |
-| `relay-webhook-secret` | gateway + engine | required, **pinned v2** | on exposure | Engine POSTs confirmations the gateway rejects. Intents report `submitted` forever. |
+| `relay-webhook-secret` | gateway + engine | required, **pinned v2** | on exposure | Engine POSTs confirmations the gateway rejects. Intents report `submitted` forever. **Since #1652 the engine keeps its copy (`WEBHOOK_SIGNING_KEY`) in its Redis notification record**, so rotating it also needs the drained-lane reset in `relayer-operations.md` § Storage mode, not just a restart. |
 | `relay-engine-api-key` | gateway + engine | required, **pinned v2** | on exposure | Gateway cannot submit to the engine. All gasless relaying stops. |
-| `relay-engine-gcp-private-key` | engine only | required | on exposure | KMS signing fails on **both** hot gas keys. Never let the public-facing gateway container see this. |
+| `relay-engine-gcp-private-key` | engine only | required | on exposure | KMS signing fails on **both** hot gas keys. Never let the public-facing gateway container see this. **Since #1652 the engine stores this key inside its (encrypted) signer records in Redis, so a new version is NOT picked up on restart**: rotating it needs the drained-lane reset in `relayer-operations.md` § Storage mode. |
+| `relay-engine-storage-key` (#1652) | engine only | required, **pinned v1** | on exposure only — **rotation wipes engine state** | The engine refuses to boot in redis storage mode without it (`STORAGE_ENCRYPTION_KEY`, base64 of 32 bytes, no trailing newline). It encrypts the signer and notification records in redis at rest, so a different key makes the stored records undecryptable: rotating = reviewed edit of the pin in `fetch-secrets.sh` PLUS a one-shot storage reset on a drained lane (`relayer-operations.md` § Storage mode). Never let the public-facing gateway container see it. |
 | `OPENSEA_API_KEY` | gateway | optional | on exposure | Collect degrades to 503; SPA hides the tab. |
 | `POLYMARKET_API_KEY` / `_SECRET` / `_PASSPHRASE` / `_ADDRESS` | gateway, finops | optional | on exposure | Predict feed degrades to 503. |
 | `QUICKNODE_POLYGON_API` | gateway, finops (as `RPC_URL_PRIMARY_137`) | optional | on exposure | Chain 137 reads fall back to the public endpoints in `RPC_URLS_137` — slower, no archive depth, still serving. Also read by the **bundler**, where it is required (below). |
+| `CHALLENGE_SECRET` (Turnstile, spec 106) | gateway | optional | on exposure, or with a Turnstile widget rotation | The `human` tier stops resolving: verifies answer `unverifiable`, callers keep reading at the **anonymous** ceiling — throughput, never access. Rotate the widget sitekey (`VITE_CHALLENGE_SITEKEY`, a rebuild) and this secret **together**; they are a pair at Cloudflare. Boot REFUSES the published test secrets in production. |
+| `RPC_ACCESS_SIGNING_KEY` + `_KID` (spec 107) | gateway | optional | **by succession, routinely** | KEY MATERIAL (spec 097 rule 3). Rotation is succession, never cutover: register the successor **public** key at the provider under a NEW kid → flip `RPC_ACCESS_SIGNING_KID` (+ key) on the gateway → retire the predecessor kid at the provider after the longest issued TTL. Clients renew on their own; no rebuild, no member-visible interruption. Getting the order wrong strands every outstanding issued credential at once. |
+| `RPC_ACCESS_ADMIN_KEY` (spec 107) | gateway | optional | on exposure | The FR-026 enforcement check goes `unverifiable`, and unverifiable REFUSES issuance (the one deliberate inversion): clients fall back to public capacity, disclosed as degraded. Server-side reads are untouched. This key can read **live endpoint URL tokens in plaintext** from the provider's admin API — treat exposure as exposure of those too. |
 
 ### Runtime — bundler VM
 
@@ -262,6 +266,13 @@ gcloud compute ssh fairwins-gateway --zone=us-central1-a --tunnel-through-iap --
   sudo rsync -a --delete --chmod=D0755,F0755 /opt/fairwins/repo/infra/vm/gateway/ /opt/fairwins/gateway/
   sudo systemctl restart fairwins-secrets@gateway && sudo systemctl restart fairwins-stack@gateway'
 ```
+
+> **Bundler VMs: rsync and restart are ONE operation.** `single-alto-gate.sh` attributes each
+> running alto to a chain by the `FW_CHAIN_ID` its compose declares, and refuses an alto it cannot
+> attribute. probe.sh also runs that gate every 60s, so between the rsync and the restart one tick
+> can see the NEW gate against the OLD container and refuse it. Self-resolving, and the correct
+> trade against passing an unattributable alto — but do not stop after the rsync and wonder why the
+> probe is red.
 
 **The VM tracks `main` only** — its clone is shallow with a `main`-restricted refspec. Work on
 `staging` cannot be deployed; it must be promoted first.

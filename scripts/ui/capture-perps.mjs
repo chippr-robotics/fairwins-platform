@@ -831,12 +831,70 @@ const ATTESTATION_RECORD = {
   at: '2026-08-12T09:00:00.000Z',
 }
 
+/** Opens the market-controls disclosure and waits for the panel to actually mount. */
+async function openFilterPanel(page) {
+  await page.locator('.perps-filter-toggle').click()
+  await page.waitForSelector('.perps-filter-panel', { timeout: 10000 })
+}
+
 const SHOTS_082 = [
   { name: 'perps-desktop-light', theme: 'light', viewport: DESKTOP },
   { name: 'perps-desktop-dark', theme: 'dark', viewport: DESKTOP },
   { name: 'perps-mobile-light', theme: 'light', viewport: MOBILE },
   { name: 'perps-mobile-dark', theme: 'dark', viewport: MOBILE },
   { name: 'perps-degraded-venue', theme: 'light', viewport: DESKTOP, degraded: true },
+
+  /* The market controls (issue #1440). These three are VIEWPORT shots, not full-page ones, because
+   * what is under review is exactly how much of a phone screen the controls take before the first
+   * pair — a full-page shot answers a different question. */
+  {
+    name: 'perps-filters-open-mobile-light',
+    theme: 'light',
+    viewport: MOBILE,
+    fullPage: false,
+    prepare: openFilterPanel,
+  },
+  {
+    name: 'perps-filters-open-mobile-dark',
+    theme: 'dark',
+    viewport: MOBILE,
+    fullPage: false,
+    prepare: openFilterPanel,
+  },
+  {
+    /* The state the collapse had to be safe for: a filter is live and the panel is CLOSED. The
+     * toggle must name it and the result count must be visible, or the short table is unexplained.
+     * Both are asserted here — a shot that merely looks right would pass with neither. */
+    name: 'perps-filter-active-collapsed-mobile-light',
+    theme: 'light',
+    viewport: MOBILE,
+    fullPage: false,
+    async prepare(page) {
+      await openFilterPanel(page)
+      await page.locator('.perps-filter-pill', { hasText: 'Hyperliquid' }).click()
+      await page.locator('.perps-filter-toggle').click()
+      await page.waitForSelector('.perps-filter-panel', { state: 'detached', timeout: 10000 })
+      await expectText(page, '.perps-filter-toggle', /hyperliquid/i, 'the live filter, named on the closed control')
+      await expectText(page, '.perps-result-count', /showing \d+ of \d+ pairs/i, 'the visible result count')
+    },
+  },
+  {
+    /* THE WIDEST SUMMARY THE CONTROL CAN CARRY, on the narrowest viewport: the longest venue label
+     * and a non-default sort together. This is the shot that says whether the toolbar degrades by
+     * wrapping or by eating the search field. */
+    name: 'perps-filter-longest-summary-mobile-light',
+    theme: 'light',
+    viewport: MOBILE,
+    fullPage: false,
+    async prepare(page) {
+      await openFilterPanel(page)
+      await page.locator('.perps-filter-pill', { hasText: 'Gains Network' }).click()
+      await page.locator('.perps-sort select').selectOption('funding')
+      await page.locator('.perps-filter-toggle').click()
+      await page.waitForSelector('.perps-filter-panel', { state: 'detached', timeout: 10000 })
+      await expectText(page, '.perps-filter-toggle', /gains network/i, 'the longest venue label')
+    },
+  },
 ]
 
 /* The management surfaces. Each scenario is captured in both themes — every one of them differs

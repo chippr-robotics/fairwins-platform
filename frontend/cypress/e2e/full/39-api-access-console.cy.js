@@ -548,7 +548,7 @@ describe('API Access console, served as a mini-app package (specs 095 / 073)', (
      *
      * The deep link is asserted at its DESTINATION rather than at the click: `host.navigate` is a
      * wrapper that refuses anything leaving the host, and what matters to the member is that they
-     * arrive on the open Settings card, not that a function was called.
+     * arrive on the open api-access card, not that a function was called.
      */
     launchConsole()
 
@@ -567,7 +567,13 @@ describe('API Access console, served as a mini-app package (specs 095 / 073)', (
 
     // The HOST surface, with the card the link names OPEN rather than a closed heading.
     cy.location('pathname', { timeout: 30000 }).should('equal', '/wallet')
-    cy.location('search').should('include', 'tab=settings')
+    /*
+     * `tab=assistant`, not `tab=settings`. The package's deep link still says Settings — its bytes
+     * are keccak-committed on-chain (spec 073), so it is not edited for a host reorganisation — and
+     * spec 104 moved the card to Tools ▸ Assistant, keeping the card id and redirecting the old
+     * hash. The member's destination is what this asserts, so it asserts where they LAND.
+     */
+    cy.location('search', { timeout: 20000 }).should('include', 'tab=assistant')
     cy.location('hash').should('equal', '#api-access')
     cy.get('[data-attention="api-access"]', { timeout: 40000 }).should('have.attr', 'data-open', 'true')
 

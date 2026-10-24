@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useLocation } from 'react-router-dom'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
 import { useWallet } from '../hooks/useWalletManagement'
 import { useVouchers } from '../hooks/useVouchers'
 import { useTierPrices } from '../hooks/useTierPrices'
@@ -141,14 +141,14 @@ export default function VouchersPage() {
 
   // Resolve the gift recipient: prefer the ENS-resolved address, else accept a
   // directly-typed hex address. Empty when neither is valid yet.
-  const giftAddr = recipientResolved || (ethers.isAddress(recipient.trim()) ? recipient.trim() : '')
+  const giftAddr = recipientResolved || (isAddress(recipient.trim()) ? recipient.trim() : '')
   const giftMode = recipient.trim().length > 0
-  const recipientValid = !giftMode || ethers.isAddress(giftAddr)
+  const recipientValid = !giftMode || isAddress(giftAddr)
 
   // Transfer recipient (same ENS-or-hex resolution as the gift field).
-  const transferAddr = transferToResolved || (ethers.isAddress(transferTo.trim()) ? transferTo.trim() : '')
+  const transferAddr = transferToResolved || (isAddress(transferTo.trim()) ? transferTo.trim() : '')
   const transferEntered = transferTo.trim().length > 0
-  const transferValid = ethers.isAddress(transferAddr) && transferAddr.toLowerCase() !== (account || '').toLowerCase()
+  const transferValid = isAddress(transferAddr) && transferAddr.toLowerCase() !== (account || '').toLowerCase()
 
   const qtyNum = Math.min(MAX_QUANTITY, Math.max(1, Math.floor(Number(quantity) || 1)))
   const unitPrice = getPrice('WAGER_PARTICIPANT', selectedTier)

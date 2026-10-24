@@ -16,7 +16,9 @@
 import { X402_ERROR_CODES, X402_GATEWAY_ERROR_CODES, X402_VERSION, buildRequirement, caip2 } from '../x402/requirements.js'
 import { ALL_SCOPES, ERROR_CODES, ROUTES, SCOPE_DESCRIPTIONS, TOKEN_PREFIX } from './contract.js'
 import { buildableActions, REFUSED_ACTIONS } from './intents.js'
-import { MAX_MESSAGES, MAX_MESSAGE_CHARS } from './assistant.js'
+import { MAX_BLOCKS_PER_MESSAGE, MAX_MESSAGES, MAX_MESSAGE_CHARS, MAX_REQUEST_CONTENT_CHARS, MAX_TOOL_RESULT_CHARS } from './assistant.js'
+import { SURFACE_MAX_CHARS } from '@fairwins/assistant-contract/prompt'
+import { ALLOWED_CONTENT_BLOCK_TYPES, TOOL_DEFS, TOOL_NAMES, toolsForMessages } from '@fairwins/assistant-contract/tools'
 
 /** A `$ref` to one of the error responses defined once in `components.responses`. */
 const errRef = (name) => ({ $ref: `#/components/responses/${name}` })
@@ -126,7 +128,7 @@ export function buildOpenApiDocument(config, { assistantConfigured = false } = {
         `- Chains with a wager indexer: ${indexedChainIds.join(', ') || 'none configured'}`,
         `- Membership reference chain: ${memberApi.referenceChainId}`,
         `- Maximum key lifetime: ${memberApi.maxTtlDays} days`,
-        `- Assistant: ${assistantConfigured ? 'configured' : 'not configured (503 assistant_unconfigured)'}`,
+        `- Assistant: ${assistantConfigured ? 'configured' : 'not configured (503 assistant_unconfigured)'}; tool rounds per turn: ${memberApi.assistant.maxRounds} (see \`x-fairwins-tools\`)`,
       ].join('\n'),
       license: { name: 'Proprietary', identifier: 'LicenseRef-FairWins' },
     },
@@ -465,10 +467,53 @@ export function buildOpenApiDocument(config, { assistantConfigured = false } = {
             },
           },
         },
+        AssistantTextBlock: {
+          type: 'object',
+          required: ['type', 'text'],
+          additionalProperties: false,
+          properties: {
+            type: { type: 'string', const: 'text' },
+            text: { type: 'string', minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+          },
+        },
+        AssistantToolUseBlock: {
+          type: 'object',
+          required: ['type', 'id', 'name', 'input'],
+          additionalProperties: false,
+          description:
+            'The model asking for a tool — copied back VERBATIM from a previous response’s `content`. Only an ' +
+            'assistant message may carry one, and `name` must be a tool this gateway offers (see `x-fairwins-tools`).',
+          properties: {
+            type: { type: 'string', const: 'tool_use' },
+            id: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+            name: { type: 'string', enum: [...TOOL_NAMES] },
+            input: { type: 'object', description: `The arguments the model chose. At most ${MAX_MESSAGE_CHARS} characters serialised.` },
+          },
+        },
+        AssistantToolResultBlock: {
+          type: 'object',
+          required: ['type', 'tool_use_id', 'content'],
+          additionalProperties: false,
+          description:
+            'Your answer to a tool_use, executed by YOU (the member API with your token, a public gateway read, ' +
+            'or locally). Only a user message may carry one; it must answer a tool_use from the IMMEDIATELY ' +
+            'preceding assistant message, and every tool_use there must be answered exactly once. A failed read ' +
+            'is `is_error: true` with text that says the answer is UNKNOWN — never an empty result.',
+          properties: {
+            type: { type: 'string', const: 'tool_result' },
+            tool_use_id: { type: 'string', pattern: '^[A-Za-z0-9_-]{1,128}$' },
+            content: { type: 'string', maxLength: MAX_TOOL_RESULT_CHARS, description: `Truncate client-side above ${MAX_TOOL_RESULT_CHARS} characters and say so in the text.` },
+            is_error: { type: 'boolean', default: false },
+          },
+        },
         AssistantChatRequest: {
           type: 'object',
           required: ['messages'],
           additionalProperties: false,
+          description:
+            'One ROUND of a client-side tool loop (spec 104). The gateway attaches the tool table itself — a ' +
+            'request carrying `tools`, `system`, `tool_choice` or `model` is refused with 400 bad_request. ' +
+            `At most ${MAX_REQUEST_CONTENT_CHARS} characters of content across the whole request.`,
           properties: {
             messages: {
               type: 'array',
@@ -480,19 +525,61 @@ export function buildOpenApiDocument(config, { assistantConfigured = false } = {
                 additionalProperties: false,
                 properties: {
                   role: { type: 'string', enum: ['user', 'assistant'] },
-                  content: { type: 'string', minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+                  content: {
+                    oneOf: [
+                      { type: 'string', minLength: 1, maxLength: MAX_MESSAGE_CHARS },
+                      {
+                        type: 'array',
+                        minItems: 1,
+                        maxItems: MAX_BLOCKS_PER_MESSAGE,
+                        items: {
+                          oneOf: [
+                            { $ref: '#/components/schemas/AssistantTextBlock' },
+                            { $ref: '#/components/schemas/AssistantToolUseBlock' },
+                            { $ref: '#/components/schemas/AssistantToolResultBlock' },
+                          ],
+                        },
+                        description: `Content blocks. Allowed types: ${ALLOWED_CONTENT_BLOCK_TYPES.join(', ')}; anything else is refused.`,
+                      },
+                    ],
+                  },
                 },
               },
-              description: 'The conversation so far. The first message must be from the user. Summarise older turns client-side rather than growing this array.',
+              description:
+                'The conversation so far. The first AND last message must be from the user. Summarise older turns ' +
+                'client-side rather than growing this array.',
             },
-            surface: { type: 'string', maxLength: 120, description: 'Optional: which screen the member is on, so the answer can be specific.' },
+            surface: {
+              type: 'string',
+              maxLength: SURFACE_MAX_CHARS,
+              description:
+                'Optional: which screen the member is on. Appended by the gateway as a trailing text block on the ' +
+                'last user message — never placed in the system prompt, which stays byte-identical across turns.',
+            },
           },
         },
         AssistantChatResponse: {
           type: 'object',
-          required: ['reply', 'model', 'usage'],
+          required: ['reply', 'content', 'stopReason', 'model', 'usage'],
           properties: {
-            reply: { type: 'string', description: 'AI-generated. Verify before acting on it. The assistant never signs or submits anything.' },
+            reply: {
+              type: 'string',
+              description:
+                'The concatenated text of this round. AI-generated — verify before acting on it. EMPTY when ' +
+                '`stopReason` is `tool_use`: the model asked for a tool instead of answering, and the answer is in ' +
+                '`content`. The assistant never signs or submits anything.',
+            },
+            content: {
+              type: 'array',
+              items: { oneOf: [{ $ref: '#/components/schemas/AssistantTextBlock' }, { $ref: '#/components/schemas/AssistantToolUseBlock' }] },
+              description:
+                'The model’s content blocks, text and tool_use only. To continue the loop, append an assistant ' +
+                'message with exactly this array, then a user message whose tool_result blocks answer every tool_use.',
+            },
+            stopReason: {
+              type: ['string', 'null'],
+              description: '`end_turn` (render `reply`), `tool_use` (execute `content`’s tool_use blocks and send another round), `max_tokens`, or another provider value.',
+            },
             model: { type: 'string' },
             usage: {
               type: 'object',
@@ -500,7 +587,7 @@ export function buildOpenApiDocument(config, { assistantConfigured = false } = {
                 inputTokens: { type: ['integer', 'null'] },
                 outputTokens: { type: ['integer', 'null'] },
               },
-              description: 'Counts only. Message content is never logged or stored by this gateway.',
+              description: 'Counts only, for THIS round. Message content is never logged or stored by this gateway.',
             },
           },
         },
@@ -685,6 +772,23 @@ export function buildOpenApiDocument(config, { assistantConfigured = false } = {
       },
     },
     paths: {},
+    // Spec 104. The assistant's tool table, in the Messages-API shape the gateway attaches, with
+    // each tool's authorization class and scope — the SAME table `@fairwins/assistant-contract`
+    // holds and the MCP server vendors, so a generic client can discover it here. `auth: 'grant'`
+    // tools appear in a conversation only when the token carries `scope`; `none` tools are public
+    // gateway reads; `local` tools run in the member's browser and this gateway never serves them.
+    'x-fairwins-tools': toolsForMessages(TOOL_DEFS).map((t) => {
+      const def = TOOL_DEFS.find((d) => d.name === t.name)
+      return { ...t, auth: def.auth, scope: def.scope }
+    }),
+    'x-fairwins-assistant': {
+      maxRounds: memberApi.assistant.maxRounds,
+      maxMessages: MAX_MESSAGES,
+      maxMessageChars: MAX_MESSAGE_CHARS,
+      maxToolResultChars: MAX_TOOL_RESULT_CHARS,
+      maxRequestContentChars: MAX_REQUEST_CONTENT_CHARS,
+      maxBlocksPerMessage: MAX_BLOCKS_PER_MESSAGE,
+    },
   }
 
   // ---- paths, derived from the SAME array routes.js mounts ------------------------------------

@@ -7,6 +7,15 @@ on:
   # ever ADDED work instead of reducing it.
   workflow_dispatch:
   workflow_call:
+    inputs:
+      run_e2e:
+        description: >-
+          Whether this change can affect the running app, and therefore whether the Cypress tiers
+          need to run. Computed by ci-manager's `app` path filter, which is a NEGATIVE list — see
+          the comment on the Cypress jobs below before changing anything about this.
+        type: boolean
+        required: false
+        default: true
 
 permissions:
   contents: read
@@ -110,6 +119,92 @@ jobs:
 
       - name: Tenant manifest gate tests
         run: npm run test:tenants
+
+      # Gate (ADR-006, issue #1648): every version outside the lockfile is a recorded decision.
+      # The relay engine sat on OZ Relayer v1.4.0 with no recorded reason while upstream shipped four
+      # minors, and four base images used floating tags, which give no upgrade signal at all. This
+      # is the OFFLINE half: an unclaimed or floating image, registry drift, or an expired hold
+      # fails here. The live upstream comparison runs weekly in version-watch.yml. Dependency-free,
+      # like the rest of this job.
+      - name: Test the version-pin gate's own rules
+        run: npm run test:version-pins
+
+      - name: Check version pins
+        run: npm run check:version-pins
+
+  # Gate (issue #1460): the spec namespace is shared, and four numbers on `main` are claimed twice
+  # (017, 041, 050, 102) because nothing checked. `create-new-feature.sh` computes max+1, which is
+  # correct exactly once per merge — two agents who ask before either has merged both get the same
+  # answer and both are right. The convention cannot fix that; merging the reservation PR is what
+  # claims a number, and this job is what makes the claim binding.
+  #
+  # Dependency-free (directory names plus one file per spec), so no npm ci — same reasoning as the
+  # jobs above. Must fail loudly; do NOT add continue-on-error (Constitution IV).
+  # NOTE: the job now also guards the E2E shard bypass and the closing-keyword parser, but its
+  # display NAME stays `Spec Registry` on purpose — the check name is what branch protection
+  # matches on, and renaming a required check makes the requirement permanently unsatisfiable
+  # rather than merely renamed.
+  spec-registry:
+    name: Spec Registry
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      # Each rule is driven against a tree that must be REJECTED. Without these the gate could
+      # enforce nothing and still print "clean" on every green run, which is exactly how the
+      # namespace drifted unobserved for four collisions.
+      - name: Test the spec registry gate's own rules
+        run: npm run test:specs
+
+      - name: Check the spec registry
+        run: npm run check:specs
+
+      # Gate (issue #1460): the E2E shard bypass. The Cypress tiers skip for a change that cannot
+      # reach the running app, which is safe ONLY because ci-manager's `app` filter is a negative
+      # list — anything unrecognised runs the suite. Inverting it to an allowlist is a one-line,
+      # tidier-looking edit that makes every unlisted path skip; since a skipped job satisfies a
+      # required check, such a change merges green having tested nothing. Fixtures first, for the
+      # same reason as above.
+      - name: Test the CI-gating guard's own rules
+        run: npm run test:ci
+
+      - name: Check the E2E bypass is still safe
+        run: npm run check:ci-gating
+
+      # A VITE_ build arg a Cloud Build file sets but the Dockerfile never declares is DROPPED by
+      # docker with only a warning — green pipeline, built image, absent feature. Its first run
+      # found VITE_STAGING_BANNER in exactly that state, so the marker saying staging sends REAL
+      # mainnet transactions had never rendered. Same job because it is the same shape: no npm ci,
+      # dependency-free, its own must-fail fixtures.
+      - name: Check every build arg reaches the build
+        run: npm run check:build-args
+
+      # The parser that decides which issues a `staging` merge closes. Same job because it is the
+      # same shape of thing: dependency-free, must-refuse fixtures, no npm ci.
+      - name: Test the closing-keyword parser
+        run: node --test "scripts/ci/__tests__/parse-closing-keywords.test.js"
+
+      # Gate (issue #1521): dependency vulnerabilities were the last class still on the honour
+      # system. dependabot.yml said in its own header that no vulnerability gate existed anywhere in
+      # CI; none did, and 45 alerts (1 critical, 9 high) accumulated with every required check green.
+      #
+      # This is the OFFLINE half — policy schema, acceptance expiry, and the wiring of
+      # dependency-alerts.yml. It needs no token and no network, so it runs on every PR including
+      # forks and Dependabot's own, which is exactly where the live half cannot run. Expiry is
+      # enforced here, so a time-boxed acceptance rotting past its date fails a pull request rather
+      # than waiting for the nightly job.
+      - name: Test the dependency alert gate's own rules
+        run: npm run test:dep-alerts
+
+      - name: Check the dependency alert policy
+        run: npm run check:dep-alerts
 
   # Gate (spec 089, FR-019…FR-023): a revenue or cost source that reaches production without a
   # dashboard entry is money moving that nobody is watching. The brief stated updating the dashboard
@@ -460,6 +555,34 @@ jobs:
       - name: Run tests
         run: node --test test/*.test.js
 
+  # Sigil bridge tests (spec 111). The bridge is the ONE path from a browser tab to a member's
+  # Sigil daemon, so its load-bearing cases are refusals: an unlisted Origin, a wrong pairing token,
+  # a rebinding Host header, a non-JSON body, no route that imports key material, and every
+  # refusable disk state refused BY NAME before a presignature is spent. A green e2e run proves the
+  # happy path; only this suite proves the doors that must stay shut.
+  #
+  # NO INSTALL STEP, for the same reason as mcp-server-tests: zero dependencies, deliberately not a
+  # workspace member (spec 075). Gating — no continue-on-error (Constitution IV).
+  sigil-bridge-tests:
+    name: Sigil Bridge Tests
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: services/sigil-bridge
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Run tests
+        run: node --test test/*.test.js
+
   frontend-tests:
     name: Frontend Unit Tests
     runs-on: ubuntu-latest
@@ -583,6 +706,14 @@ jobs:
       - name: Build frontend
         run: npm run build
 
+      # Spec 085/110 — the Speculos emulator rail points device signing at an arbitrary HTTP
+      # origin and must never ship. Its `import.meta.env.DEV` guards are a source property; the
+      # bundler decides whether the chunk is actually emitted, and once it emitted the chunk with
+      # every guard in place and every test green. Only the artifact can answer this, so it is
+      # checked here, on the PR, rather than in the nightly device job.
+      - name: No emulator rail in the bundle
+        run: npm run check:no-emulator
+
       - name: Summarize build output
         if: always()
         run: |
@@ -609,6 +740,22 @@ jobs:
       # 2.5 MB of unread bytes on every push is pure quota burn on a private repo.
 
   cypress-fast-e2e:
+    # SHARD BYPASS (issue #1460). `run_e2e` is false only when the diff touches nothing that can
+    # reach the running app — docs, specs, agent config, markdown. A docs-only pull request was
+    # spending 12 fast legs + 4 on-chain shards + the passkey full stack on bytes that cannot
+    # change a single pixel.
+    #
+    # READ THIS BEFORE WIDENING IT. A skipped job SATISFIES a required status check, which is the
+    # exact hole spec 075 documented: work that runs zero jobs merges green. The only thing that
+    # makes this safe is that ci-manager's `app` filter is a NEGATIVE list — it starts at `'**'`
+    # and subtracts known-inert paths — so a directory nobody has thought about matches `**`, sets
+    # `app` true, and RUNS the suite. Converting it to a positive allowlist would invert that:
+    # every unlisted path would silently skip. `npm run check:ci-gating` fails on that inversion,
+    # and on this `if:` being dropped.
+    #
+    # Default is `true`, so `workflow_dispatch` and any future caller that forgets the input runs
+    # everything.
+    if: inputs.run_e2e
     # Spec 094: one leg per viewport profile. Responsive behaviour needs no chain, so this is where
     # it belongs — admission rule 1 forbids spending on-chain-tier wall clock proving a control is
     # reachable at 390px. `desktop` is 1280×720, exactly what every existing spec was written
@@ -650,9 +797,29 @@ jobs:
           cache: 'npm'
           cache-dependency-path: 'package-lock.json'  # single root lockfile (spec 075)
 
+      # RESTORED BEFORE THE INSTALL, deliberately — same reasoning as the two tiers below, which
+      # have carried this pair for a while. This tier did NOT, and it is the one that runs TWELVE
+      # jobs (6 shards x 2 viewport profiles), so it was both the most exposed to a cold or evicted
+      # cache and the only one unprotected from it. Observed on PR #1607: `npm ci` reported 1431
+      # packages added, `cypress run` then said "the Cypress binary is missing", and the job failed
+      # having executed no spec at all — a red check that says nothing about the code under test.
+      - name: Cache Cypress binary
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/Cypress
+          key: cypress-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: cypress-${{ runner.os }}-
+
       - name: Install frontend dependencies
         run: npm ci --workspace frontend --workspace tools/miniapp-build --workspace @fairwins/miniapp-clearpath --include-workspace-root=false
         working-directory: .  # root install; the child has no lockfile (spec 075)
+
+      # Belt and braces, copied verbatim in intent from the full tier: `npm ci` normally installs
+      # the binary via cypress's postinstall, but a partial cache or a skipped script leaves the
+      # package without it, and `cypress run` then fails deep into the job rather than here.
+      - name: Ensure Cypress binary
+        run: npx cypress install
+        working-directory: .
 
       # Spec 030 pillar A — fast/46-clearpath-unavailable.cy.js serves the REAL ClearPath package
       # bytes (the loader verifies them), so this leg needs the package built. It needs no chain:
@@ -825,6 +992,22 @@ jobs:
   # Keeping them separate also keeps the failure legible — a red here means the money path broke,
   # not that a button moved.
   cypress-full-e2e:
+    # SHARD BYPASS (issue #1460). `run_e2e` is false only when the diff touches nothing that can
+    # reach the running app — docs, specs, agent config, markdown. A docs-only pull request was
+    # spending 12 fast legs + 4 on-chain shards + the passkey full stack on bytes that cannot
+    # change a single pixel.
+    #
+    # READ THIS BEFORE WIDENING IT. A skipped job SATISFIES a required status check, which is the
+    # exact hole spec 075 documented: work that runs zero jobs merges green. The only thing that
+    # makes this safe is that ci-manager's `app` filter is a NEGATIVE list — it starts at `'**'`
+    # and subtracts known-inert paths — so a directory nobody has thought about matches `**`, sets
+    # `app` true, and RUNS the suite. Converting it to a positive allowlist would invert that:
+    # every unlisted path would silently skip. `npm run check:ci-gating` fails on that inversion,
+    # and on this `if:` being dropped.
+    #
+    # Default is `true`, so `workflow_dispatch` and any future caller that forgets the input runs
+    # everything.
+    if: inputs.run_e2e
     # SHARDED, 4 legs, one private chain each (spec 094). Legal only because per-spec chain
     # isolation (#1222) made specs order-independent — before that, run order decided which specs
     # passed and splitting the list would have changed results, not just wall clock.
@@ -849,10 +1032,15 @@ jobs:
       fail-fast: false
       matrix:
         shard: [0, 1, 2, 3]
-    # Per-LEG bound, down from the serial job's 60. A leg that should take ~10 minutes must not
-    # occupy a runner for an hour before failing; the cap exists to catch a hang, not to
-    # accommodate one.
-    timeout-minutes: 25
+    # Per-LEG bound, down from the serial job's 60. The cap exists to catch a hang, not to
+    # accommodate one — but it has to sit above what a healthy leg actually costs, and the tier
+    # has roughly tripled since 25 was chosen against ~7-minute legs. MEASURED 2026-09-03
+    # (Actions run 33814290875): legs of 23:53 / 23:18 / 21:05 of job time, of which ~7:30 is
+    # checkout, install, compile and deploy before Cypress starts; the fourth leg was killed at
+    # the 25-minute cap mid-spec, having failed nothing. A cancelled leg is a leg whose specs
+    # went unreported, so a cap a healthy run brushes is not a safety margin — it is a coin flip
+    # on the merge gate.
+    timeout-minutes: 35
 
     steps:
       - name: Checkout code
@@ -1071,6 +1259,22 @@ jobs:
   # Not sharded: three specs, one chain, one bundler. Sharding would pay four bootstraps to save
   # nothing.
   cypress-passkey-full-stack:
+    # SHARD BYPASS (issue #1460). `run_e2e` is false only when the diff touches nothing that can
+    # reach the running app — docs, specs, agent config, markdown. A docs-only pull request was
+    # spending 12 fast legs + 4 on-chain shards + the passkey full stack on bytes that cannot
+    # change a single pixel.
+    #
+    # READ THIS BEFORE WIDENING IT. A skipped job SATISFIES a required status check, which is the
+    # exact hole spec 075 documented: work that runs zero jobs merges green. The only thing that
+    # makes this safe is that ci-manager's `app` filter is a NEGATIVE list — it starts at `'**'`
+    # and subtracts known-inert paths — so a directory nobody has thought about matches `**`, sets
+    # `app` true, and RUNS the suite. Converting it to a positive allowlist would invert that:
+    # every unlisted path would silently skip. `npm run check:ci-gating` fails on that inversion,
+    # and on this `if:` being dropped.
+    #
+    # Default is `true`, so `workflow_dispatch` and any future caller that forgets the input runs
+    # everything.
+    if: inputs.run_e2e
     name: Cypress Passkey Full Stack (bundler + paymaster)
     runs-on: ubuntu-latest
     # Generous, because a real UserOperation round trip (estimate → sponsor → bundle → mine →
@@ -1219,7 +1423,7 @@ jobs:
         run: |
           set -o pipefail
           npx start-server-and-test dev:e2e:passkey http://localhost:5173 \
-            'cypress run --spec "cypress/e2e/passkey/controllers.cy.js,cypress/e2e/passkey/recovery.cy.js,cypress/e2e/passkey/sponsored-userop.cy.js,cypress/e2e/passkey/membership-purchase.cy.js"' \
+            'cypress run --spec "cypress/e2e/passkey/controllers.cy.js,cypress/e2e/passkey/recovery.cy.js,cypress/e2e/passkey/sponsored-userop.cy.js,cypress/e2e/passkey/membership-purchase.cy.js,cypress/e2e/passkey/vault-create-batch.cy.js"' \
             2>&1 | tee cypress-passkey-output.txt
 
       - name: Summarize passkey E2E results

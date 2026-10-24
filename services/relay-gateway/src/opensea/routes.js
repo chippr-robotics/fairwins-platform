@@ -10,6 +10,7 @@
  */
 import express from 'express'
 import { GatewayError } from '../errors.js'
+import { callerQuotaKey } from '../identity/quotaKey.js'
 import { OpenSeaRequestError } from './client.js'
 import { attachReferral } from './referral.js'
 import { seaportProtocol } from './seaport.js'
@@ -52,10 +53,17 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
     }
   }
 
-  /** Read pre-flight: live check + read quota (keyed per contract doc). */
-  function guard(quotaKey) {
+  /**
+   * Read pre-flight: live check + read quota, keyed on the CALLER (spec 106, FR-011).
+   *
+   * This used to key on values out of the request — the account address, the collection slug, the
+   * search terms. All caller-chosen, so walking any of them minted a fresh bucket per request and
+   * the ceiling was never reached. It also throttled a hundred members reading one popular
+   * collection against each other while never limiting one script reading a hundred collections.
+   */
+  function guard(req) {
     requireLive()
-    const q = quotas.hit(quotaKey)
+    const q = quotas.hit(callerQuotaKey(req))
     if (!q.allowed) {
       throw new GatewayError(429, 'quota_exceeded', `${q.scope} collectibles read quota exceeded`, {
         retryAfterSec: q.retryAfterSec,
@@ -63,10 +71,16 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
     }
   }
 
-  /** Write pre-flight (spec 056): live check + the tighter write quota, keyed by the seller address. */
-  function guardWrite(quotaKey) {
+  /**
+   * Write pre-flight (spec 056): live check + the tighter write quota, keyed on the CALLER.
+   *
+   * Formerly keyed by the seller address FROM THE BODY — which the caller writes, so it metered
+   * nothing. These routes now also require proof of control (spec 106 route table), so the caller
+   * subject is an account we verified rather than one they asserted.
+   */
+  function guardWrite(req) {
     requireLive()
-    const q = (writeQuotas ?? quotas).hit(quotaKey)
+    const q = (writeQuotas ?? quotas).hit(callerQuotaKey(req))
     if (!q.allowed) {
       throw new GatewayError(429, 'quota_exceeded', `${q.scope} collectibles write quota exceeded`, {
         retryAfterSec: q.retryAfterSec,
@@ -117,7 +131,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
       const slug = requireSlugForChain(req.params.chainId)
       if (!isAddress(address)) throw new GatewayError(400, 'invalid_address', 'address must be a 0x-prefixed 20-byte hex address')
       if (!isCursor(next)) throw new GatewayError(400, 'invalid_cursor', 'malformed pagination cursor')
-      guard(address.toLowerCase())
+      guard(req)
 
       const chainId = Number(req.params.chainId)
       const result = await cache.fetchThrough(
@@ -147,7 +161,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
       const slug = requireSlugForChain(req.params.chainId)
       if (!isAddress(contract)) throw new GatewayError(400, 'invalid_address', 'contract must be a 0x-prefixed 20-byte hex address')
       if (!isIdentifier(identifier)) throw new GatewayError(400, 'invalid_identifier', 'token identifier must be 1-128 digits')
-      guard(contract.toLowerCase())
+      guard(req)
 
       const chainId = Number(req.params.chainId)
       const result = await cache.fetchThrough(
@@ -183,7 +197,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
     try {
       const { slug } = req.params
       if (!isSlug(slug)) throw new GatewayError(400, 'invalid_slug', 'collection slug must be lowercase alphanumeric/hyphen')
-      guard(slug)
+      guard(req)
 
       const result = await cache.fetchThrough(`stats:${slug}`, os.statsCacheTtlMs, async () => {
         const statsBody = await client.get(`/api/v2/collections/${slug}/stats`)
@@ -208,7 +222,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
       const chainId = Number(req.params.chainId)
       if (!seaportProtocol(chainId)) throw new GatewayError(404, 'unsupported_chain', 'selling is not available on this network')
       if (!isSlug(slug)) throw new GatewayError(400, 'invalid_slug', 'collection slug must be lowercase alphanumeric/hyphen')
-      guard(slug)
+      guard(req)
 
       const result = await cache.fetchThrough(`fees:${chainId}:${slug}`, os.cacheTtlMs, async () => {
         const collectionBody = await client.get(`/api/v2/collections/${slug}`)
@@ -234,7 +248,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
       const invalid = validateListingBody(req.body)
       if (invalid) throw new GatewayError(400, invalid, 'the listing order is malformed')
       const offerer = req.body.order.offerer
-      guardWrite(offerer.toLowerCase())
+      guardWrite(req)
 
       const slug = chainSlug(chainId)
       const referral = attachReferral(config, { chainId, kind: 'listing' })
@@ -264,7 +278,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
       const { orderHash, fulfiller } = req.body ?? {}
       if (!isOrderHash(orderHash)) throw new GatewayError(400, 'invalid_order', 'orderHash must be a 32-byte hex hash')
       if (!isAddress(fulfiller)) throw new GatewayError(400, 'invalid_address', 'fulfiller must be a 0x address')
-      guardWrite(fulfiller.toLowerCase())
+      guardWrite(req)
 
       const slug = chainSlug(chainId)
       let upstream
@@ -300,7 +314,7 @@ export function createOpenSeaRouter(config, { client, cache, quotas, writeQuotas
       const { orderHash, offerer } = req.body ?? {}
       if (!isOrderHash(orderHash)) throw new GatewayError(400, 'invalid_order', 'orderHash must be a 32-byte hex hash')
       if (!isAddress(offerer)) throw new GatewayError(400, 'invalid_address', 'offerer must be a 0x address')
-      guardWrite(offerer.toLowerCase())
+      guardWrite(req)
 
       const slug = chainSlug(chainId)
       try {

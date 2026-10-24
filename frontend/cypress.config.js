@@ -5,6 +5,7 @@ import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import clearpathTasks from './cypress/support/tasks/clearpath.js'
+import sigilTasks from './cypress/support/tasks/sigil.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -164,7 +165,7 @@ const POOL_ABI = [
   'function closeJoining()',
   'function cancel()',
   'function proposeOutcome((address winner,uint256 amount)[] entries)',
-  'function approve()',
+  'function approve(bytes32 proposalId)',
   'function claim((address winner,uint256 amount)[] entries, uint256 index, address recipient)',
   'function refund()',
   'function state() view returns (uint8)',
@@ -902,7 +903,8 @@ export default defineConfig({
             }
             case 'approvePoolOutcome': {
               const apw = new ethers.Wallet(ACCOUNT_KEYS[args.callerIndex ?? 0], provider)
-              tx = await new ethers.Contract(args.pool, POOL_ABI, apw).approve()
+              const apool = new ethers.Contract(args.pool, POOL_ABI, apw)
+              tx = await apool.approve(await apool.currentProposalId())
               break
             }
             case 'claimPool': {
@@ -2588,6 +2590,46 @@ export default defineConfig({
               }
               case 'nativeBalance':
                 return { ok: true, balance: (await provider.getBalance(args.address)).toString() }
+              case 'mintToken': {
+                // Fund a vault with the LOCAL stable (the deployment's paymentToken — the same
+                // address the app's 80002 seam resolves), so a spec can drive the spec-105
+                // everyday/big-send lanes, which are realized in the chain's stable token.
+                const d = loadLocalDeployment()
+                const token = new ethers.Contract(args.token || d.paymentToken, TOKEN_ABI, funder)
+                const rc = await (await token.mint(args.address, BigInt(args.amount))).wait(1)
+                return { ok: rc.status === 1, token: await token.getAddress() }
+              }
+              case 'tokenBalance': {
+                const d = loadLocalDeployment()
+                const token = new ethers.Contract(args.token || d.paymentToken, TOKEN_ABI, provider)
+                return { ok: true, balance: (await token.balanceOf(args.address)).toString() }
+              }
+              case 'policyRules': {
+                /*
+                 * Read the ordered rules the GUARD holds for this vault — the on-chain truth the
+                 * spec-105 realization (`vaultRulesConfig.realizeRules`) must match. Tuple shape
+                 * copied from frontend/src/abis/SafePolicyGuardV2.js (field order is load-bearing).
+                 */
+                const guard = new ethers.Contract(
+                  args.guard,
+                  ['function getRules(address safe) view returns ((address asset, uint128 perTxLimit, uint128 windowLimit, uint8 approvalsRequired, bool banded, address[] approvers, address[] targets)[] rules, uint32 cooldown)'],
+                  provider,
+                )
+                const [rules, cooldown] = await guard.getRules(args.address)
+                return {
+                  ok: true,
+                  cooldown: Number(cooldown),
+                  rules: rules.map((r) => ({
+                    asset: String(r.asset),
+                    perTxLimit: r.perTxLimit.toString(),
+                    windowLimit: r.windowLimit.toString(),
+                    approvalsRequired: Number(r.approvalsRequired),
+                    banded: Boolean(r.banded),
+                    approvers: r.approvers.map((a) => String(a)),
+                    targets: r.targets.map((t) => String(t)),
+                  })),
+                }
+              }
               case 'proposalCount': {
                 // Count what the HUB actually recorded for this vault. A queue that renders
                 // nothing is either a vault with no proposals or a discovery problem, and only
@@ -2797,6 +2839,7 @@ export default defineConfig({
          * chain. See frontend/cypress/support/tasks/clearpath.js.
          */
         ...clearpathTasks(config),
+        ...sigilTasks(config),
       })
 
       /*

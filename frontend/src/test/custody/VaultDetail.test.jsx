@@ -6,8 +6,8 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { axe } from 'vitest-axe'
 
-// Protect-accordion-refresh — VaultList now embeds VaultProposalsPanel inline for the open vault,
-// so opening a card in these unit tests reaches useWallet() even without a proposals prop.
+// The policy panels reach useWallet(); the list itself moved to VaultCardList (spec 102), which has
+// its own suite (VaultCardList.test.jsx).
 vi.mock('../../hooks', () => ({ useWallet: () => ({ chainId: 63, address: undefined, switchNetwork: vi.fn() }) }))
 
 vi.mock('../../lib/custody/policy', () => ({
@@ -27,7 +27,6 @@ vi.mock('../../lib/custody/policy', () => ({
 vi.mock('../../lib/custody/policyV2', () => ({ isPolicyV2Supported: () => false }))
 
 import VaultDetail from '../../components/custody/VaultDetail'
-import VaultList from '../../components/custody/VaultList'
 
 const A = '0x1111111111111111111111111111111111111111'
 const B = '0x2222222222222222222222222222222222222222'
@@ -122,47 +121,41 @@ describe('VaultDetail', () => {
   })
 })
 
-describe('VaultList', () => {
-  // Protect-accordion-refresh — the active vault's card is the one expanded (AccordionSection's
-  // aria-expanded), and re-clicking its trigger collapses it by selecting nothing, matching the
-  // Recovery tab's exclusive open-one-at-a-time accordion behavior.
-  it('expands the active vault as an accordion card and toggles via onSelect', () => {
-    const onSelect = vi.fn()
-    const vaults = [{ chainId: 63, address: A, label: 'One', isSafe: true, owners: [A], threshold: 1, owner: true }]
-    render(<VaultList vaults={vaults} activeAddress={A} onSelect={onSelect} />)
-    const trigger = screen.getByRole('button', { name: /One/i })
-    expect(trigger).toHaveAttribute('aria-expanded', 'true')
-    fireEvent.click(trigger)
-    expect(onSelect).toHaveBeenCalledWith(null)
+// ---------------------------------------------------------------- spec 102 (`variant="network"`)
+// The vault sheet's Details view renders one VaultDetail per NETWORK inside an article that already
+// states the address, the owners (cross-referenced) and the remove action once for the whole vault.
+describe('VaultDetail variant="network"', () => {
+  const vault = {
+    isSafe: true, address: A, chainId: 63, chainName: 'Mordor', isTestnet: true,
+    owners: [A, B], threshold: 2, owner: true, onVaultChain: true, version: '1.4.1', label: 'Coop',
+  }
+
+  it('renders the facts (without Address) and the policy panel only', async () => {
+    const { container } = render(<VaultDetail vault={vault} variant="network" onForget={vi.fn()} isActiveIdentity />)
+    expect(screen.getByRole('region', { name: /mordor detail/i })).toBeInTheDocument()
+    expect(screen.getByText(/2 of 2 owners/i)).toBeInTheDocument()
+    expect(screen.getByText('1.4.1')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^policy$/i })).toBeInTheDocument()
+    // Not in this variant: the address row, the owners list, the acting hint, the remove button.
+    expect(screen.queryByText('Address')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: /^owners$/i })).not.toBeInTheDocument()
+    expect(screen.queryByText(/account menu next to your avatar/i)).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /remove from list/i })).not.toBeInTheDocument()
+    expect(await axe(container)).toHaveNoViolations()
   })
 
-  it('renders an empty state with no vaults', () => {
-    render(<VaultList vaults={[]} activeAddress={null} onSelect={vi.fn()} />)
-    expect(screen.getByRole('status')).toHaveTextContent(/no vaults yet/i)
+  it('keeps the read-only switch prompt for a network the wallet is not on', () => {
+    const onSwitchNetwork = vi.fn()
+    render(<VaultDetail vault={{ ...vault, onVaultChain: false }} variant="network" onSwitchNetwork={onSwitchNetwork} />)
+    expect(screen.getByRole('status')).toHaveTextContent(/shown read-only/i)
+    fireEvent.click(screen.getByRole('button', { name: /switch to mordor/i }))
+    expect(onSwitchNetwork).toHaveBeenCalledWith(63)
   })
 
-  // ---------------------------------------------------------------- spec 068 (US1)
-
-  it('badges every row with its chain, across chains, in one list (FR-002/FR-003)', () => {
-    const vaults = [
-      { chainId: 63, address: A, label: 'Team', isSafe: true, owners: [A], threshold: 1, owner: true, chainName: 'Mordor', isTestnet: true },
-      { chainId: 137, address: B, label: 'Family', isSafe: true, owners: [B], threshold: 1, owner: true, chainName: 'Polygon' },
-    ]
-    render(<VaultList vaults={vaults} activeAddress={null} onSelect={vi.fn()} />)
-    expect(screen.getByText(/Mordor · testnet/)).toBeInTheDocument()
-    expect(screen.getByText('Polygon')).toBeInTheDocument()
-  })
-
-  it('states which chain is unreachable instead of dropping the row', () => {
-    const vaults = [{ chainId: 63, address: A, label: 'Team', chainName: 'Mordor', reachable: false }]
-    render(<VaultList vaults={vaults} activeAddress={null} onSelect={vi.fn()} />)
-    expect(screen.getByText(/Mordor unreachable/i)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: /Team/ })).toBeInTheDocument()
-  })
-
-  it('falls back to the numeric chain id when the network is unknown', () => {
-    const vaults = [{ chainId: 424242, address: A, label: 'Mystery', isSafe: true, owners: [A], threshold: 1 }]
-    render(<VaultList vaults={vaults} activeAddress={null} onSelect={vi.fn()} />)
-    expect(screen.getByText('Chain 424242')).toBeInTheDocument()
+  it('leaves the default variant byte-for-byte: address, owners, hint and remove all present', () => {
+    render(<VaultDetail vault={vault} onForget={vi.fn()} />)
+    expect(screen.getByText('Address')).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: /^owners$/i })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /remove from list/i })).toBeInTheDocument()
   })
 })

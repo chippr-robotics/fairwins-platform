@@ -26,15 +26,18 @@
  * the wallet with the member's collateral attached. The event decoders below are the opposite:
  * they run over arbitrary logs in effects, so they are total and return null.
  */
-import { Interface, ZeroAddress, getAddress, isAddress, parseUnits } from 'ethers'
+import { decodeEventLog, encodeEventTopics, encodeFunctionData, parseUnits, zeroAddress } from 'viem'
+// Not viem's `isAddress`: neither of its settings reproduces ethers' (see the seam's table).
+import { getAddress, isAddress } from '../../evm/address'
+import { normalizeAbi } from '../../chains/readContract'
 import { GAINS_DIAMOND_ABI, GAINS_CANCEL_REASON, GAINS_TRADE_TYPE } from '../../../abis/perps/gainsDiamond'
 import { gainsDiamondFor } from '../../../config/perps'
 
-const DIAMOND = new Interface(GAINS_DIAMOND_ABI)
+const DIAMOND_ABI = normalizeAbi(GAINS_DIAMOND_ABI)
 
 /** Exact-amount approvals only — the repo never grants an unlimited allowance for collateral. */
 const ERC20_APPROVE_ABI = ['function approve(address spender, uint256 value) returns (bool)']
-const ERC20 = new Interface(ERC20_APPROVE_ABI)
+const ERC20_ABI = normalizeAbi(ERC20_APPROVE_ABI)
 
 /** Decimal places behind each venue scale. A missing factor here is a 1000x order. */
 const PRICE_DECIMALS = 10
@@ -189,7 +192,7 @@ function requireAddress(value, label) {
     throw new TypeError(`${label} must be an address, received ${describe(value)}`)
   }
   const addr = getAddress(value)
-  if (addr === ZeroAddress) throw new TypeError(`${label} cannot be the zero address`)
+  if (addr === zeroAddress) throw new TypeError(`${label} cannot be the zero address`)
   return addr
 }
 
@@ -229,7 +232,7 @@ export function buildApprovalCall({ chainId, token, amount }) {
   const value = requireTokenAmount(amount, 'amount')
   return {
     target: collateral,
-    data: ERC20.encodeFunctionData('approve', [diamond, value]),
+    data: encodeFunctionData({ abi: ERC20_ABI, functionName: 'approve', args: [diamond, value] }),
     value: 0n,
   }
 }
@@ -282,12 +285,12 @@ export function buildOpenTradeCall({
     0, // 14 __placeholder
   ]
   const slippage = toSlippageUnits(maxSlippageP, 'maxSlippageP') // 1e3
-  const ref = referrer == null || referrer === '' ? ZeroAddress : requireAddress(referrer, 'referrer')
+  const ref = referrer == null || referrer === '' ? zeroAddress : requireAddress(referrer, 'referrer')
   // THE OWNERSHIP INVARIANT, enforced rather than only asserted in a test. The venue overwrites
   // `Trade.user` with `_msgSender()`, so an open built for the FairWins referrer address means
   // FairWins holds the position — forbidden pattern 2 in venue-calldata.md. Both are checksummed by
   // `requireAddress`, so this compares addresses, not case.
-  if (ref !== ZeroAddress && ref === user) {
+  if (ref !== zeroAddress && ref === user) {
     throw new Error(
       'refusing to build a Gains open owned by the FairWins referrer address — Trade.user is ' +
         'overwritten to _msgSender(), so this would give FairWins the position (venue-calldata.md)',
@@ -295,7 +298,7 @@ export function buildOpenTradeCall({
   }
   return {
     target: diamond,
-    data: DIAMOND.encodeFunctionData('openTrade', [trade, slippage, ref]),
+    data: encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'openTrade', args: [trade, slippage, ref] }),
     value: 0n,
   }
 }
@@ -317,17 +320,18 @@ export function buildCloseTradeCall({ chainId, tradeIndex: index, expectedPrice,
   const idx = requireTradeIndex(index, 'closeTradeMarket')
   const price = toPriceUnits(expectedPrice, 'expectedPrice')
   if (price <= 0n) throw new RangeError('expectedPrice must be greater than zero')
-  const close = DIAMOND.encodeFunctionData('closeTradeMarket', [idx, price])
+  const close = encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'closeTradeMarket', args: [idx, price] })
   if (maxSlippageP == null) {
     return { target: diamond, data: close, value: 0n }
   }
-  const slippage = DIAMOND.encodeFunctionData('updateMaxClosingSlippageP', [
-    idx,
-    toSlippageUnits(maxSlippageP, 'maxSlippageP'),
-  ])
+  const slippage = encodeFunctionData({
+    abi: DIAMOND_ABI,
+    functionName: 'updateMaxClosingSlippageP',
+    args: [idx, toSlippageUnits(maxSlippageP, 'maxSlippageP')],
+  })
   return {
     target: diamond,
-    data: DIAMOND.encodeFunctionData('multicall', [[slippage, close]]),
+    data: encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'multicall', args: [[slippage, close]] }),
     value: 0n,
   }
 }
@@ -355,7 +359,7 @@ export function buildReducePositionCall({
   if (price <= 0n) throw new RangeError('expectedPrice must be greater than zero')
   return {
     target: diamond,
-    data: DIAMOND.encodeFunctionData('decreasePositionSize', [idx, collateral, leverage, price]),
+    data: encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'decreasePositionSize', args: [idx, collateral, leverage, price] }),
     value: 0n,
   }
 }
@@ -366,7 +370,7 @@ export function buildUpdateTpCall({ chainId, tradeIndex: index, tp }) {
   const idx = requireTradeIndex(index, 'updateTp')
   return {
     target: diamond,
-    data: DIAMOND.encodeFunctionData('updateTp', [idx, toOptionalPriceUnits(tp, 'tp')]),
+    data: encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'updateTp', args: [idx, toOptionalPriceUnits(tp, 'tp')] }),
     value: 0n,
   }
 }
@@ -377,7 +381,7 @@ export function buildUpdateSlCall({ chainId, tradeIndex: index, sl }) {
   const idx = requireTradeIndex(index, 'updateSl')
   return {
     target: diamond,
-    data: DIAMOND.encodeFunctionData('updateSl', [idx, toOptionalPriceUnits(sl, 'sl')]),
+    data: encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'updateSl', args: [idx, toOptionalPriceUnits(sl, 'sl')] }),
     value: 0n,
   }
 }
@@ -393,7 +397,7 @@ export function buildCancelOrderAfterTimeoutCall({ chainId, pendingOrderIndex: i
   const idx = requirePendingOrderIndex(index, 'cancelOrderAfterTimeout')
   return {
     target: diamond,
-    data: DIAMOND.encodeFunctionData('cancelOrderAfterTimeout', [idx]),
+    data: encodeFunctionData({ abi: DIAMOND_ABI, functionName: 'cancelOrderAfterTimeout', args: [idx] }),
     value: 0n,
   }
 }
@@ -448,7 +452,11 @@ export function orderEventFilter(chainId) {
   return {
     address: diamond,
     // A nested array is an OR over topic0 — any one of the four events.
-    topics: [GAINS_ORDER_EVENT_NAMES.map((name) => DIAMOND.getEvent(name).topicHash)],
+    topics: [
+      GAINS_ORDER_EVENT_NAMES.map(
+        (name) => encodeEventTopics({ abi: DIAMOND_ABI, eventName: name })[0],
+      ),
+    ],
   }
 }
 
@@ -471,8 +479,13 @@ export function cancelReasonText(reason) {
  */
 function parse(log, name) {
   try {
-    const parsed = DIAMOND.parseLog({ topics: [...(log?.topics ?? [])], data: log?.data ?? '0x' })
-    return parsed?.name === name ? parsed : null
+    const { eventName, args } = decodeEventLog({
+      abi: DIAMOND_ABI,
+      topics: [...(log?.topics ?? [])],
+      data: log?.data ?? '0x',
+    })
+    // Shaped like the ethers parse result the decoders below read (`.name` / `.args`).
+    return eventName === name ? { name: eventName, args } : null
   } catch {
     return null
   }
@@ -511,7 +524,11 @@ export function decodeMarketExecuted(log) {
       user: t.user,
       index: Number(t.index),
       pairIndex: Number(t.pairIndex),
-      leverage: t.leverage,
+      // Venue units (1e3), and a BIGINT like every other unscaled value here. Gains declares it
+      // `uint24`, which ethers decoded to a bigint and viem decodes to a NUMBER — so the type is
+      // stated rather than inherited from whichever decoder ran. Counters above stay numbers on
+      // purpose; this is a value, and callers do bigint arithmetic with it.
+      leverage: BigInt(t.leverage),
       long: t.long,
       isOpen: t.isOpen,
       collateralIndex: Number(t.collateralIndex),

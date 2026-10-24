@@ -4,6 +4,7 @@ import { arbitrum, base, mainnet, optimism, sepolia } from 'wagmi/chains'
 import { injected, walletConnect } from 'wagmi/connectors'
 import { passkeyConnector } from './connectors/passkey'
 import { resolveRpcEndpoints } from './lib/network/rpcEndpoints'
+import { issuedFetchFor } from './lib/network/issuedAccess'
 import { tenantBrand } from './config/tenant'
 
 // Define Hoodi — Ethereum's long-lived proof-of-stake testnet (spec 048). Not a
@@ -36,9 +37,12 @@ const ethereumClassic = {
     name: 'Ether',
     symbol: 'ETC',
   },
+  // Chain metadata, not the read route — `transportFor` resolves that through
+  // `resolveRpcEndpoints` (spec 069). It still matters: this is the URL a wallet is handed
+  // on `wallet_addEthereumChain`. It said `etc.rivet.link`, which no longer resolves at all.
   rpcUrls: {
-    default: { http: ['https://etc.rivet.link'] },
-    public: { http: ['https://etc.rivet.link'] },
+    default: { http: ['https://etc.etcdesktop.com'] },
+    public: { http: ['https://etc.etcdesktop.com'] },
   },
   blockExplorers: {
     default: { name: 'Blockscout', url: 'https://etc.blockscout.com' },
@@ -75,8 +79,10 @@ const amoy = {
     symbol: 'POL',
   },
   rpcUrls: {
-    default: { http: ['https://rpc-amoy.polygon.technology'] },
-    public: { http: ['https://rpc-amoy.polygon.technology'] },
+    // Mirrors config/networks.js (the build default): Polygon's own Amoy endpoint stopped
+    // answering browser reads — see the note there (issue #1458 QA round).
+    default: { http: ['https://polygon-amoy-bor-rpc.publicnode.com'] },
+    public: { http: ['https://polygon-amoy-bor-rpc.publicnode.com'] },
   },
   blockExplorers: {
     default: { name: 'PolygonScan', url: 'https://amoy.polygonscan.com' },
@@ -246,8 +252,17 @@ function transportFor(chainId, defaultUrl) {
     // only on ethers reads — the exact "only ETC is wired for failover" gap.
     const primaryUrl = route.primary?.url || fallbackUrl
     const failoverUrl = route.failover && route.failover.url !== primaryUrl ? route.failover.url : null
-    if (failoverUrl) return fallback([http(primaryUrl), http(failoverUrl)])
-    return http(fallbackUrl)
+    // Issued keyed access on the wagmi rail (spec 107, #1470). Transports are built at module
+    // evaluation, before anything can have been minted — so instead of baking a URL that will be
+    // stale by first use, the PRIMARY leg gets a per-request fetchFn that consults the issued
+    // store on every call: credential live => the request is retargeted to the issued endpoint
+    // with the current token attached; otherwise it is exactly fetch to the URL viem resolved.
+    // Same properties as the ethers rail's preflight: rotation never rebuilds a transport, and
+    // the FAILOVER leg is built plain, so a credential never fans out to a second host and an
+    // issued endpoint going dark degrades to the public route mid-request.
+    const primary = http(primaryUrl, { fetchFn: issuedFetchFor(chainId) })
+    if (failoverUrl) return fallback([primary, http(failoverUrl)])
+    return primary
   }
 
   const options = Object.keys(route.primary.headers).length
@@ -261,9 +276,11 @@ function transportFor(chainId, defaultUrl) {
   return fallback(transports)
 }
 
-// Define supported chains. Polygon mainnet is first so it is wagmi's default
-// chain (used by useChainId when no wallet is connected), matching the primary
-// network. The Testnet/Mainnet toggle still switches to Amoy on demand.
+// Define supported chains. Polygon mainnet is first so it is wagmi's own default chain,
+// matching the primary network. The app no longer READS that default — `useChainId()` is banned
+// (spec 110 Phase 3, #1594) and `useWalletChainId` falls back to the BUILD's `getCurrentChainId()`,
+// which differs from `chains[0]` in a testnet build. The Testnet/Mainnet toggle still switches to
+// Amoy on demand.
 // Exported so config-parity tests can assert every selectable network (config/networks.js)
 // is registered here — otherwise switchChain cannot reach it. Polygon stays first (wagmi
 // default chain — FR-015).
@@ -311,7 +328,7 @@ export const config = createConfig({
     passkeyConnector(),
   ],
   transports: {
-    [amoy.id]: transportFor(80002, 'https://rpc-amoy.polygon.technology'),
+    [amoy.id]: transportFor(80002, 'https://polygon-amoy-bor-rpc.publicnode.com'),
     [polygon.id]: transportFor(137, 'https://polygon-bor-rpc.publicnode.com'),
     [ethereumClassic.id]: transportFor(61, null),
     [mordor.id]: transportFor(63, 'https://rpc.mordor.etccooperative.org'),

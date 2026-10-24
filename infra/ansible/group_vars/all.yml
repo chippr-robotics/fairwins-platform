@@ -2,7 +2,7 @@
 ---
 fairwins_project: chippr-bots-site-wp
 fairwins_region: us-central1
-fairwins_repo_url: https://github.com/chippr-robotics/prediction-dao-research.git
+fairwins_repo_url: https://github.com/chippr-robotics/fairwins-platform.git
 fairwins_repo_dir: /opt/fairwins/repo
 fairwins_root: /opt/fairwins
 fairwins_run_dir: /run/fairwins

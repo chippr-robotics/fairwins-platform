@@ -18,6 +18,7 @@
  */
 import express from 'express'
 import { GatewayError } from '../errors.js'
+import { callerQuotaKey } from '../identity/quotaKey.js'
 import { AcrossRequestError, parseChainId, isAddress, isAmount, fetchSuggestedFees } from './quotes.js'
 import { isDepositId, fetchDepositStatus } from './status.js'
 
@@ -60,7 +61,9 @@ export function createBridgeRouter(config, { client, cache, quotas, killSwitch }
 
   // No signature to recover on a GET, so quotas are keyed per caller IP like the Bitcoin proxy;
   // the global window is the real backstop for the shared upstream.
-  const quotaKey = (req) => req.ip ?? 'unknown'
+  // Keyed on the resolved caller (spec 106, FR-011) rather than on `req.ip` alone — see
+  // identity/quotaKey.js for why the network address is a fallback and not the default.
+  const quotaKey = callerQuotaKey
 
   function guard(req) {
     const q = quotas.hit(quotaKey(req))

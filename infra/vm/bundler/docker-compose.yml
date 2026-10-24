@@ -74,6 +74,12 @@ services:
       ALTO_PORT: "3000"
       ALTO_API_VERSION: "v1,v2"
       ALTO_NETWORK_NAME: "polygon"
+      # Which chain THIS instance serves. Not an alto setting — ours, and load-bearing:
+      # single-alto-gate.sh attributes each running alto to a chain by this value, because the
+      # invariant it enforces is "at most one alto per (chain, executor EOA)" and a container NAME
+      # is just a label somebody chose. An alto with no FW_CHAIN_ID is REFUSED rather than assumed
+      # safe — an instance the gate cannot reason about is the condition it exists to catch.
+      FW_CHAIN_ID: "137"
       # MUST stay "true" on Polygon (verified 2026-07-12). With false, alto v1.2.7's filterOps
       # references a simulations contract that isn't deployed and throws a swallowed error BEFORE any
       # broadcast — ops validate but the executor never sends, its nonce freezes, every UserOp times

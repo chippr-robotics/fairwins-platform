@@ -92,6 +92,85 @@ total including it is partial.
 3. If the source is genuinely retired, set its `status` to `retired` in the catalogue and
    regenerate. Do not leave a dead source alerting; that is how an alert channel gets muted.
 
+### the exporter is not serving at all
+
+**Every panel on every FinOps dashboard reads "no data", and `source-health` alerts on nothing —
+because nothing is being scraped.** This is a different failure from any single source going
+unreadable, and it looks *quieter*, not louder: the thing that publishes metrics is the thing that
+died, so there is no series anywhere carrying the news.
+
+Confirm it in this order — each step distinguishes it from a failure that only *looks* like it:
+
+```bash
+# 1. Is the container actually up, or up-and-restarting? RestartCount is the tell; a crash-loop
+#    reports `Up 20 seconds` forever and never reaches `(healthy)`.
+sudo docker inspect fairwins-gateway-finops \
+  --format '{{.State.Status}} restarts={{.RestartCount}} oom={{.State.OOMKilled}} exit={{.State.ExitCode}}'
+
+# 2. Is the port open INSIDE the shared namespace? A host-side `ss` shows nothing either way —
+#    the exporter binds loopback in the gateway's netns, so ask from in there.
+sudo docker inspect fairwins-gateway-finops --format '{{json .State.Health.Log}}' | tail -c 600
+
+# 3. Kernel OOM kills name the cgroup and the RSS at death. `anon-rss` landing on exactly the
+#    mem_limit means it grew into the ceiling rather than spiking past it.
+sudo dmesg -T | grep -i 'oom-kill\|Killed process' | tail
+```
+
+**If it is OOM:** the exporter's steady state is ~100 MB. A process dying at its `mem_limit` is
+almost never "the limit is too low" — it is a collector accumulating something unbounded, and the
+overwhelmingly likely candidate is a **log scan whose filter is too wide**. `scanLogs` now refuses
+past 50,000 accumulated entries and names the offending `address`/`topics` in the reason, so the
+source reports `unreadable` with a usable message instead of taking the process down. If you see
+that message, fix the filter — do not raise the cap.
+
+*This happened.* The x402 collector asked Polygon USDC for every `Transfer` and filtered in JS:
+~1.1M logs, ~635 MB of JSON, inside a 192 MB container. It was killed 5,966 consecutive times,
+always **before `app.listen()`**, so the exporter never served a single scrape in its life and every
+panel — including the twenty-four sources that were perfectly healthy — read "no data".
+
+Two properties now stop that shape recurring, and both matter independently:
+
+- **The listener comes up before the first collection**, so a slow or hanging collector can no
+  longer keep the exporter dark. An uncollected source reports `unreadable`, which is honest and
+  renderable; a closed port is neither.
+- **Every collection is deadline-bounded** (120s). A vendor that accepts a connection and goes
+  quiet used to hold its source's in-flight slot forever, so that source was never polled again
+  while everything else looked fine — the one failure the staleness alert cannot see, because
+  nothing ever writes a reading for it to be stale about.
+
+`NODE_OPTIONS=--max-old-space-size` is set on the container for a related reason: **V8 sizes its
+heap from host RAM, not the cgroup**. Without it Node looks at the VM's ~2 GB, targets a heap far
+above the container ceiling, and feels no pressure to collect before the kernel intervenes.
+
+### the exporter is rate-limited by a vendor
+
+**`-32007 50/second request limit reached` on several on-chain sources at once, shortly after a
+restart.** That is the boot fan-out, and it is bounded now — but the shape is worth recognising,
+because the budget it spends is not the exporter's own.
+
+The keyed Polygon endpoint is capped at **50 req/s SHARED with the gateway and the bundler**
+(`docs/architecture/workbook/06-external-vendors.md`). A reporting service must never be able to
+spend a value path's headroom, so two separate bounds apply and they bound different things:
+
+| knob | default | bounds |
+|---|---|---|
+| `FINOPS_RPC_MAX_PER_SEC` | 25 | requests per SECOND (`chain/rateLimit.js`), evenly spaced |
+| `FINOPS_BOOT_CONCURRENCY` | 4 | how many sources collect AT ONCE (`scheduler.collectAll`) |
+
+**Concurrency is not a rate limit.** Four workers issuing 100ms requests is 40 req/s; the same four
+against a faster endpoint is 400. Concurrency bounds in-flight work, which is a proxy for rate only
+if you know the latency — and it breaks in the direction that hurts exactly when the endpoint gets
+quicker. The pace is what the vendor actually measures, which is why both exist.
+
+The default of 25 is half the shared ceiling **by construction**, not by measurement: taking half
+is a cheaper guarantee than checking afterwards whether we took too much. `0` disables pacing
+rather than deadlocking on a zero rate — a limiter that silently stopped every read would be a
+worse outage than the burst it prevents.
+
+**Do not raise these to make a slow boot faster.** The boot pass is a warm-up; since the listener
+comes up before it (see above), nothing waits on it. A source not yet reached reports `unreadable`,
+which is honest and renderable.
+
 ### fees-waived
 
 **Platform fees are being waived (no treasury configured).**
@@ -202,6 +281,105 @@ The usage is real and is exported separately as `vendor_usage`. Token needs Zone
 If the plan includes the enterprise `/exporter/prometheus` endpoint, set `QUICKNODE_PROMETHEUS_URL`
 — it is the vendor's own metrics and is preferred over parsing the usage JSON.
 
+**The Admin API answers errors with HTTP 200 and an `error` field**, so a reachable endpoint proves
+nothing about the account. That envelope is now reported verbatim (through the Reading redactor)
+rather than being folded into the generic "no recognisable credit field", which is a true statement
+that sends you looking for a parser bug while the vendor is saying something specific about the
+account. If this source is `unreadable` with a vendor message, the message is the answer.
+
+### pinata-cost
+
+**A paid vendor on the member write path, catalogued late.** Wager creation, open challenges and
+encrypted data backup all pin JSON here with **no fallback**, and mini-app packages are published
+under CIDs that are keccak-committed on chain. The vendor workbook recorded "we pay them (not
+catalogued as a cost source)" from the day of the audit; neither `check:finops` discovery route
+could find it, because it registers no FeeRouter `serviceId` and no gateway payee env — the money
+flows the other way, and both routes look for money going out to someone else.
+
+**Storage is measured; the dollar figure is not.** `GET /data/userPinnedDataTotal` returns
+`pin_count`, `pin_size_total` and `pin_size_with_replications_total` — never money. Both size
+figures are published under separate `metric` labels rather than electing one: which of them a plan
+bills against is the vendor'"'"'s business, and quietly picking would put an unstated assumption inside
+a cost system. Set `FINOPS_PINATA_PLAN_USD` to model the cost; unset reports `not-configured`, and
+here that default is more than doctrine — **Pinata is a paid vendor, so a defaulted `0` would not be
+a cautious placeholder, it would be a figure known to be wrong.**
+
+#### The credential is NOT the pinning JWT
+
+> `PINATA_JWT` (workstation, `publish` profile) and `VITE_PINATA_JWT` (SPA runtime) authorise
+> `pinJSONToIPFS` and `pinFileToIPFS`. They can **write** to a member-facing store. Neither may ever
+> reach the exporter, whose entire guarantee is that it holds nothing that can change anything
+> (FR-026) — and note the `fetch-secrets.sh` boot guard only matches names that look like signing
+> keys, so a pinning JWT would pass it silently.
+
+Provision a **third** key instead:
+
+1. Pinata dashboard → **API Keys** → New Key. Turn **admin off**. Enable
+   **only** `data/userPinnedDataTotal`. Nothing else — not `pinList`, not any `pinning/*` scope.
+2. Store it as Secret Manager `finops-pinata-read-jwt`; `fetch-secrets.sh` emits it to the exporter
+   as `FINOPS_PINATA_READ_JWT` (optional — absent is `not-configured`, not an outage).
+3. Restart the whole stack, never one container: `systemctl restart fairwins-stack@gateway`.
+
+**A 401/403 on this source almost certainly means SCOPE, not a dead key**, which is why the
+collector says so in the reason rather than reporting a bare "unauthorized". This vendor has already
+burned that exact distinction in production: on 2026-08-30 a key valid for `pinFileToIPFS` but not
+`pinJSONToIPFS` authenticated correctly, passed `testAuthentication`, and broke every member write.
+Check what the key is scoped for before rotating it.
+
+### gateway-upstream-usage
+
+Measured request counts from the relay-gateway (spec 106, #1447): per assurance tier and per
+platform-credentialed upstream. **Not a dollar** — it is the attribution series beside the vendor
+cost panels, and the one that says where the QuickNode account's shared 50 req/s went.
+
+- **Enable**: set `METRICS_PORT` on the gateway (compose-network internal — **never publish this
+  port to the host**) and `FINOPS_GATEWAY_METRICS_URL` on the exporter (e.g.
+  `http://gateway:9091/counters`). Unset ⇒ the source reads `not-configured`, which is the honest
+  state, not a failure.
+- **Unreadable** means the exporter cannot reach the gateway's counters port — a scrape problem,
+  never "no traffic". Check the compose network and that the gateway logged the counters listener
+  at boot (a bind failure logs and stands down; it never takes the gateway with it).
+- **Counters are cumulative-since-boot.** A restart is an ordinary Prometheus counter reset:
+  `rate()` shows a moment of zero slope, never a negative and never a phantom level. This is why
+  in-process counters are admissible here when the catalogue rejects them for revenue LEVELS — the
+  reasoning lives at `services/finops-exporter/src/collectors/gateway.js`.
+- **Labels are bounded by construction** (tiers from the fixed ladder, upstreams from the route
+  table) and re-bounded by the collector, which drops anything outside the expected sets rather
+  than trusting the scrape target with a cardinality promise.
+
+### thegraph-cost
+
+**The tier is which endpoint the app calls — it is not a setting anywhere.**
+
+| endpoint in `frontend/src/config/networks.js` | what it is | what it costs |
+|---|---|---|
+| `api.studio.thegraph.com/...` | Subgraph Studio, the free **development** tier | $0, no GRT consumed |
+| `gateway.thegraph.com/api/<key>/...` | the **decentralized network** | query fees in GRT, from a billing balance on **Arbitrum One** |
+
+Today every configured `subgraphUrl` is a Studio endpoint, so `FINOPS_THEGRAPH_PLAN_USD=0` on the
+gateway node is an asserted zero whose evidence is in the repo rather than on a billing page — a
+property of the endpoint we call, not a guess about an account.
+
+**Two things about the paid tier that are easy to get wrong.** GRT held on **Ethereum L1 does not
+pay query fees**; the billing balance is an Arbitrum One contract, funded through the Studio billing
+page. And the free allowance **does not bill over — it fails**: exceeding it makes queries return
+errors, so the day this line becomes wrong is also the day subgraph-backed surfaces start degrading.
+On Polygon that would arrive on top of the subgraph already indexing a dead registry.
+
+#### If you publish to the decentralized network
+
+`check:finops` **C6** fails the build if any `subgraphUrl` contains `gateway.thegraph.com` while a
+committed deployment still asserts `FINOPS_THEGRAPH_PLAN_USD=0`. That rule exists because this
+transition is a one-line edit to a networks file, made by somebody thinking about indexing, that
+silently invalidates a cost figure on a dashboard nobody rechecks. When it fires:
+
+1. Fund the GRT billing balance on **Arbitrum One** (Studio → Billing).
+2. Set `FINOPS_THEGRAPH_PLAN_USD` to the modelled monthly spend on the gateway node.
+3. Consider promoting this source from a flat subscription to a real read: the billing balance is an
+   on-chain balance on a chain this exporter can already reach, which makes it a **prepaid pool** —
+   the shape that gets burn-rate and runway alerting for free (FR-015). It is deliberately NOT that
+   today, because a pool with no balance and no burn would alert on nothing while looking monitored.
+
 ### self-cost
 
 What this system costs: the Grafana Cloud plan plus the BigQuery query spend the exporter incurs.
@@ -211,6 +389,18 @@ The free tier really is $0 — but assert it by setting `FINOPS_GRAFANA_PLAN_USD
 source reports `not-configured`, because "we confirmed the free tier" and "nobody ever set this" are
 different facts and a defaulted zero renders as the first while meaning the second.
 
+**Asserted on the gateway node 2026-09-11** (operator-confirmed free tier). It had been unset since
+the exporter shipped, which was honest and also indistinguishable, on the panel, from the QuickNode
+source beside it that was genuinely broken — which is why the detail dashboards now carry their own
+`Source health` table rather than making the reader go to the overview to tell the two apart.
+
+**Every source that reuses the flat-subscription modeller must appear in `flatSubscriptions`** in
+`services/finops-exporter/src/config/index.js`. A missing key does not mean "no price declared" — it
+falls through to the QuickNode credit path and reports `not-configured` citing `QUICKNODE_API_KEY`,
+a message about a vendor it has nothing to do with. `alphaday-news-api` shipped that way with spec
+109. Alphaday is also the one entry whose default IS `0` rather than `null`, and only because its
+vendor is keyless: there is no account, so there is no tier it could silently be on.
+
 It stops being zero the moment the series budget is exceeded, which is what the cardinality rules
 exist to prevent.
 
@@ -218,8 +408,22 @@ exist to prevent.
 
 Four sources are declared and **not live**. They render as *not yet live*, contribute nothing to any
 total, and emit no metric — a `planned` source showing `$0` would be indistinguishable from a shipped
-source earning nothing (FR-014). They fall into two groups, and the difference decides how each is
+source earning nothing (FR-014). They fall into three groups, and the difference decides how each is
 watched.
+
+**Readable by nobody, and not cash.** `referral-guttertoken` (spec 104): when a member funds a
+GutterToken account through the referral-coded signup link on the Assistant tab, GutterToken credits
+FairWins' own GutterToken account with prepaid usage credit — in-kind, non-cashable, spendable only on
+model calls from that account. It is catalogued `planned` rather than `live` + `not-configured` like
+the other referrals for a reason that will not change with configuration: GutterToken exposes no
+balance, usage or referral endpoint, so **no collector could ever read the figure**; it is visible
+only on GutterToken's billing page. The referral code lives in the tenant manifest
+(`settings.assistant.guttertokenReferralCode`) and ships in the frontend, which is also why C2b cannot
+see it — the gateway reads no env var for it, so the entry carries `moneyPath: { namespace:
+'guttertoken' }` with no `payeeEnv`. Do not promote it to a USD revenue line: if P3 (a FairWins-owned
+GutterToken account as the FairWins rail's upstream) is adopted, this credit accrues on the same
+account `assistant-model-api` would be billed to and is an **offset against that cost**, to be noted
+on the cost entry, never summed with cash revenue. No code is registered yet.
 
 **Does not exist anywhere.** `miniapp-licenses` and `wager-platform-fee`: `MiniAppRegistry` has no
 fee or `payable` function, and `WagerRegistry` takes no platform cut. There is nothing that could

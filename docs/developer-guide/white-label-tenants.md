@@ -39,6 +39,27 @@ and contract set (`shared` | `dedicated`). Rules:
   script.
 - Feature gating: a feature absent from `settings.features` must be absent from
   nav/routes — never present-but-broken.
+- **Assistant providers (spec 104).** Two feature ids and one optional settings block govern the
+  member assistant:
+    - `assistant` — the assistant itself and the **Tools ▸ Assistant** tab that hosts its
+      preferences and the API access console. Members still opt in individually.
+    - `assistant-byok` — offers the **GutterToken (your credits)** provider: the member pastes their
+      own GutterToken `sk-…` key (stored on their device only, wallet-scoped, never backed up) and
+      their browser calls `api.guttertokens.com` directly. The tenant is not in that request path,
+      sees no message content and charges nothing for it. **Requires `assistant`** (the validator
+      refuses `assistant-byok` without it — it is a radio inside the Assistant card, not a surface).
+      A tenant that wants the assistant on its membership-funded rail only simply leaves this out.
+      `fairwins` enables both.
+    - `settings.assistant.guttertokenReferralCode` — **optional** string, `^[A-Za-z0-9_-]{1,64}$`,
+      delivered as `https://app.guttertokens.com/signup?ref=<code>` (it prefills GutterToken's
+      referral field) from the **Get a key** link on the Assistant card. Absent means the plain link; present, the card discloses in words that the
+      tenant receives GutterToken credit when a member funds an account through it. The validator
+      refuses a code on a tenant that does not enable `assistant-byok` (dead config that would still
+      read as a live referral arrangement in the FinOps catalogue, entry `referral-guttertoken`).
+      It is an identity value like any other manifest field: public, never a credential, and never
+      hardcoded in a shipped path — resolve it through `getActiveTenant().settings.assistant`.
+      No code is registered for `fairwins` yet, so its manifest carries no `settings.assistant`
+      block.
 
 ## Contract isolation (dedicated tenants)
 

@@ -43,7 +43,7 @@ const PASSPHRASE = 'correct-horse-battery'
  * is built with and what the chain was seeded with is NAMED — rather than discovered as "the
  * sweep only found one token", which reads like a bug in the sweep.
  */
-const APP_WRAPPED_NATIVE = '0x007e106a5664D48e02f571b58694B74c9D5c22a1'
+const APP_WRAPPED_NATIVE = '0x637914a81B4F67BeA3acd94fc5a233656f8C08f7'
 const APP_STABLECOIN = '0xbc4D54AE49ED9C6075770CD6acA930A728dcf526'
 const WRAPPED_SYMBOL = 'WPOL'
 const STABLE_SYMBOL = 'USDC'

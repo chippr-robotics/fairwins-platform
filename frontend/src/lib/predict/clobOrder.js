@@ -9,7 +9,7 @@
  * fabricate a dollar estimate for it — it's disclosed honestly as a separate note in the confirm UI. Makers
  * pay no builder fee.
  */
-import { parseUnits } from 'ethers'
+import { parseUnits } from '../evm/units'
 import { USDC_DECIMALS, feeUnits, feeLine } from './builderFee'
 
 const ZERO_BYTES32 = '0x' + '0'.repeat(64)

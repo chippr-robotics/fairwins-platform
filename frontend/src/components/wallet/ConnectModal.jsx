@@ -26,6 +26,7 @@ import { knownCredentials, isTransactComplete, forgetCredential } from '../../li
 import { hasSeenExplainer, markExplainerSeen } from '../../lib/passkey/explainer'
 import { PASSKEY_CONNECTOR_ID } from '../../connectors/passkey'
 import PasskeyExplainer from './PasskeyExplainer'
+import RecoverAccount from './RecoverAccount'
 import './ConnectModal.css'
 
 const TYPE_ORDER = { passkey: 0, walletConnect: 1, injected: 2 }
@@ -48,10 +49,15 @@ function ConnectModalDialog() {
   // this browser can sign in with right now.
   const knownAccounts = useMemo(() => knownCredentials().filter(isTransactComplete), [])
   const unlockFirst = knownAccounts.length > 0
-  const [step, setStep] = useState(unlockFirst ? 'picker' : 'methods') // methods | explainer | picker
+  const [step, setStep] = useState(unlockFirst ? 'picker' : 'methods') // methods | explainer | picker | recover
   const [pendingId, setPendingId] = useState(null)
   const [error, setError] = useState(null)
   const [pickerAccounts, setPickerAccounts] = useState(knownAccounts)
+  // Spec 104: what the resolver concluded when a ceremony succeeded but the account could not be
+  // confirmed. Held so the recovery step can say WHICH of the three verdicts it is — "we could not
+  // reach the network" and "nothing lists this passkey" lead to different actions, and collapsing
+  // them tells a member with a good account that they have none.
+  const [unresolved, setUnresolved] = useState(null)
   const dialogRef = useRef(null)
 
   // "Back to where this opened" — the methods list normally, the unlock chooser
@@ -61,6 +67,7 @@ function ConnectModalDialog() {
     setStep(unlockFirst ? 'picker' : 'methods')
     setPendingId(null)
     setError(null)
+    setUnresolved(null)
   }, [unlockFirst])
 
   const close = useCallback(() => {
@@ -117,6 +124,18 @@ function ConnectModalDialog() {
           // Clean abort — back to an immediately re-attemptable idle state:
           // the unlock chooser for a returning member, the methods list otherwise.
           setStep(unlockFirst ? 'picker' : 'methods')
+        } else if (err?.name === 'AccountUnresolved') {
+          // Spec 104: the passkey answered, the ACCOUNT did not resolve. This is a recoverable
+          // state with a next step, not a failure to report and abandon — the member can name
+          // their account, or retry an unreachable network. Deliberately NOT surfaced through
+          // `setError`, which renders a red sentence over a screen offering nothing to do.
+          setUnresolved({
+            outcome: err.outcome,
+            reason: err.message,
+            credentialId: err.credentialId ?? opts?.credentialId ?? null,
+            counterfactualAddress: err.counterfactualAddress ?? null,
+          })
+          setStep('recover')
         } else {
           setError(err?.message || 'Connection failed. Please try again.')
         }
@@ -125,6 +144,33 @@ function ConnectModalDialog() {
       }
     },
     [connectWallet, unlockFirst]
+  )
+
+  // Both ways out of the recovery step re-run the sign-in. The ceremony happens again — a passkey
+  // assertion is not something to hold on to between attempts — pinned to the credential the first
+  // one identified, or discoverable when it did not. Written once so the two cannot drift apart.
+  const retrySignIn = useCallback(
+    (extra = {}) =>
+      doConnect(PASSKEY_CONNECTOR_ID, {
+        mode: 'sign-in',
+        credentialId: unresolved?.credentialId ?? undefined,
+        discoverable: unresolved?.credentialId ? undefined : true,
+        ...extra,
+      }),
+    [doConnect, unresolved]
+  )
+
+  // The address is only ever a hint: the connector checks it against the chain.
+  const recoverWithAddress = useCallback(
+    (accountAddress) => retrySignIn({ accountAddress }),
+    [retrySignIn]
+  )
+
+  // The member accepting their own not-yet-deployed account, having been shown its address and
+  // told what it is. Never inferred — it exists as a flag precisely so the app cannot assume it.
+  const acceptCounterfactual = useCallback(
+    () => retrySignIn({ acceptCounterfactual: true }),
+    [retrySignIn]
   )
 
   const startPasskey = useCallback(() => {
@@ -228,11 +274,13 @@ function ConnectModalDialog() {
       >
         <div className="connect-modal__header">
           <h3>
-            {step !== 'picker'
-              ? 'Connect to FairWins'
-              : unlockFirst
-                ? 'Unlock your account'
-                : 'Choose an account'}
+            {step === 'recover'
+              ? 'Find your account'
+              : step !== 'picker'
+                ? 'Connect to FairWins'
+                : unlockFirst
+                  ? 'Unlock your account'
+                  : 'Choose an account'}
           </h3>
           <button type="button" className="connect-modal__close" onClick={close} aria-label="Close">
             ×
@@ -281,6 +329,22 @@ function ConnectModalDialog() {
 
         {step === 'explainer' && (
           <PasskeyExplainer onContinue={handleExplainerContinue} onDismiss={handleExplainerDismiss} />
+        )}
+
+        {step === 'recover' && (
+          <RecoverAccount
+            outcome={unresolved?.outcome}
+            reason={unresolved?.reason}
+            busy={pendingId !== null}
+            counterfactualAddress={unresolved?.counterfactualAddress}
+            onSubmit={recoverWithAddress}
+            onRetry={retrySignIn}
+            onAcceptCounterfactual={acceptCounterfactual}
+            onBack={() => {
+              setUnresolved(null)
+              setStep(unlockFirst ? 'picker' : 'methods')
+            }}
+          />
         )}
 
         {step === 'picker' && (

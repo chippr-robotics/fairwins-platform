@@ -13,6 +13,7 @@
  */
 import express from 'express'
 import { GatewayError } from '../errors.js'
+import { callerQuotaKey } from '../identity/quotaKey.js'
 import {
   HL_DEFAULT_DEX,
   isAddress,
@@ -131,9 +132,11 @@ export function createPerpsRouter(config, { clients, cache, quotas, killSwitch, 
     }
   }
 
-  // Quotas are keyed per caller IP (nothing to sign on a GET) — same convention as the
-  // bitcoin/bridge read proxies.
-  const quotaKey = (req) => req.ip ?? 'unknown'
+  // Keyed on the resolved caller (spec 106, FR-011) rather than on `req.ip` alone. An identified
+  // caller gets their own bucket and a higher ceiling; an anonymous one still falls back to the
+  // network address, which is the weakest key available and the only one left when nothing has
+  // been proven.
+  const quotaKey = callerQuotaKey
 
   function guard(req) {
     requireLive()

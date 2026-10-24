@@ -1,0 +1,54 @@
+{
+  "$comment": [
+    "Dependabot alert dismissals (issue #1520).",
+    "",
+    "A DISMISSAL IS NOT AN ACCEPTANCE. `dependency-alert-policy.json` records risk this repository",
+    "has decided to tolerate for a bounded time. This file records alerts that describe code the",
+    "repository does not contain, which is a different and stronger claim — so it is made where the",
+    "next reader will actually see it, on the alert itself, and not as a line in the tolerated list.",
+    "",
+    "THE PLAN IS DATA BECAUSE THE REASONING IS THE POINT. Twelve alerts need the same paragraph",
+    "recorded against them; pasting it twelve times by hand records twelve slightly different",
+    "paragraphs, and records nothing at all about the criteria that picked those twelve. Declaring",
+    "the match here means the selection is reviewed in a pull request before it is ever executed.",
+    "",
+    "WHY THE CODE IS UNREACHABLE, STATED CORRECTLY. An earlier draft of this said nitro-contracts is",
+    "\"reachable only from automation/**\". That is FALSE and was caught before any alert carried it:",
+    "16 files in @chainlink/contracts@1.5.0 import nitro, and 11 of them are outside automation/ --",
+    "including `shared/util/ChainSpecificUtil.sol` and three under `functions/`, i.e. the two",
+    "directories this repo DOES import from. A future reader grepping for nitro under shared/ would",
+    "have found a hit and concluded the dismissal was wrong.",
+    "",
+    "The real argument is stronger and does not depend on where nitro is imported from: solc reads a",
+    "CLOSURE, not a directory. The four chainlink paths contracts/ imports close over exactly 11",
+    "files, and that closure contains NO non-relative imports at all -- it cannot reach node_modules,",
+    "so it reaches neither OpenZeppelin nor nitro. Re-derive it against the installed package with",
+    "`scripts/security/chainlink-closure.js`; the count is asserted by the fixtures.",
+    "",
+    "SELECTION IS BY PROOF, NEVER BY ALERT NUMBER. `compiledVersion` is the version this repository",
+    "actually compiles against, and an alert is only eligible when the advisory's vulnerable range",
+    "EXCLUDES it. An unparseable range counts as including it. That is what makes the plan safe to",
+    "re-run: bump the pin into a vulnerable range and the alerts stop matching rather than being",
+    "dismissed anyway, and X-02 fails the moment `compiledVersion` and package.json disagree.",
+    "",
+    "`expectedCount` is the other half of that. The script refuses to apply when the live selection",
+    "is a different size than what was reviewed — a set that grew is a set nobody looked at."
+  ],
+
+  "dismissals": [
+    {
+      "id": "openzeppelin-nested-unreachable",
+      "issue": 1520,
+      "dismissedReason": "not_used",
+      "expectedCount": 12,
+      "match": {
+        "ecosystem": "npm",
+        "packages": ["@openzeppelin/contracts", "@openzeppelin/contracts-upgradeable"],
+        "scope": "development",
+        "maxSeverity": "high",
+        "compiledVersion": "5.4.0"
+      },
+      "comment": "Unreachable: solc never reads it. The import closure of the 4 chainlink paths contracts/ uses is 11 files with NO external imports at all - no OpenZeppelin, no nitro, nothing from node_modules. Compiled OZ is 5.4.0, outside every range. #1520"
+    }
+  ]
+}

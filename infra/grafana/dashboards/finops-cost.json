@@ -93,13 +93,72 @@
         "type": "prometheus",
         "uid": "${datasource}"
       },
+      "type": "table",
+      "title": "Source health — cost sources — read / unreadable / not-configured",
+      "description": "configured=1 & up=1 → read. configured=1 & up=0 → UNREADABLE (a real problem). configured=0 → not-configured (a feature that has not been wired up; not an outage). This is the panel that tells you which of those a blank panel above is: they look identical everywhere else, and they are not the same thing to act on.",
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "align": "auto"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "format": "table",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_source_configured{kind=\"cost\"}"
+        },
+        {
+          "refId": "B",
+          "format": "table",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_source_up{kind=\"cost\"}"
+        },
+        {
+          "refId": "C",
+          "format": "table",
+          "instant": true,
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "time() - (fairwins_finops_source_last_success_timestamp_seconds and on(source) fairwins_finops_source_configured{kind=\"cost\"})"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
       "type": "text",
       "title": "Member assistant — model provider — NOT YET LIVE",
       "gridPos": {
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 17
       },
       "options": {
         "mode": "markdown",
@@ -107,7 +166,7 @@
       }
     },
     {
-      "id": 4,
+      "id": 5,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -119,13 +178,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 17
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -163,7 +222,7 @@
       ]
     },
     {
-      "id": 5,
+      "id": 6,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -175,13 +234,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -219,7 +278,7 @@
       ]
     },
     {
-      "id": 6,
+      "id": 7,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -231,13 +290,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 25
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -275,7 +334,7 @@
       ]
     },
     {
-      "id": 7,
+      "id": 8,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -287,13 +346,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {
           "unit": "short",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -331,7 +390,7 @@
       ]
     },
     {
-      "id": 8,
+      "id": 9,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -343,13 +402,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 25
+        "y": 33
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -387,7 +446,7 @@
       ]
     },
     {
-      "id": 9,
+      "id": 10,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -399,13 +458,13 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 33
+        "y": 41
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -443,7 +502,7 @@
       ]
     },
     {
-      "id": 10,
+      "id": 11,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -455,13 +514,13 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 33
+        "y": 41
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },
@@ -499,7 +558,175 @@
       ]
     },
     {
-      "id": 11,
+      "id": 12,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "type": "timeseries",
+      "title": "Pinata (IPFS pinning) (modelled)",
+      "description": "Pinata spend MODELLED from the declared plan subscription; storage is read separately and exported as measured vendor usage. This is a PAID vendor on the member write path — wager creation, open challenges and encrypted backup pin JSON with no fallback, and mini-app packages are published here under CIDs that are keccak-committed on chain — so an outage is a member-facing incident, not a reporting one. Neither check:finops discovery route could ever have found it (no FeeRouter serviceId, no gateway payee env: the money flows the other way), which is why it sat uncatalogued while the vendor workbook recorded \"we pay them\" the whole time. The vendor publishes no billing API on our plan, so the dollar figure is arithmetic over a declared rate and the bytes beside it are the fact.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_cost_usd_total{source=\"pinata\"}",
+          "legendFormat": "{{unit}} ({{basis}})"
+        }
+      ]
+    },
+    {
+      "id": 13,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "type": "timeseries",
+      "title": "Alphaday news API (modelled)",
+      "description": "The token-news vendor behind the relay-gateway news proxy (spec 109). Keyless public API on a free tier: the modelled figure is $0 by declared plan rate, and the entry exists so the dependency is VISIBLE — if Alphaday ever prices the tier, this line is where the change lands rather than a surprise (research R7). No revenue entry pairs with it: the module carries no fee, no referral, no payee env, so C2b has nothing to claim. Gateway request volume shows in gateway-upstream-usage under the news upstream label.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 49
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_cost_usd_total{source=\"alphaday-news-api\"}",
+          "legendFormat": "{{unit}} ({{basis}})"
+        }
+      ]
+    },
+    {
+      "id": 14,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "type": "timeseries",
+      "title": "The Graph (subgraph queries) (modelled)",
+      "description": "Subgraph query spend, MODELLED from the declared plan rate. THE TIER IS WHICH ENDPOINT THE APP CALLS, not a setting: `api.studio.thegraph.com` is Subgraph Studio, the free development tier, where the cost really is $0 and no GRT is consumed. Publishing to the decentralized network and switching a `subgraphUrl` to `gateway.thegraph.com` changes that in one edit — query fees are then paid in GRT from a billing balance held on ARBITRUM ONE (GRT on Ethereum L1 does not pay them). The free allowance does not bill over, it FAILS, so this line is about a dependency as much as a dollar. `check:finops` C6 fails if a gateway URL appears while the plan price is still asserted at zero, because that transition is a one-character edit that would otherwise leave a confidently wrong $0 on the dashboard.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 57
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_cost_usd_total{source=\"thegraph\"}",
+          "legendFormat": "{{unit}} ({{basis}})"
+        }
+      ]
+    },
+    {
+      "id": 15,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -510,14 +737,14 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
-        "y": 41
+        "x": 12,
+        "y": 57
       },
       "fieldConfig": {
         "defaults": {
           "unit": "currencyUSD",
           "decimals": 2,
-          "noValue": "no data — source unreadable or not configured",
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
           "color": {
             "mode": "thresholds"
           },

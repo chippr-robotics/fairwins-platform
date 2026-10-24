@@ -1,5 +1,5 @@
 import { useEffect, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { isAddress } from 'viem'
 import { useMembershipTreasuryStats, fmtUsdc } from '../../hooks/useMembershipTreasuryStats'
 import './MembershipTreasuryOverview.css'
 
@@ -35,7 +35,7 @@ function usd(v) {
   return USD.format(Number.isFinite(n) ? n : 0)
 }
 
-const shortAddr = (a) => (a && ethers.isAddress(a) ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || '—')
+const shortAddr = (a) => (a && isAddress(a) ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || '—')
 
 /**
  * Compact single-series cumulative-revenue sparkline (magnitude over the sequence of revenue events).
@@ -92,7 +92,7 @@ function Tile({ label, value, tone }) {
 }
 
 export default function MembershipTreasuryOverview({ provider, chainId, address, accruedFees, accruedFeesReadable = true }) {
-  const configured = Boolean(address && ethers.isAddress(address))
+  const configured = Boolean(address && isAddress(address))
   const stats = useMembershipTreasuryStats({ provider, chainId, address })
 
   // Initial (cache-backed) scan when the panel mounts on a configured network.

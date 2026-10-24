@@ -101,10 +101,11 @@ Given an imported `AddressBook` and the current one:
    imported** (FR-022). Never silently overwrite or delete.
 3. Existing local-only contacts/addresses are always preserved.
 
-## Export payload (plaintext, before encryption)
+## Export file (plain text — issue #1550)
 
-The object that gets encrypted (see `contracts/export-format.md` for the file
-envelope):
+The whole file; there is no envelope around it any more (see
+`contracts/export-format.md`). Each address may also carry an informational
+`network` label, which is written for the reader and ignored on import:
 
 ```json
 {

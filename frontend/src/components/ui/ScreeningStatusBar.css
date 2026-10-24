@@ -1,0 +1,61 @@
+/* ScreeningStatusBar (issue #1458 QA round). Every colour is a status token — the segments are
+   opaque fills, never alpha tints, so their meaning does not depend on the panel behind them
+   (spec 090 rule 3). */
+
+.screen-bar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  width: 100%;
+  max-width: 22rem;
+  height: 6px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.screen-bar-seg {
+  flex: 1 1 0;
+  min-width: 3px;
+  border-radius: 1px;
+}
+
+.screen-bar-seg-clear {
+  background: var(--success-color);
+}
+
+.screen-bar-seg-flagged {
+  background: var(--danger-color);
+}
+
+.screen-bar-seg-unreadable {
+  background: var(--warning-color);
+}
+
+.screen-bar-seg-pending {
+  background: var(--border-color);
+}
+
+/* A scan in flight reads as motion rather than as a finished neutral verdict. */
+@media (prefers-reduced-motion: no-preference) {
+  .screen-bar-seg-pending {
+    animation: screen-bar-pulse 1.2s ease-in-out infinite;
+  }
+
+  .screen-bar-seg-pending:nth-child(2n) {
+    animation-delay: 0.15s;
+  }
+
+  .screen-bar-seg-pending:nth-child(3n) {
+    animation-delay: 0.3s;
+  }
+}
+
+@keyframes screen-bar-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}

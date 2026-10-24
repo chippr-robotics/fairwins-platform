@@ -1,0 +1,387 @@
+/* Assistant tab (spec 104) — the agent-controls accordion and its cards.
+
+   Absorbs the old Settings card's stylesheet (components/account/AssistantPreferencesPanel.css)
+   and adds the "Answered by" chooser and the GutterToken key card. Colours come from theme tokens
+   only (src/theme.css is the one stylesheet that may state one); links and sub-14px copy use
+   --accent-color (Teal 700), not --brand-primary, which is a large-text-and-fill colour. Status
+   surfaces are OPAQUE tokens (--success-bg / --warning-bg / --danger-bg), never an alpha tint whose
+   contrast would depend on what sits behind it. */
+
+.assistant-tools__intro {
+  color: var(--text-secondary);
+  font-size: 14px;
+  line-height: 1.5;
+  margin: 0 0 14px;
+}
+
+/* --- Assistant card ------------------------------------------------------- */
+.assistant-prefs .acc__body,
+.guttertoken-key .acc__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+
+.assistant-prefs__row {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.assistant-prefs__text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.assistant-prefs__label {
+  font-weight: 600;
+}
+
+.assistant-prefs__sub {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.assistant-prefs__switch {
+  appearance: none;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  cursor: pointer;
+  flex: none;
+  height: 24px;
+  min-height: 24px;
+  min-width: 44px;
+  padding: 0;
+  position: relative;
+  transition: background var(--transition-fast);
+  width: 44px;
+}
+
+/* White is an absolute, not a palette colour (spec 091's exemption); the knob is white on both
+   themes because the track behind it is what changes. */
+.assistant-prefs__switch::after {
+  background: #fff;
+  border-radius: 50%;
+  box-shadow: var(--shadow-sm);
+  content: '';
+  height: 18px;
+  left: 2px;
+  position: absolute;
+  top: 2px;
+  transition: transform var(--transition-fast);
+  width: 18px;
+}
+
+.assistant-prefs__switch.on {
+  background: var(--brand-primary);
+  border-color: var(--brand-primary);
+}
+
+.assistant-prefs__switch.on::after {
+  transform: translateX(20px);
+}
+
+.assistant-prefs__switch:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Answered by — a radio group drawn as rows, so each option's cost line and reason sit under it. */
+.assistant-prefs__chooser {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.assistant-prefs__option {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.assistant-prefs .assistant-prefs__radio {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: flex;
+  font-size: 0.92rem;
+  font-weight: 600;
+  gap: 0.6rem;
+  min-height: 36px;
+  padding: 0.25rem 0;
+  text-align: left;
+}
+
+.assistant-prefs__radio-dot {
+  border: 2px solid var(--border-strong);
+  border-radius: 50%;
+  flex: none;
+  height: 18px;
+  position: relative;
+  width: 18px;
+}
+
+.assistant-prefs__radio.is-checked .assistant-prefs__radio-dot {
+  border-color: var(--brand-primary);
+}
+
+.assistant-prefs__radio.is-checked .assistant-prefs__radio-dot::after {
+  background: var(--brand-primary);
+  border-radius: 50%;
+  content: '';
+  inset: 3px;
+  position: absolute;
+}
+
+/* A disabled option changes HUE, and its reason sentence is the state — the attribute alone is
+   not something a member can read. */
+.assistant-prefs .assistant-prefs__radio:disabled {
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+.assistant-prefs .assistant-prefs__radio:disabled .assistant-prefs__radio-dot {
+  border-color: var(--disabled-border);
+}
+
+.assistant-prefs__radio:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.assistant-prefs__option-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-left: calc(18px + 0.6rem);
+}
+
+.assistant-prefs__reason {
+  border-radius: var(--radius-sm);
+  display: inline-block;
+  font-size: 0.82rem;
+  line-height: 1.45;
+  padding: 0.25rem 0.5rem;
+  width: fit-content;
+}
+
+.assistant-prefs__reason--blocked {
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+}
+
+.assistant-prefs__reason--pending {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.assistant-prefs__reason--unreadable {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.assistant-prefs__effective {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.assistant-prefs__clear {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+}
+
+.assistant-prefs__count {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+}
+
+/* --- GutterToken key card ------------------------------------------------- */
+.guttertoken-key__lead {
+  color: var(--text-secondary);
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.guttertoken-key__value {
+  align-items: center;
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.guttertoken-key__value-label {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.guttertoken-key__masked {
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.guttertoken-key__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.guttertoken-key__confirm {
+  background: var(--warning-bg);
+  border: 1px solid var(--warning-border);
+  border-radius: var(--radius-md);
+  color: var(--warning-text);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  padding: 0.65rem 0.75rem;
+}
+
+.guttertoken-key__confirm p {
+  font-size: 0.86rem;
+  line-height: 1.45;
+  margin: 0;
+}
+
+.guttertoken-key__outcome {
+  border-radius: var(--radius-md);
+  font-size: 0.86rem;
+  line-height: 1.45;
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+}
+
+.guttertoken-key__outcome--ok {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.guttertoken-key__outcome--refused {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.guttertoken-key__outcome--unknown {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.guttertoken-key__get {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.guttertoken-key__link,
+.assistant-prefs__link,
+.assistant-tools__link {
+  color: var(--accent-color);
+  font-size: 0.85rem;
+  font-weight: 600;
+}
+
+.guttertoken-key__disclosure {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.guttertoken-key__can,
+.assistant-tools__disclosure {
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
+  padding: 0.75rem 0.85rem;
+}
+
+.assistant-tools__disclosure {
+  margin-top: 14px;
+}
+
+.guttertoken-key__can h4,
+.assistant-tools__disclosure h4 {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  margin: 0 0 0.5rem;
+}
+
+.guttertoken-key__can ul,
+.assistant-tools__disclosure ul {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0 0 0.5rem;
+  padding-left: 1.1rem;
+}
+
+.guttertoken-key__can li,
+.assistant-tools__disclosure li {
+  margin-bottom: 0.3rem;
+}
+
+.assistant-tools__disclosure p {
+  margin: 0;
+}
+
+/* --- Buttons -------------------------------------------------------------- */
+/* No global `.btn` exists — only scoped ones — and src/index.css's global `button` rule would
+   otherwise inflate these controls' boxes. Scoped to the two cards this file owns. A brand fill
+   takes its label from the matched `--primary-button-text` (issue #1260); a disabled control
+   changes hue via index.css's re-pointing, so no opacity trick here. */
+.assistant-prefs .btn,
+.guttertoken-key .btn {
+  align-self: flex-start;
+  background: var(--surface-color);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 600;
+  min-height: 36px;
+  padding: 0.45rem 0.85rem;
+  transition: border-color var(--transition-fast), background-color var(--transition-fast);
+}
+
+.assistant-prefs .btn:hover:not(:disabled),
+.guttertoken-key .btn:hover:not(:disabled) {
+  border-color: var(--border-hover);
+}
+
+.assistant-prefs .btn:disabled,
+.guttertoken-key .btn:disabled {
+  background: var(--disabled-bg);
+  border-color: var(--disabled-border);
+  color: var(--disabled-text);
+  cursor: not-allowed;
+}
+
+.guttertoken-key .btn-primary {
+  background: var(--primary-button);
+  border-color: var(--primary-button);
+  color: var(--primary-button-text);
+}
+
+.guttertoken-key .btn-primary:hover:not(:disabled) {
+  background: var(--primary-button-hover);
+  border-color: var(--primary-button-hover);
+}
+
+.guttertoken-key .btn-danger {
+  background: var(--danger-color);
+  border-color: var(--danger-color);
+  color: var(--status-fill-text);
+}

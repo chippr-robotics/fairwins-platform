@@ -4,7 +4,7 @@
 // governance builders. Owners only (FR-016).
 
 import { useState, useMemo } from 'react'
-import { getAddress } from 'ethers'
+import { getAddress } from 'viem'
 import CustodyAddressField from './CustodyAddressField'
 import {
   buildAddOwner,

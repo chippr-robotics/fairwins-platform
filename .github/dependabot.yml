@@ -138,3 +138,77 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 3
+
+  # ── Outside the lockfile (ADR-006, issue #1648) ───────────────────────────────────────────────
+  #
+  # Base images and compose images had NO upgrade signal: four used floating tags (node:22-alpine,
+  # nginx:alpine, redis:7-alpine) that move under you without telling you, and two Node images sat
+  # on an EOL line. They are now exact pins, which is what lets Dependabot propose a bump at all.
+  #
+  # Majors are ignored on purpose: a runtime line change (Node 22→24, redis 7→8, which is also a
+  # license change) is a migration decided at the monthly review, not a routine PR. Patches and
+  # minors arrive weekly. Images under our own Artifact Registry are first-party: Dependabot has no
+  # credential to read them, and their tags are release ids, not versions.
+  #
+  # What Dependabot still cannot see (images BUILT from an upstream git tag, like OZ Relayer and
+  # alto; toolchain lines in workflows; Ansible collections) is watched by version-watch.yml from
+  # scripts/deps/version-pins.json, and every image here must also be claimed there (V-04).
+  - package-ecosystem: docker
+    target-branch: staging
+    directories:
+      - /
+      - /services/relay-gateway
+      - /services/finops-exporter
+      - /services/mcp-server
+      - /services/alto-bundler/nginx
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      base-images:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "us-central1-docker.pkg.dev/*"
+
+  - package-ecosystem: docker-compose
+    target-branch: staging
+    directories:
+      - /infra/vm/gateway
+      - /infra/vm/bundler
+      - /services/relay-gateway
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      compose-images:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "us-central1-docker.pkg.dev/*"
+      # Not pullable (ghcr 403s every tag); the engine is built from source at a HELD tag. Its
+      # version is a decision recorded in version-pins.json (#1648), never a bot bump.
+      - dependency-name: "ghcr.io/openzeppelin/openzeppelin-relayer"
+
+  # Providers only. Terraform core is pinned in the three infra workflows and watched by
+  # version-watch.yml; the private chippr-tf-modules refs are commit SHAs (G-16) that need a token
+  # Dependabot does not hold. A provider bump changes the reviewed plan; apply runs on merge, so
+  # read the plan on the PR like any other infra change.
+  - package-ecosystem: terraform
+    target-branch: staging
+    directories:
+      - /infra/terraform/environments/prod
+      - /infra/terraform/environments/staging
+      - /infra/terraform/bootstrap
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 3
+    groups:
+      terraform-providers:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "*chippr-tf-modules*"

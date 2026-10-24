@@ -16,6 +16,15 @@
  * provider should be given on the device it is given from; restoring a backup onto a new phone must
  * not arrive with the assistant already on. A test asserts the absence.
  *
+ * PROVIDER (spec 104). `provider` names WHO ANSWERS: 'fairwins' (the gateway, on the membership) or
+ * 'guttertoken' (the member's own GutterToken key, browser-direct). It is a preference, not a
+ * capability: whether the chosen rail can actually run is `resolveProvider.js`'s job, which also
+ * holds the key and membership facts this module deliberately knows nothing about. The default is
+ * 'fairwins' and anything else stored is read as the default — a foreign string must not be able to
+ * route a conversation to a third party. The value is persisted ONLY when it differs from the
+ * default, so a member who never touched the radio keeps a stored blob byte-identical to spec 095's
+ * `{ enabled, retainMemory }`; absence means "FairWins", exactly as absence of `enabled` means off.
+ *
  * Shaped like `lib/nav/navPreferences.js` otherwise — lazy snapshot, validating reader, monotonic
  * revision with a throw-swallowing notify, and a `__reset…ForTests()` export.
  */
@@ -29,9 +38,17 @@ export const ASSISTANT_PREFS_KEY = 'assistant_prefs'
  * between openings — it never controls what is sent, only what this device remembers, and the
  * panel's copy says so.
  */
-export const DEFAULT_ASSISTANT_PREFS = Object.freeze({ enabled: false, retainMemory: true })
+export const DEFAULT_ASSISTANT_PREFS = Object.freeze({ enabled: false, retainMemory: true, provider: 'fairwins' })
 
-/** @type {{account: string, value: {enabled: boolean, retainMemory: boolean}}|null} */
+/** The two rails a conversation can run on. Order is display order (the membership rail first). */
+export const ASSISTANT_PROVIDERS = Object.freeze(['fairwins', 'guttertoken'])
+
+const DEFAULT_PROVIDER = DEFAULT_ASSISTANT_PREFS.provider
+
+/** A stored provider is honoured only when it names a rail this build knows; anything else is the default. */
+const normalizeProvider = (value) => (ASSISTANT_PROVIDERS.includes(value) ? value : DEFAULT_PROVIDER)
+
+/** @type {{account: string, value: {enabled: boolean, retainMemory: boolean, provider: string}}|null} */
 let snapshot = null
 let revision = 0
 const listeners = new Set()
@@ -46,6 +63,7 @@ function read(account) {
     // `=== true` and not truthiness: anything that is not an explicit yes is a no.
     enabled: raw.enabled === true,
     retainMemory: raw.retainMemory !== false,
+    provider: normalizeProvider(raw.provider),
   }
 }
 
@@ -68,6 +86,11 @@ export function isAssistantEnabled(account) {
 /** Whether this device keeps the conversation between openings. */
 export function isMemoryRetained(account) {
   return loadAssistantPrefs(account).retainMemory !== false
+}
+
+/** Which rail this account has chosen. Never null; a missing account yields the default rail. */
+export function getAssistantProvider(account) {
+  return loadAssistantPrefs(account).provider
 }
 
 /** Monotonic counter — React consumers re-derive from it. */
@@ -96,7 +119,15 @@ function write(account, next) {
   const key = norm(account)
   if (!key) return next
   snapshot = { account: key, value: next }
-  saveUserPreference(account, ASSISTANT_PREFS_KEY, next, true)
+  // The default provider is stored as ABSENCE (see the header), so the blob of a member who never
+  // chose a rail is unchanged from spec 095's shape.
+  const { provider, ...rest } = next
+  saveUserPreference(
+    account,
+    ASSISTANT_PREFS_KEY,
+    provider === DEFAULT_PROVIDER ? rest : { ...rest, provider },
+    true
+  )
   notify()
   return next
 }
@@ -109,6 +140,15 @@ export function setAssistantEnabled(account, enabled) {
 /** Turn on-device conversation retention on or off. */
 export function setMemoryRetained(account, retain) {
   return write(account, { ...loadAssistantPrefs(account), retainMemory: retain !== false })
+}
+
+/**
+ * Choose which rail answers for this account. An unknown value falls back to the default rail rather
+ * than throwing: the radio that calls this can only offer the two known rails, so anything else is
+ * a stale or foreign value, and the safe reading of "something we do not recognise" is FairWins.
+ */
+export function setAssistantProvider(account, provider) {
+  return write(account, { ...loadAssistantPrefs(account), provider: normalizeProvider(provider) })
 }
 
 /** Test seam: forget the in-memory snapshot so the next read hits storage again. */

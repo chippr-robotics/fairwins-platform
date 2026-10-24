@@ -8,10 +8,11 @@
  * The vault is stored in localStorage, scoped per wallet address, and encrypted with a key derived from a
  * wallet signature over a domain-separated message — so it's readable only with the SAME wallet (no
  * passphrase to remember), and never leaves the device. Reuses the audited ChaCha20-Poly1305 primitives
- * (the same approach as the address-book backup, lib/addressBook/addressBookCrypto.js).
+ * (the same approach the address-book backup used before issue #1550 moved that one to plain text;
+ * this vault holds claim secrets and stays encrypted).
  */
 
-import { keccak256, toUtf8Bytes, getBytes, concat } from 'ethers'
+import { concat, keccak256, stringToBytes, toBytes } from 'viem'
 import { encryptJson, decryptJson, utf8ToBytes } from '../../utils/crypto/primitives'
 
 const STORAGE_PREFIX = 'fairwins.ocCodeVault.'
@@ -29,7 +30,7 @@ export const CODE_VAULT_SIGN_MESSAGE =
 /** Derive the 32-byte vault key from a raw signature (no wallet popup). */
 export function deriveVaultKey(signature) {
   if (!signature) throw new Error('deriveVaultKey: signature required')
-  return getBytes(keccak256(toUtf8Bytes(VAULT_KEY_DOMAIN + signature)))
+  return toBytes(keccak256(stringToBytes(VAULT_KEY_DOMAIN + signature)))
 }
 
 /**
@@ -40,7 +41,7 @@ export function deriveVaultKey(signature) {
  */
 export function deriveVaultKeyFromSeed(seed) {
   if (!seed) throw new Error('deriveVaultKeyFromSeed: seed required')
-  return getBytes(keccak256(concat([toUtf8Bytes(VAULT_KEY_DOMAIN), seed])))
+  return toBytes(keccak256(concat([stringToBytes(VAULT_KEY_DOMAIN), seed])))
 }
 
 function storageKey(address) {

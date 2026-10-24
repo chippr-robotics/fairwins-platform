@@ -43,18 +43,24 @@ vi.mock('../../lib/chains/estate', async (orig) => {
   return { ...real, readProviderFor: () => ({ isReadProvider: true }) }
 })
 
-vi.mock('ethers', async (orig) => {
+// Both rails read through the chain seam (spec 110). `capBps`/`feeBps`/`kind` come back as NUMBERS
+// rather than bigints — they are uint16/uint8, and viem decodes integers of 48 bits or fewer as
+// numbers (divergence b) — so the fake answers what the chain now answers.
+vi.mock('../../lib/chains/readContract', async (orig) => {
   const actual = await orig()
-  function FakeContract(addr) {
-    if (String(addr).toLowerCase() === GMX.dataStore.toLowerCase()) {
-      return {
-        getUint: async (key) =>
-          key === GMX_MAX_UI_FEE_FACTOR_KEY ? 10n ** 27n : 5n * 10n ** 26n,
+  return {
+    ...actual,
+    readContract: async (_chainId, { address, functionName, args = [] }) => {
+      if (functionName === 'getUint') {
+        if (String(address).toLowerCase() !== GMX.dataStore.toLowerCase()) {
+          throw new Error('getUint asked of something other than the GMX DataStore')
+        }
+        return args[0] === GMX_MAX_UI_FEE_FACTOR_KEY ? 10n ** 27n : 5n * 10n ** 26n
       }
-    }
-    return { getService: async () => ({ capBps: 10n, feeBps: 0n, kind: 2n }) }
+      if (functionName === 'getService') return { capBps: 10, feeBps: 0, kind: 2 }
+      throw new Error('unmocked read: ' + functionName)
+    },
   }
-  return { ...actual, ethers: { ...actual.ethers, Contract: FakeContract }, Contract: FakeContract }
 })
 
 import PerpsFeesPanel from '../../components/admin/PerpsFeesPanel'

@@ -15,6 +15,11 @@ import {
 } from '../../data/ledger/ledgerClientStore'
 import { readVaultEnvelope, writeVaultEnvelope, hasVault } from '../openChallenge/codeVault'
 import {
+  loadCreationRecords,
+  applyCreationRecords,
+  mergeCreationRecords,
+} from '../custody/vaultCreationRecords'
+import {
   loadLegacyRecoveredKeys,
   saveLegacyRecoveredKeys,
   mergeLegacyRecoveredKeys,
@@ -93,6 +98,19 @@ export const syncedObjects = [
       return { conflicts }
     },
     merge: (current, incoming) => mergeVaultReferences(current, incoming),
+  },
+  {
+    // Spec 105 — per-vault CREATION records (owners at creation, threshold, saltNonce, the one
+    // semantic rules config): the chain-independent facts that let "Add a network" land the SAME
+    // address later. NON-network-scoped by design — the record is precisely what no single chain
+    // holds. Records are immutable; merge is union-by-address with existing-entry-wins, and a
+    // conflicting incoming record is reported, never silently adopted. Public parameters only.
+    key: 'vaultCreationRecords',
+    label: 'Vault creation records',
+    networkScoped: false,
+    load: (account) => loadCreationRecords(account),
+    apply: (account, value, mode) => applyCreationRecords(account, value, mode),
+    merge: (current, incoming) => mergeCreationRecords(current, incoming),
   },
   {
     // Spec 051 — client-only activity ledger records (failed gasless ops,

@@ -41,8 +41,15 @@
 
 const ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
 
-/** Settings card ids double as `data-attention` markers and as deep-link hashes (spec 081). */
-const SETTINGS_ASSISTANT = '/wallet?tab=settings#assistant-prefs'
+/**
+ * The Assistant card. Card ids double as `data-attention` markers and as deep-link hashes (spec
+ * 081), and the id did not change when spec 104 moved the card off Settings onto its own tab in
+ * Tools — so `/wallet?tab=settings#assistant-prefs` still resolves here, by redirect. This file
+ * names the DESTINATION rather than the redirect: what these tests are about is the card, and a
+ * redirect asserted in three places is a redirect that has to be changed in three places. The
+ * redirect itself is held once, in 47-assistant-rails.cy.js [GT-07].
+ */
+const ASSISTANT_TAB = '/wallet?tab=assistant#assistant-prefs'
 
 /** Wallet-scoped preference key — `lib/assistant/assistantPrefs.js` + `utils/userStorage.js`. */
 const PREFS_KEY = `fw_user_${ACCOUNT.toLowerCase()}_assistant_prefs`
@@ -142,10 +149,10 @@ const CHAT_BODY = {
   usage: { inputTokens: 412, outputTokens: 63 },
 }
 
-/** Land on the Settings card with the assistant already opted in — the precondition, not the test. */
+/** Land on the Assistant card with the assistant already opted in — the precondition, not the test. */
 function visitOptedIn({ retainMemory = true } = {}) {
   cy.mockWeb3Provider({ account: ACCOUNT, networkId: WALLET_CHAIN_ID, preAuthorized: true })
-  cy.visit(SETTINGS_ASSISTANT, {
+  cy.visit(ASSISTANT_TAB, {
     onBeforeLoad(win) {
       win.localStorage.setItem(PREFS_KEY, JSON.stringify({ enabled: true, retainMemory }))
     },
@@ -176,7 +183,7 @@ describe('Assistant (spec 095)', () => {
     cy.clearCookies()
   })
 
-  it('[AS-01] assistant.opt-in — the assistant exists only after Settings turns it on, and stops existing when it is turned off', () => {
+  it('[AS-01] assistant.opt-in — the assistant exists only after Tools ▸ Assistant turns it on, and stops existing when it is turned off', () => {
     /*
      * DEFAULT OFF is not a UI state here, it is the absence of the feature: no launcher, no
      * session, nothing sent. So "off" has to be proved by absence at both ends — before the switch
@@ -185,7 +192,7 @@ describe('Assistant (spec 095)', () => {
      */
     stubMembership()
     cy.mockWeb3Provider({ account: ACCOUNT, networkId: WALLET_CHAIN_ID, preAuthorized: true })
-    cy.visit(SETTINGS_ASSISTANT)
+    cy.visit(ASSISTANT_TAB)
 
     // The deep link OPENS the card rather than leaving the member at a closed heading.
     cy.get('[data-attention="assistant-prefs"]', { timeout: 40000 })
@@ -229,7 +236,7 @@ describe('Assistant (spec 095)', () => {
     cy.get('.assistant-panel__message--user').should('contain.text', 'what is my membership tier')
   })
 
-  it('[AS-03] assistant.memory-clear — an exchange is remembered on this device, counted in Settings, and Clear takes the count to nothing', () => {
+  it('[AS-03] assistant.memory-clear — an exchange is remembered on this device, counted on the Assistant tab, and Clear takes the count to nothing', () => {
     /*
      * "Clear" that does not say what it cleared is a promise. A number the member watches go to
      * zero is a fact — which is why the count is asserted before and after rather than the button
