@@ -69,19 +69,39 @@ export default function UnifiedLookupModal({ isOpen, onClose, onBuyMembership, i
 
   const code = normalizePhrase(phrase)
   const kind = status === 'result' ? result?.kind : null
-  const showingPanel = kind === 'challenge' || kind === 'pool' || kind === 'collision' || kind === 'not-actionable' || kind === 'self'
+  const showingPanel = kind === 'challenge' || kind === 'pool' || kind === 'funding' || kind === 'collision' || kind === 'not-actionable' || kind === 'self'
   const showForm = !showingPanel
 
   const openPoolManagement = (address) => { onClose(); navigate(`/pools/${address}`) }
+  // Funding pools (spec 103, FR-021): the words resolve to a funding pool → its own page, never the join panel.
+  const openFundingPool = (address) => { onClose(); navigate(`/fund/${address}`) }
+  const fundingRow = result?.funding ? (
+    <p className="fm-hint" data-testid="lookup-funding-also">
+      These words also match a funding pool — <button type="button" className="fm-link-btn" onClick={() => openFundingPool(result.funding.address)}>open it</button>.
+    </p>
+  ) : null
 
   const renderResult = () => {
     if (status !== 'result' || !result) return null
     switch (result.kind) {
+      case 'funding':
+        return (
+          <div className="fm-form" data-testid="lookup-funding">
+            <p className="fm-hint">
+              Those four words open a <strong>funding pool</strong>: “{result.match.purpose}” — {result.match.raisedFormatted} of {result.match.goalFormatted} {result.match.tokenSymbol} raised.
+            </p>
+            <div className="fm-success-actions">
+              <button type="button" className="fm-btn-primary" onClick={() => openFundingPool(result.match.address)}>Open the pool</button>
+              <button type="button" className="fm-btn-secondary" onClick={searchAgain}>Back</button>
+            </div>
+          </div>
+        )
       case 'challenge':
         return <TakeChallengePanel code={code} match={result.match} onClose={onClose} onBuyMembership={onBuyMembership} onBack={searchAgain} />
       case 'pool':
         return (
           <>
+            {fundingRow}
             <JoinPoolPanel summary={result.match} onClose={onClose} />
             <div className="fm-success-actions"><button type="button" className="fm-btn-secondary" onClick={searchAgain}>Back</button></div>
           </>

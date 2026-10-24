@@ -177,6 +177,10 @@ no toast appears.
 
 ### User Story 5 - Encrypted export and import for portability (Priority: P3)
 
+> **Superseded by the 2026-09-10 amendment (issue #1550).** The export is plain text and
+> needs no wallet; this story is kept as the record of the original design. See
+> *User Story 7* and the replaced FR-019–FR-021 at the end of this document.
+
 A member can export their entire address book to an encrypted file and later
 import it — on the same device or a different one — to restore or move their
 contacts. The exported data is unreadable without the member's secret, and import
@@ -301,7 +305,7 @@ confirm importing with a wrong secret fails safely.
   NOT block or alter the member's completed action, and it MUST never interrupt the
   flow.
 
-#### Portability (encrypted import/export)
+#### Portability (encrypted import/export) — *superseded, see the 2026-09-10 amendment*
 
 - **FR-019**: Members MUST be able to export their entire address book to an
   encrypted file that does not expose names, addresses, or notes in readable form.
@@ -394,3 +398,251 @@ confirm importing with a wrong secret fails safely.
 - **No sharing**: Address books are private to the member; sharing contacts between
   members is out of scope for this feature (portability is via encrypted
   export/import only).
+
+---
+
+## Amendment 2026-09-06 — estate-wide screening (issue #1458)
+
+**Problem.** FR-010–FR-014 screened an address against ONE list — the FairWins `SanctionsGuard`
+on the wallet's chain — and the guard is deployed on three chains (Polygon, Amoy, Mordor). On the
+other four mainnets the app could only ever say *Unscreened*, and a clear result was shown as
+nothing at all. A member entering a recipient had no way to learn that the address was frozen by
+a stablecoin issuer on another network, or sanctioned according to a list the guard on their
+chain does not consult, until the funds were already gone or stuck.
+
+**Scope.** Advisory only. No contract change, no new enforcement, no change to which read gates
+a submission (FR-013 stands: the guard on the chain the value moves on remains the enforcement,
+and the surfaces that gate a button on it still read it live — the *timing* of that read, forced
+past the cache at submission, is **spec 067** FR-032, not FR-013). This amendment changes what the
+member is TOLD when they enter an address, and what that statement rests on.
+
+### User Story 6 — Know that an address is flagged anywhere before sending (Priority: P1)
+
+As a member entering an address, I want to see whether it is flagged on any known list on any
+network this build can read, so that I do not send value to an address that will be refused
+on-chain or whose funds will be frozen — regardless of which network the list lives on.
+
+**Acceptance Scenarios**:
+
+1. **Given** a valid address is entered, **When** the sweep completes, **Then** every configured
+   screening source on every chain in the build's cohort has been asked, and the member can
+   expand the result to see each source, its network, and its answer.
+2. **Given** ANY source answers that the address is listed, **Then** a warning pill reading
+   **Flagged** is shown with `role="alert"`, and the sentence names the list and the network.
+3. **Given** EVERY configured source answered and none flagged the address, **Then** a green pill
+   reading **Screened clear** is shown, with the count of sources and networks it rests on.
+4. **Given** no source flagged the address but at least one could not be read, **Then** the pill
+   reads **Partly screened** (amber, never green) and the sentence names the missing source.
+5. **Given** no source answered at all, or no source exists for the chains asked, **Then** the
+   pill reads **Unscreened** and the sentence says which networks have no source.
+
+### Functional Requirements (added)
+
+- **FR-024**: The system MUST screen an entered address against every screening source configured
+  for every chain in the build's cohort (`cohortChainIds()`), never across the testnet/mainnet
+  boundary (constitution III), and never against a chain the cohort does not include.
+- **FR-025**: Screening sources are: the FairWins `SanctionsGuard` (`isAllowed`) where deployed;
+  the Chainalysis Sanctions Oracle (`isSanctioned`) where published; and issuer freeze lists
+  (`isBlacklisted` on Circle USDC, `isBlackListed` on Tether USDT) for the native issuer contracts
+  the platform lists. Each source is a named, provenance-documented on-chain read; no off-chain
+  risk provider is consulted in this amendment.
+- **FR-026**: Every source read MUST resolve to one of `read` (with a boolean flag) or `unreadable`
+  (with a reason); a chain with no source is reported as **uncovered**. A missing answer MUST
+  NEVER be presented as a clear one.
+- **FR-027**: The verdict MUST be derived from the readings, never stored: `flagged` on any flag;
+  `screened` ONLY when every configured source answered and none flagged; `partial` when nothing
+  flagged and at least one source is unreadable; `unscreened` when no source answered.
+- **FR-028**: The pill MUST convey its verdict by icon and text (WCAG 1.4.1), the flagged state
+  MUST be an alert, and the member MUST be able to expand it to see every source, per network,
+  with its answer or the reason it gave none, and the networks that have no source.
+- **FR-029**: Every source read MUST be bounded by a deadline, isolated from every other read
+  (one dead endpoint never fails the sweep), and MUST obtain its provider through the spec-069
+  endpoint seam (`readProviderFor`), never from `NETWORKS[chainId].rpcUrl`.
+- **FR-030**: The estate screen is advisory. It MUST NOT replace the per-chain live read that gates
+  a submission on the chain the value moves on (FR-013 keeps that read advisory; **spec 067**
+  FR-032 is what requires it to be taken again, forced, at submission — see the 2026-09-10
+  amendment), and it MUST NOT be presented as enforcement: the on-chain guard and the issuing
+  token remain the only things that block.
+
+### Key Entities (added)
+
+- **Screening Source**: one on-chain list on one chain — kind (`fairwins-guard` /
+  `chainalysis-oracle` / `issuer-freeze`), chain, contract address, maintainer label, and the read
+  that answers "is this address listed?".
+- **Source Reading**: one source's answer about one address — `read` + `flagged` + optional
+  detail, or `unreadable` + reason.
+- **Estate Screening Result**: the readings for one address across the cohort, the uncovered
+  chains, and the derived verdict.
+
+### Success Criteria (added)
+
+- **SC-009**: On a mainnet build with all endpoints reachable, an address on the OFAC SDN list
+  (verified: the Ronin-bridge exploiter, `0x098B…2f96`) renders **Flagged**, naming at least the
+  Chainalysis oracle and the Circle USDC freeze list, on every mainnet in the cohort.
+- **SC-010**: With one cohort endpoint unreachable and no source flagging, the pill renders
+  **Partly screened** and names the unreachable source — it is never green.
+- **SC-011**: 100% of pill states are distinguishable with colour removed.
+
+### Out of scope (recorded)
+
+- Subgraph indexing of `DenyListUpdated` (reason + timestamp for a FairWins deny-list entry): a
+  single-address verdict is a point read; the subgraph would add a deploy dependency and no new
+  fact to the verdict. Follow-up if the reason text is wanted in the UI.
+- Bring-your-own risk providers (TRM, Chainalysis KYT, Elliptic). The source shape
+  (`read(provider, account) → { flagged, detail }`) is what such a source would implement, behind
+  a member-held credential.
+
+---
+
+## Amendment 2026-09-10 — plain-text, wallet-free export (issue #1550)
+
+**Problem.** FR-019–FR-021 keyed the export file to a wallet signature over
+`ADDRESS_BOOK_BACKUP_MESSAGE_V1`. That key can only be derived from an ethers signer, and a
+passkey session has none — `WalletContext` nulls it for that login — so `deriveBackupKey` threw
+`Wallet not connected` and BOTH Export and Import were dead for every passkey member, with an
+account signed in and a book full of contacts on the screen behind the error. The sentence was
+untrue twice over: the member's wallet was connected, and no wallet was ever going to help. It is
+the same defect class as the custody write rail — asking "is there an injected EOA?" while
+appearing to ask "is a member signed in?".
+
+The second failure is quieter and older. The clarified answer to "how is the export keyed?"
+(Session 2026-06-19, Q1: same wallet, no passphrase) bought convenience by making the file
+readable by exactly one key on earth, and that is the wrong trade for what members actually do
+with the file. A member who wants to hand their contacts to a teammate, carry them to an account
+under a different key, or simply read them, cannot; what they get is *"Could not decrypt this
+backup — it may belong to a different wallet or be corrupted"*, which names a mechanism and
+guesses at a cause.
+
+**Decision.** The export is **plain JSON**. No signature, no passphrase, no key, no envelope. A
+member exports contacts to a file anyone can open, and imports one the same way, on every account
+type the app supports. The confidentiality the envelope provided is not replaced by something
+weaker — it is **dropped, deliberately and in writing**, and the member is told so at the moment
+they export.
+
+**Scope.** The export FILE only. Nothing about where the address book LIVES changes: it is still
+per-member device storage (FR-006, FR-009), and the spec-032 encrypted backup — the mechanism that
+actually protects a member's contacts at rest and across devices — is untouched and still
+encrypted. Screening (FR-010–FR-014, FR-024–FR-030) is untouched. The additive merge and its
+conflict prompt (FR-022) are untouched and now carry more weight than they did: they are the only
+thing standing between an imported file and the member's existing data.
+
+### User Story 7 — Move or share contacts as a plain file (Priority: P3)
+
+As a member on any kind of account — injected wallet, hardware wallet, or passkey — I want to
+export my address book to a file I can open, keep, or hand to someone else, and import one back,
+so that my contacts are portable without depending on which key signs my transactions.
+
+**Independent Test**: Sign in with a passkey, open My Account → Address Book, export, and confirm
+a `.json` file downloads and opens in a text editor with the nicknames readable. Import that file
+in a second profile signed in as a different member and confirm the contacts arrive. Confirm no
+surface says "Wallet not connected" at any point in either direction.
+
+**Acceptance Scenarios**:
+
+1. **Given** a signed-in member with contacts, on a passkey account, **When** they export,
+   **Then** a JSON file downloads with no signature prompt, and no surface reports a missing or
+   disconnected wallet.
+2. **Given** that file, **When** it is imported by any member on any account type, **Then** the
+   contacts, addresses, networks and notes arrive, merged additively (FR-022).
+3. **Given** the member is about to export, **When** the control is shown, **Then** the surface
+   states in words, before the file is produced, that anyone who opens it can read it.
+4. **Given** a file produced by the ENCRYPTED format that shipped before this amendment, **When**
+   it is imported in a session that can produce the original wallet's signature, **Then** it opens
+   as it always did.
+5. **Given** that same encrypted file in a session that cannot produce that signature (a passkey
+   account, or no signer), **When** it is imported, **Then** the refusal names the real reason —
+   an older encrypted export, openable only by the wallet that created it — and says what to do
+   about it, and NEVER attributes the failure to the wrong wallet, a different wallet, or a
+   disconnected one.
+6. **Given** an import that is malformed, is not an address book, or carries an unknown format,
+   **When** it is imported, **Then** it is rejected with a message naming what was wrong and the
+   existing book is unchanged (FR-021).
+7. **Given** a book with no contacts, **When** the member exports, **Then** the surface says there
+   is nothing to export rather than writing an empty file that reads as a broken export.
+
+### Functional Requirements (replaced)
+
+- **FR-019** *(replaces FR-019)*: Members MUST be able to export their entire address book to a
+  **plain JSON file** — self-describing (`format` + `version`), human-readable, carrying the
+  nicknames, addresses, networks and notes as text. The export MUST NOT require a wallet
+  signature, a passphrase, or any key material, and MUST behave identically on every account type
+  the app supports, passkey accounts included.
+- **FR-020** *(replaces FR-020)*: Members MUST be able to import a plain JSON export and recover
+  every contact with its addresses, networks and notes, without a signature and without regard to
+  which member or account type produced the file. The importing member need not be the exporting
+  one.
+- **FR-021** *(replaces FR-021)*: An import that is malformed, is not an address book, or carries
+  an unrecognised `format`/`version` MUST fail with a message naming what was actually wrong, and
+  MUST leave the existing address book unchanged. The pre-amendment encrypted envelope
+  (`fairwins-address-book-backup`, version 1) remains importable wherever the original wallet's
+  signature can be produced; where it cannot, the refusal MUST say that the file is an older
+  encrypted export openable only by the wallet that made it, and MUST NOT say the wallet is wrong,
+  different, missing, or disconnected.
+
+FR-022 stands unchanged, and its standing is now load-bearing: an import adds and never
+overwrites, and a differing nickname or note is a question put to the member, not a write.
+
+### Functional Requirements (added)
+
+- **FR-031**: The export surface MUST disclose, in words and before the file is produced, that the
+  exported file is **not encrypted** — that every nickname, address and note in it is readable by
+  anyone who opens the file. The file itself MUST carry the same statement, so the fact survives
+  the file leaving the app.
+- **FR-033**: The Export and Import controls MUST each carry an icon alongside their word label.
+  The icon is decorative (`aria-hidden`) and never the sole carrier of the control's meaning; where
+  the responsive layout hides the word, the control MUST still expose an accessible name
+  (FR-023, WCAG 1.4.1 / 4.1.2).
+
+*FR-032 is deliberately not minted here, and — corrected on review — it should not be minted at
+all.* `docs/developer-guide/address-screening.md` and the root `CLAUDE.md` both cited a bare
+"FR-032" for the forced, live screen at submission time, next to the words "spec 021", which read
+as a spec-021 requirement that had never been written down. It is not one: the requirement exists
+verbatim as **spec 067 FR-032** — *"Screening MUST occur on the real acting wallet … and MUST be
+enforced at the point of submission — not only at display time — so a wallet deny-listed between
+quote and submission is still refused"* — and both citations have been corrected to name it. This
+is the same cross-spec number bleed that mislabels spec 067's FR-044 as spec 071's in four places.
+
+Minting a spec-021 FR-032 would therefore create a second requirement, under the same number in a
+different spec, saying what 067 already says — and it would not even be true as written: only
+Bridge, Supply, group pay and the mini-app host `submit` force a re-read past the cache. Transfer
+and Pay (single-recipient) screen advisorily at render and rely on the gateway and the on-chain
+guard, which spec 021 permits (FR-013 is a ceiling on what the client may claim, not a floor on
+what it must check). The number is left unused rather than filled.
+
+### Success Criteria (added)
+
+- **SC-012**: A member signed in with a passkey completes a full export → import round-trip with
+  100% of contacts, addresses, networks and notes recovered, and zero signature prompts. No surface
+  displays "Wallet not connected" at any point in either direction.
+- **SC-013**: An export file opened in a plain text editor shows nicknames and addresses as
+  readable text — and the surface that produced it said so before producing it.
+- **SC-014**: An encrypted pre-amendment file imported in a session that cannot sign for the
+  original wallet produces a message naming the file's format as the cause. The strings "wrong
+  wallet", "different wallet" and "not connected" appear nowhere in it.
+
+### What this amendment stops claiming
+
+The following were true of the encrypted envelope and are **no longer true of the export file**.
+They must not be restated in the spec, the contracts, the user guide, or the UI:
+
+- **Confidentiality at rest.** The file is plain text and protects nothing. Emailed, dropped in
+  shared storage, or left in `~/Downloads` on a shared machine, every contact a member has saved is
+  legible to whoever finds it. That is the accepted cost of a file a member can actually read and
+  share, and it is the whole reason FR-031 exists.
+- **Authenticity.** The AEAD tag also proved a file had not been altered since export. Plain JSON
+  proves nothing about itself: import validates *shape*, not *truth*. A file received from someone
+  else can put any address under any nickname. FR-022's never-overwrite merge and the estate
+  screening pill (FR-024–FR-028) on every imported address are what carry that weight now — an
+  address book entry is a convenience, never an assertion that an address is safe or is who it says.
+- **"Same wallet" as an access control.** There is no longer any sense in which a file belongs to a
+  wallet. The only file that still does is a pre-amendment envelope, and only until the member
+  re-exports it.
+
+### Out of scope (recorded)
+
+- An optional passphrase-encrypted export alongside the plain one. It would restore
+  confidentiality for members who want it, at the cost of a second format, a second failure mode,
+  and a passphrase to remember — none of which the reported problem needs. Follow-up if members
+  ask for it.
+- Signing an export so a recipient can verify who produced it. Spec 084's Verify surface is the
+  natural home for that, and nothing in this feature depends on it.

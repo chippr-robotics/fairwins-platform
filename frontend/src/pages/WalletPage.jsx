@@ -28,8 +28,7 @@ import PortfolioPreferencesPanel from '../components/account/PortfolioPreference
 import PrivacyPreferencesPanel from '../components/account/PrivacyPreferencesPanel'
 import AppLockPreferencesPanel from '../components/account/AppLockPreferencesPanel'
 import NavigationPreferencesPanel from '../components/account/NavigationPreferencesPanel'
-import ApiAccessPanel from '../components/account/ApiAccessPanel'
-import AssistantPreferencesPanel from '../components/account/AssistantPreferencesPanel'
+import AssistantToolsPanel from '../components/assistant/AssistantToolsPanel'
 import AddressBookPanel from '../components/account/AddressBookPanel'
 import CallsignPanel from '../components/account/CallsignPanel'
 import BackupPanel from '../components/account/BackupPanel'
@@ -98,6 +97,8 @@ const WALLET_TABS = [
   // Apps (spec 073) — the mini-app catalog, and the only Apps nav item. ClearPath and Token
   // Mint stay listed below because their tabs still RENDER: they left the menu, not the app.
   { id: 'apps', label: 'Apps' },
+  // Assistant (spec 104) — the agent controls: which rail answers, the GutterToken key, API access.
+  { id: 'assistant', label: 'Assistant' },
 ]
 
 // Legacy deep-link aliases live in config/appNav.js — the drawer resolves the same
@@ -178,6 +179,10 @@ function WalletPage() {
   // redirect landing on the catalog's honest unavailable state is a better answer than a tab that
   // silently falls back to Account.
   const miniAppsEnabled = isNavItemEnabledForTenant('apps')
+  // Assistant (spec 104): gated the same way and for the same reason — the launcher already reads
+  // the `assistant` tenant feature, and a tab reachable by URL on a tenant with no assistant would
+  // offer controls for a thing that does not exist there.
+  const assistantEnabled = isNavItemEnabledForTenant('assistant')
   const {
     isStandalone: pwaStandalone,
     canPrompt: pwaCanPrompt,
@@ -204,12 +209,32 @@ function WalletPage() {
     if (redirectTo) navigate(redirectTo, { replace: true })
   }, [redirectTo, navigate])
 
+  /*
+   * Spec 104. The Assistant and API access cards left Settings for the Assistant tab, but their
+   * card ids did not change — so the old `?tab=settings#assistant-prefs` / `#api-access` links (the
+   * update toast idiom, support answers, bookmarks) still name a real card, just on another tab.
+   * Rather than a second hash map here, ask the ONE hash→section seam whether the assistant tab
+   * owns the hash: a card that moves in `navSearchIndex.js` moves its redirect with it. Every other
+   * query param is carried (the menu search's `focus=` marker in particular), only `tab` changes.
+   */
+  const settingsHashMovedToAssistant =
+    (TAB_ALIASES[requestedTab] || requestedTab) === 'settings' &&
+    assistantEnabled &&
+    Boolean(accordionSectionForHash('assistant', location.hash))
+  useEffect(() => {
+    if (!settingsHashMovedToAssistant) return
+    const next = new URLSearchParams(location.search)
+    next.set('tab', 'assistant')
+    navigate(`/wallet?${next.toString()}${location.hash}`, { replace: true })
+  }, [settingsHashMovedToAssistant, location.search, location.hash, navigate])
+
   const [activeTab, setActiveTab] = useState(() => {
     const requested = requestedTab
     const resolved = TAB_ALIASES[requested] || requested
     if (resolved === 'collectibles' && !collectiblesEnabled) return 'account'
     if (resolved === 'predict' && !predictEnabled) return 'account'
     if (resolved === 'apps' && !miniAppsEnabled) return 'account'
+    if (resolved === 'assistant' && !assistantEnabled) return 'account'
     return WALLET_TABS.some((t) => t.id === resolved) ? resolved : 'account'
   })
   const [keyRegistered, setKeyRegistered] = useState(null)
@@ -301,9 +326,10 @@ function WalletPage() {
     const available =
       (resolved !== 'collectibles' || collectiblesEnabled) &&
       (resolved !== 'predict' || predictEnabled) &&
-      (resolved !== 'apps' || miniAppsEnabled)
+      (resolved !== 'apps' || miniAppsEnabled) &&
+      (resolved !== 'assistant' || assistantEnabled)
     setActiveTab(known && available ? resolved : 'account')
-  }, [searchParams, collectiblesEnabled, predictEnabled, miniAppsEnabled])
+  }, [searchParams, collectiblesEnabled, predictEnabled, miniAppsEnabled, assistantEnabled])
 
   const handleCheckForUpdate = useCallback(async () => {
     setPwaChecking(true)
@@ -617,11 +643,9 @@ function WalletPage() {
                           setting is not offered where the lock could never be lifted. */}
                       <AppLockPreferencesPanel />
                       <NotificationProfilesPanel />
-                      {/* Spec 095 — programmatic access and the opt-in assistant. Both sit with the
-                          other privacy-shaped preferences: one decides what can reach this account,
-                          the other what leaves this device. */}
-                      <AssistantPreferencesPanel />
-                      <ApiAccessPanel />
+                      {/* The Assistant and API access cards (spec 095) moved to the Assistant tab in
+                          Tools (spec 104): they are agent controls, not appearance. Their old
+                          `#assistant-prefs` / `#api-access` hashes on this tab redirect there. */}
 
                       <AccordionSection
                         id="markets"
@@ -791,6 +815,13 @@ function WalletPage() {
                 {activeTab === 'apps' && miniAppsEnabled && (
                   <div className="apps-section" role="tabpanel">
                     <CatalogPanel />
+                  </div>
+                )}
+                {/* Assistant (spec 104) — the agent controls. The panel is an accordion like
+                    Settings, so the hash picks the card that lands open. */}
+                {activeTab === 'assistant' && assistantEnabled && (
+                  <div className="assistant-section" role="tabpanel">
+                    <AssistantToolsPanel openSection={hashOpenSection} />
                   </div>
                 )}
                 {activeTab === 'trade' && (

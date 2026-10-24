@@ -210,3 +210,10 @@ infra/ansible/collections/
 # it on every run, in CI and locally alike.
 deployments/localhost-chain*-v2.json
 .build-marker.json
+
+# Signing keystores. NEVER commit one — a Play upload key in git history is a key you must assume
+# is compromised, and the only remedy is Play's key-reset process. Generate these OUTSIDE the repo;
+# the payload's home is Secret Manager (#1378 H2), never the working tree.
+*.jks
+*.keystore
+*.p12

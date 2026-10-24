@@ -6,6 +6,9 @@
 // Spec 068 (US1) — the network row names the chain (not a bare id), and a vault on a chain other
 // than the connected one renders READ-ONLY with a switch prompt: no state-changing action may be
 // offered for a vault the wallet cannot act on (FR-004).
+// Spec 102 — `variant="network"`: one INSTANCE's facts + policy block inside the vault sheet's
+// Details view, which already shows the address, the owners (cross-referenced) and the remove
+// action once for the whole vault — so this variant renders none of those.
 
 import PolicyPanel from './PolicyPanel'
 import PolicyPanelV2 from './PolicyPanelV2'
@@ -18,8 +21,10 @@ export default function VaultDetail({
   onProposePolicy,
   onSwitchNetwork,
   proposalQueue = [],
+  variant = 'default',
 }) {
   if (!vault) return null
+  const network = variant === 'network'
   const chainLabel = vault.chainName ? `${vault.chainName} (${vault.chainId})` : String(vault.chainId)
   // Default to "on chain" when the flag is absent so legacy call sites keep their behavior.
   const onVaultChain = vault.onVaultChain !== false
@@ -56,7 +61,11 @@ export default function VaultDetail({
   }
 
   return (
-    <div className="custody-vault-detail" role="region" aria-label="Vault detail">
+    <div
+      className={`custody-vault-detail${network ? ' custody-vault-detail--network' : ''}`}
+      role="region"
+      aria-label={network ? `${vault.chainName || `Chain ${vault.chainId}`} detail` : 'Vault detail'}
+    >
       {!onVaultChain && (
         <div className="custody-warning" role="status">
           <p>
@@ -71,19 +80,23 @@ export default function VaultDetail({
         </div>
       )}
       <dl className="custody-vault-facts">
-        <div>
-          <dt>Address</dt>
-          <dd>
-            <code>{vault.address}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Network</dt>
-          <dd>
-            {chainLabel}
-            {vault.isTestnet ? ' · testnet' : ''}
-          </dd>
-        </div>
+        {!network && (
+          <div>
+            <dt>Address</dt>
+            <dd>
+              <code>{vault.address}</code>
+            </dd>
+          </div>
+        )}
+        {variant !== 'network' && (
+          <div>
+            <dt>Network</dt>
+            <dd>
+              {chainLabel}
+              {vault.isTestnet ? ' · testnet' : ''}
+            </dd>
+          </div>
+        )}
         <div>
           <dt>Threshold</dt>
           <dd>
@@ -101,15 +114,19 @@ export default function VaultDetail({
           </div>
         )}
       </dl>
-      <h5>Owners</h5>
-      <ul className="custody-owner-addresses">
-        {(vault.owners || []).map((o) => (
-          <li key={o}>
-            <code>{o}</code>
-            {vault.ownerNames?.[o] && <span className="custody-owner-name"> · {vault.ownerNames[o]}</span>}
-          </li>
-        ))}
-      </ul>
+      {!network && (
+        <>
+          <h5>Owners</h5>
+          <ul className="custody-owner-addresses">
+            {(vault.owners || []).map((o) => (
+              <li key={o}>
+                <code>{o}</code>
+                {vault.ownerNames?.[o] && <span className="custody-owner-name"> · {vault.ownerNames[o]}</span>}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
       {/* Policy changes are state-changing, so they are only proposable on the vault's own chain.
           Where the ordered engine (spec 068) is deployed it owns this section — it renders legacy
           v1 policies read-only with an upgrade path, so nothing is hidden from members still on v1;
@@ -121,26 +138,32 @@ export default function VaultDetail({
           queue={proposalQueue}
         />
       ) : (
-        <PolicyPanel vault={vault} onPropose={onVaultChain ? onProposePolicy : undefined} />
+        <PolicyPanel
+          vault={vault}
+          onPropose={onVaultChain ? onProposePolicy : undefined}
+          ariaLabel={network ? `${vault.chainName || `Chain ${vault.chainId}`} policy` : undefined}
+        />
       )}
       {/* A vault is an account you can act as, chosen from the account switcher next to your
           biticon — the same place recovered accounts live. It is not a mode you enter from a
           separate button here, so there is no "Operate as this vault": one way to switch accounts,
           wherever you are in the app. This line just says where. */}
-      {vault.owner && onVaultChain && (
+      {!network && vault.owner && onVaultChain && (
         <p className="custody-hint" role="note">
           {isActiveIdentity
             ? 'You are acting as this vault. Switch back from the account menu next to your avatar.'
             : 'To spend from this vault, pick it in the account menu next to your avatar, then use Transfer as usual.'}
         </p>
       )}
-      <div className="custody-actions">
-        {onForget && (
-          <button type="button" className="custody-link" onClick={() => onForget(vault.address, vault.chainId)}>
-            Remove from list
-          </button>
-        )}
-      </div>
+      {!network && (
+        <div className="custody-actions">
+          {onForget && (
+            <button type="button" className="custody-link" onClick={() => onForget(vault.address, vault.chainId)}>
+              Remove from list
+            </button>
+          )}
+        </div>
+      )}
     </div>
   )
 }

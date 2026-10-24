@@ -144,6 +144,29 @@ describe('rail selection', () => {
   })
 })
 
+/*
+ * Issue #1441 — the surfaces ask the hook whether the affordance should be offered at all, and
+ * today the answer is always no. The RAILS above are untouched: withdrawing a control is not the
+ * same as refusing a submission, and a group payment already in flight still reports its outcomes.
+ */
+describe('availability (#1441)', () => {
+  it('is withdrawn on every rail while GROUP_PAY_ENABLED is false', () => {
+    for (const [isPasskey, actingType] of [[true, 'personal'], [false, 'personal']]) {
+      transfer.isPasskey = isPasskey
+      effective.type = actingType
+      const { result } = renderHook(() => useGroupPay(), { wrapper })
+      expect(result.current.available).toBe(false)
+      expect(result.current.unavailableCode).toBe('withdrawn')
+      expect(result.current.unavailableReason).toMatch(/not available yet/i)
+    }
+  })
+
+  it('still submits a group payment it is handed — the withdrawal is a UI decision, not a refusal', async () => {
+    const { out } = await run({ asset: STABLE, recipients: three })
+    expect(out.summary).toMatchObject({ sent: 3, failed: 0 })
+  })
+})
+
 describe('passkey batch rail', () => {
   it('submits ONE sendCalls carrying every recipient (ERC-20)', async () => {
     const { out } = await run({ asset: STABLE, recipients: three })

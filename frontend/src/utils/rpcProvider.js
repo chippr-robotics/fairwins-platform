@@ -26,6 +26,7 @@
  */
 import { ethers } from 'ethers'
 import { resolveRpcEndpoints } from '../lib/network/rpcEndpoints'
+import { ensureIssuedAccess, currentTokenFor } from '../lib/network/issuedAccess'
 
 // Ethereum Classic mainnet (61) and Mordor testnet (63).
 const NO_BATCH_CHAIN_IDS = new Set([61, 63])
@@ -66,14 +67,17 @@ function cachedProvider(chainId, key, build) {
  * ethers' own network detection so a misconfigured endpoint fails loudly instead of
  * silently answering for another chain.
  */
-function buildProvider(url, headers, chainId, { staticNetwork = false } = {}) {
+function buildProvider(url, headers, chainId, { staticNetwork = false, preflight = null } = {}) {
   const options = {}
   if (chainId != null && NO_BATCH_CHAIN_IDS.has(Number(chainId))) options.batchMaxCount = 1
 
   let target = url
-  if (headers && Object.keys(headers).length > 0) {
+  if ((headers && Object.keys(headers).length > 0) || preflight) {
     const request = new ethers.FetchRequest(url)
-    for (const [name, value] of Object.entries(headers)) request.setHeader(name, value)
+    for (const [name, value] of Object.entries(headers || {})) request.setHeader(name, value)
+    // Issued-access tokens attach here, per request, so a rotation needs no rebuild and no
+    // credential ever sits in a provider cache key or a URL (spec 107; spec 069's header rule).
+    if (preflight) request.preflightFunc = preflight
     target = request
   }
 
@@ -106,26 +110,51 @@ function buildProvider(url, headers, chainId, { staticNetwork = false } = {}) {
 export function makeReadProvider(rpcUrl, chainId = null) {
   const route = chainId != null ? resolveRpcEndpoints(chainId) : null
 
-  // A member endpoint replaces the caller's URL outright. Without one, the caller's URL stays
-  // the primary (pre-069 behavior) and only picks up the build's curated failover where the
-  // chain defines one — so a community-run default going dark degrades to a slower route
-  // instead of leaving the chain with no route at all.
+  // Keep issued access warm (spec 107): fire-and-forget, single-flight, cooldown-guarded — the
+  // synchronous path never waits on it. Until the first mint lands this call is what causes it
+  // to land; afterwards it renews ahead of expiry. On a chain the gateway declines (404) the
+  // store cools down and reads simply stay on the public default.
+  if (chainId != null && route?.source !== 'member') ensureIssuedAccess(chainId)
+
+  // A member endpoint replaces the caller's URL outright. Without one, platform-ISSUED keyed
+  // access (spec 107) takes the primary with the build default as failover. Without either, the
+  // caller's URL stays the primary (pre-069 behavior) and only picks up the build's curated
+  // failover where the chain defines one — so a community-run default going dark degrades to a
+  // slower route instead of leaving the chain with no route at all.
   const memberRoute = route?.source === 'member' && route.primary ? route.primary : null
-  const primaryUrl = memberRoute ? memberRoute.url : rpcUrl
+  const issuedRoute = route?.source === 'issued' && route.primary ? route.primary : null
+  const primaryUrl = memberRoute ? memberRoute.url : issuedRoute ? issuedRoute.url : rpcUrl
   const primaryHeaders = memberRoute ? memberRoute.headers : null
   const failoverUrl =
     route?.failover && route.failover.url !== primaryUrl ? route.failover.url : null
 
+  // The issued credential reaches the wire PER REQUEST via a preflight hook, never via the
+  // provider's construction: the cache key stays stable across token renewals (a token in the
+  // key would tear down and rebuild the provider on every rotation, breaking the mini-app
+  // host's identity-stable wrappers), and the failover leg — a different host — never sees it.
+  const issuedPreflight = issuedRoute
+    ? async (req) => {
+        const token = currentTokenFor(chainId)
+        if (token) req.setHeader('authorization', `Bearer ${token}`)
+        return req
+      }
+    : null
+
   if (!failoverUrl) {
-    const key = JSON.stringify(['single', primaryUrl, primaryHeaders])
-    return cachedProvider(chainId, key, () => buildProvider(primaryUrl, primaryHeaders, chainId))
+    const key = JSON.stringify(['single', route?.source ?? 'caller', primaryUrl, primaryHeaders])
+    return cachedProvider(chainId, key, () =>
+      buildProvider(primaryUrl, primaryHeaders, chainId, { preflight: issuedPreflight }),
+    )
   }
 
-  const key = JSON.stringify(['fallback', primaryUrl, primaryHeaders, failoverUrl])
+  const key = JSON.stringify(['fallback', route?.source ?? 'caller', primaryUrl, primaryHeaders, failoverUrl])
   return cachedProvider(chainId, key, () => {
-    const primary = buildProvider(primaryUrl, primaryHeaders, chainId, { staticNetwork: true })
+    const primary = buildProvider(primaryUrl, primaryHeaders, chainId, {
+      staticNetwork: true,
+      preflight: issuedPreflight,
+    })
     const failover = buildProvider(failoverUrl, null, chainId, { staticNetwork: true })
-    return new ethers.FallbackProvider(
+    const fp = new ethers.FallbackProvider(
       [
         { provider: primary, priority: 1, weight: 1, stallTimeout: 2000 },
         { provider: failover, priority: 2, weight: 1 },
@@ -133,6 +162,30 @@ export function makeReadProvider(rpcUrl, chainId = null) {
       new ethers.Network(`chain-${Number(chainId)}`, Number(chainId)),
       { quorum: 1 },
     )
+    // ethers' FallbackProvider marks a member config `_lastFatalError` when its block-number
+    // probe fails and NEVER clears it. Once every member has failed once — one bad minute of
+    // connectivity kills both rails — the instance rejects everything instantly with
+    // "no runners?!" and no request ever reaches the wire again. Cached module-wide, that turns
+    // a transient outage into "dead until full reload" while every surface honestly offers a
+    // retry that cannot work. Evicting the cache entry on that terminal state makes the NEXT
+    // read rebuild fresh members; the failing call still fails (the network really was down
+    // when the instance died), which keeps the degradation honest.
+    // (Guarded: the vitest suite substitutes a global ethers mock without `_perform`.)
+    const perform = typeof fp._perform === 'function' ? fp._perform.bind(fp) : null
+    if (perform) {
+      fp._perform = async (req) => {
+        try {
+          return await perform(req)
+        } catch (err) {
+          if (String(err?.message ?? '').includes('no runners')) {
+            const cached = providerCache.get(chainId)
+            if (cached?.provider === fp) providerCache.delete(chainId)
+          }
+          throw err
+        }
+      }
+    }
+    return fp
   })
 }
 

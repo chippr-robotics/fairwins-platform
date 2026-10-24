@@ -7,6 +7,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { parseEndpoint, deriveChainUrl, redact, EVM_CHAIN_SLUGS } from '../quicknode-chains.js'
+import { allSecretIds } from '../registry.js'
 
 const TOKEN = 'abc123DEF456'
 
@@ -61,4 +62,31 @@ test('every slug entry names a real frontend build variable shape', () => {
   for (const [chainId, { envName }] of Object.entries(EVM_CHAIN_SLUGS)) {
     assert.match(envName, /^VITE_RPC_URL_[A-Z]+$/, `chain ${chainId}`)
   }
+})
+
+test('every declared secretId is a real registry entry', () => {
+  // The join that makes --provision safe. A secretId that is not in the registry is not in
+  // `workstation_secret_ids` either (the terraform-parity test enforces that half), so provisioning
+  // it would write a version nobody can read — and the failure surfaces later as PERMISSION_DENIED,
+  // which reads exactly like a broken login.
+  const declared = new Set(allSecretIds())
+  for (const [chainId, { secretId }] of Object.entries(EVM_CHAIN_SLUGS)) {
+    if (secretId === null) continue
+    assert.ok(declared.has(secretId), `chain ${chainId} names ${secretId}, which the registry does not declare`)
+  }
+})
+
+test('the four provisioned EVM mainnets each have their own container, and no two share one', () => {
+  // Per-chain means per-chain: two chains pointing at one container would store one URL and read it
+  // back for both, which is the multichain ambiguity this work exists to remove.
+  const ids = [1, 10, 8453, 42161].map((c) => EVM_CHAIN_SLUGS[c].secretId)
+  assert.ok(ids.every(Boolean), 'every one of chains 1/10/8453/42161 must name a container')
+  assert.equal(new Set(ids).size, ids.length, 'two chains share a secret container')
+  assert.equal(EVM_CHAIN_SLUGS[137].secretId, 'fairwins-quicknode-polygon-url')
+})
+
+test('Amoy declares NO container rather than borrowing another chain\'s', () => {
+  // `null` is the honest answer (no Amoy-cohort node exists) and it is what makes --provision
+  // refuse the chain instead of guessing an id.
+  assert.equal(EVM_CHAIN_SLUGS[80002].secretId, null)
 })

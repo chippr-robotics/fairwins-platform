@@ -16,7 +16,7 @@ import { read, notConfigured } from '../reading.js'
 /** EntryPoint v0.6: the paymaster's sponsorship deposit is held here, not on the paymaster. */
 const ENTRYPOINT_IFACE = new ethers.Interface(['function balanceOf(address account) view returns (uint256)'])
 
-export function createPoolsCollector({ config, providers, burn }) {
+export function createPoolsCollector({ config, providers, burn, executorNonce = null, nonceState = new Map() }) {
   /**
    * @param {object} source catalogue entry carrying `pool`
    */
@@ -44,6 +44,27 @@ export function createPoolsCollector({ config, providers, burn }) {
 
     const balance = Number(ethers.formatEther(balanceWei))
     burn.observe(poolId, balance)
+
+    // The executor's NONCE, read on the same schedule and stashed as side detail (#1539) — the
+    // `emitGcpDetail`/`emitCloudflareUsage` pattern, because buildRegistry is synchronous and a
+    // chain read cannot happen at render time.
+    //
+    // Deliberately isolated: a nonce failure must NEVER cost us the balance reading. They answer
+    // different questions and the balance is the one with an alert already attached.
+    //
+    // Only executor pools have a nonce. A paymaster's funds live at the EntryPoint under a contract
+    // that sends nothing itself, so `getTransactionCount` on it would be a meaningless zero — the
+    // kind of confident wrong number this codebase spends most of its comments preventing.
+    if (executorNonce && pool.kind !== 'paymaster') {
+      try {
+        nonceState.set(poolId, await executorNonce(poolId))
+      } catch {
+        // The collector already reports its own failures as `unreadable` readings; this catch is
+        // only for an unexpected throw, and dropping the sample is honest — a stale nonce carried
+        // forward would let an outage look like a steadily advancing executor.
+        nonceState.delete(poolId)
+      }
+    }
 
     return read(balance, pool.unit, { labels: { pool: poolId, chain: String(pool.chain) } })
   }
@@ -113,5 +134,72 @@ export function emitPoolSeries(registry, readings, burn, usdRate) {
         spent * price,
       )
     }
+  }
+}
+
+/**
+ * Emit the executor's nonce series (#1539).
+ *
+ * WHY THIS EXISTS BESIDE THE BALANCE SERIES. Balance-based monitoring cannot see a stalled
+ * executor BY CONSTRUCTION: a stall spends nothing, so burn falls to zero, so `runwaySeconds`
+ * correctly returns null (there is no dividing by a zero rate), so the series disappears, so
+ * `min by (pool)` has nothing and the alert's noDataState reads OK. A stalled executor and a
+ * healthy idle one produce identical telemetry, and the dashboard prefers the healthy reading.
+ * That is the 2026-07-12 shape, in which alto served RPC for 40 minutes while its executor sent
+ * nothing and the only alarm was members reporting failures.
+ *
+ * These three series are what balance cannot express. NONE of them is a verdict: an idle bundler
+ * has a frozen nonce and is perfectly healthy, so `staleness` must be read against DEMAND
+ * (`sponsored_ops_total`) by the alert rule, never alone. Emitting a "stalled" boolean here would
+ * page every quiet night, and an alarm that cries wolf is how this failure class survives.
+ *
+ * @param {object} registry
+ * @param {Map<string, {nonce: object, gap: object, staleness: object}>} nonceState
+ */
+export function emitExecutorNonce(registry, nonceState) {
+  for (const [poolId, detail] of nonceState ?? new Map()) {
+    const { nonce, gap, staleness } = detail ?? {}
+    // `read` only — spec 089: a value exists only in that state, so an unreadable nonce publishes
+    // NO sample rather than a zero. The absence is the honest signal; `source_up` already carries
+    // whether the read succeeded.
+    if (nonce?.state === 'read') {
+      registry.emit(
+        'executor_nonce',
+        'gauge',
+        'Transactions mined from a bundler executor EOA. Advancing means bundles are landing.',
+        nonce.labels,
+        nonce.value,
+      )
+    }
+    if (gap?.state === 'read') {
+      registry.emit(
+        'executor_nonce_pending_gap',
+        'gauge',
+        'pending minus latest nonce — queue depth. A gap that will not drain is a stuck transaction, and it is the direct read for two senders on ONE EOA (G-11).',
+        gap.labels,
+        gap.value,
+      )
+    }
+    if (staleness?.state === 'read') {
+      registry.emit(
+        'executor_nonce_stale_seconds',
+        'gauge',
+        'Seconds since this executor last ADVANCED its nonce. NOT a fault on its own — an idle bundler is healthy; pair with sponsored_ops_total before alerting.',
+        staleness.labels,
+        staleness.value,
+      )
+      // How long we have been watching. A freshly restarted exporter honestly reports 0 staleness,
+      // so an alert rule must require a minimum observation window rather than trust a new process.
+      if (typeof detail.observedForSec === 'number') {
+        registry.emit(
+          'executor_nonce_observed_seconds',
+          'gauge',
+          'How long this exporter has been watching that executor. An alert must require a minimum window: a fresh process reports 0 staleness truthfully.',
+          staleness.labels,
+          detail.observedForSec,
+        )
+      }
+    }
+    void poolId
   }
 }

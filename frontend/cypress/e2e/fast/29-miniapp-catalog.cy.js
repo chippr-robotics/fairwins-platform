@@ -32,7 +32,11 @@ const ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
 const CATALOG_URL = '/wallet?tab=apps'
 
 /** Polygon is the mainnet build's registry home (`miniAppChainId()`), reached over publicnode. */
-const RPC_PATTERN = /publicnode\.com/
+// BOTH rails, or the stub is a lie: since 480720bf every EVM mainnet has a drpc.org FAILOVER,
+// so makeReadProvider builds a FallbackProvider — a stub that fails only the publicnode primary
+// is answered by LIVE drpc, and "the chain is unreachable" quietly becomes "the chain answered
+// tier 0 from production" (issue #1463; spec 42 and the passkey suite hit the same class).
+const RPC_PATTERN = /publicnode\.com|drpc\.org/
 
 const APPS = [
   { id: 1, name: 'Token Mint', category: 0, version: 3 },

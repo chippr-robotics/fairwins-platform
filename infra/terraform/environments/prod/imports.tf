@@ -207,6 +207,23 @@ import {
   id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_005_API"
 }
 
+# ── the PER-CHAIN QuickNode endpoints — CREATES, deliberately not imports ─────────────────────
+#
+# `fairwins-quicknode-{ethereum,optimism,base,arbitrum}-url` (chains 1 / 10 / 8453 / 42161) have
+# NO import block, and that absence is the correct declaration rather than an omission: unlike
+# every secret above, they were never hand-created at the console. The apply that adds them to
+# `managed_secret_ids` CREATES the empty containers, and only then does
+# `node scripts/secrets/quicknode-chains.js --provision 1,10,8453,42161` add the first version.
+# An import block for a secret that does not exist fails the plan outright.
+#
+# THAT ORDER IS LOAD-BEARING. The provisioning step derives each URL from the QUICKNODE_RPC_001
+# multichain endpoint by swapping a hostname infix and verifies `eth_chainId` before writing —
+# and a container that does not exist yet cannot receive a verified version, so provisioning
+# first simply fails. Creating them here, empty, is what makes the write target exist.
+#
+# The accessor bindings are creates too: these are granted to the WORKSTATION identity only
+# (`workstation_secret_ids`), never to a node — the gateway does not define those chains.
+
 # import {
 #   to = google_artifact_registry_repository.cloud_run_source_deploy
 #   id = "projects/chippr-bots-site-wp/locations/us-central1/repositories/cloud-run-source-deploy"
@@ -360,3 +377,13 @@ import {
 #   to = module.monitoring[0].google_monitoring_alert_policy.probe_failing[0]
 #   id = "projects/chippr-bots-site-wp/alertPolicies/15034287693947745231"
 # }
+
+# ── Spec 107: keyed RPC issuance signing key ──────────────────────────────────────────────────
+# Created manually during the operator ceremony on #1468 (the key had to exist the moment it was
+# generated — its public half went to the provider in the same session). Adopted rather than
+# recreated: recreating would destroy the container holding the only copy of the private key.
+
+import {
+  to = google_secret_manager_secret.managed["fairwins-rpc-access-signing-key"]
+  id = "projects/chippr-bots-site-wp/secrets/fairwins-rpc-access-signing-key"
+}

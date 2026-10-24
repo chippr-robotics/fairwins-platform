@@ -111,6 +111,10 @@
  *                              in sources.hyperliquid.unreadDexes, never silently dropped.
  *   PERPS_QUOTA_PER_IP/_GLOBAL/_WINDOW_MS   read quotas (defaults 60/300/60000)
  *   PERPS_KILLSWITCH           'true' => all /v1/perps/* routes answer 503 (ops kill)
+ *   NEWS_ENABLED               'true' enables the /v1/news/* read proxy (spec 109; default false)
+ *   NEWS_BASE_URL              Alphaday API host (keyless — no credential exists for this module)
+ *   NEWS_CACHE_TTL_MS          per-slug cache TTL, clamped >= 300000 (the vendor's own cache floor)
+ *   NEWS_TIMEOUT_MS / NEWS_RETRIES / NEWS_QUOTA_* / NEWS_KILLSWITCH   read plumbing (perps defaults)
  *   PERPS_GAINS_REFERRER       PUBLIC attribution: FairWins gains referrer address
  *   PERPS_GMX_REF_CODE         PUBLIC attribution: GMX referral code (1-20 [A-Za-z0-9_])
  *   PERPS_HL_BUILDER_ADDRESS   PUBLIC attribution: FairWins Hyperliquid builder wallet
@@ -153,6 +157,10 @@
  *   ASSISTANT_MAX_TOKENS       per-turn output ceiling (default 1024). HARD-CAPPED at 4096 in code —
  *                              boot fails above it. This is the only bound on what one request can
  *                              cost, so it is not something an env file may raise without limit
+ *   ASSISTANT_MAX_ROUNDS       tool rounds per member turn (default 4; spec 104). HARD-CAPPED at 8 in
+ *                              code — the browser runs the tool loop and each round is its own
+ *                              request here, so this multiplies what one question can cost. Exported
+ *                              on /status as memberApi.assistant.maxRounds
  *   ASSISTANT_TIMEOUT_MS       upstream request timeout (default 30000)
  *   ASSISTANT_QUOTA_PER_ACCOUNT / _GLOBAL   model calls/window, in a class of their own, tighter than
  *                              the module's general read quota (defaults 20/60). A read and a model
@@ -203,7 +211,7 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CHAIN_DEFS } from './chains.js'
 import { actionsForContract } from '../intent/intentTypes.js'
-import { MAX_TOKENS_CEILING, maxTurnTokens } from '../memberApi/assistant.js'
+import { MAX_ROUNDS_CEILING, MAX_TOKENS_CEILING, MAX_TOOL_ROUNDS, maxTurnTokens } from '../memberApi/assistant.js'
 
 const ADDRESS_RE = /^0x[0-9a-fA-F]{40}$/
 const BYTES32_RE = /^0x[0-9a-fA-F]{64}$/
@@ -408,14 +416,125 @@ export function loadConfig(env = process.env, opts = {}) {
     chains,
     port: int(env, 'PORT', 8788),
     originAuthSecret: opt(env, 'ORIGIN_AUTH_SECRET', null),
+    // Operator-only disclosure secret (#1505). The origin lock CANNOT serve this purpose: the
+    // zone-wide Transform Rule injects X-Origin-Auth on EVERY request, so "behind the edge gate"
+    // means "not readable on the raw origin IP" and public to everyone else. This is a separate
+    // INBOUND, operator-held secret. Unset means the fields it guards are absent for everyone —
+    // honest, and never a silent fallback to public.
+    opsStatusSecret: opt(env, 'OPS_STATUS_SECRET', null),
     webhookSecret: opt(env, 'WEBHOOK_SHARED_SECRET', null),
     // Browser origins allowed to call the gateway cross-origin (CORS). The SPA lives on a different
     // host than the relay subdomain (fairwins.app -> relay.fairwins.app), so it needs an explicit
     // allow-list. Comma-separated; unset => no CORS headers (same-origin / server-to-server only).
-    allowedOrigins: opt(env, 'ALLOWED_ORIGINS', '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    allowedOrigins: (() => {
+      const configured = opt(env, 'ALLOWED_ORIGINS', '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      // The native shells (spec 102/103) are NOT on https://fairwins.app. Capacitor serves the
+      // bundle from `capacitor://localhost` (iOS) and `https://localhost` (Android), and the
+      // WebView's fetch is subject to CORS like any browser's. Without these, the CORS middleware
+      // emits no Access-Control-Allow-* at all for a shell, so a native caller cannot send the
+      // Authorization header — which would put spec 106's member-grant requirement on Bitcoin
+      // broadcast (a passkey-only, native-bridged flow) onto a channel physically unable to carry
+      // a credential. They are appended rather than defaulted so an explicit ALLOWED_ORIGINS still
+      // gets them; an operator who genuinely wants web-only must remove them here, deliberately.
+      const NATIVE_SHELL_ORIGINS = ['capacitor://localhost', 'https://localhost']
+      return [...new Set([...configured, ...(configured.length ? NATIVE_SHELL_ORIGINS : [])])]
+    })(),
+    // --- Caller identity (spec 106) ---
+    // Unset/false => the layer is INERT: every caller resolves anonymous, no status changes, and
+    // the state is disclosed at boot and in the gated /status. FR-015 — a disabled control must
+    // never be indistinguishable from an enforcing one.
+    identity: {
+      enabled: opt(env, 'IDENTITY_ENABLED', 'false').toLowerCase() === 'true',
+      // SEPARATE from `enabled`, deliberately. `enabled` without `enforce` is OBSERVE mode: the
+      // tier resolves and is reported, and no status code changes — so the model can be validated
+      // against real traffic before anything depends on it. A safety layer that starts refusing the
+      // moment it deploys fails in the shape "the product is broken", which is the worst way for
+      // this particular change to be wrong.
+      enforce: opt(env, 'IDENTITY_ENFORCE', 'false').toLowerCase() === 'true',
+      killswitch: opt(env, 'IDENTITY_KILLSWITCH', 'false').toLowerCase() === 'true',
+      // Per-upstream ceilings (FR-013), checked BEFORE the outbound call. UNSET = UNLIMITED, and
+      // that absence is honest rather than a hidden default: inventing a cap an operator did not
+      // choose would refuse traffic in the name of a budget nobody set.
+      upstreamCeilings: {
+        opensea: int(env, 'UPSTREAM_CEILING_OPENSEA', 0),
+        polymarket: int(env, 'UPSTREAM_CEILING_POLYMARKET', 0),
+        bitcoin: int(env, 'UPSTREAM_CEILING_BITCOIN', 0),
+        perps: int(env, 'UPSTREAM_CEILING_PERPS', 0),
+        bridge: int(env, 'UPSTREAM_CEILING_BRIDGE', 0),
+      },
+      upstreamCeilingWindowMs: int(env, 'UPSTREAM_CEILING_WINDOW_MS', 60_000),
+      challenge: {
+        // Unset => the challenge verifier ABSTAINS (returns `absent`), never rejects. An
+        // unconfigured bot-check must not deny every anonymous caller.
+        secret: (() => {
+          const secret = opt(env, 'CHALLENGE_SECRET', null)
+          // Cloudflare's PUBLISHED test secrets always pass (1x…) or always fail (2x…/3x…).
+          // In development they are the right tool; in production the always-pass one turns the
+          // human tier into a stamp anyone can print — a mock in a shipped path (constitution
+          // III), invisible in every log. Boot refuses rather than warns: a warning here is a
+          // production incident someone reads later (T014).
+          const TEST_SECRETS = [
+            '1x0000000000000000000000000000000AA',
+            '2x0000000000000000000000000000000AA',
+            '3x0000000000000000000000000000000AA',
+          ]
+          if (secret && TEST_SECRETS.includes(secret) && env.NODE_ENV === 'production') {
+            throw new Error(
+              'CHALLENGE_SECRET is a published Turnstile TEST secret; in production this makes the human tier a mock. Configure a real secret or unset it.'
+            )
+          }
+          return secret
+        })(),
+        verifyUrl: opt(env, 'CHALLENGE_VERIFY_URL', 'https://challenges.cloudflare.com/turnstile/v0/siteverify'),
+        ttlSec: int(env, 'CHALLENGE_TTL_SEC', 900),
+        timeoutMs: int(env, 'CHALLENGE_TIMEOUT_MS', 3000),
+      },
+    },
+    // --- Keyed RPC access issuance (spec 107) ---
+    // DORMANT until an endpoint pair, a signing key and the admin credential are all present; the
+    // module mounts regardless and answers 503 access_unconfigured, so absence stays honest.
+    // RPC_ACCESS_SIGNING_KEY is KEY MATERIAL (spec 097 rule 3): it arrives from Secret Manager via
+    // fetch-secrets.sh and must never be committed, logged, or echoed.
+    rpcAccess: (() => {
+      const endpoints = {}
+      for (const key of Object.keys(env)) {
+        const m = key.match(/^RPC_ACCESS_ENDPOINT_URL_(\d+)$/)
+        if (!m) continue
+        const chainId = Number(m[1])
+        const url = String(env[key]).trim()
+        const id = opt(env, `RPC_ACCESS_ENDPOINT_ID_${chainId}`, null)
+        // A URL without its admin-API id is refused AS A PAIR: without the id the FR-026
+        // enforcement check cannot run, and serving that endpoint would mean transmitting a
+        // credential whose protection was never confirmed.
+        if (url && id) endpoints[chainId] = { url, id: String(id).trim() }
+      }
+      return {
+        enabled: opt(env, 'RPC_ACCESS_ENABLED', 'false').toLowerCase() === 'true',
+        killswitch: opt(env, 'RPC_ACCESS_KILLSWITCH', 'false').toLowerCase() === 'true',
+        signingKeyPem: opt(env, 'RPC_ACCESS_SIGNING_KEY', null),
+        kid: opt(env, 'RPC_ACCESS_SIGNING_KID', null),
+        adminKey: opt(env, 'RPC_ACCESS_ADMIN_KEY', null),
+        adminBaseUrl: opt(env, 'RPC_ACCESS_ADMIN_URL', 'https://api.quicknode.com'),
+        endpoints,
+        // Tier shapes LIFETIME, never whether (FR-022): anonymous mints short and re-mints often,
+        // which is itself the metering pressure that makes proving something worthwhile.
+        ttlSecByTier: {
+          anonymous: int(env, 'RPC_ACCESS_TTL_ANONYMOUS_SEC', 300),
+          human: int(env, 'RPC_ACCESS_TTL_HUMAN_SEC', 900),
+          address: int(env, 'RPC_ACCESS_TTL_ADDRESS_SEC', 900),
+          member: int(env, 'RPC_ACCESS_TTL_MEMBER_SEC', 1800),
+        },
+        maxTtlSec: int(env, 'RPC_ACCESS_MAX_TTL_SEC', 3600),
+        mintQuotaPerSubject: int(env, 'RPC_ACCESS_MINT_QUOTA_PER_SUBJECT', 12),
+        mintQuotaGlobal: int(env, 'RPC_ACCESS_MINT_QUOTA_GLOBAL', 600),
+        mintQuotaWindowMs: int(env, 'RPC_ACCESS_MINT_QUOTA_WINDOW_MS', 60_000),
+        enforcementCacheTtlMs: int(env, 'RPC_ACCESS_ENFORCEMENT_CACHE_MS', 60_000),
+        adminTimeoutMs: int(env, 'RPC_ACCESS_ADMIN_TIMEOUT_MS', 5000),
+      }
+    })(),
     engine: {
       url: opt(env, 'ENGINE_URL', 'http://localhost:8080'),
       apiKey: opt(env, 'ENGINE_API_KEY', null),
@@ -423,6 +542,13 @@ export function loadConfig(env = process.env, opts = {}) {
       retries: int(env, 'ENGINE_RETRIES', 2),
     },
     killSwitch: opt(env, 'KILL_SWITCH', 'false').toLowerCase() === 'true',
+    // SIGHUP re-reads allowlisted operational switches from this file (spec 106 FR-014, #1446).
+    // Unset => SIGHUP answers honestly that nothing can reload. The process env is frozen at
+    // exec, which is why the source is a FILE — the same mounted env file the deploy delivers.
+    reloadEnvFile: opt(env, 'RELOAD_ENV_FILE', null),
+    // Counters endpoint for the FinOps exporter (spec 106/#1447). 0/unset = off. The compose file
+    // must NEVER publish this port to the host — it is compose-network-internal by design.
+    metricsPort: int(env, 'METRICS_PORT', 0),
     quotas: {
       signerPerWindow: int(env, 'SIGNER_QUOTA_PER_MIN', 12),
       globalPerWindow: int(env, 'GLOBAL_QUOTA_PER_MIN', 120),
@@ -736,6 +862,49 @@ export function loadConfig(env = process.env, opts = {}) {
         killSwitch: opt(env, 'PERPS_KILLSWITCH', 'false').toLowerCase() === 'true',
       }
     })(),
+
+    // Token news read proxy (spec 109) — the fourth read-only proxy, on the perps template.
+    // Keyless by design: Alphaday's public API takes no credential (research R1), so there is
+    // deliberately NO key variable here and nothing for the secrets registry to hold.
+    news: (() => {
+      const enabled = opt(env, 'NEWS_ENABLED', 'false').toLowerCase() === 'true'
+      const baseUrl = opt(env, 'NEWS_BASE_URL', 'https://api.alphaday.com')
+      if (enabled) {
+        let ok = false
+        try {
+          const proto = new URL(baseUrl).protocol
+          // http is admitted for the fixture server in tests; production config is https.
+          ok = proto === 'https:' || proto === 'http:'
+        } catch {
+          ok = false
+        }
+        if (!ok) throw new Error(`[relay-gateway] NEWS_BASE_URL=${baseUrl} is not a valid URL`)
+      }
+      /**
+       * TTL floor 300s: the vendor itself serves `cache-control: max-age=300` (research R5), so a
+       * shorter TTL buys upstream load without buying freshness. A mis-set value is a tuning
+       * error, not a lie to members — clamp and log once rather than failing boot.
+       */
+      const NEWS_TTL_FLOOR_MS = 300_000
+      const rawTtl = int(env, 'NEWS_CACHE_TTL_MS', NEWS_TTL_FLOOR_MS)
+      const cacheTtlMs = Math.max(rawTtl, NEWS_TTL_FLOOR_MS)
+      if (rawTtl < NEWS_TTL_FLOOR_MS) {
+        console.warn(
+          `[relay-gateway] NEWS_CACHE_TTL_MS=${rawTtl} is below the vendor's 300s cache floor; clamped to ${NEWS_TTL_FLOOR_MS}`
+        )
+      }
+      return {
+        enabled,
+        baseUrl,
+        cacheTtlMs,
+        timeoutMs: int(env, 'NEWS_TIMEOUT_MS', 8000),
+        retries: int(env, 'NEWS_RETRIES', 1),
+        quotaPerIp: int(env, 'NEWS_QUOTA_PER_IP', 60),
+        quotaGlobal: int(env, 'NEWS_QUOTA_GLOBAL', 300),
+        quotaWindowMs: int(env, 'NEWS_QUOTA_WINDOW_MS', 60_000),
+        killSwitch: opt(env, 'NEWS_KILLSWITCH', 'false').toLowerCase() === 'true',
+      }
+    })(),
     // Member API (spec 095): member-signed capability tokens granting custody-free, scoped access to
     // a member's OWN data plus unsigned typed-data quotes. Optional like the bitcoin/bridge/perps
     // proxies — disabled means every /v1/member/* route (including the OpenAPI document) answers
@@ -769,6 +938,10 @@ export function loadConfig(env = process.env, opts = {}) {
       const assistantEnabled = opt(env, 'ASSISTANT_ENABLED', 'false').toLowerCase() === 'true'
       const assistantBaseUrl = opt(env, 'ASSISTANT_BASE_URL', 'https://api.anthropic.com')
       const assistantMaxTokens = int(env, 'ASSISTANT_MAX_TOKENS', 1024)
+      // Tool rounds per member turn (spec 104). The browser runs the loop and each round is its own
+      // request here, so this is the multiplier on everything the per-turn ceiling bounds; capped
+      // in code by MAX_ROUNDS_CEILING for the same reason ASSISTANT_MAX_TOKENS is.
+      const assistantMaxRounds = int(env, 'ASSISTANT_MAX_ROUNDS', MAX_TOOL_ROUNDS)
       // Model spend. The per-turn output ceiling is capped by MAX_TOKENS_CEILING (imported rather
       // than restated — a duplicated ceiling is two ceilings that agree today), and the rest of this
       // block bounds what SPEND may accumulate. The request quotas above bound TRAFFIC; only these
@@ -836,6 +1009,13 @@ export function loadConfig(env = process.env, opts = {}) {
               `[relay-gateway] ASSISTANT_MAX_TOKENS=${assistantMaxTokens} must be between 1 and ` +
                 `${MAX_TOKENS_CEILING}. This is the per-turn output ceiling — the only bound on what a ` +
                 'SINGLE request can cost — so it is capped in code rather than left to the env file.'
+            )
+          }
+          if (assistantMaxRounds < 1 || assistantMaxRounds > MAX_ROUNDS_CEILING) {
+            throw new Error(
+              `[relay-gateway] ASSISTANT_MAX_ROUNDS=${assistantMaxRounds} must be between 1 and ` +
+                `${MAX_ROUNDS_CEILING}. Each tool round is a separate model call, so this multiplies what ` +
+                'one member question can cost; it is capped in code rather than left to the env file.'
             )
           }
           if (assistantQuotaPerAccount < 1 || assistantQuotaGlobal < 1) {
@@ -911,6 +1091,9 @@ export function loadConfig(env = process.env, opts = {}) {
           baseUrl: assistantBaseUrl,
           model: opt(env, 'ASSISTANT_MODEL', 'claude-sonnet-5'),
           maxTokens: assistantMaxTokens,
+          // Public config, exported on /status as `maxRounds` so the browser loop reads its ceiling
+          // from the gateway it is talking to rather than assuming the package default.
+          maxRounds: assistantMaxRounds,
           timeoutMs: int(env, 'ASSISTANT_TIMEOUT_MS', 30_000),
           // A tighter request class than the module's general read quota: an assistant turn costs
           // real money, so 120 reads/min and 120 model calls/min are not the same permission.

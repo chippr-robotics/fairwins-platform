@@ -28,7 +28,11 @@ const CUSTODY_URL = '/wallet?tab=custody'
 
 
 /** Every shipped read provider this build resolves runs through publicnode. */
-const RPC_PATTERN = /publicnode\.com/
+// BOTH rails, or the stub is a lie: since 480720bf every EVM mainnet has a drpc.org FAILOVER,
+// so makeReadProvider builds a FallbackProvider — a stub that fails only the publicnode primary
+// is answered by LIVE drpc, and "the chain is unreachable" quietly becomes "the chain answered
+// tier 0 from production" (issue #1463; spec 42 and the passkey suite hit the same class).
+const RPC_PATTERN = /publicnode\.com|drpc\.org/
 
 
 /**

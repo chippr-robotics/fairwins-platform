@@ -68,6 +68,13 @@ implementation and its tests must satisfy; UI code touches ONLY these seams.
   link (see data-model) and consumed exactly once after the gate clears.
 - Only the tenant's own origin URLs are accepted from the link channel;
   anything else is ignored (never opened, never navigated).
+- **Both link channels are read.** `appUrlOpen` only fires for a link arriving
+  while the app already runs; the link that *launched* the app is consumed by
+  the platform before any listener exists and is readable only from
+  `App.getLaunchUrl()`. A URL reported down both (Android does; iOS reports
+  only the launch one) is delivered exactly once, and the de-duplication is
+  single-use so a member deliberately re-opening the same link still
+  navigates.
 
 ## Native CSP parity gate
 

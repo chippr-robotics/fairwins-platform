@@ -1,7 +1,7 @@
 /* Shared informative bottom sheet for account-security actions (specs 041/045).
    Mirrors the connect surface (ConnectModal.css): centered card on desktop,
    bottom sheet on mobile, with the mobile bottom-nav clearance fixed in #938
-   (backdrop z-index 1500 + safe-area padding) so actions never hide behind the
+   (backdrop z-index 2100 + safe-area padding) so actions never hide behind the
    fixed icon nav.
 
    Colors use the FairWins theme tokens from src/theme.css so text stays
@@ -16,9 +16,20 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1500;
+  /* Ceremony tier: ABOVE the modal tier (2000). A sheet is launched FROM whatever the member
+     is doing — the spec-098 unlock ceremony opens from inside PremiumPurchaseModal at confirm
+     time, and at the previous 1500 it rendered UNDER that modal's progress panel, so the
+     passphrase field could not be typed into (caught by full/40 AAP-03). 2100 matches the
+     existing "above the detail sheet" tier. */
+  z-index: 2100;
   padding: 16px;
   animation: action-sheet-fade 160ms ease-out;
+}
+
+/* Spec 111 — the deferred-signing ceremony (spec 088) opens FROM another sheet and must sit above
+   it. Same tier as that sheet meant DOM order decided, and the global host mounts first. */
+.action-sheet__backdrop--ceremony {
+  z-index: 2200;
 }
 
 .action-sheet {

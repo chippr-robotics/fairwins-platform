@@ -3,7 +3,7 @@
 // chain and is re-loadable by address; these records just remember which vaults a member belongs to and their
 // member-authored labels (labels are client-side only, never on-chain). Identity is (chainId, address).
 
-import { getAddress } from 'ethers'
+import { getAddress } from 'viem'
 import { getUserPreference, saveUserPreference } from '../../utils/userStorage'
 
 const STORAGE_KEY = 'custody_vault_references'

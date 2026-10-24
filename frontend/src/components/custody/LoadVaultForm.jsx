@@ -3,15 +3,17 @@
 //
 // Spec 068 (US5) — address entry goes through the shared Protect field (paste, address book, QR).
 // Spec 068 also makes loading CROSS-CHAIN: `onLoad` searches every custody network, so a member
-// pasting a vault address does not have to already know which chain it is on (and does not have to
-// hop networks to find out). The result states which network it was found on, and when the same
-// address is a Safe on several, all of them are offered rather than one silently chosen.
+// pasting a vault address does not have to already know which chain it is on.
+//
+// Spec 102 (US2, FR-003) — every network the address is a Safe on is ADDED, and the result says so
+// ("Found on Polygon, Base and Optimism"). The "pick another network" prompt is gone: it asked a
+// question the member cannot answer yet. Networks that could not be reached are NAMED and can be
+// checked again; nothing is added for them. The form closes as soon as at least one network was
+// added, and stays open only when nothing was.
 
 import { useState } from 'react'
-import { NETWORKS } from '../../config/networks'
+import { vaultChainName as chainName, listChainNames } from '../../lib/custody/vaultGroups'
 import CustodyAddressField from './CustodyAddressField'
-
-const chainName = (id) => NETWORKS[Number(id)]?.name || `Chain ${Number(id)}`
 
 export default function LoadVaultForm({ onLoad, onDone, chainId }) {
   const [address, setAddress] = useState('')
@@ -19,26 +21,41 @@ export default function LoadVaultForm({ onLoad, onDone, chainId }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [result, setResult] = useState(null)
+  // Networks the probe could not reach — from a success (some added) or from the "found nowhere
+  // reachable" rejection, which carries them so the member can retry rather than give up.
+  const [unreachable, setUnreachable] = useState([])
 
-  const handleLoad = async (preferredChainId) => {
+  const handleLoad = async () => {
     setError(null)
     setResult(null)
+    setUnreachable([])
     setBusy(true)
     try {
-      const vault = await onLoad(address.trim(), label, 0, { preferredChainId })
+      const vault = await onLoad(address.trim(), label, 0)
       setResult(vault)
-      // Hold the form open while the member decides between multiple networks; closing it would
-      // silently commit them to whichever one we happened to pick.
-      if (!(vault.matches?.length > 1)) onDone?.(vault)
+      setUnreachable(vault.unreachable || [])
+      // Close as soon as the vault was added anywhere. `added` absent means a single-network result
+      // from a legacy caller, which always added one.
+      const addedCount = vault.added?.length ?? vault.matches?.length ?? 1
+      if (addedCount > 0) onDone?.(vault)
     } catch (e) {
       setError(e?.message || 'Could not load that address')
+      setUnreachable(Array.isArray(e?.unreachable) ? e.unreachable : [])
     } finally {
       setBusy(false)
     }
   }
 
+  const addedChains = result?.added ?? (result?.matches?.length ? result.matches.map((m) => m.chainId) : [])
+  const foundOn = addedChains.length > 1 ? listChainNames(addedChains) : chainName(result?.chainId)
+
   return (
     <form className="custody-load" onSubmit={(e) => e.preventDefault()} aria-label="Load a vault by address">
+      {/* Spec 105 (US4) — the sheet states what it does before asking for anything. */}
+      <p className="custody-hint">
+        Paste a vault&rsquo;s address — every custody network is searched, and the vault is added on
+        each network it lives on.
+      </p>
       <CustodyAddressField
         id="load-address"
         label="Vault address"
@@ -58,39 +75,34 @@ export default function LoadVaultForm({ onLoad, onDone, chainId }) {
       )}
       {result?.isSafe && (
         <p className="custody-predicted" role="status">
-          Found on <strong>{chainName(result.chainId)}</strong>: {result.owner ? 'a vault you co-own' : 'a view-only vault'}{' '}
-          with {result.owners.length} owners and a {result.threshold}-of-{result.owners.length} threshold
+          Found on <strong>{foundOn}</strong>: {result.owner ? 'a vault you co-own' : 'a view-only vault'} with{' '}
+          {result.owners.length} owners and a {result.threshold}-of-{result.owners.length} threshold
           {result.version ? ` (Safe ${result.version})` : ''}.
         </p>
       )}
 
-      {result?.matches?.length > 1 && (
-        <div className="custody-warning" role="status">
+      {unreachable.length > 0 && (
+        <div className="custody-hint" role="status">
           <p>
-            This address is a Safe on {result.matches.length} networks. {chainName(result.chainId)} was added — pick
-            another to add it instead:
+            Not checked on {unreachable.map((u) => chainName(u.chainId)).join(', ')} — those networks could not be
+            reached.
           </p>
           <div className="custody-actions">
-            {result.matches
-              .filter((m) => Number(m.chainId) !== Number(result.chainId))
-              .map((m) => (
-                <button key={m.chainId} type="button" onClick={() => handleLoad(m.chainId)} disabled={busy}>
-                  Use {chainName(m.chainId)}
-                </button>
-              ))}
+            <button type="button" onClick={handleLoad} disabled={busy} data-testid="load-vault-check-again">
+              Check again
+            </button>
           </div>
         </div>
       )}
 
-      {result?.unreachable?.length > 0 && (
-        <p className="custody-hint" role="status">
-          {result.unreachable.map((u) => chainName(u.chainId)).join(', ')} could not be reached, so this address was
-          not checked there.
-        </p>
-      )}
-
       <div className="custody-actions">
-        <button type="button" onClick={() => handleLoad()} disabled={!address.trim() || busy}>
+        <button
+          type="button"
+          className="btn-primary"
+          onClick={handleLoad}
+          disabled={!address.trim() || busy}
+          data-testid="load-vault-submit"
+        >
           {busy ? 'Searching all networks…' : 'Load vault'}
         </button>
       </div>

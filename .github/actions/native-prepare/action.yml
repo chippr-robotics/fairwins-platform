@@ -1,0 +1,77 @@
+name: Prepare a native shell
+description: >
+  Install, build the web bundle, stamp identity/version, and sync one Capacitor
+  platform — the exact sequence every native job runs before it touches Gradle
+  or Xcode.
+
+# WHY THIS IS ONE ACTION AND NOT SIX COPIES.
+#
+# The native jobs in `release.yml` only run on a push to `main` (its sole trigger), so nothing
+# before that exercises them — on 2026-09-04 all four failed the first time they ever executed and
+# no version could be minted at all. `native-build.yml` now runs the same builds on pull requests
+# and on every push to `staging`, which only helps if it prepares the shell IDENTICALLY. Six
+# hand-maintained copies of these steps would drift, and the copy that drifted would be the early
+# check — passing while the release it is supposed to protect still fails. One definition, six
+# callers, no drift.
+
+inputs:
+  platform:
+    description: 'android | ios'
+    required: true
+  version:
+    description: >
+      Release version to stamp (vX.Y.Z). Omit on a check run — sync-native-config
+      then resolves the current published tag, which is the honest answer when no
+      release is being cut.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 22
+        cache: 'npm'
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+      env:
+        CYPRESS_INSTALL_BINARY: '0'
+    - name: Build the web bundle for the native shell
+      shell: bash
+      run: |
+        set -euo pipefail
+        npm run build --workspace frontend
+        node scripts/native/inject-native-csp.js
+        if [ -n "${{ inputs.version }}" ]; then
+          node scripts/native/sync-native-config.js --version "${{ inputs.version }}"
+        else
+          node scripts/native/sync-native-config.js
+        fi
+        cd frontend && npx cap sync "${{ inputs.platform }}"
+    # Select the newest Xcode on the image, and SAY WHICH. Capacitor 8 ships its
+    # Swift API as prebuilt XCFrameworks (`capacitor-swift-pm` resolves
+    # Capacitor.xcframework / Cordova.xcframework, not source), and a binary
+    # Swift module is read through its `.swiftinterface` by an older compiler —
+    # which silently DROPS every declaration that compiler cannot parse. The
+    # symptom is not "too old, upgrade": it is `CAPPluginCall has no member
+    # 'reject'` and `getString` resolving to the wrong overload, in EVERY
+    # third-party plugin at once, as if each were independently stale. That cost
+    # a wrong diagnosis on 2026-09-04. `@capacitor/ios`'s own test script targets
+    # iPhone 17 / iOS 26, so the toolchain floor is far above the macos-14
+    # image's default Xcode 15.4.
+    - name: Select the newest Xcode
+      if: inputs.platform == 'ios'
+      shell: bash
+      run: |
+        set -euo pipefail
+        NEWEST=$(ls -d /Applications/Xcode*.app 2>/dev/null | sort -V | tail -1)
+        if [ -z "$NEWEST" ]; then
+          echo "::error::No Xcode found on this image."
+          exit 1
+        fi
+        sudo xcode-select -s "$NEWEST/Contents/Developer"
+        echo "Selected $NEWEST"
+        xcodebuild -version
+        swift --version

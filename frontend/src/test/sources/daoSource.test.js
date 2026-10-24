@@ -46,16 +46,19 @@ vi.mock('../../lib/clearpath/connectors', () => ({
 // `lib/clearpath/trackedDaos` is the HOST-side reader of that namespace — legitimate, because the
 // host implements the namespaces; the isolation rule binds packages, not the host.
 vi.mock('../../lib/clearpath/trackedDaos', () => ({ list: () => m.local }))
-vi.mock('ethers', async (orig) => {
-  const actual = await orig()
-  function FakeContract() {
-    return {
-      externalCount: () => { if (m.registry.throws) throw new Error('rpc down'); return m.registry.count },
-      getExternalDAO: () => m.registry.entry,
+// The registry read rides the spec-110 seam; the connectors below still take a provider, which is
+// why this file keeps both fakes. `m.registry` is unchanged.
+vi.mock('../../lib/chains/readContract', async (orig) => ({
+  ...(await orig()),
+  readContract: (_chainId, { functionName }) => {
+    if (functionName === 'externalCount') {
+      if (m.registry.throws) throw new Error('rpc down')
+      return m.registry.count
     }
-  }
-  return { ...actual, ethers: { ...actual.ethers, Contract: vi.fn(FakeContract) } }
-})
+    if (functionName === 'getExternalDAO') return m.registry.entry
+    throw new Error('unmocked registry read: ' + functionName)
+  },
+}))
 
 import { daoSource } from '../../data/notifications/sources/daoSource'
 

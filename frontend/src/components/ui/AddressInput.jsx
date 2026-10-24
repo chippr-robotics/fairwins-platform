@@ -123,9 +123,26 @@ const AddressInput = forwardRef(({
   const hasError = externalError || bitcoinError || callsignError || (!isBitcoinMode && value && !isLoading && !callsignRes.isCallsign && resolutionError)
   const displayError = externalErrorMessage || (bitcoinError ? btc.message : (callsignError ? callsignRes.message : (!callsignRes.isCallsign ? resolutionError : undefined)))
 
-  // Determine status indicator
-  const showLoading = isLoading || isLookingUp || callsignRes.isLoading
+  /*
+   * Status indicator (#1431).
+   *
+   * `showLoading` is RESOLUTION busy — the work that decides whether there is an address at all.
+   * The reverse ENS lookup is deliberately NOT part of it. That lookup only decides whether to
+   * DECORATE the field with a name, and it is a live call to a third-party mainnet RPC
+   * (`useEnsReverseLookup` → `useEnsName({ chainId: mainnet.id })`, routed by wagmi.js at
+   * ethereum-rpc.publicnode.com) fired for ANY pasted address.
+   *
+   * Gating the tick on it meant the field withheld confirmation of something it already knew:
+   * for a raw address `useEnsResolution` returns the resolved value synchronously, with no
+   * network involved. A member pasting a valid address watched a spinner for as long as a
+   * mainnet RPC took to answer — indefinitely on a slow or blocked network — and the on-chain
+   * e2e tier inherited that as a flake, because whether the tick appeared inside 15s was a
+   * property of the runner's internet rather than of the code under test.
+   */
+  const showLoading = isLoading || callsignRes.isLoading
   const showSuccess = effectiveResolvedAddress && !hasError && !showLoading
+  // The ENS name is decoration: it appears when (and if) the lookup lands, and its absence never
+  // holds anything else back.
   const showEnsLabel = isEns && !isLoading
   const showCallsignResolved = callsignRes.isCallsign && !!callsignRes.address && !showLoading && !hasError
 

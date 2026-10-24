@@ -110,7 +110,19 @@ export function makeHost(over = {}) {
     wallet: Object.freeze(wallet),
     readProvider: over.readProvider ?? ((forChain = chainId) => {
       if (!providers.has(forChain)) {
-        providers.set(forChain, { call: vi.fn(async () => '0x'), getBlockNumber: vi.fn(async () => 1) })
+        providers.set(forChain, {
+          call: vi.fn(async () => '0x'),
+          getBlockNumber: vi.fn(async () => 1),
+          /*
+           * `estimateGas` / `getFeeData` are ordinary provider reads and the real host's guard
+           * blocks neither (only `destroy` and `removeAllListeners`), so the stub must offer them
+           * — the fee disclosure (issue #1408) is built on exactly these two calls. Overridable
+           * per test so the "estimate failed" and "no gas price" branches are reachable without
+           * inventing a different provider shape.
+           */
+          estimateGas: vi.fn(over.estimateGas ?? (async () => 6_340_000n)),
+          getFeeData: vi.fn(over.getFeeData ?? (async () => ({ maxFeePerGas: 30_000_000_000n, gasPrice: 30_000_000_000n }))),
+        })
       }
       return providers.get(forChain)
     }),

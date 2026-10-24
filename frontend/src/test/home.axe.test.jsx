@@ -31,6 +31,18 @@ vi.mock('../hooks', () => ({
   useWallet: () => ({ isConnected: true, address: '0x5555555555555555555555555555555555555555', chainId: 137, openConnectModal: vi.fn() }),
   useWalletConnection: () => ({ connectWallet: vi.fn() }),
 }))
+// HomeScreen mounts the FR-021 creation-moment DeviceLossWarning (issue #1405), which reads the
+// session through usePasskeyAccount → useWallet — the useWalletManagement module, not the `hooks`
+// barrel mocked above. This audit runs a classic session, so the warning renders nothing.
+vi.mock('../hooks/useWalletManagement', () => ({
+  useWallet: () => ({
+    address: '0x5555555555555555555555555555555555555555',
+    chainId: 137,
+    loginMethod: 'wallet',
+    isConnected: true,
+    provider: null,
+  }),
+}))
 vi.mock('../hooks/useUI', () => ({
   useModal: () => ({ showModal: vi.fn(), hideModal: vi.fn() }),
   useNotification: () => ({ showNotification: vi.fn() }),

@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import { useOpenChallengeAccept } from './useOpenChallengeAccept'
 import { usePools } from './usePools'
+import { useFundingPools } from './useFundingPools'
 import { useWeb3 } from './useWeb3'
 import { getWordListLang } from '../utils/wordListLanguage'
 import { resolvePhraseLookup } from '../lib/lookup/resolvePhraseLookup.js'
@@ -15,6 +16,8 @@ import { resolvePhraseLookup } from '../lib/lookup/resolvePhraseLookup.js'
 export function useUnifiedLookup() {
   const { lookup: lookupChallenge } = useOpenChallengeAccept()
   const { resolvePhrase } = usePools()
+  // Funding pools (spec 103) share the four-word entry point; the resolver reports which kind it found.
+  const { resolvePhrase: resolveFunding } = useFundingPools()
   const { account } = useWeb3()
   const [status, setStatus] = useState('idle')
   const [result, setResult] = useState(null)
@@ -26,12 +29,12 @@ export function useUnifiedLookup() {
       phrase,
       lang: getWordListLang(),
       account,
-      deps: { lookupChallenge, resolvePool: resolvePhrase },
+      deps: { lookupChallenge, resolvePool: resolvePhrase, resolveFunding },
     })
     setResult(res)
     setStatus('result')
     return res
-  }, [account, lookupChallenge, resolvePhrase])
+  }, [account, lookupChallenge, resolvePhrase, resolveFunding])
 
   const reset = useCallback(() => {
     setStatus('idle')

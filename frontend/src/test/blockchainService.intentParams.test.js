@@ -2,12 +2,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 // Focused unit test for resolveMembershipIntentParams (specs 035 + 036): the read-only helper that
 // resolves the exact EIP-712 intent params (esp. the USDC `price` the contract pulls) for a gasless
-// membership payment. We stub the contract resolver and the MembershipManager reads so no real chain
-// call happens, while keeping the rest of ethers real (keccak256/toUtf8Bytes drive ROLE_NAME_TO_HASH
-// at module load; ZeroHash is the no-terms sentinel).
-const { resolverMock, mmMock } = vi.hoisted(() => ({
+// membership payment. We stub the contract resolver and the MembershipManager reads so no real
+// chain call happens.
+//
+// Spec 110: the `vi.mock('ethers')` that stood here installed `function FakeContract() { return
+// mmMock }` — it took NO arguments at all, so every read below was satisfied no matter which
+// address, which ABI or which chain it was aimed at. The reads go through the chain seam now and
+// each one is recorded with all three, which is what lets the first test assert that the price a
+// member is about to authorise was read from the MembershipManager on the SIGNER'S chain.
+const { resolverMock, mmMock, reads } = vi.hoisted(() => ({
   resolverMock: vi.fn(),
   mmMock: {},
+  reads: [],
 }))
 
 vi.mock('../config/contracts', async (importOriginal) => {
@@ -15,20 +21,26 @@ vi.mock('../config/contracts', async (importOriginal) => {
   return { ...actual, getContractAddressForChain: resolverMock }
 })
 
-vi.mock('ethers', async () => {
-  const real = await vi.importActual('ethers')
-  // `new ethers.Contract(addr, abi, signer)` must return our MembershipManager stub.
-  function FakeContract() {
-    return mmMock
+vi.mock('../lib/chains/readContract', async (importOriginal) => {
+  const actual = await importOriginal()
+  return {
+    ...actual,
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      reads.push({ chainId, address, functionName, args })
+      const stub = mmMock[functionName]
+      if (!stub) throw new Error(`unexpected read: ${functionName}`)
+      return stub(...args)
+    },
   }
-  return { ...real, ethers: { ...real.ethers, Contract: FakeContract } }
 })
 
 import { resolveMembershipIntentParams, getRoleHash } from '../utils/blockchainService'
-import { ethers } from 'ethers'
 
 const MM_ADDR = '0x00c3ef4e02Ef00Ad6eE955dF5022A22F6ea73dae'
 const ROLE = 'WAGER_PARTICIPANT'
+// The bytes32 no-terms sentinel, frozen as a literal: it is a fact about the contract's argument,
+// not about whichever library happens to spell it.
+const ZERO_HASH = '0x' + '00'.repeat(32)
 
 const makeSigner = (chainId = 137, address = '0x0000000000000000000000000000000000000001') => ({
   getAddress: async () => address,
@@ -37,6 +49,7 @@ const makeSigner = (chainId = 137, address = '0x00000000000000000000000000000000
 
 describe('resolveMembershipIntentParams', () => {
   beforeEach(() => {
+    reads.length = 0
     resolverMock.mockReset()
     resolverMock.mockReturnValue(MM_ADDR)
     // priceUSDC scales with the tier so upgrade deltas are checkable: tier N → N * 10 USDC (6 decimals).
@@ -49,8 +62,13 @@ describe('resolveMembershipIntentParams', () => {
     expect(res.roleHash).toBe(getRoleHash(ROLE))
     expect(res.validTier).toBe(2)
     expect(res.price).toBe(20_000_000n) // getTierConfig(role, 2).priceUSDC
-    expect(res.acceptedTermsHash).toBe(ethers.ZeroHash)
+    expect(res.acceptedTermsHash).toBe(ZERO_HASH)
     expect(mmMock.getTierConfig).toHaveBeenCalledWith(getRoleHash(ROLE), 2)
+    // The price a member is about to authorise came from the MembershipManager, on the chain the
+    // signer reports — neither of which the argument-less Contract fake could tell apart.
+    expect(reads).toEqual([
+      { chainId: 137, address: MM_ADDR, functionName: 'getTierConfig', args: [getRoleHash(ROLE), 2] },
+    ])
   })
 
   it('resolves extend price from the passed (current) tier config', async () => {
@@ -89,7 +107,7 @@ describe('resolveMembershipIntentParams', () => {
 
   it('uses ZeroHash for a malformed / empty terms hash', async () => {
     const res = await resolveMembershipIntentParams(makeSigner(), ROLE, 1, 'purchase', 'not-a-hash')
-    expect(res.acceptedTermsHash).toBe(ethers.ZeroHash)
+    expect(res.acceptedTermsHash).toBe(ZERO_HASH)
   })
 
   it('throws on a missing signer', async () => {

@@ -23,5 +23,8 @@
   "saltPrefix": "FairWins-P2P-v2.0-",
   "timestamp": "2026-07-27T01:18:30.104Z",
   "bootstrappedBy": "scripts/deploy/init-deployment-record.js",
-  "bootstrapNote": "Created empty — no contracts were deployed by this file. Addresses are appended by the targeted deploy scripts (deploy-fee-router.js, deploy-bridge-liquidity.js)."
+  "bootstrapNote": "Created empty — no contracts were deployed by this file. Addresses are appended by the targeted deploy scripts (deploy-fee-router.js, deploy-bridge-liquidity.js).",
+  "deployBlocks": {
+    "accountFactory": 25625767
+  }
 }

@@ -21,13 +21,13 @@
  *     ParticipantAccepted / WinningsClaimed / StakeRefunded
  */
 
-import { ethers } from 'ethers'
 import { getContractAddressForChain, NETWORK_CONFIG, DEPLOYMENT_BLOCKS } from '../../config/contracts'
 import { WAGER_REGISTRY_ABI } from '../../abis/WagerRegistry'
 import { FRIEND_GROUP_MARKET_FACTORY_ABI } from '../../abis/FriendGroupMarketFactory'
 import { getDefaultWagerRepository } from '../wagers/WagerRepository'
 import { getSubgraphUrl, hasSubgraph } from '../../config/networks'
-import { getReadProvider } from '../../utils/rpcProvider'
+import { getPublicClient } from '../../lib/chains/publicClient'
+import { eventScanHandle } from '../../lib/chains/eventScan'
 
 const INITIAL_CHUNK = 5000
 const MIN_CHUNK = 200
@@ -116,20 +116,53 @@ function transferToPreItem(row) {
  * report read one chain's transaction hashes against another chain's node: a Mordor report asked
  * Polygon about Mordor tx hashes, got nothing back, and reported the gas fees as absent rather than
  * as unread. Passing a URL and a chain id that can contradict each other is exactly what spec 069
- * forbids, and `getReadProvider(chainId)` cannot be called that way.
+ * forbids — the chain seam (`getPublicClient(chainId)`, spec 110) cannot be called that way.
  *
- * It returns null for a chain with no endpoint at all. That is surfaced as a refusal here rather
- * than passed on: a null provider would reach ethers as "use the default network", which is the
+ * The seam returns null for a chain with no endpoint at all. That is surfaced as a refusal here
+ * rather than passed on: a null provider falling through to some default network would be the
  * same wrong-chain read by another route.
+ *
+ * The returned object keeps the ethers-provider read shape the rest of this module (and its
+ * injectable test seam, `opts.provider`) was written against: numeric block numbers,
+ * `getBlock(n) → { timestamp }`, and `getTransactionReceipt(hash) → null` when unmined.
  */
 function getProvider(opts = {}) {
   if (opts.provider) return opts.provider
   const chainId = opts.chainId ?? NETWORK_CONFIG.chainId
-  const provider = getReadProvider(chainId)
-  if (!provider) {
+  const client = getPublicClient(chainId)
+  if (!client) {
     throw new Error(`No RPC endpoint is configured for network ${chainId}, so this report cannot read the chain.`)
   }
-  return provider
+  return {
+    async getBlockNumber() {
+      // Never cached: this head bounds a log scan, and a report that silently stops short of the
+      // chain's tip under-reports rather than failing. See the note in `lib/chains/eventScan.js`.
+      return Number(await client.getBlockNumber({ cacheTime: 0 }))
+    },
+    async getBlock(blockNumber) {
+      const block = await client.getBlock({ blockNumber: BigInt(blockNumber) })
+      return block ? { timestamp: Number(block.timestamp) } : null
+    },
+    async getTransactionReceipt(txHash) {
+      try {
+        const r = await client.getTransactionReceipt({ hash: txHash })
+        return r
+          ? {
+              from: r.from,
+              gasUsed: r.gasUsed,
+              // viem names the paid price effectiveGasPrice; keep both spellings readable.
+              gasPrice: r.effectiveGasPrice ?? r.gasPrice,
+              effectiveGasPrice: r.effectiveGasPrice ?? r.gasPrice,
+              blockNumber: Number(r.blockNumber),
+            }
+          : null
+      } catch (err) {
+        // ethers answered null for an unknown hash; viem throws a typed not-found error.
+        if (err?.name === 'TransactionReceiptNotFoundError') return null
+        throw err
+      }
+    },
+  }
 }
 
 /** Resolve the escrow contract (prefer v2 WagerRegistry, fall back to v1 factory). */
@@ -141,7 +174,41 @@ export function resolveEscrow(chainId) {
   throw new Error('No wager escrow contract is configured for this network.')
 }
 
-/** Normalize an ethers EventLog into the report's { name, args, txHash, block } shape. */
+/**
+ * The default escrow scan handle: `filters` + `queryFilter` over the spec-110 chain seam,
+ * shaped like the ethers Contract the scanner was written against. Indexed wager-id filter
+ * args are normalized to bigint (viem encodes topics strictly; ethers coerced strings).
+ */
+function seamScanContract(chainId, escrow) {
+  const handle = eventScanHandle(chainId, { address: escrow.address, abi: escrow.abi })
+  if (!handle) {
+    throw new Error(`No RPC endpoint is configured for network ${chainId}, so this report cannot read the chain.`)
+  }
+  return {
+    filters: new Proxy(
+      {},
+      {
+        get(_t, eventName) {
+          return (...args) => handle.filters[eventName](...args.map((a) => (typeof a === 'string' && /^\d+$/.test(a) ? BigInt(a) : a)))
+        },
+      },
+    ),
+    async queryFilter(filter, fromBlock, toBlock) {
+      const logs = await handle.provider.getLogs({
+        address: escrow.address,
+        topics: filter.getTopicFilter(),
+        fromBlock,
+        toBlock,
+      })
+      return logs.map((log) => {
+        const parsed = handle.interface.parseLog(log)
+        return { ...log, eventName: parsed.name, args: parsed.args }
+      })
+    },
+  }
+}
+
+/** Normalize an ethers-shaped EventLog into the report's { name, args, txHash, block } shape. */
 export function normalizeEvent(ev) {
   const a = ev.args || {}
   const id = a.wagerId ?? a.friendMarketId
@@ -214,7 +281,7 @@ async function scanAdaptive(contract, filter, fromBlock, toBlock, label, budget)
  *
  * @param {object} [opts]
  * @param {number} [opts.chainId] - active chain id
- * @param {object} [opts.provider] - ethers provider (defaults to the member's endpoint for `chainId`)
+ * @param {object} [opts.provider] - read-provider override (testing); defaults to the chain seam for `chainId`
  * @param {object} [opts.contract] - escrow contract override (testing)
  * @param {object} [opts.repository] - WagerRepository override (testing)
  * @returns {object} dataSource
@@ -233,7 +300,7 @@ export function createReportDataSource(opts = {}) {
   const ensureContract = () => {
     if (!contract) {
       escrow = resolveEscrow(chainId)
-      contract = opts.contract || new ethers.Contract(escrow.address, escrow.abi, provider)
+      contract = opts.contract || seamScanContract(chainId, escrow)
     }
     return contract
   }

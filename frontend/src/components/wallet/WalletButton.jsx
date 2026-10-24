@@ -334,7 +334,17 @@ function WalletButton({ className = '' }) {
                       role="menuitem"
                     >
                       <span className="action-icon" aria-hidden="true"><NavIcon name="key" size={16} /></span>
-                      <span>Get Access - from $2 USDC / month</span>
+                      {/* NO PRICE HERE, deliberately. This said "from $2 USDC / month" as a
+                          hardcoded string, and both halves were untrue on production: Bronze ($2)
+                          is INACTIVE on the live ladder so the cheapest purchasable tier is Silver
+                          at $8, and the contract sells a one-shot 30-day term, not a recurring
+                          month. The tier grid inside the purchase modal reads getTierConfig live
+                          (and discloses when it is falling back), which is the only place a price
+                          can be stated honestly — the other two membership CTAs (Dashboard,
+                          WalletPage) already quote no price for the same reason. Quoting one here
+                          would mean either a second hardcoded number that drifts again, or a
+                          contract read on every page that mounts the header. */}
+                      <span>Get Access</span>
                     </button>
                     <button
                       onClick={() => { setIsOpen(false); navigate('/vouchers#vch-redeem-h') }}

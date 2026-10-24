@@ -39,54 +39,96 @@ automatically.
 
 ## How screening works
 
-Every saved or entered address is checked against the on-chain
-sanctions/compliance oracle. Results appear as small tags:
+Every address you enter or save is checked against **every screening list FairWins knows
+about, on every network this app can read** — not just the network your wallet is on. The
+result is a small pill under the address:
 
-| Tag | Meaning |
+| Pill | Meaning |
 |-----|---------|
-| *(no tag)* | The address screened **clear** on this network. |
-| **Restricted** | The address is flagged by sanctions screening. |
-| **Unscreened** | The address could not be checked (see "Fails closed" below). |
+| **Screened clear** (green) | Every list on every network answered, and none of them flag this address. |
+| **Flagged** (red) | At least one list says the address is listed. The sentence names the list and the network. |
+| **Partly screened** (amber) | No list flagged it, but at least one list could not be read. This is **not** a clean bill. |
+| **Unscreened** (amber) | No list could be read, or no list exists for this network. |
+| **Screening…** | The check is still running. |
+
+Beside the pill, a small **segmented bar** shows the scan itself: one segment per list that was
+asked — green for clear, red for a flag, amber for one that could not be read.
+
+**Tap the pill** to see exactly which lists were asked, on which networks, and what each one
+said — including the ones that could not be reached and the networks that have no list at all.
+
+Your saved contacts carry the same pill, checked the same way. It does not depend on which network
+your wallet is on, or on having a wallet connected at all.
+
+The lists are:
+
+- **FairWins sanctions guard** — FairWins' own on-chain guard (the OFAC list plus FairWins'
+  deny list). Where it says no, a wager, membership or pool action with that address is refused
+  on-chain.
+- **Chainalysis sanctions oracle** — the OFAC sanctions list, published on-chain by Chainalysis.
+- **Issuer freeze lists** — Circle's USDC and Tether's USDT freeze lists. An address on one of
+  these cannot receive or move that token: the transfer fails and the funds stay put.
 
 Four principles govern screening:
 
-1. **Advisory only.** The tags in the app are a convenience pre-check. They do
-   **not** block anything by themselves.
-2. **The on-chain guard enforces.** FairWins' smart contracts independently
-   screen every participant when a wager is created or accepted. A restricted
-   address is blocked on-chain **even if the app shows no warning** — the contract
-   is the source of truth, not the UI.
-3. **Fails closed.** If an address cannot be screened — for example the guard is
-   not configured on the current network, or the check fails — it is shown as
-   **Unscreened**, never as clear. Treat "Unscreened" as "unknown, proceed with
-   caution."
-4. **Network-scoped.** A screening result applies only to the network it was
-   checked on. The same address may screen differently on a different network, so
-   the network is always part of the result.
+1. **Green means all of them said yes.** One flag from any list is **Flagged**. One list that
+   could not be reached is **Partly screened** — never green, because a missing answer is not a
+   clear one.
+2. **Advisory only.** The pill is a convenience pre-check. It does **not** block anything by
+   itself.
+3. **The chain enforces.** FairWins' smart contracts independently screen every participant, and
+   an issuer freeze is enforced by the token itself. A flagged address is refused on-chain
+   **even if the app shows no warning** — the contract is the source of truth, not the UI.
+4. **Fails closed.** If nothing can be checked, the address shows as **Unscreened**, never as
+   clear. Treat amber as "unknown, proceed with caution."
 
-Results are cached briefly during your session to avoid repeated on-chain reads,
-then re-checked the next time you open the book or pick an address.
+Results are cached briefly during your session to avoid repeated on-chain reads, then
+re-checked the next time you enter or pick the address.
 
-## Portability: encrypted export & import
+## Portability: export & import
 
-You can move your address book between devices:
+You can move your address book between devices, or hand it to someone else.
 
-- **Export** produces an encrypted file. The encryption key is derived from a
-  signature from your wallet, so the file contains **no readable** names,
-  addresses, or notes.
+- **Export** produces a plain `.json` file. No signature, no passphrase, no wallet
+  — it works the same whether you sign in with a browser wallet, a hardware
+  wallet, or a passkey.
 - **Import** on another device (or after clearing your browser) restores your
-  contacts — but only with the **same wallet** that created the export, since the
-  decryption key comes from that wallet's signature. There is no separate
-  passphrase to remember.
+  contacts. Any account can open any export: a file is no longer tied to the
+  wallet that made it, so you can also share one with a friend or move it to a
+  different account of your own.
+- The file is **readable**, which is the point — you can open it in a text
+  editor, check it, or edit it by hand before importing.
 - Importing **merges** additively: new addresses are added, existing ones are
   kept (no duplicates), and where a nickname or note differs you are asked which
   to keep. Nothing is silently deleted.
 
-If you import a file created by a different wallet, or a corrupted file, the
-import fails safely and your existing book is left unchanged.
+> **The export file is not encrypted.** Every nickname, address and note in it is
+> readable by anyone who opens it. Treat it like a contacts list, because that is
+> what it is — think before you email it, drop it in shared storage, or leave it
+> in your Downloads folder on a shared computer.
+
+If you import a corrupted file, or a file that is not an address book, the import
+fails safely and your existing book is left unchanged. An import is not a
+verification: a file can put any address under any name, so a contact that arrived
+from someone else deserves the same look as one you typed yourself — the screening
+tags apply to imported addresses exactly as they do to the rest.
+
+### Older encrypted exports
+
+Exports made before this changed were encrypted with a key from your wallet's
+signature. They still open — but only in a session connected to the **browser
+wallet that created them**, since only that wallet can produce the key. If you now
+sign in with a passkey, that file cannot be opened; export a fresh one from a
+device that still has the book instead. The app will tell you this in those words
+rather than blaming your wallet.
 
 ## Privacy notes
 
 - Contacts live in your browser's local storage, keyed to your wallet address.
-  Clearing your browser data removes them — export a backup first.
+  Clearing your browser data removes them — export a copy first, and keep in mind
+  that the copy is plain text.
+- The separate **Backup** feature (My Account → Recovery) is a different thing and
+  is still encrypted: it syncs your address book along with your other app data
+  under a key only your wallet can derive. Use that when you want your contacts
+  protected; use Export when you want a file you can read or share.
 - Different wallets on the same device have separate, isolated address books.

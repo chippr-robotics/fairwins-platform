@@ -30,6 +30,11 @@ const DOMAIN_PATTERN = /^[a-z0-9.-]+$/;
 const LIFECYCLES = ["draft", "live", "suspended", "retired"];
 const CONTRACT_MODES = ["shared", "dedicated"];
 
+// Spec 104: a GutterToken referral code is public config appended to a signup
+// URL. Bounded charset so a manifest cannot smuggle a query string or a path
+// into the link it is interpolated into.
+const REFERRAL_CODE_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
 // Platform fee caps in bps (spec 057 + spec 060). Anything not named falls
 // under the wrapped-service cap.
 const FEE_CAPS = { "polymarket.taker": 100, "polymarket.maker": 50 };
@@ -163,12 +168,47 @@ function validateManifest(id, manifest, knownFeatures) {
   if (!isPlainObject(settings)) {
     err("settings is required");
   } else {
+    const features = Array.isArray(settings.features) ? settings.features : [];
     if (!Array.isArray(settings.features)) {
       err("settings.features must be an array");
     } else {
       for (const feature of settings.features) {
         if (!knownFeatures.has(feature)) {
           err(`settings.features: "${feature}" is not in tenants/features.json`);
+        }
+      }
+      // Spec 104: the bring-your-own-key rail is a PROVIDER for the assistant,
+      // not a surface of its own. Enabled without the assistant it would gate a
+      // radio inside a card that does not exist.
+      if (features.includes("assistant-byok") && !features.includes("assistant")) {
+        err('settings.features: "assistant-byok" requires "assistant" (it is a provider option inside the Assistant tab)');
+      }
+    }
+
+    // --- settings.assistant (spec 104) ---
+    // OPTIONAL. Absence means the plain GutterToken signup link with no
+    // referral code. When present, the code is a bounded identifier and the
+    // rail it belongs to must actually be offered — a referral code for a
+    // provider the tenant does not enable is dead config that would still
+    // read, in the FinOps catalogue, as a live referral arrangement.
+    const assistant = settings.assistant;
+    if (assistant !== undefined) {
+      if (!isPlainObject(assistant)) {
+        err("settings.assistant must be an object when present");
+      } else {
+        for (const key of Object.keys(assistant)) {
+          if (key !== "guttertokenReferralCode") {
+            err(`settings.assistant: unknown key "${key}"`);
+          }
+        }
+        const code = assistant.guttertokenReferralCode;
+        if (code !== undefined) {
+          if (typeof code !== "string" || !REFERRAL_CODE_PATTERN.test(code)) {
+            err("settings.assistant.guttertokenReferralCode must match /^[A-Za-z0-9_-]{1,64}$/ (it is interpolated into a URL)");
+          }
+          if (!features.includes("assistant-byok")) {
+            err('settings.assistant.guttertokenReferralCode is set but "assistant-byok" is not enabled — the link it decorates is never rendered');
+          }
         }
       }
     }

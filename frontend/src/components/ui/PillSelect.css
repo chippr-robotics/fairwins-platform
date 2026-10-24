@@ -63,7 +63,9 @@
 .pill-select-option.active {
   border-color: var(--brand-primary);
   background: rgba(var(--brand-primary-rgb), 0.12);
-  color: var(--brand-primary);
+  /* Small text: Teal 700 (spec 090 rule 1) — --brand-primary is a large-text/fill colour and measures
+     under 4.5:1 here (axe color-contrast on the spec-103 window pills). The border keeps the brand hue. */
+  color: var(--accent-color);
 }
 
 .pill-select-option.locked {

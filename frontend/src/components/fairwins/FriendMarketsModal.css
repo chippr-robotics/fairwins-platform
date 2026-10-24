@@ -266,6 +266,28 @@
   margin: 0;
 }
 
+/* A label row carrying a marker rather than an info icon needs real space between the two —
+   0.1rem is the icon gap and reads as a collision under a pill. */
+.fm-label-row-spaced {
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+
+/* Group pay (spec 058): the To field is recipient one of several. 0.75rem is small text, so the
+   label takes --accent-color (Teal 700), never --brand-primary — see the brand ladder rule. */
+.fm-badge-multi {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  padding: 0.2rem 0.6rem;
+  width: fit-content;
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  color: var(--accent-color);
+}
+
 .fm-subtitle .infotip-wrap {
   vertical-align: -0.35em;
 }

@@ -332,7 +332,7 @@ describe('GET /v1/opensea/* cross-cutting policy', () => {
     expect(openseaFetch.calls.length).toBe(0) // never touches upstream without a key
   })
 
-  it('enforces the per-address quota with Retry-After', async () => {
+  it('enforces the per-CALLER quota with Retry-After', async () => {
     const { app } = build({ env: { OPENSEA_QUOTA_PER_ADDRESS: '2', OPENSEA_QUOTA_GLOBAL: '100' } })
     expect((await get(app, LIST_PATH)).status).toBe(200)
     expect((await get(app, LIST_PATH)).status).toBe(200) // cache hit still counts a quota hit
@@ -340,8 +340,26 @@ describe('GET /v1/opensea/* cross-cutting policy', () => {
     expect(res.status).toBe(429)
     expect(res.body.error.code).toBe('quota_exceeded')
     expect(Number(res.headers['retry-after'])).toBeGreaterThan(0)
-    // A different requested address has its own window.
-    expect((await get(app, `/v1/opensea/137/account/${CONTRACT}/nfts`)).status).toBe(200)
+  })
+
+  it('does NOT give a different requested address its own window (spec 106, FR-011)', async () => {
+    // This assertion is INVERTED from what it was, and the inversion is the fix.
+    //
+    // The quota used to key on the address in the PATH, so this test asserted that asking about a
+    // different address reset the window — and it passed, because that is exactly what the code
+    // did. But the address in the path is chosen by the caller: walking it minted a fresh bucket
+    // per request, the ceiling was never reached, and the quota metered nothing. Forty requests
+    // naming forty addresses cost one unit each.
+    //
+    // It was wrong in the other direction too: a hundred members reading the same popular
+    // collection shared one bucket and throttled each other, while one script reading a hundred
+    // collections was never limited at all.
+    //
+    // The window now belongs to the CALLER, so varying request content cannot escape it.
+    const { app } = build({ env: { OPENSEA_QUOTA_PER_ADDRESS: '2', OPENSEA_QUOTA_GLOBAL: '100' } })
+    expect((await get(app, LIST_PATH)).status).toBe(200)
+    expect((await get(app, LIST_PATH)).status).toBe(200)
+    expect((await get(app, `/v1/opensea/137/account/${CONTRACT}/nfts`)).status).toBe(429)
   })
 
   it('enforces the global backstop across keys', async () => {

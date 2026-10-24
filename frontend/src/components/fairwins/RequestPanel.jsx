@@ -1,4 +1,5 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import PropTypes from 'prop-types'
 import AmountKeypad from '../ui/AmountKeypad'
 import RequestQRModal from './RequestQRModal'
 import UniversalAssetSelect from '../ui/UniversalAssetSelect'
@@ -10,6 +11,19 @@ import { formatBip21 } from '../../lib/bitcoin/addresses'
 import { ASSET_ACTIVITIES } from '../../lib/assets/assetActivity'
 import { getDefaultCurrencyKind } from '../../utils/homePreference'
 import { buildPaymentRequestUri, NOTE_MAX_LENGTH } from '../../lib/payments/paymentRequest'
+import PillSelect from '../ui/PillSelect'
+import NavIcon from '../nav/NavIcon'
+import FundingPoolCreatePanel from '../funding/FundingPoolCreatePanel'
+import MyFundingPoolsSheet from '../funding/MyFundingPoolsSheet'
+import '../funding/funding.css'
+
+// Request kinds (spec 103, FR-001): a DIRECT one-time request, or a funding POOL. Same surface, same
+// chrome, a compact switch with a subtle glyph each; the direct form below is byte-for-byte the
+// spec-058/064 flow.
+const REQUEST_KINDS = [
+  { value: 'once', label: 'Direct', icon: <NavIcon name="arrowIn" size={14} /> },
+  { value: 'pool', label: 'Pool', icon: <NavIcon name="users" size={14} /> },
+]
 
 const shortAddr = (a) => (a && a.length > 10 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || '')
 
@@ -25,8 +39,14 @@ const shortAddr = (a) => (a && a.length > 10 ? `${a.slice(0, 6)}…${a.slice(-4)
  *
  * Contract: specs/064-universal-asset-selector/contracts/universal-asset-selector.md
  */
-function RequestPanel() {
+function RequestPanel({ initialKind = 'once', kindNonce = 0 }) {
   const { address: connectedAddress, isConnected, openConnectModal } = useWallet()
+  const [kind, setKind] = useState(initialKind)
+  const [showMyPools, setShowMyPools] = useState(false)
+  // A deep link that arrives while mounted re-applies the requested kind (HomeScreen bumps the nonce).
+  useEffect(() => {
+    if (kindNonce > 0) setKind(initialKind)
+  }, [initialKind, kindNonce])
   // Spec 063 (US1): the request must be addressed to the account the member is ACTING AS
   // (a vault or recovered account), not always the connected wallet.
   const { address: effectiveAddress, isActingAccount, label: actingLabel, type: actingType } = useEffectiveAccount()
@@ -114,8 +134,35 @@ function RequestPanel() {
 
   const requestDisabled = !amountValid || !selectedAsset || (isBitcoin && btc.status !== 'ready')
 
+  const kindSwitch = (
+    <div className="fp-kind-switch">
+      <PillSelect
+        label="Request kind"
+        hideLabel
+        options={REQUEST_KINDS}
+        value={kind}
+        onChange={setKind}
+      />
+    </div>
+  )
+
+  if (kind === 'pool') {
+    return (
+      <div className="fm-form fm-pay-form request-panel request-panel--pool" data-testid="request-kind" data-kind="pool">
+        {kindSwitch}
+        <FundingPoolCreatePanel
+          isConnected={isConnected && Boolean(address)}
+          onConnect={() => openConnectModal()}
+          onOpenMyPools={() => setShowMyPools(true)}
+        />
+        <MyFundingPoolsSheet open={showMyPools} onClose={() => setShowMyPools(false)} onStartPool={() => setKind('pool')} />
+      </div>
+    )
+  }
+
   return (
-    <div className="fm-form fm-pay-form request-panel">
+    <div className="fm-form fm-pay-form request-panel" data-testid="request-kind" data-kind="once">
+      {kindSwitch}
       <div className="fm-pay-hero">
         <AmountKeypad
           value={amount}
@@ -196,6 +243,13 @@ function RequestPanel() {
       />
     </div>
   )
+}
+
+RequestPanel.propTypes = {
+  /** 'once' (default) or 'pool' — lets a deep link or test open the Pool kind directly. */
+  initialKind: PropTypes.oneOf(['once', 'pool']),
+  /** Bumped by the parent when a deep link re-requests `initialKind` on an already-mounted panel. */
+  kindNonce: PropTypes.number,
 }
 
 export default RequestPanel

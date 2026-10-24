@@ -20,6 +20,7 @@ import { getCurrentDocument } from '../../utils/legalDocs'
 import { getContractAddressForChain } from '../../config/contracts'
 import { ACCOUNT_MODERATION_PATH } from '../../constants/legalLinks'
 import MembershipAttestation from '../compliance/MembershipAttestation'
+import DeviceLossWarning from '../wallet/DeviceLossWarning'
 import { getTransactionUrl } from '../../config/blockExplorer'
 import { usePurchaseFlow } from '../../hooks/usePurchaseFlow'
 import PurchaseProgressView from './PurchaseProgressView'
@@ -786,6 +787,19 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
     }
   }, [isBusy, resetForm, onClose])
 
+  /*
+   * FR-021 moment 3 of 3 — MEMBERSHIP PURCHASE (spec 041 US5, issue #1405): the warning's
+   * "Add a backup now" lands on the controllers card. It CLOSES the modal on the way out, the
+   * same as goToVouchers: this dialog is portalled, so navigating from underneath it would leave
+   * a purchase flow floating over the Recovery tab.
+   */
+  const goToControllers = useCallback(() => {
+    if (isBusy) return
+    resetForm()
+    onClose?.()
+    navigate('/wallet?tab=security#controllers')
+  }, [isBusy, resetForm, onClose, navigate])
+
   // Leave the purchase modal and open the dedicated voucher view (buy or redeem).
   const goToVouchers = useCallback((hash = '') => {
     if (isBusy) return
@@ -1067,6 +1081,11 @@ function PremiumPurchaseModal({ isOpen = true, onClose, action }) {
                 <h3 className="ppm-section-title">
                   <span aria-hidden="true">📋</span> Review Your Purchase
                 </h3>
+
+                {/* FR-021 moment 3 of 3 — before the member commits money to an account that one
+                    lost device would take with it. It warns, it never gates: the purchase button
+                    below is untouched, and a member who reads this and continues, continues. */}
+                <DeviceLossWarning moment="membership-purchase" onAddController={goToControllers} />
 
                 <div className="ppm-review-card">
                   <h4>Order Summary</h4>

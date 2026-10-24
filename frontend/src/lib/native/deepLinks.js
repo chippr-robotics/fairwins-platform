@@ -15,8 +15,12 @@
  *    without unmounting the route underneath (spec 041 amendment), and the
  *    sign-in surfaces render in place on the destination route — so
  *    navigating immediately preserves the destination through either gate by
- *    construction. A link that arrives before the router mounts is held and
- *    consumed exactly once.
+ *    construction.
+ *  · A COLD START IS A LINK TOO. `appUrlOpen` only fires for links arriving
+ *    while the app is already running; the link that LAUNCHED the app was
+ *    consumed by the platform before any listener could exist, and is
+ *    readable only from `App.getLaunchUrl()`. Both channels are read, and a
+ *    URL that reaches us down both is delivered exactly once.
  */
 import { App } from '@capacitor/app'
 
@@ -44,23 +48,59 @@ export function pathForIncomingUrl(url, { appOrigin }) {
 }
 
 /**
- * Subscribe the packaging layer's link events. `onPath` receives the mapped
- * SPA path; a link arriving before the consumer is ready is queued and
- * delivered exactly once on subscription. Inert on web (real links navigate
- * the document; there is nothing to bridge). Returns an unsubscribe function.
+ * Subscribe the packaging layer's link channels. `onPath` receives the mapped
+ * SPA path, for links arriving while the app runs AND for the link that
+ * launched it. Inert on web (real links navigate the document; there is
+ * nothing to bridge). Returns an unsubscribe function.
  */
 export function subscribeDeepLinks(onPath, { appOrigin, native = isNativeRuntime() } = {}) {
   if (!native) return () => {}
 
-  const handle = App.addListener('appUrlOpen', ({ url }) => {
+  let stopped = false
+  const deliver = (url) => {
+    if (stopped) return
     const path = pathForIncomingUrl(url, { appOrigin })
     if (path) onPath(path)
+  }
+
+  // A cold-start link can reach us down BOTH channels — Android reports it as
+  // an `appUrlOpen` as well as the launch URL, iOS only as the launch URL —
+  // and either can land first. Two single-use tokens, one per ordering, so the
+  // duplicate is dropped exactly once and a member deliberately re-opening the
+  // same link later still navigates.
+  let launchSettled = false
+  const seenBeforeLaunchSettled = new Set()
+  let spendNextEventMatching = null
+
+  const handle = App.addListener('appUrlOpen', ({ url }) => {
+    // The duplicate, if the platform sends one, is the very next event. The
+    // window closes at the first event whatever it carried.
+    const isLaunchEcho = url === spendNextEventMatching
+    spendNextEventMatching = null
+    if (isLaunchEcho) return
+    if (!launchSettled) seenBeforeLaunchSettled.add(url)
+    deliver(url)
   })
 
-  let removed = false
+  Promise.resolve()
+    .then(() => App.getLaunchUrl?.())
+    .then((result) => {
+      launchSettled = true
+      const url = result?.url
+      const alreadyDelivered = seenBeforeLaunchSettled.has(url)
+      seenBeforeLaunchSettled.clear()
+      if (!url || alreadyDelivered) return
+      spendNextEventMatching = url
+      deliver(url)
+    })
+    .catch(() => {
+      launchSettled = true
+      seenBeforeLaunchSettled.clear()
+    }) // no launch URL, or a packaging layer that does not implement one
+
   return () => {
-    if (removed) return
-    removed = true
+    if (stopped) return
+    stopped = true
     Promise.resolve(handle).then((h) => h?.remove?.()).catch(() => {})
   }
 }

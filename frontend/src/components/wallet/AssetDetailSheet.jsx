@@ -5,6 +5,8 @@ import { NETWORKS } from '../../config/networks'
 import { priceSourceLabel } from '../../lib/portfolio/prices'
 import { isHomeInstance, instanceFormLabel, formatAssetAmount } from '../../lib/portfolio/aggregate'
 import SensitiveValue from '../common/SensitiveValue'
+import TokenNewsCard from '../news/TokenNewsCard'
+import { isFeatureEnabled } from '../../config/tenant'
 import './AssetDetailSheet.css'
 
 // Member-facing names for the classification provenance (FR-006).
@@ -286,6 +288,16 @@ export default function AssetDetailSheet({ aggregate, onClose }) {
               .join('. ')}
             .
           </p>
+        )}
+
+        {/* Token news (spec 109) — advisory only, mounted AFTER the actions it never gates.
+            Tenant-flagged; NFTs are out of scope (news identity is a fungible-asset fact). */}
+        {isFeatureEnabled('news') && selected && selected.asset.kind !== 'nft' && (
+          <TokenNewsCard
+            chainId={selected.asset.chainId}
+            address={selected.asset.kind === 'native' ? null : selected.asset.address}
+            assetLabel={selected.asset.symbol}
+          />
         )}
       </div>
     </div>

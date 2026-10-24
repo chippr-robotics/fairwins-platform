@@ -50,6 +50,19 @@ vi.mock('../lib/custody/batchPreflight', async (orig) => ({
   previewBatchSupport: vi.fn(async () => m.batchSupport),
 }))
 
+// The Review step now mounts the FR-021 device-loss warning (issue #1405), which reads the
+// session through usePasskeyAccount → useWallet. These suites are about purchase ROUTING, so the
+// session here is a classic wallet and the warning renders nothing; its own three-moment coverage
+// lives in src/test/passkey/deviceLossWarning.test.jsx.
+vi.mock('../hooks/useWalletManagement', () => ({
+  useWallet: () => ({
+    address: '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed',
+    chainId: 137,
+    loginMethod: 'wallet',
+    isConnected: true,
+    provider: null,
+  }),
+}))
 vi.mock('../hooks/useWeb3', () => ({
   useWeb3: () => ({
     account: CONNECTED,

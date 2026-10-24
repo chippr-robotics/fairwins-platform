@@ -39,7 +39,8 @@
  *    about to commit money.
  */
 
-import { Contract, parseUnits } from 'ethers'
+import { parseUnits } from '../../lib/evm/units'
+import { readContract } from '../../lib/chains/readContract'
 
 import { ERC20_ABI } from '../../abis/ERC20'
 import { MAINNET_CHAIN_ID, membershipChainId } from '../../config/networks'
@@ -434,7 +435,7 @@ export async function defaultReadCollateralBalances(input) {
   const tokens = [...wanted.values()]
   const settled = await Promise.allSettled(
     tokens.map((token) =>
-      Promise.resolve().then(() => makeContract(token.address, provider).balanceOf(account)),
+      Promise.resolve().then(() => makeContract(token.address, provider, chainId).balanceOf(account)),
     ),
   )
 
@@ -766,14 +767,25 @@ export async function defaultReadAllowance(input) {
   try {
     const provider = getProvider(chainId)
     if (!provider) return null
-    return bigintOrNull(await makeContract(token, provider).allowance(owner, spender))
+    return bigintOrNull(await makeContract(token, provider, chainId).allowance(owner, spender))
   } catch {
     return null
   }
 }
 
-function defaultErc20(address, provider) {
-  return new Contract(address, ERC20_ABI, provider)
+/**
+ * The default ERC-20 reader. `chainId` is a THIRD argument rather than a replacement: the
+ * `makeContract` seam is injected by tests, and an added parameter leaves every existing fake
+ * working unchanged while the real one names the chain it reads (spec 110). `provider` stays the
+ * availability gate the callers already check before getting here.
+ */
+function defaultErc20(address, provider, chainId) {
+  const call = (functionName, args) =>
+    readContract(chainId, { address, abi: ERC20_ABI, functionName, args })
+  return {
+    balanceOf: (owner) => call('balanceOf', [owner]),
+    allowance: (owner, spender) => call('allowance', [owner, spender]),
+  }
 }
 
 /* ------------------------------------------------------------------------------------------- *

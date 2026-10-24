@@ -50,7 +50,9 @@ export function useAddressScreening() {
    *   force     skip the cache and re-read. A cached 'clear' is fine for
    *             browsing, but a submission-time screen has to be a live read:
    *             a wallet deny-listed since the quote must still be refused
-   *             (FR-032), and the TTL would otherwise hide that for a minute.
+   *             (spec 067 FR-032 — NOT a spec-021 requirement; 021 asks only
+   *             that the warning stay advisory, FR-013), and the TTL would
+   *             otherwise hide that for a minute.
    */
   const screenOne = useCallback(
     (address, chainId, { provider: providerOverride = null, force = false } = {}) => {
@@ -71,7 +73,10 @@ export function useAddressScreening() {
           status = 'uncertain'
         } else {
           try {
-            const res = await screenAddress(address, readProvider)
+            // The entry's own chain — the guard that will enforce it, never one inferred from
+            // whatever connection this happens to be (spec 110). The guard above already
+            // established that this IS the connected chain.
+            const res = await screenAddress(address, readProvider, chainId)
             status = res.available ? (res.allowed ? 'clear' : 'restricted') : 'uncertain'
           } catch {
             status = 'uncertain' // fail-closed (FR-011)

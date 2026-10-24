@@ -21,12 +21,25 @@ const BITCOIN_ADDRESS = 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4'
 const addrRow = (n) => cy.get('input[id^="pt-gp-addr-"]').eq(n - 2)
 const amtRow = (n) => cy.get('input[id^="pt-gp-amt-"]').eq(n - 2)
 
+// ── Issue #1441: the affordance this file drives is WITHDRAWN ────────────────────────────────
+// `GROUP_PAY_ENABLED` in `frontend/src/lib/payments/groupPay.js` is false, so no send surface
+// renders "Add another recipient" and none of the journeys below can start. They are GUARDED,
+// not deleted: the engine, the lib and the components they exercise are all still in the tree,
+// and #1538 flips this constant back with them. A guarded describe reports as pending — which is
+// the point, because "passed" and "never ran" must not look alike (spec 094).
+//
+// Keep this in step with the constant. There is deliberately no import: a Cypress spec cannot
+// read the app's module graph, and a fetch-and-parse would fail open — reporting the suite green
+// on any error, which is the one outcome worse than a pending suite.
+const GROUP_PAY_ENABLED = false
+const groupPayDescribe = GROUP_PAY_ENABLED ? describe : describe.skip
+
 const draftPrimary = (amount = '1') => {
   cy.get('#pt-to', { timeout: 20000 }).type(PAYEE_ONE, { delay: 0 })
   cy.get('#pt-amount').type(amount, { delay: 0 })
 }
 
-describe('Group pay — building the recipient list (release 1.14.0)', () => {
+groupPayDescribe('Group pay — building the recipient list (release 1.14.0)', () => {
   beforeEach(() => {
     cy.clearLocalStorage()
     cy.clearCookies()
@@ -99,7 +112,7 @@ describe('Group pay — building the recipient list (release 1.14.0)', () => {
   })
 })
 
-describe('Group pay — what the confirm screen discloses (release 1.14.0)', () => {
+groupPayDescribe('Group pay — what the confirm screen discloses (release 1.14.0)', () => {
   beforeEach(() => {
     cy.clearLocalStorage()
     cy.clearCookies()
@@ -141,5 +154,32 @@ describe('Group pay — what the confirm screen discloses (release 1.14.0)', () 
 
   it('[GP-09] the group confirm has no serious or critical accessibility violations', () => {
     cy.a11yScan({ context: '.pt-form', label: 'group pay confirm' })
+  })
+})
+
+// The withdrawal itself, which IS shipped and therefore is NOT guarded. This is the whole of
+// group pay's live member-facing behaviour today: there is no control, and the single-recipient
+// send that has always been there is untouched.
+describe('Group pay — withdrawn from the send surfaces (#1441)', () => {
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.clearCookies()
+    cy.mockWeb3Provider({ account: TEST_ACCOUNT, preAuthorized: true })
+  })
+
+  it('[GP-10] Transfer \u25b8 Send offers no multi-recipient control', () => {
+    cy.visit('/wallet?tab=paytransfer')
+    cy.get('#pt-to', { timeout: 20000 }).should('exist')
+    cy.get('[data-testid="group-pay-add"]').should('not.exist')
+    cy.get('[data-testid="group-pay-row"]').should('not.exist')
+  })
+
+  it('[GP-11] a single-recipient send still previews exactly as it always did', () => {
+    cy.visit('/wallet?tab=paytransfer')
+    draftPrimary('1')
+    cy.contains('button', 'Preview').should('be.enabled').click()
+    // "Send", never "Send to N recipients" — and no group confirm anywhere.
+    cy.contains('button', 'Send').should('exist')
+    cy.get('[data-testid="group-pay-confirm"]').should('not.exist')
   })
 })

@@ -209,9 +209,13 @@ async function main() {
       // alone rather than minting a mock (Spec 015, Constitution III).
       console.log(`\nNo real wrapped-native for ${networkName}; allowlisting stablecoin only (no mock).`);
     } else {
-      console.log(`\nNo WMATIC configured for ${networkName}; deploying MockERC20 (18 dec)...`);
+      // WETH9-shaped, not a plain MockERC20 (spec 108): the recorded `wmatic` is what the
+      // Wrap surface resolves as the chain's wrapped native, and a wrapped-native mock with
+      // no payable deposit() made the on-chain wrap flow unrunnable against the local stack.
+      // MockWNative keeps MockERC20's mint/burn test API, so swap fixtures are unchanged.
+      console.log(`\nNo WMATIC configured for ${networkName}; deploying MockWNative (18 dec)...`);
       const mock = await deployDeterministic(
-        "MockERC20",
+        "MockWNative",
         ["Wrapped Matic", "WMATIC", 0],
         generateSalt(SALT_PREFIXES.V2 + "MockWMATIC"),
         deployer

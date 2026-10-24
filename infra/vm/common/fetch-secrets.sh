@@ -7,7 +7,7 @@
 #   1. PER-CONTAINER SCOPING. Cloud Run scoped each secret to exactly one container. The VM must not
 #      widen that. The internet-facing container never receives the other container's credential:
 #        gateway VM: gateway.env (the gateway's own credentials)   engine.env (API_KEY,
-#                    WEBHOOK_SIGNING_KEY, GCP_PRIVATE_KEY — the exported SA key holding
+#                    WEBHOOK_SIGNING_KEY, STORAGE_ENCRYPTION_KEY, GCP_PRIVATE_KEY — the exported SA key holding
 #                    cloudkms.signerVerifier on BOTH hot gas keys; the public-facing gateway
 #                    container MUST NOT see it)   finops.env / alloy.env (vendor READ tokens)
 #        bundler VM: nginx.env (ORIGIN_LOCK_SECRET only)   alto.env (the executor key + alto's
@@ -143,10 +143,71 @@ case "$ROLE" in
     emit "$GW" RPC_URL_PRIMARY_137       QUICKNODE_POLYGON_API       latest optional \
       "chain 137 reads fall back to the public endpoints in RPC_URLS_137"
 
+    # ── Keyed RPC issuance (spec 107, #1469) ─────────────────────────────────────────────────
+    # Both OPTIONAL by the never-stranded rule: either absent => POST /v1/access/rpc answers 503
+    # access_unconfigured and the SPA keeps reading public capacity exactly as it does today.
+    #
+    # RPC_ACCESS_SIGNING_KEY is KEY MATERIAL (an ES256 private key, PEM). It signs the short-lived
+    # read-only JWTs browsers present at the provider; its public twin lives on issuance endpoint
+    # 657013 under kid k1. Never echoed, never in a URL, never logged — the gateway loads it at
+    # boot and fails the deploy loudly if it is present but unusable.
+    emit "$GW" RPC_ACCESS_SIGNING_KEY    fairwins-rpc-access-signing-key latest optional \
+      "keyed RPC issuance answers 503 access_unconfigured; the SPA reads public capacity"
+    # The FR-026 enforcement check (is the endpoint ACTUALLY demanding the credential, with the
+    # read-only whitelist switched ON?) reads the provider's admin API. Delivered from
+    # finops-quicknode-key — ALREADY granted to this node for the exporter, and verified live to
+    # read per-endpoint security state — rather than granting the account-wide QUICKNODE_ADMIN_API
+    # to the public-facing container for nothing. Note this response carries live endpoint tokens
+    # in plaintext; the gateway's verifier destructures the flags it needs and drops the body.
+    emit "$GW" RPC_ACCESS_ADMIN_KEY      finops-quicknode-key        latest optional \
+      "enforcement reads become unverifiable, which REFUSES issuance; SPA falls back to public capacity"
+
     log "engine container:"
     emit "$EN" API_KEY                   relay-engine-api-key        2      required
     emit "$EN" WEBHOOK_SIGNING_KEY       relay-webhook-secret        2      required
     emit "$EN" GCP_PRIVATE_KEY           relay-engine-gcp-private-key latest required
+    # #1652: the key the engine encrypts its signer + notification records with at rest in redis
+    # (OZ Relayer v1.4.0 src/utils/encryption.rs: base64 of exactly 32 bytes).
+    #
+    # OPTIONAL, AND IT IS THE SWITCH. Every boot resets the checkout to origin/main (startup.sh), so
+    # this file reaches the VM at the first reboot after promotion, whether or not an operator has
+    # created the secret version. `required` would turn that into a die() here and the WHOLE stack
+    # down — gateway, paymaster and engine — for a storage-mode upgrade. Instead, redis storage is
+    # enabled only when the key exists: absent => no REPOSITORY_STORAGE_TYPE line, the engine keeps
+    # today's in-memory behaviour, and this journal line names why. Creating version 1 during the
+    # drained rollout window (runbook "Storage mode") is the deliberate act that switches storage.
+    #
+    # PINNED TO VERSION 1, not latest: a ROTATION of this key makes every encrypted record already in
+    # redis undecryptable, so adding a version must never silently change what a restart reads.
+    # Rotating means a reviewed edit of this pin PLUS a one-shot storage reset on a drained lane.
+    #
+    # The payload must carry NO trailing newline (create it with printf / tr -d '\n'): emit() writes
+    # it verbatim between quotes, and a newline inside the base64 is a different, invalid key.
+    #
+    # ONE-WAY ONCE ARMED. Optional is right only BEFORE the cutover. After it, a transient gcloud/IAM
+    # failure would otherwise boot the engine in-memory, ignoring everything in redis, with nothing but
+    # a journal line to say so. So the first successful arm writes a marker on PERSISTENT disk (RUN_DIR
+    # is tmpfs), and from then on the key is required like every other engine credential. A deliberate
+    # rollback removes the marker (runbook: Storage mode, Rollback).
+    STATE_DIR="${FW_STATE_DIR:-/var/lib/fairwins}"
+    ARMED="${STATE_DIR}/engine-storage-armed"
+    if [ -f "$ARMED" ]; then
+      emit "$EN" STORAGE_ENCRYPTION_KEY  relay-engine-storage-key    1      required
+    else
+      emit "$EN" STORAGE_ENCRYPTION_KEY  relay-engine-storage-key    1      optional \
+        "engine stays on IN-MEMORY storage; create relay-engine-storage-key version 1 to switch to redis (runbook: Storage mode)"
+    fi
+    if grep -q '^STORAGE_ENCRYPTION_KEY=' "$EN"; then
+      # The engine needs base64 of exactly 32 bytes (v1.4.0 src/utils/encryption.rs). An empty or
+      # newline-terminated payload would arm redis and then crash-loop the engine; refuse it here, by name.
+      key="$(sed -n "s/^STORAGE_ENCRYPTION_KEY='\(.*\)'$/\1/p" "$EN")"
+      [ "$(printf '%s' "$key" | base64 -d 2>/dev/null | wc -c)" -eq 32 ] \
+        || die "relay-engine-storage-key:1 is not base64 of 32 bytes (empty, or a trailing newline?) — recreate it per the runbook"
+      unset key
+      printf "REPOSITORY_STORAGE_TYPE='redis'\n" >>"$EN"
+      mkdir -p "$STATE_DIR" && : >"$ARMED"
+      log "  REPOSITORY_STORAGE_TYPE <- redis (storage key present; armed marker ${ARMED})"
+    fi
 
     # server.js:48-61 prefers PM_SIGNER_PRIVATE_KEY over PM_SIGNER_KMS_KEY with NO guard and NO
     # warning. A raw key present anywhere in the gateway's environment silently downgrades paymaster
@@ -180,6 +241,17 @@ case "$ROLE" in
     emit "$FO" RPC_URL_PRIMARY_137        QUICKNODE_POLYGON_API     latest optional \
       "chain 137 reads fall back to the public endpoints in RPC_URLS_137"
     emit "$FO" POLYMARKET_API_KEY         POLYMARKET_API_KEY        latest optional
+    # A THIRD Pinata credential, and the distinction is the point. `fairwins-pinata-jwt` (workstation,
+    # `publish` profile) and the SPA's VITE_PINATA_JWT both authorise pinJSONToIPFS/pinFileToIPFS —
+    # they can WRITE to a member-facing store. Neither may ever land here: the exporter's guarantee is
+    # that it holds nothing capable of changing anything (FR-026), and the guard below only catches
+    # things named like signing keys, so a pinning JWT would sail straight past it.
+    #
+    # finops-pinata-read-jwt must be a Pinata key scoped to data/userPinnedDataTotal AND NOTHING
+    # ELSE. Absent ⇒ the pinata source reads not-configured, which costs a storage figure and
+    # nothing else. Create it per docs/runbooks/finops-operations.md#pinata-cost.
+    emit "$FO" FINOPS_PINATA_READ_JWT     finops-pinata-read-jwt    latest optional \
+      "the pinata cost/usage source reads not-configured"
 
     log "alloy container:"
     emit "$AY" GRAFANA_CLOUD_PROM_TOKEN   finops-grafana-cloud-token latest optional
@@ -245,29 +317,57 @@ esac
 #   emit "$GW" RPC_WSS_URL_137          QUICKNODE_POLYGON_WSS latest optional
 #   emit "$GW" RPC_WSS_URL_80002        QUICKNODE_AMOY_WSS    latest optional
 #
-# ---- the numbered MULTICHAIN endpoints (QUICKNODE_RPC_001..005, 2026-08-30) are not delivered
-#      either, for the same reason: no chain they serve is in ENABLED_CHAIN_IDS / the FinOps
-#      cohort today (both are 63,137, and 137 already rides QUICKNODE_POLYGON_API above). ----
+# ---- the PER-CHAIN endpoints for chains 1 / 10 / 8453 / 42161 are not delivered either ----
 #
-# 001 is the one with a foreseeable VM consumer: its base network is eth, and the SAME token
-# serves Ethereum 1, Optimism 10, Base 8453 and Arbitrum 42161 by hostname infix (Ethereum
-# mainnet OMITS the infix — `<name>.quiknode.pro/<token>`; the others are
-# `<name>.<slug>.quiknode.pro/<token>`, slugs in scripts/secrets/quicknode-chains.js). Because
-# the config surface (`RPC_URL_PRIMARY_<chainId>`) already exists for every chain, wiring a new
-# chain when ENABLED_CHAIN_IDS grows is three steps, none of them here first:
+# Step 1 of the recipe that used to live here is DONE. Each of those four chains now has its own
+# Secret Manager container holding a VERIFIED per-chain URL, derived once from the QUICKNODE_RPC_001
+# multichain endpoint rather than re-derived by every consumer:
 #
-#   1. store the derived per-chain URL as ITS OWN secret version — derive and VERIFY it with
-#      `node scripts/secrets/quicknode-chains.js --verify` first (a wrong infix answers 200 with
-#      ANOTHER CHAIN'S state, not 401; the gateway's boot-time eth_chainId assertion is the last
-#      line of defence, not the first) — or emit from QUICKNODE_RPC_001_API directly if the
-#      chain is Ethereum mainnet, whose URL is the payload verbatim;
-#   2. add the secret to `gateway_secret_ids` in infra/terraform/environments/prod/terraform.tfvars;
-#   3. uncomment/add the matching emit lines, e.g.:
-#        emit "$GW" RPC_URL_PRIMARY_1    QUICKNODE_RPC_001_API latest optional
-#        emit "$FO" RPC_URL_PRIMARY_1    QUICKNODE_RPC_001_API latest optional
+#   Ethereum  1      fairwins-quicknode-ethereum-url
+#   Optimism  10     fairwins-quicknode-optimism-url
+#   Base      8453   fairwins-quicknode-base-url
+#   Arbitrum  42161  fairwins-quicknode-arbitrum-url
 #
-# The frontend build's VITE_RPC_URL_MAINNET/OPTIMISM/BASE/ARBITRUM primaries are the consumers
-# that exist TODAY; they are deploy-time envs set outside this script (VITE_ values compile into
-# the public bundle — spec 097 rule 5 — so only a domain-restricted token belongs there).
+# They are declared in scripts/secrets/registry.js, managed + granted to the WORKSTATION only in
+# infra/terraform/environments/prod/terraform.tfvars, and written by
+# `node scripts/secrets/quicknode-chains.js --provision 1,10,8453,42161`, which asserts eth_chainId
+# and refuses to store a URL that did not verify. Doing the infix swap once, under verification, is
+# the whole reason these are per-chain secrets and not one multichain payload: a wrong infix answers
+# 200 WITH ANOTHER CHAIN'S STATE, not 401, and the gateway's boot-time assertion is the last line of
+# defence rather than the first.
+#
+# NO NODE READS THEM, and that is not an oversight. This estate's cohort is ENABLED_CHAIN_IDS /
+# FINOPS_COHORT_CHAIN_IDS = "63,137"; more to the point the gateway does not DEFINE those chains at
+# all (CHAIN_DEFS in services/relay-gateway/src/config/chains.js covers 61, 63, 137, 80002), so an
+# RPC_URL_PRIMARY_1 here would be an env var nothing parses — a credential sitting in a container
+# for no benefit, which is the same reasoning that keeps the WSS/AMOY pair out of this file.
+#
+# When a node genuinely needs one, it is two steps, and the config surface
+# (`RPC_URL_PRIMARY_<chainId>`) already exists:
+#
+#   1. add the secret to `gateway_secret_ids` in infra/terraform/environments/prod/terraform.tfvars
+#      — without the accessor binding the fetch fails, and (being optional) it fails on ONE
+#      journal line;
+#   2. add the matching emit lines, e.g.:
+#        emit "$GW" RPC_URL_PRIMARY_1    fairwins-quicknode-ethereum-url latest optional
+#        emit "$FO" RPC_URL_PRIMARY_1    fairwins-quicknode-ethereum-url latest optional
+#
+# QUICKNODE_RPC_002..005 stay undelivered with no per-chain derivative at all. 003 (sol) / 004
+# (btc) / 005 (zec) have no consumer — 004 is not even a drop-in, since the spec-061 gateway module
+# speaks Esplora REST (BTC_ESPLORA_URL), not Bitcoin Core JSON-RPC.
+#
+# ⚠ 002 IS NOT A SECOND CREDENTIAL, AND IT CARRIES A TRAP. Byte-compared 2026-09-01:
+# QUICKNODE_RPC_002_API and QUICKNODE_POLYGON_API are the same endpoint with the same token,
+# differing by ONE BYTE — 002 has a TRAILING NEWLINE (88 vs 87). `emit` above writes
+# VAR='<payload>' with the payload verbatim (invariant 3, and deliberately so — a PEM must survive
+# unchanged), which means swapping alto's ALTO_RPC_URL onto 002 would hand it a URL with a newline
+# INSIDE the quotes. alto has no failover, so that is a bundler outage arriving as a malformed-URL
+# error nobody expects from a "same credential" swap. If 002 is ever wired here, re-store it
+# without the trailing byte FIRST and re-read it to confirm 87 bytes.
+#
+# The frontend build's VITE_RPC_URL_MAINNET/OPTIMISM/BASE/ARBITRUM primaries are a SEPARATE
+# credential and must stay one: VITE_ values compile into the public bundle (spec 097 rule 5), so
+# only a QuickNode endpoint with referrer/origin restrictions may be set there — NEVER the archive
+# URLs above. They are deploy-time build args on the Cloud Build trigger, set outside this script.
 
 log "wrote per-container env files to ${RUN_DIR} (tmpfs, 0600)"

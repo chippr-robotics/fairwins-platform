@@ -1,5 +1,5 @@
 {
-  "description": "Catalog of feature ids a tenant manifest may enable. Consumed by scripts/tenants/validate-tenant-manifest.js and frontend/src/config/tenant.js. Adding a feature here requires the corresponding surface to honor isFeatureEnabled().",
+  "description": "Catalog of feature ids a tenant manifest may enable. Consumed by scripts/tenants/validate-tenant-manifest.js and frontend/src/config/tenant.js. Adding a feature here requires the corresponding surface to honor isFeatureEnabled(). `notes` documents a feature whose meaning is not obvious from its id; the validator reads `features` only.",
   "features": [
     "wagers",
     "pools",
@@ -16,6 +16,13 @@
     "token-mint",
     "bitcoin",
     "recovery",
-    "assistant"
-  ]
+    "assistant",
+    "assistant-byok",
+    "news"
+  ],
+  "notes": {
+    "assistant": "The in-app assistant (spec 095) and the Tools > Assistant tab that hosts its preferences and API access. Off per member until opted in.",
+    "assistant-byok": "Spec 104: offers the GutterToken bring-your-own-key rail as an assistant provider. The member pastes their own GutterToken sk- key (stored on the device only, wallet-scoped, never backed up) and the browser calls api.guttertokens.com directly; the tenant is not in the request path, sees no message content, and charges nothing. Requires `assistant`. Without it a tenant keeps the assistant on the membership-funded rail only. The signup link may carry settings.assistant.guttertokenReferralCode.",
+    "news": "Spec 109: third-party token news cards on the portfolio asset detail and the trade pair view, plus the assistant get_token_news tool surface. Read-only and advisory: no value path gates on it. Off hides every news surface; the gateway module (NEWS_ENABLED) must also be on for content to render — either switch off means honest absence."
+  }
 }

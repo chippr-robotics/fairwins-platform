@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ethers } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { useSwitchChain } from 'wagmi'
 import AmountKeypad from '../ui/AmountKeypad'
 import AddressInput from '../ui/AddressInput'
@@ -15,6 +15,7 @@ import { useSelectableAssets } from '../../hooks/useSelectableAssets'
 import { useEffectiveAccount } from '../../hooks/useEffectiveAccount'
 import { useBitcoinWallet } from '../../hooks/useBitcoinWallet'
 import { useAddressScreening } from '../../hooks/useAddressScreening'
+import AddressScreenNotice from '../ui/AddressScreenNotice'
 import { useGroupPay } from '../../hooks/useGroupPay'
 import { useNotification } from '../../hooks/useUI'
 import { getNetwork } from '../../config/networks'
@@ -41,7 +42,7 @@ function groupNotice(summary) {
 
 /** Format base units for the keypad; trims trailing zeros ("12.50" → "12.5"). */
 function formatUnitsForKeypad(units, decimals) {
-  const s = ethers.formatUnits(units, decimals)
+  const s = formatUnits(units, decimals)
   const trimmed = s.includes('.') ? s.replace(/0+$/, '').replace(/\.$/, '') : s
   return trimmed === '' ? '0' : trimmed
 }
@@ -77,8 +78,6 @@ function PayPanel({ onSuccess }) {
   const { address: effectiveAddress, isActingAccount } = useEffectiveAccount()
   const actingAddress = isActingAccount ? effectiveAddress : null
   const { options, defaultKey, isGasless } = useSelectableAssets({ activity: ASSET_ACTIVITIES.PAY, actingAddress })
-  // Group pay (release 1.14.0): dormant until the member adds a second recipient.
-  const groupPay = useGroupPay()
 
   const [selectedKey, setSelectedKey] = useState(null)
   const [amount, setAmount] = useState('')
@@ -101,8 +100,6 @@ function PayPanel({ onSuccess }) {
   const [groupResult, setGroupResult] = useState(null)
 
   const connectedChainId = Number(chainId)
-  const groupBusy = groupPay.status === 'screening' || groupPay.status === 'submitting'
-  const busy = status === 'signing' || status === 'submitting' || status === 'pending' || groupBusy
 
   // Preference-aware default (spec 058): the home currency preference still picks
   // the STARTING asset — 'native' preselects the connected native coin, otherwise
@@ -125,6 +122,13 @@ function PayPanel({ onSuccess }) {
   const symbol = selectedAsset?.symbol || ''
   const bal = selectedAsset?.balance ?? null
   const gasless = selectedAsset ? isGasless(selectedAsset) : false
+
+  // Group pay (release 1.14.0): dormant until the member adds a second recipient. It is handed
+  // the selected asset because issue #1441's availability is a fact about the asset's own
+  // NETWORK, not only about the acting identity — hence its position here, after the selection.
+  const groupPay = useGroupPay({ asset: selectedAsset })
+  const groupBusy = groupPay.status === 'screening' || groupPay.status === 'submitting'
+  const busy = status === 'signing' || status === 'submitting' || status === 'pending' || groupBusy
 
   useEffect(() => { refreshBalances() }, [refreshBalances])
 
@@ -487,7 +491,18 @@ function PayPanel({ onSuccess }) {
 
       {/* Recipient — the standard address entry stack (typed/pasted + book + scan). */}
       <div className="fm-form-group fm-form-full">
-        <label className="fm-label" htmlFor="pay-to">To</label>
+        <span className="fm-label-row fm-label-row-spaced">
+          <label className="fm-label" htmlFor="pay-to">To</label>
+          {/* Recipient ONE of a group, not the only recipient — see the note in TransferForm. */}
+          {isGroup && (
+            <span
+              className="fm-badge-multi"
+              aria-label={`Multiple recipients: ${allRecipients.length}`}
+            >
+              Multi · {allRecipients.length}
+            </span>
+          )}
+        </span>
         <div className="fm-input-with-action">
           <div className="fm-address-input-wrap">
             <AddressInput
@@ -516,13 +531,15 @@ function PayPanel({ onSuccess }) {
         </div>
         <QRScanner isOpen={scanOpen} onClose={() => setScanOpen(false)} onScanSuccess={handleScan} />
         {scanNotice && <div className="fm-hint" role="status">{scanNotice}</div>}
+        {/* Estate-wide advisory screen (issue #1458): every list on every cohort chain. */}
+        <AddressScreenNotice address={toResolved} chainId={assetChainId} />
+        {/* The per-chain `screening` read is a SEPARATE fact: it is the guard on the chain the value
+            moves on, the read the contract will repeat, and it is what withholds the button — so
+            its refusal is stated as its own alert, next to the button it disables. */}
         {screening === 'restricted' && (
           <div className="fm-error-banner" role="alert">
-            This address is flagged by sanctions screening. Transfers to it are blocked.
+            This address is flagged by sanctions screening on this network. Pay is withheld: the on-chain guard would refuse it.
           </div>
-        )}
-        {screening === 'uncertain' && toResolved && (
-          <span className="fm-hint">Screening unavailable — proceed with care.</span>
         )}
         {isGroup && issuesFor(PRIMARY_ID).map((issue) => (
           <div
@@ -534,7 +551,8 @@ function PayPanel({ onSuccess }) {
           </div>
         ))}
 
-        {/* Rows 2..N. Absent — and inert — until the member presses Add. */}
+        {/* Rows 2..N. Withdrawn entirely while `available` is false (#1441); otherwise
+            absent — and inert — until the member presses Add. */}
         <GroupPayRecipients
           recipients={extraRecipients}
           onChange={setExtraRecipients}
@@ -543,6 +561,7 @@ function PayPanel({ onSuccess }) {
           symbol={symbol}
           disabled={busy}
           idPrefix="pay"
+          available={Boolean(groupPay.available)}
         />
       </div>
 

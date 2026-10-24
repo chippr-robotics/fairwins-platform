@@ -106,6 +106,8 @@ export const SHARED_MODULES = [
   { specifier: 'react-dom', package: 'react-dom' },
   { specifier: 'react/jsx-runtime', package: 'react' },
   { specifier: 'ethers', package: 'ethers' },
+  // spec 110 Phase 0 (#1591): additive — see HOST_SHARED_MODULES in the host manifest module.
+  { specifier: 'viem', package: 'viem' },
   { specifier: '@fairwins/miniapp-sdk', package: '@fairwins/miniapp-sdk', exports: ['useMiniAppHost'] }
 ]
 

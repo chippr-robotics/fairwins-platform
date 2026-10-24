@@ -16,7 +16,8 @@
  * '1'), driven by `stablecoin.domainVersion` in config/networks.js — `null` means the token lacks EIP-3009
  * and this whole path is skipped in favour of a plain `transfer` (e.g. Mordor/ETC USC).
  */
-import { ethers } from 'ethers'
+import { toHex } from 'viem'
+import { splitSignature } from '../evm/signature'
 import { TRANSFER_WITH_AUTHORIZATION_TYPES } from '@fairwins/intent-types'
 
 /*
@@ -64,7 +65,7 @@ export async function signTransferAuthorization({
 }) {
   const from = await signer.getAddress()
   const now = nowSeconds != null ? nowSeconds : Math.floor(Date.now() / 1000)
-  const nonce = ethers.hexlify(ethers.randomBytes(32))
+  const nonce = toHex(crypto.getRandomValues(new Uint8Array(32)))
   const domain = { name: tokenName, version: tokenVersion, chainId: Number(chainId), verifyingContract: token }
   const message = {
     from,
@@ -75,9 +76,11 @@ export async function signTransferAuthorization({
     validBefore: now + validitySeconds,
     nonce,
   }
-  const sig = ethers.Signature.from(
-    await signer.signTypedData(domain, TRANSFER_WITH_AUTHORIZATION_TYPES, message)
-  )
+  // `lib/evm/signature.js`, not viem's `parseSignature` — which refuses the 64-byte compact form a
+  // wallet may return AND hands back `v` as a BIGINT where ethers gave a number. This authorization
+  // is serialized to a relayer, and `JSON.stringify` throws on a bigint (spec 110, divergence 10).
+  const sig = splitSignature(await signer.signTypedData(domain, TRANSFER_WITH_AUTHORIZATION_TYPES, message))
+  if (!sig) throw new Error('The wallet returned something that is not a signature, so nothing has been authorized.')
   return { from, to, value, validAfter: 0, validBefore: message.validBefore, nonce, v: sig.v, r: sig.r, s: sig.s }
 }
 

@@ -11,8 +11,14 @@
  *   (see useOpenChallengeAccept().lookup — never throws)
  * deps.resolvePool(phrase, lang) → { summary } | { notFound:true, reason } ; MAY throw on RPC/signer error
  *   (see usePools().resolvePhrase)
+ * deps.resolveFunding(phrase, lang) → same shape, against the FUNDING-pool factory (spec 103, FR-021);
+ *   optional — absent means "not checked", which is reported honestly as a `funding` errored source only
+ *   when it was supplied and threw.
  *
- * Result kinds: format-error | challenge | pool | collision | not-actionable | self | none | lookup-failed.
+ * Result kinds: format-error | challenge | pool | funding | collision | not-actionable | self | none |
+ * lookup-failed. A funding pool never collides with the others silently: when both a wager-side match and
+ * a funding match exist the wager result wins and the funding pool rides along as `result.funding` so the
+ * UI can offer it as a second row.
  * Distinguishing "none" (both sources checked, no match) from "lookup-failed" (a source errored) is the
  * FR-025 guarantee — we never show "no match" when we could not actually check.
  */
@@ -84,27 +90,35 @@ export async function resolvePhraseLookup({ phrase, lang = 'en', account = null,
   // Challenges are English-only; only attempt the challenge lookup for a valid English four-word code.
   const englishValid = isValidCode(normalized)
 
-  const [challengeSettled, poolSettled] = await Promise.allSettled([
+  const [challengeSettled, poolSettled, fundingSettled] = await Promise.allSettled([
     englishValid ? deps.lookupChallenge(normalized) : Promise.resolve({ status: 'not-found', reason: 'not-english' }),
     poolOutcome(deps.resolvePool, normalized, lang),
+    deps.resolveFunding
+      ? poolOutcome(deps.resolveFunding, normalized, lang)
+      : Promise.resolve({ status: 'not-found', reason: 'not-checked' }),
   ])
 
   const challenge = settledToOutcome(challengeSettled)
   const pool = settledToOutcome(poolSettled)
+  const funding = settledToOutcome(fundingSettled)
 
   const challengeMatched = challenge.status === 'matched'
   const poolMatched = pool.status === 'matched'
+  const fundingMatched = funding.status === 'matched'
+  const withFunding = (res) => (fundingMatched ? { ...res, funding: funding.payload } : res)
 
   if (challengeMatched && poolMatched) {
-    return { kind: 'collision', challenge: challenge.payload, pool: pool.payload }
+    return withFunding({ kind: 'collision', challenge: challenge.payload, pool: pool.payload })
   }
-  if (challengeMatched) return classifyChallenge(challenge.payload, account)
-  if (poolMatched) return classifyPool(pool.payload, account, nowSec)
+  if (challengeMatched) return withFunding(classifyChallenge(challenge.payload, account))
+  if (poolMatched) return withFunding(classifyPool(pool.payload, account, nowSec))
+  if (fundingMatched) return { kind: 'funding', match: funding.payload }
 
   // Neither matched: distinguish a genuine empty result from a source that could not be checked.
   const erroredSources = []
   if (challenge.status === 'errored') erroredSources.push('challenge')
   if (pool.status === 'errored') erroredSources.push('pool')
+  if (funding.status === 'errored') erroredSources.push('funding')
   if (erroredSources.length > 0) return { kind: 'lookup-failed', sources: erroredSources }
   return { kind: 'none' }
 }

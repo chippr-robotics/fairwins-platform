@@ -37,7 +37,7 @@ const REQUIRED_RPCS = [
   'https://rpc-amoy.polygon.technology', // Polygon Amoy (80002)
   'https://polygon-bor-rpc.publicnode.com', // Polygon mainnet (137)
   'https://rpc.mordor.etccooperative.org', // Ethereum Classic Mordor (63)
-  'https://etc.rivet.link', // Ethereum Classic mainnet (61)
+  'https://etc.etcdesktop.com', // Ethereum Classic mainnet (61) — replaced etc.rivet.link, which stopped resolving (NXDOMAIN)
   // Ethereum family (spec 048) — selectable value networks; portfolio reads and
   // earn position reads (spec 050) hit these directly.
   'https://ethereum-rpc.publicnode.com', // Ethereum mainnet (1)

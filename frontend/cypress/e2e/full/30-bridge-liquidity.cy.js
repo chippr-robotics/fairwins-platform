@@ -27,7 +27,7 @@
 
 const MEMBER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266' // hardhat #0
 const USDC = '0xbc4D54AE49ED9C6075770CD6acA930A728dcf526'   // the local payment token (18 dec here)
-const WMATIC = '0x007e106a5664D48e02f571b58694B74c9D5c22a1' // the local wrapped native (deployment key 'wmatic'; the app labels it WPOL)
+const WMATIC = '0x637914a81B4F67BeA3acd94fc5a233656f8C08f7' // the local wrapped native (deployment key 'wmatic'; the app labels it WPOL — MockWNative since spec 108)
 const ROUTER = '0x5f3f1dBD7B74C6B46e8c44f98792A1dAf8d69154' // liquidityRouter (nonce-derived)
 const BRIDGE_ROUTER = '0x4c5859f0F772848b2D91F1D83E2Fe57935348029' // bridgeRouter (nonce-derived)
 // The destination leg. Sepolia's USDC — the app's own registry entry for chain 11155111, which

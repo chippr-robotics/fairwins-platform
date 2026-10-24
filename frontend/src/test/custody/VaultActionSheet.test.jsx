@@ -3,7 +3,7 @@
 //
 // What is asserted here is the SHEET's own contract — which actions it offers, which it closes and
 // why, and that each view is wired to the vault in scope. The flows themselves keep their own
-// suites (CreateVaultWizard, LoadVaultForm, ProposeTransactionForm, ProposalQueue).
+// suites (CreateVaultFlow, LoadVaultForm, ProposeTransactionForm, ProposalQueue).
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
@@ -21,6 +21,10 @@ vi.mock('../../components/ui/QRScanner', () => ({ default: () => null }))
 let walletCtx = { address: '0x1111111111111111111111111111111111111111', chainId: 63, switchNetwork: vi.fn() }
 vi.mock('../../hooks', () => ({ useWallet: () => walletCtx }))
 vi.mock('../../hooks/useVaultProposals', () => ({ useVaultProposals: () => null }))
+// The guided creation flow keeps its own suite (createflow); the sheet only mounts it.
+vi.mock('../../components/custody/createflow/CreateVaultFlow', () => ({
+  default: () => <div data-testid="create-flow-stub" aria-label="Create a vault" />,
+}))
 
 import VaultActionSheet from '../../components/custody/VaultActionSheet'
 import { unavailableReason } from '../../lib/custody/vaultActions'
@@ -95,17 +99,16 @@ describe('VaultActionSheet', () => {
 
   it('opens straight onto the action the caller asked for, and can go back to the chooser', () => {
     renderSheet({ initialAction: 'create' })
-    expect(screen.getByRole('form', { name: /create a vault/i })).toBeInTheDocument()
+    expect(screen.getByTestId('create-flow-stub')).toBeInTheDocument()
     expect(screen.queryByTestId('vault-action-create')).not.toBeInTheDocument()
     fireEvent.click(screen.getByTestId('vault-action-back'))
     expect(screen.getByTestId('vault-action-create')).toBeInTheDocument()
   })
 
-  it('mounts the creation wizard, defaulted to a starter policy', () => {
+  it('mounts the guided creation flow (spec 105)', () => {
     renderSheet()
     fireEvent.click(screen.getByTestId('vault-action-create'))
-    expect(screen.getByRole('form', { name: /create a vault/i })).toBeInTheDocument()
-    expect(screen.getByLabelText(/^starter policy/i)).toBeChecked()
+    expect(screen.getByTestId('create-flow-stub')).toBeInTheDocument()
   })
 
   it('mounts the cross-chain load form', () => {
@@ -180,13 +183,12 @@ describe('VaultActionSheet', () => {
     expect(screen.getByRole('button', { name: /^approve$/i })).toBeEnabled()
   })
 
-  it('says why creation is closed rather than hiding it', () => {
+  it('creation and loading stay OPEN whatever chain the wallet is on (spec 105 — chain-abstracted)', () => {
+    // The guided flow deploys to the networks the member picks, switching the wallet at signature
+    // time, and loading searches every custody network — so the connected chain gates neither door.
     renderSheet({ canCreateHere: false })
-    expect(screen.getByTestId('vault-action-create')).toBeDisabled()
-    expect(screen.getByTestId('vault-action-load')).toBeDisabled()
-    expect(screen.getByTestId('vault-action-create')).toHaveTextContent(
-      /vaults are not available on ethereum classic mordor/i,
-    )
+    expect(screen.getByTestId('vault-action-create')).toBeEnabled()
+    expect(screen.getByTestId('vault-action-load')).toBeEnabled()
   })
 
   it('says why propose and approve are closed with no vault open', () => {

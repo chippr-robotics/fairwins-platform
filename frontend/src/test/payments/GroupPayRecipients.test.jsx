@@ -143,3 +143,34 @@ describe('per-row issues', () => {
     expect(screen.getByText(/appears more than once/)).toBeInTheDocument()
   })
 })
+
+/*
+ * Issue #1441 — `available` withdraws the editor entirely. Two properties, and the second is the
+ * one that matters: the control disappears, AND any list already drafted is emptied. Rows left in
+ * the parent's state behind a control that is gone would still be submitted as a group payment
+ * the member could no longer see or edit.
+ */
+describe('withdrawn (#1441)', () => {
+  it('renders nothing at all when the affordance is unavailable', () => {
+    setup({ available: false })
+    expect(screen.queryByTestId('group-pay-add')).toBeNull()
+    expect(screen.queryAllByTestId('group-pay-row')).toHaveLength(0)
+  })
+
+  it('empties a list that already exists, so nothing hidden can be submitted', () => {
+    const { onChange } = setup({ available: false, recipients: [makeRecipient({ address: A })] })
+    expect(onChange).toHaveBeenCalledWith([])
+    expect(screen.queryAllByTestId('group-pay-row')).toHaveLength(0)
+  })
+
+  it('leaves an already-empty list alone rather than committing a redundant change', () => {
+    const { onChange } = setup({ available: false })
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('renders the list as before when it is available', () => {
+    setup({ available: true, recipients: [makeRecipient({ address: A })] })
+    expect(screen.getByTestId('group-pay-add')).toBeInTheDocument()
+    expect(screen.getAllByTestId('group-pay-row')).toHaveLength(1)
+  })
+})

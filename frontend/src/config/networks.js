@@ -260,7 +260,12 @@ const NETWORKS = {
     // POL since Polygon's MATIC → POL migration (the testnet gas token followed
     // mainnet's rebrand). Same coin, same decimals — only the ticker moved.
     nativeCurrency: { decimals: 18, name: 'POL', symbol: 'POL' },
-    rpcUrl: import.meta.env?.VITE_RPC_URL_AMOY || 'https://rpc-amoy.polygon.technology',
+    // publicnode, not Polygon's own `rpc-amoy.polygon.technology`: the official endpoint
+    // stopped answering browser reads for the testnet staging build (issue #1458 QA round —
+    // every Amoy screening source came back unreadable while the same calls succeed here),
+    // and it is the odd one out anyway, since Polygon mainnet, Sepolia and Hoodi all default
+    // to publicnode already. A member can still point `network_endpoints` anywhere (spec 069).
+    rpcUrl: import.meta.env?.VITE_RPC_URL_AMOY || 'https://polygon-amoy-bor-rpc.publicnode.com',
     explorer: { name: 'Polygonscan', baseUrl: 'https://amoy.polygonscan.com' },
     // The Graph endpoint that indexes this chain's WagerRegistry. When present,
     // the wager list/reports read from the subgraph; when null (see Mordor),
@@ -468,13 +473,23 @@ const NETWORKS = {
     // Surfaced in the My Account → Network tab as a user-switchable network.
     selectable: true,
     nativeCurrency: { decimals: 18, name: 'Ethereum Classic', symbol: 'ETC' },
-    rpcUrl: import.meta.env?.VITE_RPC_URL_ETC || 'https://etc.rivet.link',
-    // Build-level last resort when the primary default above is unreachable and the member
-    // hasn't configured their own endpoint (spec 069) — without this, a member on default
-    // settings has zero redundancy on a community-run RPC. Verified independently to answer
-    // eth_chainId with a correct `access-control-allow-origin` header on both the preflight
-    // and the real request. Override via VITE_RPC_URL_ETC_FAILOVER.
-    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_ETC_FAILOVER || 'https://etc.etcdesktop.com',
+    // `etc.rivet.link` was the default here until it stopped resolving entirely
+    // (NXDOMAIN — the host is gone, not down), which cost every ETC read a failed DNS
+    // lookup before the failover leg could answer. etcdesktop was already the verified
+    // failover and is promoted in its place: it answers eth_chainId with `0x3d` and a
+    // correct `access-control-allow-origin` on both the preflight and the real request.
+    rpcUrl: import.meta.env?.VITE_RPC_URL_ETC || 'https://etc.etcdesktop.com',
+    // NO BUILD DEFAULT FAILOVER, deliberately — and this is a smaller loss than it looks:
+    // rivet was the only other default, and it was already dead, so ETC has in practice
+    // been running on one endpoint for as long as that host has been gone. Shipping a
+    // second URL is only redundancy if it works, and every other public ETC RPC checked
+    // (geth-at.etc-network.info, etccooperative, rivet.cloud) either sends no
+    // `access-control-allow-origin` — unusable from a browser at any price — or was
+    // already rate-limiting. A URL that cannot answer is not a failover; it is a
+    // guaranteed wasted round-trip on the way to the one that can. Ops can point
+    // VITE_RPC_URL_ETC_FAILOVER at a keyed endpoint, and a member can set their own
+    // (spec 069), the moment one is available.
+    rpcFailoverUrl: import.meta.env?.VITE_RPC_URL_ETC_FAILOVER || null,
     explorer: { name: 'Blockscout', baseUrl: 'https://etc.blockscout.com' },
     // No hosted Graph indexer supports Ethereum Classic, so wager reads go
     // straight to the WagerRegistry over RPC (RegistrySource). ETC mainnet is

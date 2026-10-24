@@ -1,0 +1,106 @@
+name: Native Build
+
+# The native channels compile BEFORE main (spec 103).
+#
+# `release.yml` is triggered only by a push to `main`, so its native jobs are unexercised by every
+# pull request that precedes them. On 2026-09-04 that bill came due: the first execution of the
+# native chain — the v1.16.0 promotion, already merged — failed on all four jobs, `Publish release`
+# was skipped, and NO TAG WAS MINTED. Two toolchain facts (a JDK too old for `capacitor-android`,
+# and a Bluetooth plugin that does not compile against the pinned Capacitor Swift API) reached
+# production's branch without a single check having looked at them.
+#
+# This workflow is that missing look. It compiles both shells:
+#
+#   · on a PULL REQUEST that touches anything a native build reads — dependencies, either shell,
+#     the Capacitor config, the native scripts, or these workflows themselves; and
+#   · on every PUSH TO STAGING, unfiltered — the backstop, so a break that no path filter predicted
+#     is caught at the merge into staging rather than at the promotion into main.
+#
+# It builds; it does not smoke, sign, archive or record a digest. Those stay in `release.yml`,
+# which remains the sole authority for what a release record may claim (FR-009). The compile is
+# what both 2026-09-04 failures were, and it is a fraction of the cost.
+#
+# Both jobs prepare the shell through `.github/actions/native-prepare`, the same action the release
+# jobs use. That shared definition is the point: an early check that prepares the app differently
+# from the release would pass while the release fails, which is worse than no check.
+
+on:
+  pull_request:
+    paths:
+      - 'package.json'
+      - 'package-lock.json'
+      - 'frontend/package.json'
+      - 'frontend/capacitor.config.ts'
+      - 'frontend/android/**'
+      - 'frontend/ios/**'
+      - 'tenants/*/manifest.json'
+      - 'scripts/native/**'
+      - '.github/actions/native-prepare/**'
+      - '.github/workflows/native-build.yml'
+      - '.github/workflows/release.yml'
+  push:
+    branches:
+      - staging
+  workflow_dispatch:
+
+concurrency:
+  group: native-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    name: Android shell compiles
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: ./.github/actions/native-prepare
+        with:
+          platform: android
+      # JAVA 21, not 17: `capacitor-android` (Capacitor 8) declares source/target
+      # compatibility 21 and an older toolchain answers `invalid source release: 21`.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      # assembleDebug, not bundleRelease: it compiles the same
+      # `:capacitor-android:compile*JavaWithJavac` task the release build does — that IS where the
+      # 2026-09-04 failure landed, on both the Debug and Release variants — without paying for a
+      # release bundle nothing here will publish.
+      - name: Compile the Android shell
+        run: cd frontend/android && ./gradlew --no-daemon assembleDebug
+
+  ios:
+    name: iOS shell compiles
+    runs-on: macos-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+      - uses: ./.github/actions/native-prepare
+        with:
+          platform: ios
+      # A simulator build compiles every Swift target the archive does, including each Capacitor
+      # plugin's sources — which is where bluetooth-le failed — and needs no signing identity.
+      # `generic/platform=iOS Simulator`, never a device NAME. A compile needs no
+      # particular device, and naming one couples the check to whatever the image
+      # happens to ship — `name:iPhone 15` failed here the moment the runner moved
+      # to an Xcode 26 image whose newest simulators are iPhone 17s.
+      - name: Compile the iOS shell
+        run: |
+          set -euo pipefail
+          xcodebuild \
+            -project frontend/ios/App/App.xcodeproj \
+            -scheme App \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO

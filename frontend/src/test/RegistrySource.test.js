@@ -37,19 +37,20 @@ const contractMock = {
   getWager: vi.fn(async () => makeStruct()),
 }
 
-vi.mock('ethers', async (orig) => {
+// The registry reads ride the spec-110 chain seam, so the canned views are served there. Each
+// call records the CHAIN it named, which is this file's own subject: a wallet on one network
+// must never read another's wagers, and that is now carried by the read rather than by whichever
+// provider happened to be built beside it.
+const readChainIds = []
+vi.mock('../lib/chains/readContract', async (orig) => {
   const actual = await orig()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      JsonRpcProvider: class {},
-      Contract: class {
-        constructor() {
-          return contractMock
-        }
-      },
-      ZeroAddress: ZERO,
+    readContract: (chainId, { functionName, args = [] }) => {
+      readChainIds.push(chainId)
+      const fn = contractMock[functionName]
+      if (!fn) throw new Error('unmocked registry read: ' + functionName)
+      return fn(...args)
     },
   }
 })
@@ -66,6 +67,7 @@ describe('RegistrySource (RPC reads for un-indexed networks)', () => {
     contractMock.getUserWagerCount.mockClear()
     contractMock.getUserWagerIds.mockClear()
     contractMock.getUserWagers.mockClear()
+    readChainIds.length = 0
   })
   afterEach(() => vi.unstubAllEnvs())
 
@@ -105,6 +107,20 @@ describe('RegistrySource (RPC reads for un-indexed networks)', () => {
     expect(contractMock.getWager).toHaveBeenCalledWith('1')
     expect(w.id).toBe('1')
     expect(w.status).toBe('active')
+  })
+
+  // The file's stated purpose: a wallet on one network never reads another's wagers. Under the
+  // old shape that was a property of the provider built next to the contract; now the read names
+  // the chain, so it can be asserted directly.
+  it('reads ONLY the chain it was asked for', async () => {
+    const mod = await import('../data/wagers/RegistrySource')
+    await mod.listPage({ userAddress: USER, pageSize: 10, chainId: 63, filter: { includeExpired: true } })
+    expect(readChainIds.length).toBeGreaterThan(0)
+    expect([...new Set(readChainIds)]).toEqual([63])
+
+    readChainIds.length = 0
+    await mod.getById('1', USER, { chainId: 137 })
+    expect([...new Set(readChainIds)]).toEqual([137])
   })
 
   it('returns empty when blockchain calls are skipped', async () => {

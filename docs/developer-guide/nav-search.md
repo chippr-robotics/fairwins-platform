@@ -82,6 +82,20 @@ mechanism Settings already had, now derived from the index so Recovery gets it t
 drift from the other. `SETTINGS_HASH_ALIASES` in `WalletPage.jsx` holds only the cases where the
 hash does not name its card.
 
+**The Assistant tab (spec 104).** The `assistant-prefs` and `api-access` cards moved from Settings
+to a tab of their own, `assistant`, which is an item in the **Tools** nav group
+(`/wallet?tab=assistant`). Their index entries therefore carry `navId: 'assistant'` and
+`path: '/wallet?tab=assistant'` — the `id`s (which are the card ids, and so the `data-attention`
+markers) are unchanged, and `accordionSectionForHash` resolves the new tab through the same one
+map. The old `?tab=settings#assistant-prefs` / `#api-access` links redirect. Two consequences for
+the index: the Assistant card's keywords gain the names members will actually type for the new
+provider — `guttertoken`, `byok`, `api key`, `credits`, `provider` — so "guttertoken" in the drawer
+lands on the card; and because the tab is a real nav item rather than an account-button surface, it
+matches at rest like any other Tools item and no longer joins results only under the
+`Settings & Account` heading. The same index is what the assistant's `find_in_app` tool searches,
+which is one more reason it stays descriptive, never authoritative: a hidden surface does not
+resurrect because a model asked for it.
+
 ## Adding a surface to the index
 
 1. Add the entry to `NAV_DESTINATIONS` (or extend `NAV_ITEM_TERMS` for a section with no

@@ -8,7 +8,12 @@
  * (winners come straight from the roster), so it can be shared off-chain verbatim — only its hash lives
  * on-chain.
  */
-import { AbiCoder, keccak256, getAddress } from 'ethers'
+import { encodeAbiParameters, getAddress, keccak256, parseAbiParameters } from 'viem'
+
+// The contract's `lockedOutcome` is keccak256 over this exact encoding, so the parameter type is
+// written once and shared by every hash below — a drifting copy would produce a hash the pool
+// rejects, with nothing on screen to say why.
+const PAYOUT_ENTRIES = parseAbiParameters('(address winner, uint256 amount)[]')
 
 /** Normalise a row to { winner: checksummed address, amount: bigint }. */
 function normEntry(e) {
@@ -17,9 +22,7 @@ function normEntry(e) {
 
 /** keccak256(abi.encode(PayoutEntry[])) — equals the contract's lockedOutcome / proposalId. */
 export function payoutMatrixHash(entries) {
-  const coder = AbiCoder.defaultAbiCoder()
-  const enc = coder.encode(['tuple(address winner,uint256 amount)[]'], [entries.map(normEntry)])
-  return keccak256(enc)
+  return keccak256(encodeAbiParameters(PAYOUT_ENTRIES, [entries.map(normEntry)]))
 }
 
 /** Sum of all row amounts (must equal the pool escrow = members * buyIn). */

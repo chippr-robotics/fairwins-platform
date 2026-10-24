@@ -113,6 +113,34 @@ get_highest_from_specs() {
     echo "$highest"
 }
 
+# Function to get the highest number from the specs/ tree on the INTEGRATION branches
+# (issue #1460).
+#
+# The local checkout is not authoritative in a multi-agent repo: each agent's container clones at a
+# different moment, so "highest number in my specs/" answers "highest at the time I was cloned".
+# Two agents cloned an hour apart legitimately compute different next numbers, and both are wrong.
+#
+# Reading the tree off origin/staging (and origin/main, in case a hotfix landed a spec there) asks
+# the question against the branch that actually arbitrates the namespace. It reads refs already in
+# the object store — the caller decides whether to fetch first, so this stays usable in --dry-run,
+# where a stale answer is still strictly better than a local-only one.
+get_highest_from_integration_specs() {
+    local highest=0
+
+    for ref in origin/staging origin/main; do
+        git rev-parse -q --verify "$ref" >/dev/null 2>&1 || continue
+        local ref_highest
+        ref_highest=$(git ls-tree --name-only "$ref" specs/ 2>/dev/null \
+            | sed 's|^specs/||; s|/$||' \
+            | _extract_highest_number)
+        if [ "$ref_highest" -gt "$highest" ]; then
+            highest=$ref_highest
+        fi
+    done
+
+    echo "$highest"
+}
+
 # Function to get highest number from git branches
 get_highest_from_branches() {
     git branch -a 2>/dev/null | sed 's/^[* ]*//; s|^remotes/[^/]*/||' | _extract_highest_number
@@ -172,13 +200,22 @@ check_existing_branches() {
     # Get highest number from ALL specs (not just matching short name)
     local highest_spec=$(get_highest_from_specs "$specs_dir")
 
-    # Take the maximum of both
+    # ...and from the specs/ tree on staging/main, which is what actually arbitrates the namespace
+    # when several agents are working at once (issue #1460).
+    local highest_integration=$(get_highest_from_integration_specs)
+
+    # Take the maximum of all three
     local max_num=$highest_branch
     if [ "$highest_spec" -gt "$max_num" ]; then
         max_num=$highest_spec
     fi
+    if [ "$highest_integration" -gt "$max_num" ]; then
+        max_num=$highest_integration
+    fi
 
-    # Return next number
+    # Return next number. NOTE: this is a PROPOSAL, not a claim. Nothing is reserved until a PR
+    # adding specs/<NNN>-<slug>/spec.md merges to staging; until then another agent asking the same
+    # question gets the same answer. See docs/developer-guide/multi-agent-workflow.md.
     echo $((max_num + 1))
 }
 
@@ -282,7 +319,7 @@ else
             # Dry-run: query remotes via ls-remote (side-effect-free, no fetch)
             BRANCH_NUMBER=$(check_existing_branches "$SPECS_DIR" true)
         elif [ "$DRY_RUN" = true ]; then
-            # Dry-run without git: local spec dirs only
+            # Dry-run without git: local spec dirs only (no refs to consult)
             HIGHEST=$(get_highest_from_specs "$SPECS_DIR")
             BRANCH_NUMBER=$((HIGHEST + 1))
         elif [ "$HAS_GIT" = true ]; then

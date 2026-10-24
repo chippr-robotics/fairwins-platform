@@ -90,6 +90,11 @@ export const HOST_SHARED_MODULES = Object.freeze([
   'react-dom',
   'react/jsx-runtime',
   'ethers',
+  // spec 110 Phase 0 (#1591): ADDITIVE — packages migrate off ethers independently, and a
+  // package declaring `viem` on a host predating this entry is refused at INSTALL by the
+  // sharedDeps ⊆ HOST_SHARED_MODULES check (a loud refusal, so no hostApi bump). Removing
+  // `ethers` is the breaking half and ships later as its own hostApi major (Phase 5, #1596).
+  'viem',
   '@fairwins/miniapp-sdk',
 ])
 

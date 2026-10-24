@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import AssetLogo from '../wallet/AssetLogo'
 import SensitiveValue from '../common/SensitiveValue'
 import { matchesAssetQuery } from '../../lib/assets/assetSearch'
+import { formatDecimalForDisplay } from '../../lib/format/amount'
 import './UniversalAssetSelect.css'
 
 /**
@@ -148,11 +149,13 @@ export default function UniversalAssetSelect({
     focusOptionAt(at < 0 ? 0 : at + (e.key === 'ArrowDown' ? 1 : -1))
   }
 
+  // Balances are formatted at render only (spec 102 FR-018). The option object itself — and the
+  // `balance` callers read from it for MAX and validation — is handed back untouched.
   const renderBalance = (option) =>
     option?.balance == null ? (
       <span className="uas-pending" aria-label="balance loading">…</span>
     ) : (
-      <SensitiveValue>{option.balance}</SensitiveValue>
+      <SensitiveValue>{formatDecimalForDisplay(option.balance) ?? '—'}</SensitiveValue>
     )
 
   return (

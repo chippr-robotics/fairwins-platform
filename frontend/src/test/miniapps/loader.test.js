@@ -321,7 +321,7 @@ describe('integrity refusals — nothing executes', () => {
       harness,
     })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
-    expect(fetchImpl.mock.calls[0][0].startsWith(G1)).toBe(true)
+    expect(fetchImpl.mock.calls[0][0].startsWith(`${G1}/`)).toBe(true)
   })
 
   it('REFUSES a record whose on-chain hash does not describe the package at all', async () => {
@@ -443,8 +443,8 @@ describe('gateway failover (FR-012)', () => {
     expect(result.gateway).toBe(G2)
     expect(harness.importImpl).toHaveBeenCalledTimes(1)
     // Gateway 1 was tried for the manifest before the fallback was used.
-    expect(fetchImpl.mock.calls[0][0].startsWith(G1)).toBe(true)
-    expect(fetchImpl.mock.calls[1][0].startsWith(G2)).toBe(true)
+    expect(fetchImpl.mock.calls[0][0].startsWith(`${G1}/`)).toBe(true)
+    expect(fetchImpl.mock.calls[1][0].startsWith(`${G2}/`)).toBe(true)
   })
 
   it('fails over on a transport error and on a 404', async () => {
@@ -473,7 +473,7 @@ describe('gateway failover (FR-012)', () => {
     await loadMiniApp(approvedRecord(pkg), { gateways: GATEWAYS, fetchImpl, ...harness })
 
     const entryCall = fetchImpl.mock.calls.find(([url]) => url.endsWith('entry.js'))
-    expect(entryCall[0].startsWith(G2)).toBe(true)
+    expect(entryCall[0].startsWith(`${G2}/`)).toBe(true)
   })
 
   it('REFUSES with GatewayUnavailableError when every gateway is down', async () => {

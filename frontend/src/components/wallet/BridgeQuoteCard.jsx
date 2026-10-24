@@ -24,7 +24,7 @@
  *   - FR-014: Across is named on the quote itself, not only in the small print.
  */
 import { useId } from 'react'
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import InfoTip from '../ui/InfoTip'
 import { BRIDGE_SETTLEMENT, BRIDGE_TIPS, BRIDGE_UNAVAILABLE } from '../../lib/bridge/bridgeCopy'
 import { bpsToPercent } from '../../lib/fees/feeQuote'

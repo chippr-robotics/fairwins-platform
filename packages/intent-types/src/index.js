@@ -71,6 +71,11 @@ export const CONTRACT_DOMAINS = Object.freeze({
   wagerPool: Object.freeze({ name: 'FairWins WagerPool', version: '1' }),
   wagerPoolFactory: Object.freeze({ name: 'FairWins WagerPoolFactory', version: '1' }),
   callsignRegistry: Object.freeze({ name: 'FairWins CallsignRegistry', version: '1' }),
+  // Funding pools (spec 103) — the same factory/clone split as the wager pools: the FACTORY verifies
+  // createPoolWithSig under its own domain, each CLONE verifies the four actor twins under a per-clone
+  // domain (verifyingContract = the clone).
+  fundingPool: Object.freeze({ name: 'FairWins FundingPool', version: '1' }),
+  fundingPoolFactory: Object.freeze({ name: 'FairWins FundingPoolFactory', version: '1' }),
 })
 
 /**
@@ -84,6 +89,8 @@ export const DOMAIN_SOURCES = Object.freeze({
   wagerPool: 'contracts/pools/WagerPool.sol',
   wagerPoolFactory: 'contracts/pools/WagerPoolFactory.sol',
   callsignRegistry: 'contracts/naming/CallsignRegistry.sol',
+  fundingPool: 'contracts/pools/FundingPool.sol',
+  fundingPoolFactory: 'contracts/pools/FundingPoolFactory.sol',
 })
 
 /**
@@ -314,7 +321,55 @@ export const OPEN_ACCEPT_TYPES = {
  * The two EIP-3009 tables below are deliberately absent: their authority is Circle's deployed USDC,
  * not a contract in this repo (see the note on them).
  */
-export const CONTRACT_VERIFIED_TYPES = { ...INTENT_TYPES, ...OPEN_ACCEPT_TYPES }
+
+/**
+ * Funding-pool structs (spec 103) — verified on-chain by FundingPool.sol (the four actor twins, under
+ * the per-clone `fundingPool` domain) and FundingPoolFactory.sol (`CreateFundingPool`, under the
+ * `fundingPoolFactory` domain).
+ *
+ * WHY THEY ARE NOT IN `INTENT_TYPES`
+ * `INTENT_TYPES` is gated to be exactly the set of structs the relayed action table can sign, and the
+ * relay gateway does not serve funding-pool actions in this release (specs/103 research R8): the
+ * frontend self-submits (or uses the passkey `sendCalls` rail). A struct in `INTENT_TYPES` with no
+ * action would fail the "unreachable struct" gate, and an action with no gateway implementation would
+ * fail the gateway's coverage gate — both correctly. So, like `OPEN_ACCEPT_TYPES`, they live in their
+ * own table and still join `CONTRACT_VERIFIED_TYPES`, which is what ties them byte-for-byte to the
+ * contracts. Promoting them to relayable actions later means moving them into `INTENT_TYPES` and
+ * adding the `INTENT_ACTIONS` rows + gateway wiring in the same change.
+ *
+ * Struct names are unique on purpose: the parity gate rejects a NAME reused with a different string,
+ * and the wager-pool `Cancel` / `Refund` structs carry different field names.
+ * `purposeHash` = keccak256(bytes(purpose)).
+ */
+export const FUNDING_POOL_TYPES = {
+  CloseFundingPool: [
+    { name: 'organizer', type: 'address' },
+    ...TRAILING,
+  ],
+  CancelFundingPool: [
+    { name: 'organizer', type: 'address' },
+    ...TRAILING,
+  ],
+  VoteRefund: [
+    { name: 'contributor', type: 'address' },
+    ...TRAILING,
+  ],
+  ClaimRefund: [
+    { name: 'contributor', type: 'address' },
+    ...TRAILING,
+  ],
+  CreateFundingPool: [
+    { name: 'organizer', type: 'address' },
+    { name: 'token', type: 'address' },
+    { name: 'goal', type: 'uint256' },
+    { name: 'purposeHash', type: 'bytes32' },
+    { name: 'contributeDeadline', type: 'uint64' },
+    { name: 'settleDeadline', type: 'uint64' },
+    ...TRAILING,
+  ],
+}
+
+export const CONTRACT_VERIFIED_TYPES = { ...INTENT_TYPES, ...OPEN_ACCEPT_TYPES, ...FUNDING_POOL_TYPES }
 
 /**
  * EIP-3009 — the TOKEN-side legs. Both are structurally identical and differ only in who may

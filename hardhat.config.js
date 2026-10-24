@@ -264,9 +264,12 @@ function requiredRpcUrl(networkName, envVar) {
   if (targetNetworkName() === networkName) {
     throw new Error(
       `${envVar} is not set, so network '${networkName}' has no RPC endpoint. ` +
-        `Set ${envVar} in .env to an endpoint for that chain (archive-capable if you are ` +
-        `forking). Refusing to fall back to a public default: a wrong or throttled endpoint ` +
-        `here means deploying to the wrong chain or stranding a partial deployments/ record.`
+        `It is a MANAGED SECRET (spec 097): run the command through the wrapper, which delivers ` +
+        `it from Secret Manager — e.g. \`npm run sec -- --profile deploy --network ${networkName} ` +
+        `-- npx hardhat <cmd> --network ${networkName}\`. Putting it back in .env is what ` +
+        `check:env-hygiene fails on. Refusing to fall back to a public default: a wrong or ` +
+        `throttled endpoint here means deploying to the wrong chain or stranding a partial ` +
+        `deployments/ record.`
     );
   }
   return `http://${envVar.toLowerCase().replace(/_/g, "-")}-is-unset.invalid`;
@@ -523,7 +526,14 @@ module.exports = {
       // Pin the highest pre-osaka fork (prague) ONLY under coverage; non-coverage runs
       // (npm test / gas report) keep the realistic default. The account WebAuthn path
       // falls back to the FreshCryptoLib verifier when the osaka P256 precompile is absent.
-      ...(COVERAGE ? { hardfork: "prague" } : {}),
+      // HARDHAT_HARDFORK is the same lever for the on-chain e2e tier. The local node impersonates
+      // Polygon Amoy (no EIP-7825), yet under the osaka default the ClearPath native-DAO deploy
+      // (full/42, ~6.4M gas) was refused at eth_estimateGas with "transaction gas limit
+      // (19069152) is greater than the cap (16777216)" — the wallet rail's buffered limit meets
+      // the osaka per-tx cap, which the chain this node stands in for does not have. The full
+      // tier pins prague; the passkey full-stack tier keeps the default so its P256 path runs
+      // against the precompile the way it does on Polygon.
+      ...(process.env.HARDHAT_HARDFORK ? { hardfork: process.env.HARDHAT_HARDFORK } : COVERAGE ? { hardfork: "prague" } : {}),
       accounts: {
         count: 20, // More accounts for integration tests
         accountsBalance: "100000000000000000000000", // 100,000 ETH each - increased to handle bond-heavy tests
@@ -574,7 +584,7 @@ module.exports = {
     // Ethereum Classic mainnet (chainId 61). MAINNET — deploy.js requires
     // CONFIRM_MAINNET=true. Explorer verification is Blockscout (etc.blockscout.com).
     etc: {
-      url: process.env.ETC_RPC_URL || "https://etc.rivet.link",
+      url: process.env.ETC_RPC_URL || "https://etc.etcdesktop.com", // was etc.rivet.link (NXDOMAIN)
       chainId: 61,
       accounts: floppyKeys,
       ...(process.env.GAS_PRICE_WEI ? { gasPrice: Number(process.env.GAS_PRICE_WEI) } : {}),

@@ -6,6 +6,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 const platformRef = { value: 'android' }
 const listeners = []
+// What `App.getLaunchUrl()` reports. `null` = the app was not opened by a link.
+const launchUrlRef = { value: null }
 
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
@@ -20,6 +22,9 @@ vi.mock('@capacitor/app', () => ({
       listeners.push(entry)
       return Promise.resolve({ remove: () => { entry.removed = true } })
     }),
+    getLaunchUrl: vi.fn(() => Promise.resolve(
+      launchUrlRef.value ? { url: launchUrlRef.value } : null,
+    )),
   },
 }))
 
@@ -38,6 +43,7 @@ describe('deep links', () => {
   beforeEach(() => {
     platformRef.value = 'android'
     listeners.length = 0
+    launchUrlRef.value = null
     __resetRuntimeForTests()
   })
 
@@ -60,6 +66,57 @@ describe('deep links', () => {
     fire('https://attacker.example/wallet')
     expect(onPath).toHaveBeenCalledTimes(1)
     expect(onPath).toHaveBeenCalledWith('/wallet?tab=custody')
+  })
+
+  // The launch read is a promise chain; let it settle.
+  const settle = async () => { for (let i = 0; i < 4; i += 1) await Promise.resolve() }
+
+  it('delivers the link that LAUNCHED the app — the cold-start case', async () => {
+    launchUrlRef.value = 'https://fairwins.app/fund/0xabc'
+    const onPath = vi.fn()
+    subscribeDeepLinks(onPath, { appOrigin: ORIGIN })
+    expect(onPath).not.toHaveBeenCalled() // nothing fired an event; only the launch URL exists
+    await settle()
+    expect(onPath).toHaveBeenCalledTimes(1)
+    expect(onPath).toHaveBeenCalledWith('/fund/0xabc')
+  })
+
+  it('delivers a cold-start link ONCE when the platform reports it down both channels', async () => {
+    // Android's ordering: the launch read resolves first, then the same URL
+    // arrives as an event.
+    launchUrlRef.value = 'https://fairwins.app/wallet?tab=custody'
+    const onPath = vi.fn()
+    subscribeDeepLinks(onPath, { appOrigin: ORIGIN })
+    await settle()
+    fire('https://fairwins.app/wallet?tab=custody')
+    expect(onPath).toHaveBeenCalledTimes(1)
+
+    // …and the other ordering: the event beats the launch read.
+    onPath.mockClear()
+    listeners.length = 0
+    launchUrlRef.value = 'https://fairwins.app/fund/0xdef'
+    subscribeDeepLinks(onPath, { appOrigin: ORIGIN })
+    fire('https://fairwins.app/fund/0xdef')
+    await settle()
+    expect(onPath).toHaveBeenCalledTimes(1)
+  })
+
+  it('still navigates when the member re-opens the SAME link later — the suppression is single-use', async () => {
+    launchUrlRef.value = 'https://fairwins.app/wallet?tab=custody'
+    const onPath = vi.fn()
+    subscribeDeepLinks(onPath, { appOrigin: ORIGIN })
+    await settle()
+    fire('https://fairwins.app/wallet?tab=custody') // the platform's echo — spent
+    fire('https://fairwins.app/wallet?tab=custody') // a deliberate re-open — must navigate
+    expect(onPath).toHaveBeenCalledTimes(2)
+  })
+
+  it('ignores a foreign launch URL, exactly as it ignores a foreign event', async () => {
+    launchUrlRef.value = 'https://evil.example/wallet'
+    const onPath = vi.fn()
+    subscribeDeepLinks(onPath, { appOrigin: ORIGIN })
+    await settle()
+    expect(onPath).not.toHaveBeenCalled()
   })
 
   it('is inert on web and unsubscribes cleanly on native', async () => {

@@ -12,16 +12,22 @@ export const STORAGE_KEY = 'addressBook'
 // On-disk schema version for forward migration.
 export const SCHEMA_VERSION = 1
 
-// Encrypted export envelope identifiers.
-export const EXPORT_FORMAT = 'fairwins-address-book-backup'
-export const EXPORT_VERSION = 1
+// Plain-text export file identifiers (issue #1550). The file IS the payload now
+// — what used to be the inner `type` of the encrypted ciphertext is the file's
+// own `format`, which is why one validator accepts a new file and a decrypted
+// legacy payload alike.
+export const EXPORT_FORMAT = 'fairwins-address-book'
+export const EXPORT_VERSION = 2
 
-// Plaintext export payload type (inside the encrypted ciphertext).
-export const EXPORT_PAYLOAD_TYPE = 'fairwins-address-book'
+// Pre-#1550 encrypted envelopes. Nothing WRITES this format any more; it is kept
+// so files a member already has on disk still open where a wallet signer exists.
+export const LEGACY_ENCRYPTED_FORMAT = 'fairwins-address-book-backup'
+export const LEGACY_ENCRYPTED_VERSION = 1
 
-// Domain-separated signing message for the backup key. Intentionally DISTINCT
-// from the wager-encryption signing messages in utils/crypto/constants.js so the
-// backup key can never coincide with a member's wager-encryption private key.
+// Domain-separated signing message for the LEGACY backup key — READ-ONLY from
+// here on. Intentionally DISTINCT from the wager-encryption signing messages in
+// utils/crypto/constants.js so the backup key can never coincide with a member's
+// wager-encryption private key; do not reuse it for anything else.
 export const ADDRESS_BOOK_BACKUP_MESSAGE_V1 = 'FairWins Address Book Backup v1'
 
 // How long a screening result stays fresh in-session before a re-screen (ms).

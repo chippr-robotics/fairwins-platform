@@ -300,11 +300,10 @@ describe('WalletPage — Settings tab', () => {
       'Portfolio',
       'Privacy',
       'Notifications',
-      // Spec 095 — the opt-in assistant and programmatic access sit with the other
-      // privacy-shaped cards: one decides what leaves this device, the other what can
-      // reach this account.
-      'Assistant',
-      'API access',
+      // Spec 104 — 'Assistant' and 'API access' LEFT this tab for Tools ▸ Assistant. They are
+      // agent controls (who answers, on whose money, what may read this account), not "how this
+      // app looks", and `?tab=settings#assistant-prefs` / `#api-access` now redirect there. Their
+      // absence from this list is the assertion.
       'Markets',
       'Install app',
       'Software update',

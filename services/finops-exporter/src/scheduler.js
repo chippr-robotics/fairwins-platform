@@ -20,7 +20,16 @@ import { attempt, notConfigured, unreadable } from './reading.js'
 /** How much older than its own interval a reading may get before it counts as stale. */
 const STALE_FACTOR = 3
 
-export function createScheduler({ sources, collectors, now = () => Date.now(), log = console.warn }) {
+/** How many sources the boot pass collects at once. See `collectAll` for why this is bounded. */
+const DEFAULT_BOOT_CONCURRENCY = 4
+
+export function createScheduler({
+  sources,
+  collectors,
+  now = () => Date.now(),
+  log = console.warn,
+  bootConcurrency = DEFAULT_BOOT_CONCURRENCY,
+}) {
   /** @type {Map<string, {reading: object, collectedAt: number, durationMs: number, lastSuccessAt: number|null}>} */
   const state = new Map()
   /**
@@ -80,9 +89,32 @@ export function createScheduler({ sources, collectors, now = () => Date.now(), l
   }
 
   return {
-    /** Collect everything once. Used at boot so the first scrape is not empty, and by tests. */
-    async collectAll() {
-      await Promise.all(sources.map((s) => collectOne(s)))
+    /**
+     * Collect everything once — BOUNDED, not all at once.
+     *
+     * This was `Promise.all(sources.map(collectOne))`, which put ~25 sources onto the wire
+     * simultaneously, each then chunking `eth_getLogs` up to 25 times over the lookback. On every
+     * restart that took eleven sources `unreadable` with the vendor's `-32007 50/second request
+     * limit reached` for about two minutes, on an endpoint whose budget is SHARED with the gateway
+     * and the bundler (#1585).
+     *
+     * A bound costs nothing that matters: this pass is a warm-up, and since #1577 the listener no
+     * longer waits for it. A source not yet reached reports `unreadable` — honest, and renderable.
+     *
+     * Concurrency bounds how many are IN FLIGHT; the shared rate limiter in `chain/rateLimit.js`
+     * bounds requests per SECOND. Both exist because they bound different things and only one of
+     * them is what the vendor actually measures.
+     */
+    async collectAll({ concurrency = bootConcurrency } = {}) {
+      const queue = [...sources]
+      const workers = Math.max(1, Math.min(concurrency, queue.length))
+      await Promise.all(
+        Array.from({ length: workers }, async () => {
+          for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+            await collectOne(next)
+          }
+        }),
+      )
     },
 
     start() {

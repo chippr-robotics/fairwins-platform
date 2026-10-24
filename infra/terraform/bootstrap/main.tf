@@ -120,6 +120,55 @@ resource "google_service_account" "tf_apply" {
   description  = "Applies reviewed plans on merge to main. Cannot destroy irreplaceable resources. Spec 085."
 }
 
+# The Android upload key's reader (#1378 H2). It exists so the release workflow can sign the .aab
+# and NOTHING else: it holds no project role, and its only grant is secretAccessor on the two
+# android-upload secrets, declared in the prod environment beside the containers themselves.
+#
+# Deliberately a THIRD identity rather than reusing tf-apply. That one can mutate production
+# infrastructure; a signing key reader has no business holding that power, and the reverse is worse
+# — a release workflow compromise should not be able to reach Terraform.
+resource "google_service_account" "android_signing" {
+  project      = var.project_id
+  account_id   = "fairwins-android-signing"
+  display_name = "FairWins Android upload-key reader"
+  description  = "Reads the Play upload keystore + password at release time. Signing only; no project role. Spec 103 / #1378 H2."
+}
+
+# The runtime identity for Cloud Run services that need NO GCP permission at all: the two staging
+# SPAs today, and the MCP servers when they are ungated. It holds no role anywhere, and that is the
+# whole point of it.
+#
+# It exists because TERRAFORM CANNOT MANAGE A CLOUD RUN SERVICE WITHOUT `actAs` ON THAT SERVICE'S
+# RUNTIME ACCOUNT. Leaving these services on the Cloud Run DEFAULT COMPUTE account therefore does
+# not avoid a grant — it forces one on `266380754692-compute@`, which carries roles/editor,
+# run.admin and iam.serviceAccountUser PROJECT-WIDE in a project shared with unrelated workloads
+# (WordPress, clearpath-*, fukuii-*, kings-edge-*). That grant would let the apply identity attach
+# an Editor to anything it deploys.
+#
+# The comment on `module "mcp_server"` in environments/prod/main.tf argued the reverse — that a
+# dedicated runtime account "would have to be added to the enumerated actAs list … a widening of the
+# apply identity bought for nothing". It missed that the default account needs that same list entry,
+# and is the far larger widening. Nothing caught it because `manage_mcp_server` is false, so that
+# module has never applied; the two staging SPAs hit the 403 the first time `Apply staging` actually
+# ran to completion (2026-09-08).
+#
+# An account that can do nothing is the cheaper thing to be able to act as.
+resource "google_service_account" "run_noperm" {
+  project      = var.project_id
+  account_id   = "fairwins-run-noperm"
+  display_name = "FairWins Cloud Run — no permissions"
+  description  = "Runtime identity for Cloud Run services that need no GCP access. Holds no role, deliberately. Spec 087."
+}
+
+# Deliberately NOT folded into `node_service_account_emails`: that list is VM accounts the apply
+# identity attaches to compute, and this is a Cloud Run runtime account. Same role, different reason,
+# so it is stated separately rather than hidden inside a list whose name would stop being true.
+resource "google_service_account_iam_member" "tf_apply_act_as_run_noperm" {
+  service_account_id = google_service_account.run_noperm.name
+  role               = "roles/iam.serviceAccountUser"
+  member             = "serviceAccount:${google_service_account.tf_apply.email}"
+}
+
 # Any branch of this repository may impersonate the READ-ONLY identity.
 resource "google_service_account_iam_member" "tf_plan_wif" {
   service_account_id = google_service_account.tf_plan.name
@@ -130,6 +179,16 @@ resource "google_service_account_iam_member" "tf_plan_wif" {
 # Only the default branch may impersonate the APPLY identity.
 resource "google_service_account_iam_member" "tf_apply_wif" {
   service_account_id = google_service_account.tf_apply.name
+  role               = "roles/iam.workloadIdentityUser"
+  member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/${var.default_branch}"
+}
+
+# Only the default branch may impersonate the SIGNING identity, for the same reason and one more:
+# release.yml's ONLY trigger is a push to main, so a repository-wide binding would grant every
+# branch's workflow the ability to read the upload key while no legitimate release could ever come
+# from one. The tighter binding costs nothing and closes that gap.
+resource "google_service_account_iam_member" "android_signing_wif" {
+  service_account_id = google_service_account.android_signing.name
   role               = "roles/iam.workloadIdentityUser"
   member             = "principalSet://iam.googleapis.com/${google_iam_workload_identity_pool.github.name}/attribute.ref/refs/heads/${var.default_branch}"
 }

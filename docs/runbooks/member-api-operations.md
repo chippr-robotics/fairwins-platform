@@ -352,6 +352,7 @@ Therefore:
 | `429 assistant_budget_exhausted` | The **token** budget is spent for that account, or for the gateway | Distinct from `quota_exceeded`: this counts what was billed, not requests. The reason names which ceiling bit. Raise `ASSISTANT_TOKEN_BUDGET_*` only with a cost figure in mind (3.2); the assistant is working as designed. |
 | Assistant returns `503 assistant_unavailable` | Model provider unreachable, timing out, or refusing the key | Check the provider's status; verify the key reached the container (4.2). The SPA shows an honest unreachable state meanwhile. |
 | Assistant returns `503 assistant_unconfigured` after a rotation | New secret version added but the unit was not restarted | Restart the unit. Secrets are read at boot. |
+| A member on the **GutterToken** provider reports "key not accepted", "out of credit" or "rate-limited" | Nothing on our side — that rail never touches this gateway | See 3.9. There is no FairWins log, config or secret involved; do not go looking for one. |
 | Model spend spiking | Abuse or a client retry loop | The token budget bounds it already (3.2). To tighten fast, lower `ASSISTANT_TOKEN_BUDGET_PER_ACCOUNT`/`_GLOBAL` and restart — heavy accounts refuse, everyone else keeps working. `ASSISTANT_ENABLED=false` is the blunt fallback. |
 | A revoked key works again | The gateway restarted and forgot the in-process set | Expected. Re-submit the revocation (3.5). |
 | A chain reports `not-configured` in `/wagers` | `MEMBER_API_SUBGRAPH_<chainId>` unset | This is honest, not an outage. Set the URL only if that chain should be readable. |
@@ -484,6 +485,36 @@ build-and-push step is a change to what production ships, and belongs in a spec-
 its own review — not folded into the change that closed the unattended-apply hazard.
 
 ---
+
+### 3.9 The GutterToken rail — nothing to operate
+
+Spec 104 lets a member have the assistant answered by **GutterToken** on their own prepaid credit.
+On that provider the member's browser calls `https://api.guttertokens.com/v1/messages` **directly**
+with a key the member pasted; FairWins is not in the request path, holds no GutterToken credential,
+sees no message content, and charges nothing. Consequently there is **no env var, no secret, no
+quota, no killswitch and no log line** for it in this gateway — `ASSISTANT_ENABLED=false` does not
+affect it, and neither does the member-API killswitch. The only FairWins-side switch is the tenant
+feature flag `assistant-byok` in `tenants/<id>/manifest.json`, which is a **build-time** change.
+
+The one thing that does reach this gateway from that rail is the assistant's **tool reads**
+(`GET /v1/member/*` under the member's session grant, and the public routes) — ordinary member-API
+traffic, handled and audited exactly like the MCP server's.
+
+**Support script — the three things members will report.** Every one of these is a state the panel
+already names honestly; the job is to confirm the member is reading it correctly and point them at
+GutterToken, not at us.
+
+| Member says | It means | Say |
+|---|---|---|
+| "GutterToken did not accept this key" (`key_invalid`) | GutterToken answered `401`. The key was mistyped, or revoked/rotated at GutterToken. | Copy a fresh key from `app.guttertokens.com` and use **Add / Replace** on Tools ▸ Assistant; **Test** before saving. We cannot see or check the key — it is on their device only, and we never receive it. Never ask a member to paste a key into a support channel. |
+| "Your GutterToken balance is empty" (`out_of_credit`) | GutterToken answered `403 insufficient_quota`. | Top up at GutterToken (USDC/USDT on Ethereum, Base, Arbitrum One or Polygon, from a wallet they can sign for — an exchange withdrawal cannot be claimed). We cannot see their balance and cannot credit anything. Billing disputes go to GutterToken. |
+| "GutterToken is rate-limiting requests from your network" (`quota`) | GutterToken answered `429`. Its limits are **per source IP**, so an office or shared network can trip it with one member's traffic. | Wait and retry; it is not our quota and not something we can lift. |
+| "The assistant service is not reachable", naming GutterToken | Transport failure to `api.guttertokens.com`, or `503 model_unavailable`. | Check GutterToken's own status; retry. There is no FairWins-side probe for this rail. If the member is on a corporate network, an outbound proxy blocking the host presents the same way. |
+
+A member who has **lost the wallet** they opened a wallet-only GutterToken account with has lost
+that account and its credit; there is nothing FairWins can do, and the Risk Disclosure §13 says so.
+A member switching devices needs to re-enter the key (it is never backed up) — that is by design,
+not a sync fault.
 
 ## 4. Code Examples
 

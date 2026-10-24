@@ -17,9 +17,9 @@
  * external calls are injectable for tests.
  */
 import { useCallback, useContext, useMemo, useRef, useState } from 'react'
-import { useChainId, useWalletClient } from 'wagmi'
+import { useWalletClient } from 'wagmi'
+import { useWalletChainId } from './useWalletChainId'
 import { WalletContext } from '../contexts/WalletContext.js'
-import { getCurrentChainId } from '../config/networks'
 import { readSession } from '../connectors/passkey'
 import { computeCost as defaultComputeCost } from '../lib/predict/clobOrder'
 import { resolveTradeSigner as defaultResolveTradeSigner } from '../lib/predict/tradeSigner'
@@ -68,7 +68,7 @@ export function usePredictTrade(options = {}) {
   const wallet = useMemo(() => walletCtx || {}, [walletCtx])
   const { data: hookWalletClient } = useWalletClient()
   const walletClient = options.walletClient ?? hookWalletClient
-  const activeChainId = useChainId() || getCurrentChainId()
+  const activeChainId = useWalletChainId()
 
   const [status, setStatus] = useState('idle') // idle|checking|geoblocked|blocked|ready|enabling|signing|submitting|done|error
   const [reason, setReason] = useState(null)

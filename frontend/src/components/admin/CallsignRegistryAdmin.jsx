@@ -1,5 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, keccak256, stringToBytes, zeroAddress } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { getAddress, isAddress } from '../../lib/evm/address'
 import { CALLSIGN_REGISTRY_ABI, CallsignStatus } from '../../abis/callsignRegistry'
 import { getContractAddressForChain } from '../../config/contracts'
 import { estateNetworks, networkName, readProviderFor } from '../../lib/chains/estate'
@@ -46,7 +48,7 @@ const POLICY_FIELDS = [
 ]
 
 const shortHash = (h) => (h && h.length > 12 ? `${h.slice(0, 8)}…${h.slice(-4)}` : h || '—')
-const shortAddr = (a) => (a && ethers.isAddress(a) ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || '—')
+const shortAddr = (a) => (a && isAddress(a) ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || '—')
 
 function humanDuration(seconds) {
   const s = Number(seconds || 0)
@@ -71,14 +73,39 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
     () => readProviderFor(scopeChainId, chainId, signer?.provider || null),
     [scopeChainId, chainId, signer],
   )
-  const configured = Boolean(address && ethers.isAddress(address))
+  const configured = Boolean(address && isAddress(address))
 
+  /**
+   * Reads bound to the SCOPED chain (spec 110). `provider` stays the availability gate —
+   * `readProviderFor` is cohort-bounded, so its null means this build may not read that chain at
+   * all, which is a different answer from a read that was attempted and failed.
+   */
   const reader = useMemo(
-    () => (configured && provider ? new ethers.Contract(address, CALLSIGN_REGISTRY_ABI, provider) : null),
-    [configured, address, provider],
+    () =>
+      configured && provider
+        ? (functionName, args = []) =>
+            readContract(scopeChainId, {
+              address,
+              abi: CALLSIGN_REGISTRY_ABI,
+              functionName,
+              args,
+            })
+        : null,
+    [configured, address, provider, scopeChainId],
   )
   const writer = useCallback(
-    () => (configured && signer ? new ethers.Contract(address, CALLSIGN_REGISTRY_ABI, signer) : null),
+    () =>
+      configured && signer
+        ? (functionName, args = []) =>
+            signer.sendTransaction({
+              to: address,
+              data: encodeFunctionData({
+                abi: normalizeAbi(CALLSIGN_REGISTRY_ABI),
+                functionName,
+                args,
+              }),
+            })
+        : null,
     [configured, address, signer],
   )
 
@@ -106,14 +133,14 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
         membershipRole, minTier, membershipManager, sanctionsGuard,
         minCommitmentAge, maxCommitmentAge, quarantinePeriod, changeCooldown, repointDelay, lapseGrace,
       ] = await Promise.all([
-        reader.REGISTRY_CURATOR_ROLE(), reader.MODERATOR_ROLE(), reader.VERIFIER_ROLE(), reader.DEFAULT_ADMIN_ROLE(),
-        reader.membershipRole(), reader.minTier(), reader.membershipManager(), reader.sanctionsGuard(),
-        reader.minCommitmentAge(), reader.maxCommitmentAge(), reader.quarantinePeriod(),
-        reader.changeCooldown(), reader.repointDelay(), reader.lapseGrace(),
+        reader('REGISTRY_CURATOR_ROLE'), reader('MODERATOR_ROLE'), reader('VERIFIER_ROLE'), reader('DEFAULT_ADMIN_ROLE'),
+        reader('membershipRole'), reader('minTier'), reader('membershipManager'), reader('sanctionsGuard'),
+        reader('minCommitmentAge'), reader('maxCommitmentAge'), reader('quarantinePeriod'),
+        reader('changeCooldown'), reader('repointDelay'), reader('lapseGrace'),
       ])
       const [curator, moderator, verifier, admin] = await Promise.all([
-        reader.hasRole(curatorRole, account), reader.hasRole(moderatorRole, account),
-        reader.hasRole(verifierRole, account), reader.hasRole(adminRole, account),
+        reader('hasRole', [curatorRole, account]), reader('hasRole', [moderatorRole, account]),
+        reader('hasRole', [verifierRole, account]), reader('hasRole', [adminRole, account]),
       ])
       setRoles({ curator, moderator, verifier, admin })
       const cfg = {
@@ -148,8 +175,12 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
     if (!reader) { setLookupError('Registry not configured on this network.'); return }
     try {
       const canonical = normalizeCallsign(callsignInput)
-      const callsignHash = ethers.id(canonical)
-      const [info, isReserved] = await Promise.all([reader.getCallsignInfoByHash(callsignHash), reader.reserved(callsignHash)])
+      // `keccak256(utf8(canonical))` — byte-identical to the `ethers.id` it replaces, checked over
+      // 21 callsign shapes including the length boundaries, rejected forms and unicode. This hash
+      // IS the on-chain key: a wrong byte does not throw, it silently looks up nothing and the
+      // panel reports the callsign as unregistered.
+      const callsignHash = keccak256(stringToBytes(canonical))
+      const [info, isReserved] = await Promise.all([reader('getCallsignInfoByHash', [callsignHash]), reader('reserved', [callsignHash])])
       setLookup({
         canonical,
         callsignHash,
@@ -172,20 +203,20 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
   // Route a write through the parent's runTx (plain signer), then refresh reads once it settles.
   // Promise.resolve tolerates a runTx that returns undefined; afterWrite is idempotent (pure re-reads).
   const submit = useCallback(
-    (build, msg) => {
-      const c = writer()
-      if (!c) return
-      Promise.resolve(runTx(() => build(c), msg)).finally(() => afterWrite())
+    (functionName, args, msg) => {
+      const send = writer()
+      if (!send) return
+      Promise.resolve(runTx(() => send(functionName, args), msg)).finally(() => afterWrite())
     },
     [writer, runTx, afterWrite],
   )
 
   const onSuspend = (suspend) =>
-    submit((c) => c.setSuspended(lookup.callsignHash, suspend), `${suspend ? 'Suspend' : 'Unsuspend'} ${formatCallsign(lookup.canonical)}`)
+    submit('setSuspended', [lookup.callsignHash, Boolean(suspend)], `${suspend ? 'Suspend' : 'Unsuspend'} ${formatCallsign(lookup.canonical)}`)
   const onVerify = (verify) =>
-    submit((c) => c.setVerified(lookup.callsignHash, verify), `${verify ? 'Verify' : 'Unverify'} ${formatCallsign(lookup.canonical)}`)
+    submit('setVerified', [lookup.callsignHash, Boolean(verify)], `${verify ? 'Verify' : 'Unverify'} ${formatCallsign(lookup.canonical)}`)
   const onReserve = (reserve) =>
-    submit((c) => c.setReserved([lookup.callsignHash], reserve), `${reserve ? 'Reserve' : 'Unreserve'} ${formatCallsign(lookup.canonical)}`)
+    submit('setReserved', [[lookup.callsignHash], Boolean(reserve)], `${reserve ? 'Reserve' : 'Unreserve'} ${formatCallsign(lookup.canonical)}`)
 
   // ---- Policy ----
   const policyInvalid = useMemo(() => {
@@ -200,22 +231,25 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
   const savePolicy = () => {
     if (policyInvalid) return
     const args = POLICY_FIELDS.map((f) => Number(policyForm[f.key]))
-    submit((c) => c.setPolicyParams(...args), 'Update policy params')
+    submit('setPolicyParams', args, 'Update policy params')
   }
 
   const saveGate = () => {
     if (!config) return
-    submit((c) => c.setMembershipGate(config.membershipRole, gateTier), `Set membership gate → ${TIER_LABEL[gateTier]}`)
+    submit('setMembershipGate', [config.membershipRole, gateTier], `Set membership gate → ${TIER_LABEL[gateTier]}`)
   }
 
   // ---- Role management ----
   const onRoleGrant = (grant) => {
     if (!config) return
     const target = roleForm.address.trim()
-    if (!ethers.isAddress(target)) return
+    if (!isAddress(target)) return
     const roleHash = config.roleHashes[roleForm.role.toLowerCase()]
     submit(
-      (c) => (grant ? c.grantRole(roleHash, target) : c.revokeRole(roleHash, target)),
+      grant ? 'grantRole' : 'revokeRole',
+      // Normalised before encoding (spec 110 divergence 16): the seam's `isAddress` reproduces
+      // ethers' rule and ACCEPTS an all-uppercase address, which viem's encoder refuses.
+      [roleHash, getAddress(target)],
       `${grant ? 'Grant' : 'Revoke'} ${roleForm.role} → ${shortAddr(target)}`,
     )
   }
@@ -360,7 +394,7 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
               {lookup.verified ? <span className="callsign-admin__badge">Verified</span> : null}
               {lookup.reserved ? <span className="callsign-admin__badge">Reserved</span> : null}
               <br />
-              Owner: <span title={lookup.owner}>{lookup.owner === ethers.ZeroAddress ? '— (unregistered)' : shortAddr(lookup.owner)}</span>
+              Owner: <span title={lookup.owner}>{lookup.owner === zeroAddress ? '— (unregistered)' : shortAddr(lookup.owner)}</span>
               <br />
               <code className="callsign-admin__hash">{lookup.callsignHash}</code>
             </p>
@@ -423,7 +457,7 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
           </div>
           <p className="callsign-admin__hint">
             Membership manager: <span title={config.membershipManager}>{shortAddr(config.membershipManager)}</span> ·
-            Sanctions guard: {config.sanctionsGuard === ethers.ZeroAddress ? 'disabled' : <span title={config.sanctionsGuard}>{shortAddr(config.sanctionsGuard)}</span>}
+            Sanctions guard: {config.sanctionsGuard === zeroAddress ? 'disabled' : <span title={config.sanctionsGuard}>{shortAddr(config.sanctionsGuard)}</span>}
           </p>
         </div>
       )}
@@ -450,8 +484,8 @@ export default function CallsignRegistryAdmin({ signer, account, contracts, chai
               autoComplete="off"
             />
             <div className="callsign-admin__mod-actions">
-              <button type="button" className="confirm-btn primary" onClick={() => onRoleGrant(true)} disabled={!onScopeNetwork || pendingTx || !ethers.isAddress(roleForm.address.trim())}>Grant</button>
-              <button type="button" className="confirm-btn danger" onClick={() => onRoleGrant(false)} disabled={!onScopeNetwork || pendingTx || !ethers.isAddress(roleForm.address.trim())}>Revoke</button>
+              <button type="button" className="confirm-btn primary" onClick={() => onRoleGrant(true)} disabled={!onScopeNetwork || pendingTx || !isAddress(roleForm.address.trim())}>Grant</button>
+              <button type="button" className="confirm-btn danger" onClick={() => onRoleGrant(false)} disabled={!onScopeNetwork || pendingTx || !isAddress(roleForm.address.trim())}>Revoke</button>
             </div>
           </div>
           <p className="callsign-admin__hint">Role hashes are the keccak256 of the role names; the curator role also administers the reserved list.</p>

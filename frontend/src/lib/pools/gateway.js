@@ -7,7 +7,7 @@
  * factory's `poolByPhrase` (FR-004). The same pool resolves regardless of the member's language
  * (SC-008), because the tuple — not the words — identifies the pool.
  */
-import { ZeroAddress } from 'ethers'
+import { zeroAddress } from 'viem'
 import { getWordlist, DEFAULT_BIP39_LANG } from './bip39Lists'
 
 export const POOL_WORD_COUNT = 4
@@ -84,5 +84,5 @@ export function phraseToIndices(phrase, lang = DEFAULT_BIP39_LANG) {
 export async function resolvePool(factory, indices) {
   assertIndices(indices)
   const addr = await factory.poolByPhrase(indices)
-  return addr && addr !== ZeroAddress ? addr : null
+  return addr && addr !== zeroAddress ? addr : null
 }

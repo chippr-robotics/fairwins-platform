@@ -7,6 +7,10 @@
 // account. The signing ceremony is deferred to the moment a transaction actually needs a
 // signature (CustodyContext's broker + the global SignerRequestHost).
 // Used by the wallet header's biticon caret dropdown so the identity IS the switcher.
+//
+// Spec 102 (FR-016) — ONE entry per vault ADDRESS. A Safe on six networks was six entries with the
+// same label; it is now one, carrying `chainIds` (every instance) and `chainId` (the pinned one),
+// and choosing it hands the whole set to `operateAsVault` so the acting chain can follow the wallet.
 
 import { useCallback, useMemo } from 'react'
 import { useWallet } from './useWalletManagement'
@@ -18,25 +22,34 @@ import { useHardwareAccounts } from './useHardwareAccounts'
 export const ACCOUNT_KIND_TAG = { vault: 'Multisig', legacy: 'Recovered', hardware: 'Hardware' }
 export const shortAccountAddr = (a) => (a ? `${a.slice(0, 6)}…${a.slice(-4)}` : '')
 
+const vaultId = (address) => `vault:${String(address || '').toLowerCase()}`
+
 export function useAccountSwitcher() {
   const { address } = useWallet()
   const { identity, operateAsPersonal, operateAsVault, operateAsLegacy, operateAsHardware } = useActiveAccount()
-  const { vaults } = useCustodyVaults()
+  const { groups } = useCustodyVaults()
   const legacyAccounts = useLegacyAccounts()
   const hardwareAccounts = useHardwareAccounts()
 
   const accounts = useMemo(() => {
     const list = [{ id: 'personal', kind: 'personal', address, label: 'Personal wallet' }]
-    for (const v of vaults || []) {
-      if (v?.address) {
-        list.push({ id: `vault:${v.address}`, kind: 'vault', address: v.address, chainId: v.chainId, label: v.label || shortAccountAddr(v.address) })
+    for (const g of groups || []) {
+      if (g?.address) {
+        list.push({
+          id: vaultId(g.address),
+          kind: 'vault',
+          address: g.address,
+          chainId: g.pinnedChainId,
+          chainIds: g.chainIds,
+          label: g.label || shortAccountAddr(g.address),
+        })
       }
     }
     return list.concat(legacyAccounts, hardwareAccounts)
-  }, [address, vaults, legacyAccounts, hardwareAccounts])
+  }, [address, groups, legacyAccounts, hardwareAccounts])
 
   const currentId = useMemo(() => {
-    if (identity.mode === 'vault') return `vault:${identity.vaultAddress}`
+    if (identity.mode === 'vault') return vaultId(identity.vaultAddress)
     if (identity.mode === 'legacy') return `legacy:${String(identity.address).toLowerCase()}`
     if (identity.mode === 'hardware') return `hardware:${String(identity.address).toLowerCase()}`
     return 'personal'
@@ -46,7 +59,9 @@ export function useAccountSwitcher() {
   const choose = useCallback(
     (acc) => {
       if (acc.kind === 'personal') return operateAsPersonal()
-      if (acc.kind === 'vault') return operateAsVault({ address: acc.address, chainId: acc.chainId, label: acc.label })
+      if (acc.kind === 'vault') {
+        return operateAsVault({ address: acc.address, chainIds: acc.chainIds, chainId: acc.chainId, label: acc.label })
+      }
       if (acc.kind === 'legacy') return operateAsLegacy({ address: acc.address, kind: acc.entry?.kind, label: acc.label })
       if (acc.kind === 'hardware') return operateAsHardware({ address: acc.address, vendor: acc.vendor, label: acc.label })
       return undefined

@@ -18,6 +18,7 @@
   "deployBlocks": {
     "safePolicyGuardV2": 25026887,
     "policyGuardSetup": 25026889,
-    "safeProposalHub": 25026893
+    "safeProposalHub": 25026893,
+    "accountFactory": 25032007
   }
 }

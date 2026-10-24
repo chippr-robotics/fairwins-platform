@@ -24,7 +24,11 @@ const MEMBERSHIP_URL = '/wallet?tab=membership'
 const FLAGGED_ADDRESS = '0x70997970C51812dc3A010C7d01b50e0d17dc79C8'
 
 /** Every shipped read provider this build resolves runs through publicnode. */
-const RPC_PATTERN = /publicnode\.com/
+// BOTH rails, or the stub is a lie: since 480720bf every EVM mainnet has a drpc.org FAILOVER,
+// so makeReadProvider builds a FallbackProvider — a stub that fails only the publicnode primary
+// is answered by LIVE drpc, and "the chain is unreachable" quietly becomes "the chain answered
+// tier 0 from production" (issue #1463; spec 42 and the passkey suite hit the same class).
+const RPC_PATTERN = /publicnode\.com|drpc\.org/
 
 /*
  * The WALLET's own transport, pointed at the same host the intercept covers.
@@ -248,6 +252,12 @@ describe('Endpoints, callsigns and compliance (specs 069 / 054 / 007)', () => {
 
       cy.contains('.fm-error-banner', /flagged by sanctions screening/i, { timeout: 30000 })
         .should('be.visible')
+
+      // And the estate-wide pill (issue #1458) reaches the same verdict from the same read, naming
+      // the FairWins guard as the list that said no — the pill and the gate never disagree here.
+      cy.get('.ab-screen-notice[role="alert"]', { timeout: 30000 })
+        .should('be.visible')
+        .and('contain.text', 'FairWins sanctions guard')
 
       // And the refusal is not cosmetic: the action is withheld, not merely annotated.
       cy.get('.pay-panel .fm-success-actions')

@@ -13,7 +13,7 @@
  * nothing is claimable. Claim success is reported from the tx outcome.
  */
 import { useMemo } from 'react'
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { useEarnRewards } from '../../hooks/useEarnRewards'
 import { NETWORKS } from '../../config/networks'
 import InfoTip from '../ui/InfoTip'

@@ -2,7 +2,7 @@ steps:
   # Build the Docker image
   # Note: VITE_PINATA_JWT is NOT passed as a build arg - it's injected at runtime
   # via Cloud Run environment variable from Secret Manager
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     args:
       - 'build'
       # Tenant selection (spec 072): this pipeline builds the DEFAULT (fairwins)
@@ -25,6 +25,25 @@ steps:
       - 'VITE_NETWORK_ID=137'
       - '--build-arg'
       - 'VITE_RPC_URL=https://polygon-bor-rpc.publicnode.com'
+      # Per-chain RPC primaries for the EVM mainnets. EMPTY BY DEFAULT and set on the TRIGGER, not
+      # here: a QuickNode URL carries its token in the path, and committing one would put it in git
+      # history where rotation cannot reach it. Empty falls through to the committed publicnode
+      # primary + drpc failover in config/networks.js, so an unset trigger builds exactly what it
+      # built before.
+      #
+      # ⚠ ONLY a DOMAIN-RESTRICTED QuickNode endpoint belongs here. VITE_ values compile into the
+      # public bundle (spec 097 rule 5), so whatever is set is readable by every visitor — the fix
+      # is an endpoint scoped to the app's origins, never a hiding place for the archive credential
+      # the workstation reads (fairwins-quicknode-<chain>-url). Polygon 137 is deliberately absent:
+      # it is the app's own chain and rides VITE_RPC_URL above.
+      - '--build-arg'
+      - 'VITE_RPC_URL_MAINNET=${_RPC_URL_MAINNET}'
+      - '--build-arg'
+      - 'VITE_RPC_URL_OPTIMISM=${_RPC_URL_OPTIMISM}'
+      - '--build-arg'
+      - 'VITE_RPC_URL_BASE=${_RPC_URL_BASE}'
+      - '--build-arg'
+      - 'VITE_RPC_URL_ARBITRUM=${_RPC_URL_ARBITRUM}'
       - '--build-arg'
       - 'VITE_IPFS_GATEWAY=https://gateway.pinata.cloud'
       # v2 WagerRegistry subgraph (Spec 017 / #707). Build-time only: Vite inlines
@@ -75,7 +94,7 @@ steps:
       - '.'
 
   # Push the image to Artifact Registry
-  - name: 'gcr.io/cloud-builders/docker'
+  - name: 'gcr.io/cloud-builders/docker:20.10.24'
     args: ['push', '--all-tags', 'us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/prediction-dao-research']
 
   # Deploy to Cloud Run
@@ -87,7 +106,7 @@ steps:
   # created, it can be wired declaratively with:
   #   - '--update-secrets'
   #   - 'ORIGIN_LOCK_SECRET=origin-lock-secret:latest'
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:588.0.0'
     entrypoint: gcloud
     args:
       - 'run'
@@ -138,6 +157,15 @@ substitutions:
   # app self-describes as `unreleased+<sha>`, which is the honest answer (FR-031). The release
   # workflow passes a real value when it builds a tagged commit.
   _APP_VERSION: ''
+
+  # Per-chain RPC primaries (see the build args above). EMPTY defaults so the committed pipeline
+  # never carries a credential and an unset trigger reproduces the previous bundle byte for byte.
+  # Set these on the Cloud Build trigger once domain-restricted QuickNode endpoints exist —
+  # docs/developer-guide/network-endpoints.md §"QuickNode per-chain endpoints".
+  _RPC_URL_MAINNET: ''
+  _RPC_URL_OPTIMISM: ''
+  _RPC_URL_BASE: ''
+  _RPC_URL_ARBITRUM: ''
 
 # STATED rather than inherited. Cloud Build's implicit default is 600s; production builds one image
 # and lands in ~3 minutes, so the default has never bitten here — but an implicit ceiling is one

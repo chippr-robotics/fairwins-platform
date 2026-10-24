@@ -1,0 +1,87 @@
+/* GutterToken key sheet (spec 104) — content styling only.
+
+   The shell (backdrop, rise, focus trap, safe-area, close button, `.btn` tones) is ActionSheet's;
+   this file scopes under `.guttertoken-key-sheet`, the className the sheet passes, so nothing here
+   leaks into the other sheets. Colours are theme tokens only; sub-18px copy uses --accent-color. */
+
+.action-sheet.guttertoken-key-sheet {
+  max-width: 480px;
+}
+
+.guttertoken-key-sheet__form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.guttertoken-key-sheet__label {
+  color: var(--text-primary);
+  font-size: 0.88rem;
+  font-weight: 600;
+}
+
+.guttertoken-key-sheet__field {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.guttertoken-key-sheet__field input {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  /* Inherit, not restate: `input` does not inherit the root face by default and would fall back
+     to the UA font — the composer in AssistantPanel.css records the same lesson. */
+  font-family: inherit;
+  font-size: 0.95rem;
+  flex: 1;
+  min-height: 40px;
+  min-width: 0;
+  padding: 0.5rem 0.65rem;
+}
+
+.guttertoken-key-sheet__field input[aria-invalid='true'] {
+  border-color: var(--danger-color);
+}
+
+.guttertoken-key-sheet__field input:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+/* The row's own children are sized by the field; the show toggle must not stretch to the
+   `.action-sheet__actions .btn { flex: 1 }` rule that governs the footer buttons. */
+.guttertoken-key-sheet .guttertoken-key-sheet__show {
+  flex: none;
+  min-height: 40px;
+  min-width: 64px;
+}
+
+.guttertoken-key-sheet__error {
+  color: var(--danger-text);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  margin: 0;
+}
+
+.guttertoken-key-sheet__get {
+  color: var(--text-secondary);
+  font-size: 0.82rem;
+  line-height: 1.5;
+  margin: 14px 0 0;
+}
+
+.guttertoken-key-sheet__link {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+/* One screen per step on a phone: the list and the form are short by design, so the only thing
+   that can push the primary button below the fold is the sheet's own max-height. Let the body
+   scroll rather than the page. */
+@media (max-width: 480px) {
+  .action-sheet.guttertoken-key-sheet .action-sheet__body {
+    max-height: 70vh;
+    overflow-y: auto;
+  }
+}

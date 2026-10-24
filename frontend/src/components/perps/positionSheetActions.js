@@ -16,7 +16,7 @@
  * Junk in yields a refusal with a member-facing sentence — never a throw, and never a silent pass.
  */
 
-import { Contract } from 'ethers'
+import { readContract } from '../../lib/chains/readContract'
 
 import { GAINS_DIAMOND_ABI, GAINS_SCALES } from '../../abis/perps/gainsDiamond'
 import { GMX_DATA_STORE_ABI } from '../../abis/perps/gmxDataStore'
@@ -361,8 +361,14 @@ export async function defaultReadFeeBps({ venue, chainId, getProvider = getReadP
     if (!key || !addresses?.dataStore) return { failed: true }
     const provider = getProvider(chainId)
     if (!provider) return { failed: true }
-    const store = new Contract(addresses.dataStore, GMX_DATA_STORE_ABI, provider)
-    const bps = gmxUiFeeFactorToBps(await store.getUint(key))
+    const bps = gmxUiFeeFactorToBps(
+      await readContract(chainId, {
+        address: addresses.dataStore,
+        abi: GMX_DATA_STORE_ABI,
+        functionName: 'getUint',
+        args: [key],
+      }),
+    )
     return bps === null ? { failed: true } : { bps }
   } catch {
     return { failed: true }
@@ -438,8 +444,19 @@ const PROTECTION_LEGS = Object.freeze({ sl: 'stopLoss', tp: 'takeProfit' })
 
 const defaultSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-function defaultMakeDiamond(address, provider) {
-  return new Contract(address, GAINS_DIAMOND_ABI, provider)
+/**
+ * The default Gains diamond reader. `chainId` is a THIRD argument rather than a replacement: the
+ * `makeContract` seam is injected by tests, and an added parameter leaves every existing fake
+ * working unchanged while the real one names the chain it reads (spec 110). `provider` stays the
+ * availability gate the caller already checked.
+ */
+function defaultMakeDiamond(address, provider, chainId) {
+  const call = (functionName, args) =>
+    readContract(chainId, { address, abi: GAINS_DIAMOND_ABI, functionName, args })
+  return {
+    getTrade: (account, index) => call('getTrade', [account, index]),
+    getTrades: (account) => call('getTrades', [account]),
+  }
 }
 
 /**
@@ -532,7 +549,7 @@ export async function readStoredProtection(input) {
   try {
     const provider = getProvider(chainId)
     if (!provider) return { ok: false, reason: 'unreadable' }
-    const trade = await readOneTrade(makeContract(diamond, provider), account, tradeIndex.value)
+    const trade = await readOneTrade(makeContract(diamond, provider, chainId), account, tradeIndex.value)
     if (!trade) return { ok: false, reason: 'not_found' }
     return { ok: true, stored: storedProtectionFrom(trade, tradeIndex) }
   } catch {

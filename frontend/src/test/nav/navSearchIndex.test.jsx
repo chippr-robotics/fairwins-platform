@@ -60,6 +60,9 @@ const shortcuts = () =>
 const KNOWN_TABS = new Set([
   'home', 'portfolio', 'account', 'membership', 'network', 'settings', 'security', 'earn', 'trade',
   'collectibles', 'predict', 'paytransfer', 'custody', 'addressbook', 'reports', 'apps',
+  // Spec 104 — Tools ▸ Assistant, the tab the `assistant-prefs` / `guttertoken-key` / `api-access`
+  // cards moved onto out of Settings.
+  'assistant',
 ])
 
 describe('nav search index — integrity', () => {

@@ -2,7 +2,7 @@
  * VaultActionSheet (release 1.14.0) — the four things a member does with a multisig vault, behind
  * one bottom sheet instead of scattered across the Protect card.
  *
- *   Create vault          → CreateVaultWizard   (spec 043/049/068)
+ *   Create vault          → CreateVaultFlow     (spec 105 guided multichain flow)
  *   Load a vault          → LoadVaultForm       (spec 068 cross-chain search)
  *   Propose a transaction → ProposeTransactionForm (spec 043 US2 / 049 FR-012 pre-flight)
  *   Approve or execute    → VaultProposalsPanel (spec 043 US2 queue + governance)
@@ -22,7 +22,7 @@
 import { useEffect, useRef, useState } from 'react'
 import PropTypes from 'prop-types'
 import ActionSheet from '../account/ActionSheet'
-import CreateVaultWizard from './CreateVaultWizard'
+import CreateVaultFlow from './createflow/CreateVaultFlow'
 import LoadVaultForm from './LoadVaultForm'
 import ProposeTransactionForm from './ProposeTransactionForm'
 import VaultProposalsPanel from './VaultProposalsPanel'
@@ -41,8 +41,7 @@ export default function VaultActionSheet({
   chainId,
   connectedAddress,
   canCreateHere = false,
-  onCreate,
-  onPreview,
+  onCreated,
   onLoad,
   vault = null,
   proposals = null,
@@ -87,12 +86,13 @@ export default function VaultActionSheet({
 
   const body = () => {
     if (action === 'create') {
+      // Spec 105 — the guided four-sheet flow deploys across the member's chosen networks itself
+      // (useVaultDeployment); the sheet only needs to know when a vault landed so the list refreshes.
       return (
-        <CreateVaultWizard
+        <CreateVaultFlow
           connectedAddress={connectedAddress}
           chainId={chainId}
-          onCreate={onCreate}
-          onPreview={onPreview}
+          onCreated={onCreated}
           onDone={close}
         />
       )
@@ -164,7 +164,7 @@ VaultActionSheet.propTypes = {
   chainId: PropTypes.oneOfType([PropTypes.number, PropTypes.string]),
   connectedAddress: PropTypes.string,
   canCreateHere: PropTypes.bool,
-  onCreate: PropTypes.func,
+  onCreated: PropTypes.func,
   onPreview: PropTypes.func,
   onLoad: PropTypes.func,
   /** The vault currently open in the list, enriched by useCustodyVaults. */

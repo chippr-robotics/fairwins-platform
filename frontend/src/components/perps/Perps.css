@@ -5,7 +5,7 @@
 .perps-view {
   display: flex;
   flex-direction: column;
-  gap: 0.9rem;
+  gap: 0.7rem;
   text-align: left;
 }
 
@@ -13,7 +13,9 @@
   align-items: center;
   display: inline-flex;
   gap: 0.35rem;
-  margin: 0 0 0.25rem;
+  /* No bottom margin: `.perps-view`'s own gap already separates the heading from the toolbar, and
+     the two together were double-spacing the densest part of the page (issue #1440). */
+  margin: 0;
 }
 .perps-subtitle {
   color: var(--text-secondary);
@@ -22,11 +24,94 @@
   max-width: 42rem;
 }
 
-/* ---- controls ---- */
+/* ---- controls (issue #1440) ----
+   ONE ROW AT REST. Search and a Filters disclosure share a single line; the venue pills and the
+   sort select only take height once the member asks for them. The pills wrapped onto two rows on a
+   phone, which — with the search field and the sort row under them — put roughly a fifth of the
+   viewport above the first pair on a surface that exists to show pairs.
+
+   EVERY interactive target in this block carries a 36px floor — the toolbar's search and toggle
+   (38px, which is what stops the two disagreeing about the row height) and, inside the panel, the
+   venue pills and the sort select. The panel is opened deliberately, so there is nothing to buy by
+   making the controls in it harder to hit than the one that revealed them.
+   Gated by `src/test/perps/perpsControlTargets.test.js`: this paragraph made a claim about four
+   selectors while two of them did not carry it (issue #1440 review). */
 .perps-controls {
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
+  gap: 0.5rem;
+}
+/* WRAPS RATHER THAN SQUEEZES. The disclosure grows when it carries a filter name, and a non-wrapping
+   row paid for that out of the search field — at 390px the placeholder truncated mid-word. The
+   search floor is the width its own placeholder needs (~12rem at 0.9rem), so the field never shows
+   a half-word hint; the button drops to a second line once a named filter makes the pair too wide.
+   Two lines beats a search box nobody can read, and it is still one line in every default state. */
+.perps-toolbar {
+  align-items: stretch;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+.perps-search {
+  flex: 1 1 12rem;
+  min-width: 12rem;
+}
+.perps-search input {
+  background: var(--bg-secondary, transparent);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary, inherit);
+  font-size: 0.9rem;
+  min-height: 38px;
+  padding: 0.4rem 0.7rem;
+  width: 100%;
+}
+/* The disclosure. It carries the ACTIVE filter as a chip, so a collapsed panel never hides the
+   reason the table is short — closing the panel must not also close the disclosure of its state. */
+.perps-filter-toggle {
+  align-items: center;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  color: var(--text-primary);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 auto;
+  font-size: 0.85rem;
+  gap: 0.35rem;
+  min-height: 38px;
+  padding: 0.4rem 0.7rem;
+  white-space: nowrap;
+}
+.perps-filter-toggle:hover,
+.perps-filter-toggle:focus-visible {
+  border-color: var(--accent-color);
+}
+/* Active state is a BORDER, not a brand fill: a filled control states its own label colour, which
+   is the pairing brand rule (6) exists to prevent. */
+.perps-filter-toggle.has-filters {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+.perps-filter-summary {
+  background: var(--bg-tertiary);
+  border-radius: 999px;
+  color: var(--text-primary);
+  font-size: 0.75rem;
+  font-weight: 600;
+  max-width: 12rem;
+  overflow: hidden;
+  padding: 0.05rem 0.45rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.perps-filter-panel {
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  padding: 0.6rem 0.7rem;
 }
 .perps-venue-filter {
   display: flex;
@@ -40,21 +125,13 @@
   color: var(--text-primary);
   cursor: pointer;
   font-size: 0.82rem;
+  min-height: 36px;
   padding: 0.3rem 0.8rem;
 }
 .perps-filter-pill.active {
-  background: var(--brand-primary);
-  border-color: var(--brand-primary);
-  color: var(--text-on-brand);
-}
-.perps-search input {
-  background: var(--bg-secondary, transparent);
-  border: 1px solid var(--border-color);
-  border-radius: 10px;
-  color: var(--text-primary, inherit);
-  font-size: 0.95rem;
-  padding: 0.55rem 0.75rem;
-  width: 100%;
+  background: var(--primary-button);
+  border-color: var(--primary-button);
+  color: var(--primary-button-text);
 }
 .perps-sort {
   align-items: center;
@@ -71,7 +148,15 @@
   border-radius: 8px;
   color: var(--text-primary, inherit);
   font-size: 0.85rem;
+  min-height: 36px;
   padding: 0.35rem 0.5rem;
+}
+/* Visible only while the search box or the venue filter is narrowing the list — otherwise it is
+   the `sr-only` announcement it has always been. */
+.perps-result-count {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  margin: 0;
 }
 
 /* ---- notices ---- */

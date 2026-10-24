@@ -23,6 +23,7 @@ import {
   clearCache,
   clearCacheEntry,
   checkGatewayHealth,
+  uploadJson,
   uploadEncryptedEnvelope,
   fetchEncryptedEnvelope,
   parseEncryptedIpfsReference,
@@ -403,6 +404,43 @@ describe('IPFS Service', () => {
       expect(() => buildEncryptedIpfsReference('invalid')).toThrow('Invalid CID')
       expect(() => buildEncryptedIpfsReference('')).toThrow('Invalid CID')
       expect(() => buildEncryptedIpfsReference(null)).toThrow('Invalid CID')
+    })
+  })
+
+  /*
+   * A rejected upload has to say enough to act on. In production a valid Pinata key that lacked the
+   * `pinJSONToIPFS` scope rejected every wager creation with the bare word `NO_SCOPES_FOUND` — no
+   * status, no explanation — which reads as an app bug and points at nothing. Pinata puts the
+   * opaque token in `reason` and the sentence in `details`, and the HTTP status is what separates a
+   * credential problem (401/403) from rate limiting (429) from Pinata being down (5xx).
+   */
+  describe('uploadJson error reporting', () => {
+    it('carries Pinata’s own explanation and the HTTP status into the thrown error', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 403,
+        text: async () =>
+          JSON.stringify({
+            error: {
+              reason: 'NO_SCOPES_FOUND',
+              details: 'This key does not have the required scopes to access this endpoint',
+            },
+          }),
+      })
+
+      await expect(uploadJson({ hello: 'world' })).rejects.toThrow(
+        /NO_SCOPES_FOUND.*required scopes.*HTTP 403/s
+      )
+    })
+
+    it('falls back to the status and a body snippet when the body is not Pinata JSON', async () => {
+      global.fetch.mockResolvedValueOnce({
+        ok: false,
+        status: 502,
+        text: async () => '<html>Bad Gateway</html>',
+      })
+
+      await expect(uploadJson({ hello: 'world' })).rejects.toThrow(/502.*Bad Gateway/s)
     })
   })
 

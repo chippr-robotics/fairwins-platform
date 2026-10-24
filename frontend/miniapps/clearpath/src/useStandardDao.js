@@ -2,7 +2,8 @@ import { useCallback, useMemo } from 'react'
 import { ethers } from 'ethers'
 import { useMiniAppHost } from '@fairwins/miniapp-sdk'
 
-import { STANDARD_DAO_FACTORY_ABI, parseCreatedDAO } from './standardDaoFactoryAbi'
+import { FEE_READ, FEE_GAS_ONLY, FEE_UNAVAILABLE } from './createDaoFee'
+import { STANDARD_DAO_FACTORY_ABI, encodeCreateDAO, parseCreatedDAO } from './standardDaoFactoryAbi'
 
 /**
  * Spec 030 pillar A — launching a native standard DAO from the ClearPath package.
@@ -80,6 +81,60 @@ export function useStandardDao() {
   const showNotification = useCallback((message, type) => host.toast.show(message, type), [host])
 
   /**
+   * What this creation will cost the member, estimated against the REAL calldata (issue #1408).
+   *
+   * Three outcomes and no fourth, because a fee estimate is a read (spec 071's rule, applied here):
+   * gas + price, gas alone, or nothing. Nothing NEVER becomes zero — the fee sentence the surface
+   * renders does not depend on this call succeeding, so a failed read costs the member a number,
+   * never the disclosure.
+   *
+   * `estimateGas` reverts for real reasons a member should not be told a price despite: below the
+   * factory's Silver floor, a votes token that is not `IVotes`, a timelock delay over the maximum.
+   * All of them land in `unavailable`, which is honest — this endpoint could not price the call —
+   * and the member still meets the true error at signature time from the wallet or the factory.
+   *
+   * The read goes through `host.readProvider`, never the wallet: pricing must not require a
+   * connected signer, and the host's provider is the endpoint the member chose (spec 069).
+   */
+  const estimateCreateFee = useCallback(
+    async (params) => {
+      if (!factoryAddress) return { state: FEE_UNAVAILABLE }
+      let provider
+      let gas
+      try {
+        provider = host.readProvider(chainId)
+        gas = await provider.estimateGas({
+          to: factoryAddress,
+          data: encodeCreateDAO(iface, params),
+          value: 0n,
+          // Estimating AS the member: the factory's membership check reads `msg.sender`, so an
+          // estimate from nobody in particular would price a call that reverts for everybody.
+          ...(account ? { from: account } : {}),
+        })
+      } catch {
+        return { state: FEE_UNAVAILABLE }
+      }
+      try {
+        const feeData = await provider.getFeeData()
+        // `maxFeePerGas` is the CEILING the wallet will offer on an EIP-1559 chain, so it is the
+        // number the member should budget against; `gasPrice` covers legacy chains. A chain that
+        // answers neither leaves gas as the only fact, which is what `gas-only` says.
+        const price = feeData?.maxFeePerGas ?? feeData?.gasPrice ?? null
+        if (price == null) return { state: FEE_GAS_ONLY, gas: BigInt(gas) }
+        return {
+          state: FEE_READ,
+          gas: BigInt(gas),
+          feeWei: BigInt(gas) * BigInt(price),
+          decimals: host.network(chainId)?.nativeCurrency?.decimals ?? 18,
+        }
+      } catch {
+        return { state: FEE_GAS_ONLY, gas: BigInt(gas) }
+      }
+    },
+    [factoryAddress, host, chainId, iface, account],
+  )
+
+  /**
    * Create a DAO on the CONNECTED chain. Real transaction, honest state.
    *
    * @returns {Promise<{ status: 'created'|'proposed'|'pending', dao?: object, txHash?: string }>}
@@ -96,21 +151,7 @@ export function useStandardDao() {
       }
       try {
         showNotification('Create DAO: confirm in your wallet…', 'info')
-        const data = iface.encodeFunctionData('createDAO', [
-          [
-            params.name,
-            params.purpose ?? '',
-            params.votesToken || ethers.ZeroAddress,
-            params.tokenName ?? '',
-            params.tokenSymbol ?? '',
-            params.initialSupply ?? 0n,
-            params.votingDelay,
-            params.votingPeriod,
-            params.proposalThreshold ?? 0n,
-            params.quorumPercent,
-            params.timelockDelay,
-          ],
-        ])
+        const data = encodeCreateDAO(iface, params)
         const result = await host.wallet.submit({ to: factoryAddress, data, value: 0n, chainId })
 
         if (result.kind === 'proposed') {
@@ -147,5 +188,5 @@ export function useStandardDao() {
     [factoryAddress, host, chainId, iface, showNotification],
   )
 
-  return { chainId, account, isConnected, factoryAddress, canCreate, factoryFor, createDAO }
+  return { chainId, account, isConnected, factoryAddress, canCreate, factoryFor, createDAO, estimateCreateFee }
 }

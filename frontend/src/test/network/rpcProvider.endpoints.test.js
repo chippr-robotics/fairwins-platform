@@ -121,26 +121,35 @@ describe('makeReadProvider — member endpoints', () => {
 
 describe('makeReadProvider — build-curated failover', () => {
   // A member who has configured nothing still needs redundancy on chains served by a single
-  // community-run RPC. Ethereum Classic's default going dark is what left every read on the
-  // chain with no route at all, so the chain declares a second endpoint at build time.
+  // community-run RPC. Ethereum Classic's default going dark is what motivated build-declared
+  // failovers in the first place; they are now declared on every covered EVM mainnet.
   beforeEach(() => {
     localStorage.clear()
     __resetEndpointStoreForTests()
     constructed.length = 0
   })
 
-  it('falls back to the chain-declared endpoint on ETC with no member settings', () => {
+  // ETC is the exception, and it inverted: the chain USED to declare a pair here
+  // (`etc.rivet.link` primary, etcdesktop failover). rivet then stopped resolving entirely,
+  // etcdesktop was promoted to primary, and no browser-usable second endpoint could be
+  // verified to sit behind it (see `rpcFailover.test.js` for what was checked and rejected).
+  //
+  // So ETC now takes the SINGLE-provider path, and the consequence is deliberate rather than a
+  // loss: `buildProvider` sets `staticNetwork` only for a failover SET, because every member of
+  // a FallbackProvider has to agree on the network up front. A lone provider instead keeps
+  // ethers' own network detection on purpose, so an endpoint that answers for the wrong chain
+  // fails loudly instead of quietly serving another network's state into every ETC read. On a
+  // chain down to one community-run RPC that verification is worth more than the saved probe.
+  it('builds a single detecting provider on ETC, which declares no build failover', () => {
+    expect(NETWORKS[61].rpcFailoverUrl).toBeNull()
     makeReadProvider(NETWORKS[61].rpcUrl, 61)
 
-    const fallbackCall = constructed.find((c) => c.kind === 'fallback')
-    expect(fallbackCall).toBeTruthy()
-    expect(fallbackCall.configs.map((c) => c.provider.target)).toEqual([
-      NETWORKS[61].rpcUrl,
-      NETWORKS[61].rpcFailoverUrl,
-    ])
-    // staticNetwork on both members is what stops ethers' endless `_detectNetwork` retry
-    // loop — the source of the "failed to detect network; retry in 1s" console storm.
-    expect(fallbackCall.configs.every((c) => c.provider.options?.staticNetwork)).toBe(true)
+    expect(constructed.some((c) => c.kind === 'fallback')).toBe(false)
+    const direct = constructed.filter((c) => c.kind !== 'fallback')
+    expect(direct.map((c) => c.target)).toEqual([NETWORKS[61].rpcUrl])
+    // Detection deliberately left on (see above), and ETC keeps its no-batch workaround.
+    expect(direct.every((c) => c.options?.staticNetwork)).toBe(false)
+    expect(direct.every((c) => c.options?.batchMaxCount === 1)).toBe(true)
   })
 
   it('leaves chains without a declared failover on a single provider', () => {

@@ -337,6 +337,21 @@
   background: var(--color-surface-secondary, var(--bg-primary));
   color: var(--color-text-secondary, var(--text-secondary));
 }
+/* Group pay (spec 058): the To field is recipient one of several. 0.75rem is small text, so the
+   label takes --accent-color (Teal 700), never --brand-primary — see the brand ladder rule. */
+.pt-badge-multi {
+  background: color-mix(in srgb, var(--accent-color) 12%, transparent);
+  color: var(--accent-color);
+}
+
+/* A field label that carries a marker beside it. Without this the badge would become its own row:
+   .pt-field is a flex COLUMN. */
+.pt-label-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
 
 /* Notices */
 .pt-notice {

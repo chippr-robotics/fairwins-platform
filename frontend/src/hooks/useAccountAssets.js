@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Contract, formatUnits } from 'ethers'
+import { formatUnits } from '../lib/evm/units'
 import { useWallet } from './useWalletManagement'
 import { makeReadProvider } from '../utils/rpcProvider'
 import { useEndpointsRevision } from './useRpcEndpoints'
 import { NETWORKS } from '../config/networks'
 import { getPortfolioRegistry } from '../config/assetTaxonomy'
-
-const BALANCE_OF_ABI = ['function balanceOf(address) view returns (uint256)']
+import { readBalancesSettled } from '../lib/portfolio/batchBalances'
 
 /**
  * Read the CONNECTED chain's transferable balances (native + curated ERC-20s, no NFTs) for an arbitrary
@@ -39,21 +38,23 @@ export function useAccountAssets(accountAddress) {
   // Compute (never sets state) so the effect below can set state off the synchronous path.
   const compute = useCallback(async () => {
     if (!accountAddress || !provider || registry.length === 0) return []
-    const settled = await Promise.allSettled(
-      registry.map(async (asset) => {
-        const raw =
-          asset.kind === 'native'
-            ? await provider.getBalance(accountAddress)
-            : await new Contract(asset.address, BALANCE_OF_ABI, provider).balanceOf(accountAddress)
-        return {
-          asset,
-          balance: Number(formatUnits(raw, asset.decimals)),
-          network: NETWORKS[asset.chainId]?.name || String(asset.chainId),
-        }
-      }),
+    // One Multicall3 round trip for the whole chain instead of one request per asset (#1459);
+    // results align with the registry by index, and a failed read still drops the asset rather
+    // than rendering a false zero.
+    const settled = await readBalancesSettled(
+      registry,
+      new Map([[numericChainId, provider]]),
+      accountAddress,
     )
-    return settled.filter((r) => r.status === 'fulfilled').map((r) => r.value)
-  }, [accountAddress, provider, registry])
+    return settled
+      .map((res, i) => ({ res, asset: registry[i] }))
+      .filter(({ res }) => res.status === 'fulfilled')
+      .map(({ res, asset }) => ({
+        asset,
+        balance: Number(formatUnits(res.value, asset.decimals)),
+        network: NETWORKS[asset.chainId]?.name || String(asset.chainId),
+      }))
+  }, [accountAddress, provider, registry, numericChainId])
 
   useEffect(() => {
     let active = true

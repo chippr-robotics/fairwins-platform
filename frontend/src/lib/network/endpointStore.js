@@ -306,6 +306,27 @@ export function endpointsRevision() {
   return revision
 }
 
+/**
+ * Bump the revision WITHOUT persisting anything (spec 107).
+ *
+ * Exists for state that affects route resolution but must never touch storage — issued RPC
+ * access, whose credential living in `fw_global_prefs` would be a stored secret riding the
+ * device backup. `commit()` cannot be reused for this precisely because it saves; this is the
+ * notify half alone. Rare transitions only (an issued endpoint appearing or disappearing):
+ * every mounted provider memo re-derives on a bump, so a caller bumping per token renewal
+ * would churn the whole app on a timer.
+ */
+export function bumpEndpointsRevision() {
+  revision += 1
+  for (const listener of listeners) {
+    try {
+      listener(revision)
+    } catch {
+      // A bad subscriber must not break the notification.
+    }
+  }
+}
+
 /** Subscribe to endpoint changes. Returns an unsubscribe function. */
 export function subscribeEndpointSettings(listener) {
   listeners.add(listener)

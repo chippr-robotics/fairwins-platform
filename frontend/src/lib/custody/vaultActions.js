@@ -63,9 +63,12 @@ export function vaultChainLabel(chainId) {
  * @param {number|string} ctx.chainId  the CONNECTED chain (never the vault's — the two are compared)
  * @param {object|null} ctx.vault      the vault currently open in the list, enriched on chain
  */
-export function unavailableReason(action, { canCreateHere, chainId, vault }) {
+export function unavailableReason(action, { chainId, vault }) {
   if (action === 'create' || action === 'load') {
-    return canCreateHere ? null : `Vaults are not available on ${vaultChainLabel(chainId)}.`
+    // Spec 105 — creation and loading are CHAIN-ABSTRACTED: the guided flow deploys to the
+    // networks the member picks (switching the wallet when a signature needs it) and loading
+    // searches every custody network. The connected chain no longer gates either door.
+    return null
   }
   if (!vault) return 'Open a vault in the list below first.'
   // An unreachable chain is reported as unreachable. Rendering it as "no such vault" would turn an

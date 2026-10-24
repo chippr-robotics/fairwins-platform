@@ -1,0 +1,102 @@
+name: CodeQL
+
+# Code scanning as REVIEWABLE CONFIGURATION, and why Swift is not in the matrix (issue #1486).
+#
+# This repository ran CodeQL under GitHub's *default setup*, which picks the languages itself from
+# what it finds on disk. It found `frontend/ios/**` and added Swift — and Swift is the one language
+# here that CodeQL cannot analyze without building the app. The autobuilder therefore failed three
+# times in a row on every run (2026-09-04, run 33832923221):
+#
+#   1. `Cannot read workspace: … App.xcworkspace/contents.xcworkspacedata` (not committed), so it
+#      fell back to `xcodebuild -project`;
+#   2. `xcodebuild: error: Could not resolve package dependencies: the package at
+#      '…/node_modules/@capacitor/app' cannot be accessed`; then
+#   3. the same error again from its `swift build --package-path …/CapApp-SPM` fallback.
+#
+# All three are one fact: `frontend/ios/App/CapApp-SPM/Package.swift` — a Capacitor-managed file
+# marked DO NOT MODIFY — declares its dependencies as local paths into `node_modules`, and default
+# setup runs no `npm ci`. The job then burned ~13 minutes of macOS time and reported
+# "CodeQL job status was configuration error".
+#
+# That failure was not confined to Swift. Default setup combines the languages into ONE upload
+# (`CODEQL_ACTION_FEATURE_SARIF_COMBINE`), and its `Upload Results` job is skipped when any
+# language fails — so the JavaScript/TypeScript, Python, Java and Actions results were analyzed
+# successfully and then thrown away, run after run. The alert list the Security tab has been
+# showing is stale for that reason, not because the code stopped changing.
+#
+# So: the languages are declared here instead of inferred, and Swift is deliberately absent.
+# The entire Swift surface is four files — `AppDelegate.swift` and `SceneDelegate.swift` (both
+# unmodified Capacitor templates), the `CapApp-SPM.swift` stub (`public let isCapacitorApp = true`)
+# and `Package.swift` itself. Analyzing them would mean adding a ~15-minute macOS job, on the
+# 10x-billed runner, that must run `npm ci` + `npx cap sync ios` before it can compile a single
+# line — to scan boilerplate that contains no first-party logic. `native-build.yml` already
+# compiles both shells for real, on every PR that touches them and on every push to staging;
+# that is what actually protects the native channels.
+#
+# If first-party Swift is ever written, add the job back with `build-mode: manual` and
+# `.github/actions/native-prepare` (platform: ios) ahead of it — that action is what makes the
+# SPM package resolvable, and it is the one definition the release jobs use.
+#
+# REQUIRED ONE-TIME STEP: default setup must be turned OFF for this workflow's results to be
+# accepted (Settings ▸ Advanced Security ▸ CodeQL analysis ▸ Advanced). While both are enabled,
+# the upload below is rejected.
+
+on:
+  push:
+    branches: [main, staging]
+  # NO base-branch filter here, deliberately (spec 075, `test/config/CiGates.test.js`). Stacked
+  # PRs are the normal shape of work in this repo, and `branches: [main, staging]` would have
+  # meant a PR into a feature branch got no scan at all — code reviewed more weakly precisely
+  # where it is least finished. Scope a workflow with `paths:`, never with the base branch.
+  pull_request:
+  schedule:
+    # Weekly, so a newly published query still finds an old commit.
+    - cron: '25 14 * * 2'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      packages: read
+      actions: read
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Workflows and composite actions — the estate's own CI is a supply chain.
+          - language: actions
+          # frontend/, services/, packages/, scripts/, subgraph/ — the bulk of the code.
+          - language: javascript-typescript
+          # scripts/utils/*.py and frontend/scripts/rasterize-preview.py.
+          - language: python
+          # The Android shell's MainActivity + Capacitor's example tests. `none` analyzes
+          # Java without a build, so unlike Swift this costs nothing and cannot fail on a
+          # toolchain.
+          - language: java-kotlin
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          config-file: ./.github/codeql/codeql-config.yml
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}

@@ -70,7 +70,7 @@ Proven on the real Safe in `test/integration/policy-guard-safe.test.js`.
   from enforcement.
 - ABI: `frontend/src/abis/SafePolicyGuard.js`.
 - Surfaces: Policy step in `CreateVaultWizard`, `PolicyPanel` in `VaultDetail`, `PolicyBadge` in
-  `VaultList`, pre-flight warnings in `ProposeTransactionForm`, policy-change decoding in
+  `VaultCardList` + the `VaultSheet` (spec 102), pre-flight warnings in `ProposeTransactionForm`, policy-change decoding in
   `ProposalQueue`. Guard events feed the existing `custody` notification domain.
 - Network gating: `getContractAddressForChain('safePolicyGuard'|'policyGuardSetup', chainId)`;
   `undefined` ⇒ policy UI renders its unsupported states and custody behaves exactly as spec 043.

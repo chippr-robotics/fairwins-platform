@@ -624,6 +624,43 @@
   font-size: 0.78rem;
 }
 
+/* Export/Import controls plus the plain-text disclosure that sits under them
+   (issue #1550). The wrapper had no rule at all while it held only two buttons;
+   with a paragraph inside it needs one, or the buttons reflow unpredictably. */
+.ab-import-export {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.35rem;
+}
+
+.ab-import-export-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+/* The privacy fact about a plain-text export, stated where the button is rather
+   than only in the docs. */
+.ab-plaintext-note {
+  margin: 0;
+  max-width: 34ch;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: var(--text-muted);
+  text-align: right;
+}
+
+@media (max-width: 639px) {
+  .ab-import-export {
+    align-items: flex-start;
+  }
+
+  .ab-plaintext-note {
+    text-align: left;
+  }
+}
+
 .ab-conflict {
   border: 1px solid var(--border-color);
   border-radius: 0.6rem;
@@ -637,4 +674,11 @@
   display: flex;
   gap: 0.75rem;
   font-size: 0.85rem;
+}
+
+/* "Nothing screens this network" — a fact about coverage, not a verdict about the address, so it
+   is stated in words rather than dressed as a status tag (issue #1458). */
+.ab-address-nosource {
+  font-size: 0.72rem;
+  color: var(--text-muted);
 }

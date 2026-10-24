@@ -3,13 +3,14 @@
  *
  * Per-wallet CRUD over saved contacts (FR-001..FR-009), with advisory sanctions
  * tags screened on open (FR-010..FR-012), in-panel search (FR-015), and (added
- * in US5) encrypted export/import.
+ * in US5, plain text since issue #1550) file export/import.
  */
 
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useWallet } from '../../hooks/useWalletManagement'
 import { useAddressBook } from '../../hooks/useAddressBook'
-import { useAddressScreening } from '../../hooks/useAddressScreening'
+import { useEstateScreeningMany } from '../../hooks/useEstateScreening'
+import { VERDICTS } from '../../lib/screening/verdict'
 import { getNetwork, getSelectableNetworks, getCurrentChainId } from '../../config/networks'
 import { addressKey, listEntries } from '../../lib/addressBook/addressBookStore'
 import { isVaultAddress } from '../../lib/custody/vaultAddressBook'
@@ -55,19 +56,19 @@ export default function AddressBookPanel({ address }) {
     addAddress,
     removeAddress,
     findByAddress,
+    importBook,
+    resolveConflicts,
   } = useAddressBook()
-  const { getStatus, screen } = useAddressScreening()
+  // Every address in the book, screened against every list on every cohort chain — no wallet
+  // required (issue #1458 QA round: the per-chain hook rendered a book full of "Unscreened"
+  // whenever the wallet was elsewhere, or absent).
+  const bookAddresses = useMemo(() => listEntries(book).map((e) => e.address), [book])
+  const { getVerdict, getVerdictOn } = useEstateScreeningMany(bookAddresses)
 
   const [query, setQuery] = useState('')
   const [editing, setEditing] = useState(null) // { contact } | { contact: null } | null
 
   const networks = useMemo(() => getSelectableNetworks(), [])
-
-  // Screen visible addresses when the book opens or changes (FR-010, Q5).
-  useEffect(() => {
-    const entries = listEntries(book)
-    if (entries.length) screen(entries)
-  }, [book, screen])
 
   // Meta row (design 3a): total saved addresses, and how many contacts carry a
   // non-clear screening state.
@@ -79,11 +80,11 @@ export default function AddressBookPanel({ address }) {
     () =>
       contacts.filter((c) =>
         c.addresses.some((a) => {
-          const s = getStatus(a.address, a.chainId)
-          return s === 'restricted' || s === 'uncertain'
+          const v = getVerdict(a.address)
+          return v === VERDICTS.FLAGGED || v === VERDICTS.PARTIAL || v === VERDICTS.UNSCREENED
         }),
       ).length,
-    [contacts, getStatus],
+    [contacts, getVerdict],
   )
 
   // Filter contacts by the search query (nickname or any address) (FR-015).
@@ -143,7 +144,17 @@ export default function AddressBookPanel({ address }) {
           <ScreeningInfoButton />
         </div>
         <div className="ab-panel-head-actions">
-          <AddressBookImportExport />
+          {/*
+            The book is passed DOWN rather than re-read via useAddressBook():
+            that hook keeps the book in its own useState, so a second call here
+            is a second copy — the export would freeze at mount and an import
+            would never reach this grid.
+          */}
+          <AddressBookImportExport
+            book={book}
+            importBook={importBook}
+            resolveConflicts={resolveConflicts}
+          />
         </div>
       </div>
 
@@ -201,7 +212,8 @@ export default function AddressBookPanel({ address }) {
             <ContactCard
               key={contact.id}
               contact={contact}
-              getStatus={getStatus}
+              getVerdict={getVerdict}
+              getVerdictOn={getVerdictOn}
               networkName={networkName}
               // Spec 068 — badge entries that are the member's own multisig vaults.
               isVault={contact.addresses.some((a) => isVaultAddress(vaultRefs, a.address, a.chainId))}

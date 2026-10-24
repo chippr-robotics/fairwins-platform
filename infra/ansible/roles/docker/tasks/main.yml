@@ -9,6 +9,27 @@
     mode: "0644"
   become: true
 
+- name: Remove the legacy Docker repo entry
+  # The nodes were first provisioned by hand with a binary keyring at /etc/apt/keyrings/docker.gpg.
+  # This role declares the ASCII one (docker.asc), and apt REFUSES a source listed twice with two
+  # different Signed-By values — so the legacy line must go, or the first converge of an adopted
+  # node dies at apt update. Removing the line, not just the keyring: an orphaned Signed-By path is
+  # the same conflict.
+  ansible.builtin.apt_repository:
+    repo: >-
+      deb [arch={{ ansible_architecture | replace('x86_64', 'amd64') }}
+      signed-by=/etc/apt/keyrings/docker.gpg]
+      https://download.docker.com/linux/debian {{ ansible_distribution_release }} stable
+    filename: docker
+    state: absent
+  become: true
+
+- name: Remove the legacy Docker keyring
+  ansible.builtin.file:
+    path: /etc/apt/keyrings/docker.gpg
+    state: absent
+  become: true
+
 - name: Add the Docker apt repository
   ansible.builtin.apt_repository:
     repo: >-

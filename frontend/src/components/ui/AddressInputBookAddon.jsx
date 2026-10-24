@@ -7,9 +7,10 @@
 
 import { useState, useMemo, useCallback } from 'react'
 import { useAddressBook } from '../../hooks/useAddressBook'
-import { useAddressScreening } from '../../hooks/useAddressScreening'
+import { useEstateScreeningMany } from '../../hooks/useEstateScreening'
 import { getNetwork } from '../../config/networks'
 import { isValidAddress } from '../../lib/addressBook/addressBookStore'
+import { VERDICTS } from '../../lib/screening/verdict'
 import AddressBookPicker from './AddressBookPicker'
 import RestrictionTag from '../account/RestrictionTag'
 import './AddressBookField.css'
@@ -18,10 +19,19 @@ const netName = (id) => getNetwork(id)?.name || `Chain ${id}`
 
 export default function AddressInputBookAddon({ query = '', chainId, resolvedAddress, onPick }) {
   const { search } = useAddressBook()
-  const { getStatus } = useAddressScreening()
   const [open, setOpen] = useState(false)
 
   const entries = useMemo(() => search(query), [search, query])
+
+  // Estate verdicts, so a saved address reads the same here as it does in the notice under the
+  // field and in the address book (issue #1458): three surfaces, one sweep, one vocabulary.
+  const screenAddr =
+    resolvedAddress && isValidAddress(resolvedAddress) ? resolvedAddress : null
+  const screened = useMemo(
+    () => [...entries.map((e) => e.address), ...(screenAddr ? [screenAddr] : [])],
+    [entries, screenAddr],
+  )
+  const { getVerdictOn } = useEstateScreeningMany(screened)
 
   const handleSelect = useCallback(
     (entry) => {
@@ -31,9 +41,7 @@ export default function AddressInputBookAddon({ query = '', chainId, resolvedAdd
     [onPick],
   )
 
-  const screenAddr =
-    resolvedAddress && isValidAddress(resolvedAddress) ? resolvedAddress : null
-  const status = screenAddr ? getStatus(screenAddr, chainId) : 'clear'
+  const status = screenAddr ? getVerdictOn(screenAddr, chainId) : null
 
   return (
     <div className="ab-field-addon">
@@ -47,15 +55,16 @@ export default function AddressInputBookAddon({ query = '', chainId, resolvedAdd
         >
           Address book
         </button>
-        {screenAddr && (status === 'restricted' || status === 'uncertain') && (
-          <RestrictionTag status={status} />
-        )}
+        {screenAddr &&
+          (status === VERDICTS.FLAGGED ||
+            status === VERDICTS.PARTIAL ||
+            status === VERDICTS.UNSCREENED) && <RestrictionTag status={status} />}
       </div>
       {open &&
         (entries.length ? (
           <AddressBookPicker
             entries={entries}
-            getStatus={getStatus}
+            getStatus={getVerdictOn}
             networkName={netName}
             onSelect={handleSelect}
           />

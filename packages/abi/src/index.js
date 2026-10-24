@@ -8,4 +8,6 @@ export { ChainlinkFunctionsOracleAdapterAbi } from './ChainlinkFunctionsOracleAd
 export { UMAOptimisticOracleV3AdapterAbi } from './UMAOptimisticOracleV3Adapter.js'
 export { WagerPoolAbi } from './WagerPool.js'
 export { WagerPoolFactoryAbi } from './WagerPoolFactory.js'
+export { FundingPoolAbi } from './FundingPool.js'
+export { FundingPoolFactoryAbi } from './FundingPoolFactory.js'
 export { TokenInstanceAbi } from './TokenInstance.js'

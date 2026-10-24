@@ -21,7 +21,11 @@ describe('the pause acts on one named chain (T066, FR-017/FR-018)', () => {
     expect(adminPanelSource).toMatch(
       /getContractAddressForChain\('wagerRegistry', incidentChainId\)/,
     )
-    expect(adminPanelSource).toMatch(/const incidentWrite = \(\) =>/)
+    // Spec 110: writes are `encodeFunctionData` + `sendTransaction` now. What this asserts is
+    // what it always meant to — the transaction's `to` is the SCOPED registry address, which is
+    // the only thing standing between "pause Polygon" and pausing whatever the wallet is on.
+    expect(adminPanelSource).toMatch(/const incidentWrite = \(functionName, args = \[\]\) =>/)
+    expect(adminPanelSource).toMatch(/to: incidentRegistryAddr,/)
   })
 
   it('names the chain in the pause and unpause confirmations', () => {
@@ -45,8 +49,8 @@ describe('the pause acts on one named chain (T066, FR-017/FR-018)', () => {
 
 describe('a freeze applies to one named chain (T068)', () => {
   it('writes to the scoped registry and names the chain', () => {
-    expect(adminPanelSource).toMatch(/incidentWrite\(\)\.freezeAccount/)
-    expect(adminPanelSource).toMatch(/incidentWrite\(\)\.unfreezeAccount/)
+    expect(adminPanelSource).toMatch(/incidentWrite\('freezeAccount'/)
+    expect(adminPanelSource).toMatch(/incidentWrite\('unfreezeAccount'/)
     expect(adminPanelSource).toMatch(/frozen on \$\{networkName\(incidentChainId\)\}/)
     expect(adminPanelSource).toMatch(/unfrozen on \$\{networkName\(incidentChainId\)\}/)
   })

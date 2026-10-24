@@ -1,15 +1,26 @@
 site_name: FairWins
 site_description: Self-custody digital asset infrastructure — embedded wallets, policy-governed custody, payments, markets connectivity, and compliance across major networks, available white-label
 site_author: Chippr Robotics
-site_url: https://docs.FairWins.app
+site_url: https://docs.fairwins.app/
 
-repo_name: chippr-robotics/prediction-dao-research
-repo_url: https://github.com/chippr-robotics/prediction-dao-research
+repo_name: chippr-robotics/fairwins-platform
+repo_url: https://github.com/chippr-robotics/fairwins-platform
 edit_uri: edit/main/docs/
 
 theme:
   name: material
+  # Self-hosted faces only. `false` stops Material emitting its Google Fonts <link> and its
+  # --md-text-font/--md-code-font declarations; both families are declared instead in
+  # docs/stylesheets/extra.css, which carries the @font-face blocks and ships the woff2 beside
+  # itself in docs/stylesheets/fonts/. Nothing this site serves reaches a font CDN.
+  font: false
   palette:
+    # The palette is not hand-set here: it is the Chippr brand token set, exported from
+    # chippr-robotics/chippr-bots and copied verbatim into docs/stylesheets/extra.css with its
+    # upstream commit in the header. That export scopes the light palette to the `default` scheme
+    # and gives `slate` the brand accents only (Material's own dark surfaces carry the rest), so
+    # the toggle below does exactly what it says in both directions. Change a colour by changing
+    # the pin THERE and re-copying; an edit here is overwritten by the next copy.
     # Palette toggle for light mode
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -104,6 +115,7 @@ nav:
   - Developer Guide:
     - Setup: developer-guide/setup.md
     - Architecture: developer-guide/architecture.md
+    - Transaction Lifecycle (spec 110): developer-guide/transaction-lifecycle.md
     - Smart Contracts: developer-guide/smart-contracts.md
     - Frontend Development: developer-guide/frontend.md
     - ClearPath Multi-Network DAOs: developer-guide/clearpath-multi-network.md
@@ -111,13 +123,16 @@ nav:
     - Staking Integration: developer-guide/staking-integration.md
     - Perps (specs 082 + 083): developer-guide/perps.md
     - Platform Fees (FeeRouter): developer-guide/platform-fees.md
+    - Funding Pools (spec 103): developer-guide/funding-pools.md
     - Mini-Apps (spec 073): developer-guide/miniapps.md
     - Member API (spec 095): developer-guide/member-api.md
+    - Caller identity (specs 106/107): developer-guide/caller-identity.md
     - MCP Server (spec 095): developer-guide/mcp-server.md
     - Agentic Assistant (spec 095): developer-guide/agentic-chat.md
     - Agentic Payments (spec 096): developer-guide/agentic-payments.md
     - Message Signing (Protect ▸ Verify): developer-guide/message-signing.md
     - Hardware Wallets (Protect ▸ Off chain): developer-guide/hardware-wallets.md
+    - Sigil Cold Signer (Protect ▸ Off chain): developer-guide/sigil-cold-signer.md
     - Account Cards & Identity (spec 086): developer-guide/account-cards.md
     - Infrastructure as Code (spec 087): developer-guide/infrastructure-as-code.md
     - Account Statements: developer-guide/account-statements.md
@@ -130,6 +145,7 @@ nav:
     - Singleton Deployment Patterns: developer-guide/singleton-deployment-patterns.md
     - Testing: developer-guide/testing.md
     - Coverage & Audit Gates: developer-guide/coverage-and-audit-gates.md
+    - Multi-Agent Development Flow: developer-guide/multi-agent-workflow.md
     - Contributing: developer-guide/contributing.md
   - Security Testing:
     - Overview: security/index.md
@@ -159,6 +175,7 @@ nav:
     - Perps Operations: runbooks/perps-operations.md
     - Mini-App Registry Operations: runbooks/miniapp-registry-operations.md
     - Member API Operations (spec 095): runbooks/member-api-operations.md
+    - Keyed RPC Access (spec 107): runbooks/keyed-rpc-access.md
     - Staking Operations: runbooks/staking-operations.md
     - Contract Upgrades: runbooks/contract-upgrades.md
     - Relayer Mordor Deploy: runbooks/relayer-mordor-deploy.md
@@ -167,6 +184,19 @@ nav:
     - Batch Operations: runbooks/batch-operations.md
     - Passkey Account Recovery: runbooks/passkey-account-recovery.md
     - Hardware Wallet Staging Validation: runbooks/hardware-wallet-staging-validation.md
+    - Sigil Cold Signer Staging Validation: runbooks/sigil-cold-signer-staging-validation.md
+  - Architecture Workbook:
+    - Overview: architecture/workbook/README.md
+    - Executive Summary: architecture/workbook/00-executive-summary.md
+    - "01 Logical View": architecture/workbook/01-logical-view.md
+    - "02 Architectural View": architecture/workbook/02-architecture-view.md
+    - "03 Systems View": architecture/workbook/03-systems-view.md
+    - "04 Connectors & Ports": architecture/workbook/04-connectors-and-ports.md
+    - "05 Cryptographic BOM": architecture/workbook/05-cryptographic-bom.md
+    - "06 External Vendors": architecture/workbook/06-external-vendors.md
+    - "07 On-Chain Estate": architecture/workbook/07-onchain-estate.md
+    - "08 Spec Index": architecture/workbook/08-spec-index.md
+    - "09 Findings & Drift": architecture/workbook/09-findings-and-drift.md
   - Architecture Decisions:
     - Overview: adr/README.md
     - ADR-001 Trail of Bits Toolchain: adr/001-trail-of-bits-toolchain.md
@@ -174,9 +204,11 @@ nav:
     - ADR-003 X-Wing Post-Quantum Encryption: adr/003-xwing-post-quantum-encryption.md
     - ADR-004 Upgradeable Registry (UUPS): adr/004-upgradeable-registry-uups.md
     - ADR-005 Remove Unused X3DH Messaging Layer: adr/005-remove-unused-x3dh-messaging-layer.md
+    - ADR-006 Dependency Version Policy: adr/006-dependency-version-policy.md
   - Research:
     - Dex v3 Integration Analysis: research/dex-v3-integration-analysis.md
     - Alternative Approaches (Appendix): research/dex-v3-alternative-approaches.md
+    - GutterToken Assistant Integration: research/guttertoken-assistant-integration.md
   - Reference:
     - API Reference: reference/api.md
     - Contract Interfaces: reference/contracts.md
@@ -295,7 +327,11 @@ not_in_nav: |
 extra:
   social:
     - icon: fontawesome/brands/github
-      link: https://github.com/chippr-robotics/prediction-dao-research
+      link: https://github.com/chippr-robotics/fairwins-platform
 
 extra_css:
   - stylesheets/extra.css
+
+# Accessibility fixes the theme's markup needs (docs/javascripts/*.js say which finding each closes).
+extra_javascript:
+  - javascripts/search-dialog-name.js

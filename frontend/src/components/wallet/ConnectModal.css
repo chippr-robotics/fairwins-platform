@@ -252,3 +252,64 @@
     transition: none;
   }
 }
+
+/* Recovery by address (spec 104). Colours come from theme.css tokens only — this file states
+   none of its own (spec 091). */
+.connect-modal__recover-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem;
+}
+
+.connect-modal__recover-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.connect-modal__recover-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.625rem 0.75rem;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: var(--input-bg);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+}
+
+.connect-modal__recover-input:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 1px;
+}
+
+.connect-modal__recover-input[aria-invalid='true'] {
+  border-color: var(--danger-color);
+}
+
+.connect-modal__recover-help {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.connect-modal__recover-error {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--danger-text);
+}
+
+.connect-modal__recover-new {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.25rem;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.75rem;
+}
+
+.connect-modal__recover-new .connect-modal__address {
+  overflow-wrap: anywhere;
+}

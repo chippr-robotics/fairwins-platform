@@ -30,7 +30,6 @@ vi.mock('wagmi', () => ({
   useDisconnect: vi.fn(() => ({
     disconnect: vi.fn()
   })),
-  useChainId: vi.fn(() => 61),
   useWalletClient: vi.fn(() => ({
     data: {
       account: { address: '0x1234567890123456789012345678901234567890' },
@@ -125,7 +124,7 @@ vi.mock('../components/ui/AddressQRModal', () => ({
   )
 }))
 
-import { useAccount, useConnect, useDisconnect, useChainId } from 'wagmi'
+import { useAccount, useConnect, useDisconnect } from 'wagmi'
 import { useWalletRoles, useWeb3 } from '../hooks'
 import { useDex } from '../hooks/useDex'
 import { useUserPreferences } from '../hooks/useUserPreferences'
@@ -215,7 +214,6 @@ describe('WalletButton Component - Wagers', () => {
     useDisconnect.mockReturnValue({
       disconnect: vi.fn()
     })
-    useChainId.mockReturnValue(61)
     useWalletRoles.mockReturnValue({
       roles: [],
       hasRole: vi.fn(() => false)
@@ -282,8 +280,13 @@ describe('WalletButton Component - Wagers', () => {
       await user.click(button)
 
       await waitFor(() => {
-        expect(screen.getByText(/Get Access - from \$2 USDC \/ month/)).toBeInTheDocument()
+        expect(screen.getByRole('menuitem', { name: /get access/i })).toBeInTheDocument()
       })
+      // And it quotes NO price: the old "from $2 USDC / month" was hardcoded, and on the live
+      // ladder Bronze ($2) is inactive while the term is 30 days, not a recurring month. A price
+      // belongs only where it is read from the contract (the purchase modal's grid).
+      expect(screen.queryByText(/\$\d/)).not.toBeInTheDocument()
+      expect(screen.queryByText(/\/ month/i)).not.toBeInTheDocument()
     })
 
     it('no longer shows the "My Wagers" entry in the dropdown', async () => {

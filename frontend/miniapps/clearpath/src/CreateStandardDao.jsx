@@ -3,6 +3,7 @@ import { useMiniAppHost } from '@fairwins/miniapp-sdk'
 
 import CpAddressField from './CpAddressField'
 import { nativeDaoUnavailableReason } from './config/nativeDaoChains'
+import { FEE_STATEMENT, describeFeeEstimate, useCreateDaoFee } from './createDaoFee'
 import { validateCreateForm, toParams } from './createDaoForm'
 import { useStandardDao } from './useStandardDao'
 
@@ -29,7 +30,7 @@ const DEFAULTS = {
 
 export default function CreateStandardDao({ hasRegistryFor, track }) {
   const host = useMiniAppHost()
-  const { chainId, isConnected, canCreate, createDAO } = useStandardDao()
+  const { chainId, isConnected, canCreate, createDAO, estimateCreateFee } = useStandardDao()
   const [form, setForm] = useState(DEFAULTS)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
@@ -39,6 +40,16 @@ export default function CreateStandardDao({ hasRegistryFor, track }) {
 
   const net = host.network(chainId)
   const set = (key) => (e) => setForm((f) => ({ ...f, [key]: e.target.value }))
+
+  /*
+   * The network fee, estimated live against the calldata this form would submit (issue #1408).
+   *
+   * Hooks run before the `canCreate` early return below can be reached — but the hook is inert
+   * where there is no factory (`estimateCreateFee` answers `unavailable` without a read), so the
+   * not-deployed branch costs nothing. Paused while submitting: the transaction is already priced
+   * by then and the member is looking at their wallet, not at this.
+   */
+  const feeEstimate = useCreateDaoFee({ form, estimateCreateFee, enabled: !busy })
 
   // NOT DEPLOYED HERE — say which of the two reasons it is. "Pre-Cancun" is permanent (issue #1268);
   // "not deployed" is a state of the estate. Collapsing them would leave an ETC member waiting.
@@ -217,6 +228,23 @@ export default function CreateStandardDao({ hasRegistryFor, track }) {
       </div>
 
       {error && <div className="cp-error" role="alert">{error}</div>}
+
+      {/*
+        THE FEE DISCLOSURE, DIRECTLY ABOVE THE BUTTON (issue #1408).
+
+        Two parts, and only the second one is conditional. `FEE_STATEMENT` is a fact about the
+        transaction and renders whatever the network says; the estimate underneath states a number
+        only when one was actually read, and otherwise says plainly that it could not be confirmed.
+        A member must never be able to reach the signature without having been told a fee applies —
+        which is why this sits at the button rather than in the intro paragraph they scrolled past.
+      */}
+      <div className="cp-fee">
+        <span className="cp-fee-k">Network fee</span>
+        <p className="cp-fee-v">{FEE_STATEMENT}</p>
+        <p className="cp-fee-est" aria-live="polite">
+          {describeFeeEstimate(feeEstimate, { symbol: net?.nativeCurrency?.symbol })}
+        </p>
+      </div>
 
       <div className="cp-row-actions">
         <button type="submit" className="cp-btn cp-btn-primary" disabled={busy || !isConnected}>

@@ -17,7 +17,7 @@
  * Failed entries are INCLUDED here; excluding them from financial totals is
  * the summary helpers' job (FR-003), not the repository's.
  */
-import { formatUnits } from 'ethers'
+import { formatUnits } from '../../lib/evm/units'
 import { getNetwork } from '../../config/networks'
 import { resolveTokenMeta } from '../reports/tokenMeta'
 import { valueTransfer } from '../reports/valuation'

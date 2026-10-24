@@ -26,6 +26,7 @@ const withdrawData = (v) => IFACE.encodeFunctionData('withdraw', [v])
 const getBalance = vi.fn()
 const balanceOf = vi.fn()
 const symbolCall = vi.fn()
+const readCalls = []
 const getFeeData = vi.fn()
 const sendTransaction = vi.fn()
 const sendCalls = vi.fn()
@@ -38,22 +39,42 @@ const active = vi.hoisted(() => ({ current: {} }))
 
 vi.mock('../../hooks/useWalletManagement', () => ({ useWallet: () => wallet.current }))
 vi.mock('../../hooks/useActiveAccount', () => ({ useActiveAccount: () => active.current }))
-vi.mock('../../utils/rpcProvider', () => ({ makeReadProvider: () => readProvider }))
+vi.mock('../../utils/rpcProvider', () => ({
+  makeReadProvider: () => readProvider,
+  getReadProvider: () => readProvider,
+}))
+// The passkey lifecycle tests below exercise pending/failed/sponsorship REPORTING, not chain
+// support — on the real test chain (Mordor, no bundler) spec 108's pre-tap gate would refuse
+// before sendCalls ever ran, which is its own behavior with its own tests (the spec 108 block
+// at the bottom flips this seam off to prove the refusal). Support defaults to present so the
+// lifecycle paths stay reachable.
+const passkeySupport = vi.hoisted(() => ({ supported: true, reason: null }))
+vi.mock('../../config/passkeySupport', () => ({
+  isPasskeySupported: () => passkeySupport.supported,
+  getPasskeySupport: () => ({ ...passkeySupport }),
+}))
 vi.mock('../../hooks/useRpcEndpoints', () => ({ useEndpointsRevision: () => 0 }))
 
-// Only `Contract` is stubbed — every read this hook makes goes through one, and the rest of ethers
-// (Interface, parseUnits, formatUnits) is the real thing so the encoded calldata under test is
-// genuinely what ethers would produce.
-vi.mock('ethers', async (importOriginal) => {
+/**
+ * Spec 110: the contract reads go through the chain seam, so the seam is what is faked — the
+ * `vi.mock('ethers')` that stood here stubbed `new ethers.Contract(address, abi, runner)`, a
+ * constructor whose fake (like every fake of it) IGNORED THE ADDRESS. A balance read aimed at the
+ * wrong contract, or at the wrong chain, passed every assertion in this file. Both are recorded
+ * and asserted now.
+ *
+ * ethers is still imported below, unmocked, purely as the cross-library oracle for the calldata:
+ * `IFACE.encodeFunctionData` is what the hook's viem encoder is being compared AGAINST, so it must
+ * be the real thing.
+ */
+vi.mock('../../lib/chains/readContract', async (importOriginal) => {
   const actual = await importOriginal()
   return {
     ...actual,
-    ethers: {
-      ...actual.ethers,
-      Contract: function MockContract(address, abi) {
-        // The symbol probe is built with a one-entry ABI; the balance reads use the full one.
-        return abi.length === 1 ? { symbol: symbolCall } : { balanceOf }
-      },
+    readContract: async (chainId, { address, functionName, args = [] }) => {
+      readCalls.push({ chainId, address, functionName, args })
+      if (functionName === 'symbol') return symbolCall()
+      if (functionName === 'balanceOf') return balanceOf(args[0])
+      throw new Error(`unexpected read: ${functionName}`)
     },
   }
 })
@@ -62,10 +83,16 @@ const { useWrapNative } = await import('../../hooks/useWrapNative')
 
 beforeEach(() => {
   vi.clearAllMocks()
+  readCalls.length = 0
+  passkeySupport.supported = true
+  passkeySupport.reason = null
   wallet.current = {
     address: '0xAaAa000000000000000000000000000000000001',
     chainId: MORDOR,
-    signer: { sendTransaction },
+    // A real JsonRpcSigner carries the provider it was built on, and that provider knows
+    // which chain it serves — the spec-108 settle loop reads it to tell a settled signer
+    // from the pre-switch one.
+    signer: { sendTransaction, provider: { getNetwork: async () => ({ chainId: MORDOR }) } },
     provider: null,
     loginMethod: 'eoa',
     sendCalls,
@@ -220,7 +247,11 @@ describe('who is acting', () => {
   // Guards the finding that wrap/unwrap read the CONNECTED wallet's balances and signed with the
   // connected signer while operating as a hardware account.
   it('reads balances from the hardware acting address, not the connected wallet (spec 088 FR-001)', async () => {
-    const HW = '0xHaRd000000000000000000000000000000000009'
+    // A REAL address. The placeholder that stood here ('0xHaRd…') is not hex and was only ever
+    // accepted because the fake `new Contract(address, …)` ignored its first argument entirely.
+    // Checksummed: the hook normalises the acting address before the read (divergence 16),
+    // so a fixture in another casing would assert on a string the seam never sees.
+    const HW = '0x00000000000000000000000000000000000000A9'
     active.current = {
       ...active.current,
       isHardware: true,
@@ -233,6 +264,14 @@ describe('who is acting', () => {
     await waitFor(() => expect(result.current.wrappedBalance).not.toBeNull())
     expect(balanceOf).toHaveBeenCalledWith(HW)
     expect(balanceOf).not.toHaveBeenCalledWith(wallet.current.address)
+    // And the read was aimed at the wrapper on the wrapper's own chain — the two facts the
+    // address-ignoring Contract fake could never distinguish.
+    expect(readCalls).toContainEqual({
+      chainId: MORDOR,
+      address: WRAPPED,
+      functionName: 'balanceOf',
+      args: [HW],
+    })
   })
 
   it('routes a hardware wrap through the acting-account seam, never the connected signer (spec 088 FR-002)', async () => {
@@ -294,5 +333,117 @@ describe('who is acting', () => {
     let res
     await act(async () => { res = await result.current.wrap('1') })
     expect(res).toMatchObject({ txHash: '0xtx', sponsored: false })
+  })
+})
+
+describe('the target chain (spec 108) — the asset is the entry point', () => {
+  const POLYGON = 137
+
+  it('re-binds every read to an explicit target, and says a switch is coming', async () => {
+    // Wallet stays on Mordor; the member picked Polygon's coin.
+    const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
+    await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
+    const { NETWORKS } = await import('../../config/networks')
+    expect(view.result.current.token.address).toBe(NETWORKS[POLYGON].dex.wnative)
+    expect(view.result.current.chainId).toBe(POLYGON)
+    expect(view.result.current.networkName).toBe(NETWORKS[POLYGON].name)
+    expect(view.result.current.needsSwitch).toBe(true)
+    expect(view.result.current.writeRail.kind).toBe('signer-switch')
+  })
+
+  it('passing no target keeps the wallet’s chain — the pre-108 contract, byte for byte', async () => {
+    const { result } = await mounted()
+    expect(result.current.chainId).toBe(MORDOR)
+    expect(result.current.needsSwitch).toBe(false)
+    expect(result.current.writeRail.kind).toBe('signer-same-chain')
+  })
+
+  it('a refused switch names BOTH chains and sends nothing', async () => {
+    const switchNetwork = vi.fn().mockRejectedValue(new Error('user rejected'))
+    wallet.current = { ...wallet.current, switchNetwork }
+    const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
+    await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
+    await act(async () => {
+      // Spec 110 T026a — the GUARANTEE, not just "both names appear somewhere". This assertion used
+      // to be the loose regex alone, so when the refusal moved to the shared `settleWalletOn` its
+      // tail changed from "— nothing was sent" to "so nothing has been signed" and this suite stayed
+      // green; only the Cypress spec, which pinned the sentence, caught it. Pinning the phrase here
+      // means a wording change is a LOCAL failure rather than a CI one.
+      const err = await view.result.current.wrap('1').catch((e) => e)
+      expect(err.message).toMatch(/Polygon.*Mordor|Mordor.*Polygon/s)
+      expect(err.message).toMatch(/nothing has been signed/i)
+    })
+    expect(switchNetwork).toHaveBeenCalledWith(POLYGON)
+    expect(sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('a switch that lands sends through the SETTLED signer on the target chain', async () => {
+    const settledSend = vi
+      .fn()
+      .mockResolvedValue({ hash: '0xsettled', wait: async () => ({ hash: '0xsettled' }) })
+    // The switch arrives as new context values on a LATER render, not as the switch
+    // promise's resolution — exactly what the settle loop exists to wait for. And it arrives
+    // in TWO steps, the way a real wallet delivers it: the connector's chainChanged updates
+    // the context chainId FIRST, while the chain-scoped signer is still the pre-switch one
+    // (whose own provider still answers the OLD chain); the rebuilt signer lands on a later
+    // render. The loop must skip that stale pair — ethers only rejects a send through it
+    // AFTER broadcasting ("network changed: 63 => 137"), so waiting is the only safe answer.
+    const switchNetwork = vi.fn().mockImplementation(async () => {
+      wallet.current = { ...wallet.current, chainId: POLYGON } // stale signer still in place
+    })
+    wallet.current = { ...wallet.current, switchNetwork }
+    const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
+    await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
+    // The wrap is started OUTSIDE act on purpose: the settle loop inside it is waiting for a
+    // render pass, and a render cannot flush while the act() awaiting the same promise holds
+    // the queue. waitFor drives its own act ticks, which is what lets the loop observe the
+    // switched snapshot.
+    let pending
+    act(() => { pending = view.result.current.wrap('1') })
+    await waitFor(() => expect(switchNetwork).toHaveBeenCalledWith(POLYGON))
+    view.rerender() // delivers chainId=137 with the PRE-switch signer — must not send
+    wallet.current = {
+      ...wallet.current,
+      signer: {
+        sendTransaction: settledSend,
+        provider: { getNetwork: async () => ({ chainId: POLYGON }) },
+      },
+    }
+    view.rerender() // the rebuilt, target-bound signer lands
+    let res
+    await act(async () => { res = await pending })
+    expect(res.txHash).toBe('0xsettled')
+    expect(settledSend).toHaveBeenCalledTimes(1)
+    // The pre-switch signer never signed anything.
+    expect(sendTransaction).not.toHaveBeenCalled()
+  })
+
+  it('a passkey batch pins the target chain by parameter — no switch ceremony', async () => {
+    wallet.current = { ...wallet.current, loginMethod: 'passkey', signer: null, switchNetwork: undefined }
+    sendCalls.mockResolvedValue({ state: 'included', txHash: '0xop', sponsored: false })
+    const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
+    await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
+    expect(view.result.current.writeRail.kind).toBe('passkey')
+    await act(async () => { await view.result.current.wrap('1') })
+    expect(sendCalls).toHaveBeenCalledWith(
+      expect.any(Array),
+      expect.objectContaining({ chainId: POLYGON }),
+    )
+  })
+
+  it('an unsupported passkey target is stated BEFORE the tap, with the seam’s own reason', async () => {
+    passkeySupport.supported = false
+    passkeySupport.reason = 'No bundler is configured for this network.'
+    wallet.current = { ...wallet.current, loginMethod: 'passkey', signer: null }
+    const view = renderHook(() => useWrapNative({ chainId: POLYGON }))
+    await waitFor(() => expect(view.result.current.nativeBalance).not.toBeNull())
+    expect(view.result.current.writeRail).toEqual({
+      kind: 'unavailable',
+      reason: 'No bundler is configured for this network.',
+    })
+    await act(async () => {
+      await expect(view.result.current.wrap('1')).rejects.toThrow(/no bundler/i)
+    })
+    expect(sendCalls).not.toHaveBeenCalled()
   })
 })

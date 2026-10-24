@@ -5,7 +5,9 @@
  * right now?" Precedence, highest first:
  *
  *   1. the member's override for that chain (Network settings, `endpointStore`)
- *   2. the build default for that chain (`NETWORKS[chainId].rpcUrl`, itself
+ *   2. platform-ISSUED keyed access for that chain (spec 107, `issuedAccess` — module memory,
+ *      acquired in the background; the route carries the URL only, never the credential)
+ *   3. the build default for that chain (`NETWORKS[chainId].rpcUrl`, itself
  *      `VITE_RPC_URL_*` or a curated public endpoint)
  *
  * Consumers never re-implement that order — `utils/rpcProvider#makeReadProvider` (every
@@ -20,6 +22,7 @@
 
 import { NETWORKS } from '../../config/networks'
 import { AUTH_MODES, getEndpointSettings, redactRpcUrl } from './endpointStore'
+import { getIssuedAccessSync } from './issuedAccess'
 
 /** Build-time default endpoint for a chain (env override or curated public RPC). */
 export function defaultRpcUrlForChain(chainId) {
@@ -53,7 +56,7 @@ export function authHeadersFor(entry) {
  *   chainId: number,
  *   primary: { url: string, headers: Record<string,string> } | null,
  *   failover: { url: string, headers: Record<string,string> } | null,
- *   source: 'member' | 'default',
+ *   source: 'member' | 'issued' | 'default',
  *   defaultUrl: string | null,
  * }}
  */
@@ -63,6 +66,22 @@ export function resolveRpcEndpoints(chainId) {
   const entry = getEndpointSettings(id)
 
   if (!entry?.url) {
+    // Platform-issued keyed access (spec 107) slots between the member's choice and the build
+    // default. THE ROUTE CARRIES NO CREDENTIAL: headers stay empty, and the token reaches the
+    // wire per request via the provider's preflight hook — which is what lets it rotate without
+    // rebuilding providers, and what keeps the failover leg (a different host) from ever seeing
+    // it. The build default becomes the failover, so issued access going dark degrades to the
+    // public route rather than to nothing.
+    const issued = getIssuedAccessSync(id)
+    if (issued?.url) {
+      return {
+        chainId: id,
+        primary: { url: issued.url, headers: {} },
+        failover: defaultUrl && defaultUrl !== issued.url ? { url: defaultUrl, headers: {} } : null,
+        source: 'issued',
+        defaultUrl,
+      }
+    }
     // A member on default settings still gets the build's curated failover where one exists,
     // so a community-run primary going dark degrades to a slower route rather than to nothing.
     const builtInFailover = defaultRpcFailoverUrlForChain(id)

@@ -1,50 +1,10 @@
-previous: v1.14.0
-commits:  45
-  [unclassified] Merge pull request #1377 from chippr-robotics/staging
-  [unclassified] Merge pull request #1376 from chippr-robotics/claude/release-1-14-0-tasks-av87yu
-  [test -> patch] sample the linearity guard best-of-5 so runner noise cannot fail it
-  [fix -> patch] move form helpers out of the CreateStandardDao component file
-  [fix -> patch] re-derive local addresses after pillar-A deploy-sequence growth
-  [unclassified] Merge pull request #1375 from chippr-robotics/fix/cohort-gate-precision
-  [unclassified] Merge pull request #1374 from chippr-robotics/chore/auto-backmerge-main-into-staging
-  [feat -> minor] native standard DAO creation - spec 030 pillar A (#1268)
-  [unclassified] Merge pull request #1371 from chippr-robotics/claude/release-1-14-0-tasks-av87yu
-  [fix -> patch] the cohort gate checked a filename, not the boundary
-  [unclassified] Merge remote-tracking branch 'origin/main' into backmerge-resolve
-  [fix -> patch] the build marker lives beside artifacts/, not inside it
-  [fix -> patch] write the build marker where CI actually compiles
-  [fix -> patch] a11y suppression retired, byte gate fails closed on stale artifacts, dead archive scripts removed
-  [fix -> patch] vault batch proposals pre-flight the guard's own delegatecall answer (#1368)
-  [feat -> minor] Ledger over Bluetooth on phones, behind the one adapter seam
-  [test -> patch] the ClearPath matrix row names what it measures (#1268 part 1)
-  [unclassified] Merge pull request #1367 from chippr-robotics/claude/release-1-14-0-tasks-av87yu
-  [fix -> patch] CV-06 must kill Polygon's failover too, now that one exists
-  [fix -> patch] drop unused imports from the resolution-loop regression test
-  [fix -> patch] reset sheet scroll on view change; scroll deep assertions into view
-  [fix -> patch] kill the resolution-announcement update loop in the recipient rows
-  [feat -> minor] group pay - N recipients from Home Pay and Transfer
-  [feat -> minor] vault actions in one sheet, majority threshold + starter policy defaults
-  [feat -> minor] QuickNode-ready primaries with distinct public failover on every EVM mainnet
-  [unclassified] Merge pull request #1365 from chippr-robotics/claude/release-1-14-0-tasks-av87yu
-  [feat -> minor] optional app lock per the spec 041 amendment
-  [feat -> minor] purchase lands on the acting account (spec 098)
-  [feat -> minor] complete the POL rename sweep and wrap/voucher test alignment
-  [feat -> minor] MATIC to POL on Polygon/Amoy, Bitcoin network card
-  [feat -> minor] account add chooser, wrap as a Trade view, FWMV send from portfolio
-  [test -> patch] make the reply-links linearity check robust to runner hiccups
-  [test -> patch] add coverage-matrix rows for specs 098-101
-  [spec -> patch] passkey-native Zcash - spec, plan, research, tasks, derivation contract
-  [spec -> patch] passkey-native Solana - spec, plan, tasks, derivation contract
-  [spec -> patch] acting-account membership purchase across every submit rail
-  [spec -> patch] network status mini-app board with bridge/supply CTAs
-  [spec -> patch] amend with optional app-lock (FR-025..FR-028, SC-010)
-  [unclassified] Merge pull request #1363 from chippr-robotics/feat/enable-x402-assistant
-  [test -> patch] the money-path tests encoded x402's dormancy
-  [feat -> minor] enable the x402 rail, with the collector that watches it
-  [unclassified] Merge pull request #1362 from chippr-robotics/chore/auto-backmerge-main-into-staging
-  [unclassified] Merge pull request #1361 from chippr-robotics/docs/bootstrap-state-push-lesson
-  [docs -> patch] commit AND push bootstrap state, every time
-  [chore -> patch] record bootstrap state
-bump:     minor
+previous: v1.19.0
+commits:  5
+  [unclassified] Merge pull request #1645 from chippr-robotics/hotfix/dependency-alerts
+  [fix -> patch] drop the cdp-sdk axios acceptance the override resolves
+  [fix -> patch] patch decompress, axios and grpc-js advisories
+  [unclassified] Merge pull request #1639 from chippr-robotics/release/v1.19.0-changelog
+  [skipped] chore(release): v1.19.0 [skip release]
+bump:     patch
 reason:   computed
-next:     v1.15.0
+next:     v1.19.1

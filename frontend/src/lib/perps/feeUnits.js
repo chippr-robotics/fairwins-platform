@@ -29,7 +29,9 @@
  * has no caller and every fee surface would have to re-derive the key locally — the second-source
  * failure this repo keeps paying for.
  */
-import { AbiCoder, getAddress, isAddress, keccak256 } from 'ethers'
+import { encodeAbiParameters, keccak256 } from 'viem'
+// Not viem's `isAddress`: neither of its settings reproduces ethers' (see the seam's table).
+import { getAddress, isAddress } from '../evm/address'
 
 /** GMX `Keys.uiFeeFactor` is a 1e30-precision float; 1 bps of it is 1e26. */
 export const GMX_UI_FEE_FACTOR_PER_BPS = 10n ** 26n
@@ -58,13 +60,17 @@ const BPS_DENOMINATOR = 10_000n
  * the factor the spec-083 ops transaction set.
  * ------------------------------------------------------------------------------------------- */
 
-const ABI_CODER = AbiCoder.defaultAbiCoder()
+// abi.encode twins (spec 110 Phase 1): viem's encodeAbiParameters is byte-identical to
+// ethers' AbiCoder.encode for these static types.
+const encodeString = (v) => encodeAbiParameters([{ type: 'string' }], [v])
+const encodeKeyAddress = (k, a) =>
+  encodeAbiParameters([{ type: 'bytes32' }, { type: 'address' }], [k, a])
 
 /** `Keys.MAX_UI_FEE_FACTOR` — the ceiling, read live rather than assumed to stay 1e27. */
-export const GMX_MAX_UI_FEE_FACTOR_KEY = keccak256(ABI_CODER.encode(['string'], ['MAX_UI_FEE_FACTOR']))
+export const GMX_MAX_UI_FEE_FACTOR_KEY = keccak256(encodeString('MAX_UI_FEE_FACTOR'))
 
 /** `Keys.UI_FEE_FACTOR` — the base the per-account key is derived from, never read directly. */
-const GMX_UI_FEE_FACTOR_BASE_KEY = keccak256(ABI_CODER.encode(['string'], ['UI_FEE_FACTOR']))
+const GMX_UI_FEE_FACTOR_BASE_KEY = keccak256(encodeString('UI_FEE_FACTOR'))
 
 /**
  * `Keys.uiFeeFactorKey(account)` = `keccak256(abi.encode(UI_FEE_FACTOR, account))`.
@@ -79,7 +85,7 @@ const GMX_UI_FEE_FACTOR_BASE_KEY = keccak256(ABI_CODER.encode(['string'], ['UI_F
 export function gmxUiFeeFactorKey(account) {
   if (typeof account !== 'string' || !isAddress(account)) return null
   try {
-    return keccak256(ABI_CODER.encode(['bytes32', 'address'], [GMX_UI_FEE_FACTOR_BASE_KEY, getAddress(account)]))
+    return keccak256(encodeKeyAddress(GMX_UI_FEE_FACTOR_BASE_KEY, getAddress(account)))
   } catch {
     return null
   }

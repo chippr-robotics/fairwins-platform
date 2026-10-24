@@ -39,14 +39,23 @@
 
 const ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
 
-/** Settings card ids double as `data-attention` markers and as deep-link hashes (spec 081). */
+/**
+ * Card ids double as `data-attention` markers and as deep-link hashes (spec 081). The id survived
+ * spec 104's move of this card off Settings onto the Assistant tab in Tools, so the OLD link below
+ * still lands on it — by redirect, which is why every assertion here names the card and none names
+ * the tab. The redirect itself is held once, in 47-assistant-rails.cy.js [GT-07].
+ */
 const API_ACCESS_URL = '/wallet?tab=settings#api-access'
 
 /** Wallet-scoped metadata store — `lib/apiAccess/apiKeys.js` + `utils/userStorage.js`. */
 const KEYS_STORAGE = `fw_user_${ACCOUNT.toLowerCase()}_api_access_keys`
 
 /** Every shipped read provider this build resolves runs through publicnode. */
-const RPC_PATTERN = /publicnode\.com/
+// BOTH rails, or the stub is a lie: since 480720bf every EVM mainnet has a drpc.org FAILOVER,
+// so makeReadProvider builds a FallbackProvider — a stub that fails only the publicnode primary
+// is answered by LIVE drpc, and "the chain is unreachable" quietly becomes "the chain answered
+// tier 0 from production" (issue #1463; spec 42 and the passkey suite hit the same class).
+const RPC_PATTERN = /publicnode\.com|drpc\.org/
 
 /*
  * ── The membership answer, encoded by hand ─────────────────────────────────────────────────────
@@ -304,6 +313,16 @@ describe('API access (spec 095)', () => {
     stubMembership({ fail: true })
     openApiAccess()
 
+    /*
+     * `fail: true` refuses EVERY call, `eth_chainId` included, so the provider cannot even finish
+     * network detection — a deliberately hostile chain, and the arm is written that way on purpose.
+     * Reaching the unreadable state from there is `useRoleDetails`' own doing: the read is bounded
+     * by `MEMBERSHIP_READ_TIMEOUT_MS` and expires to `readable: false`. Before that bound existed
+     * this assertion was a race against ethers' retry backoff, which is why it was ~40% red on
+     * `staging` (issue #1463). Do NOT "fix" a future flake here by narrowing the stub to leave
+     * `eth_chainId` answering: that would make the test agree with the app, and this arm exists to
+     * hold the app to a member-facing promise — a spinner is not an answer.
+     */
     cy.get('[data-testid="api-access-unreadable"]', { timeout: 40000 }).should('be.visible')
     cy.get('[data-testid="api-access-unreadable"]').contains('button', 'Try again').should('exist')
     cy.get('[data-testid="api-access-upgrade"]').should('not.exist')

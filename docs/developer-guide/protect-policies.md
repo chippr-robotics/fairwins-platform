@@ -83,6 +83,47 @@ signature bundles) — no signature-format change was needed.
 - Changing the rule set clears live window accounting (rule identity is positional). The UI says so
   before the change is proposed.
 
+## The write rail is a property of the signer, not the login
+
+A custody action needs something that can sign it on the chain it lands on. Until this change the
+code asked a different question — `loginMethod === 'passkey'` — and that is the one thing
+`WalletContext` says not to ask:
+
+> `loginMethod` is INFORMATIONAL ONLY (signing ceremony differs); identity, gating, and screening
+> always key off `address` — no feature may branch on it for authorization.
+
+It produced a real refusal. Ethereum Classic and Mordor have no bundler, so the passkey UserOp rail
+cannot submit there; every approve / execute / cancel on those networks died inside
+`sendPasskeyBatch` with a chain-support error the member had asked no question to receive. A wallet
+that holds a key has no such problem: an injected wallet, a Ledger, or an unlocked recovered
+account signs `approveHash` natively and pays the fee in ETC.
+
+`lib/chains/writeRail.js#resolveWriteRail` answers it once, for every custody surface (spec 110
+T025 moved it out of `lib/custody/` — nothing about the question is custody-specific, and the
+write seam `lib/chains/submitOn.js` asks it for every write):
+
+| condition | rail | offered? |
+|---|---|---|
+| a signer is present | `signer` | yes — on every EVM chain the vault lives on |
+| no signer, passkey session, `isPasskeySupported(chain)` | `passkey` | yes |
+| no signer, passkey session, chain has no bundler | `passkey` | **no** — reason names the chain and the way out |
+| no signer, no passkey session | `none` | no — "connect a wallet" |
+
+Three rules:
+
+1. **A signer wins, and is checked first.** Routing by login would take a working key away from a
+   member on a chain the passkey rail has never reached.
+2. **The refusal is knowable before the tap, so it is said before the tap.** `useVaultProposals`
+   returns `writeRail`, and the Queue renders the reason in place of buttons that would throw.
+   That state is *not* "view-only" — the member IS an owner, which is a different fact and reads
+   differently.
+3. **The reason names the way out**, not only the obstacle. "Connect a wallet that can sign there"
+   is actionable; `ChainNotSupportedError` is not.
+
+`requireWriteRail` is the throwing form used inside the action callbacks, so a caller that reaches
+them anyway fails with the same sentence the surface would have shown.
+
+
 ## Client integration
 
 `frontend/src/lib/custody/policyV2.js` is the single seam:
@@ -121,6 +162,39 @@ keyboard reorder), `RuleComposer` (plain-language editor; members never see `ban
 - `safeProposalHub` needs a recorded **deployment block** per chain
   (`DEPLOYMENT_BLOCKS_BY_CHAIN`), or `useVaultProposals` refuses to scan and proposal discovery is
   silently dead on that chain.
+
+## One vault, every network (spec 102)
+
+The Queue reads when the sheet opens and does not poll: **Refresh** re-reads every network the vault is on. It is offered whatever each chain's state is — the per-chain **Retry** is for a chain that failed, Refresh is for time having passed — because a queue that is one block stale otherwise looks exactly like a settled one.
+
+- **A vault is an address; a network is a property of a transaction.** The reference store is still
+  keyed `(chainId, address)` and every chain is still read through its own provider with per-row
+  failure isolation — but the member sees ONE card per address. `useCustodyVaults().groups` is the
+  view (`lib/custody/vaultGroups.js#groupVaults`), `vaults` is still the per-instance list the
+  policy panels and `VaultActionSheet` consume.
+- **Loading adds every network.** `loadByAddress` upserts a reference for each chain the probe
+  finds a Safe on and names the chains it could not reach; nothing asks the member to pick.
+  `probeVault(address)` re-runs the probe for an existing card and adds only new instances.
+- **The vault sheet** (`components/custody/VaultSheet.jsx`, on the shared `ActionSheet`) has three
+  views. *Queue* reads proposals for EVERY instance through `hooks/useVaultQueueAcrossChains.js`
+  — each chain resolves `read | unreadable | not-configured | not-supported`, rows carry a
+  `NetworkPill`, and a total missing a chain is partial and names it. Approve / Execute / Cancel
+  on a row whose chain differs from the wallet's **switches the wallet at tap time** (spec 088's
+  `switchNetwork`, awaited) and runs the action once the connected-chain `useVaultProposals`
+  has rebound; a refused switch is a per-row alert naming both chains, and nothing is signed.
+  *Style* is the spec-086 customize body (one address-keyed profile — never per chain).
+  *Details* lists every network, cross-references owners (address book > callsign > ENS >
+  generated, "You" for the connected wallet, add-to-book in place) and holds the acting-account
+  radiogroup and "Remove from Protect" (all networks).
+- **The acting identity follows the wallet where it can.** `operateAsVault({ address, chainIds })`
+  resolves `active.chainId` to the wallet's chain when the vault exists there, else the pin; a
+  wallet chain change re-evaluates it with no prompt. A vault-mode `submit` on the wrong chain
+  switches first (settle loop mirrors `useEarnSend.sendOnChain`) and still never falls through to
+  the connected wallet's signer under the vault label.
+- **Never render a failed read as zero.** "0 of 0", "none pending" for an unreadable chain, and a
+  missing threshold as a number are all bugs; the card says "unreachable"/"varies by network".
+- Deep link: `/wallet?tab=custody&vault=<address>` opens the sheet (address only — by design there
+  is no chain in the URL).
 
 ## Deploying
 
@@ -186,3 +260,54 @@ from memory: a guessed `Proposed` event hashes to a different topic0 and matches
 exactly like an app that proposed nothing), and `configureRules` takes `uint128` limits, so a
 `uint256` guess selects a different function and the Safe's setup delegatecall reverts with no data
 to explain it. Both cost a debugging round.
+
+## One vault, created everywhere (spec 105)
+
+Creation is a guided four-sheet flow (`components/custody/createflow/`): **type** (Joint 1-of-2 /
+Controlled n-of-n / Complex m-of-n — presets resolve owners + threshold; nobody types a bare
+threshold unless they chose Complex), **rules** (a tile grid over ONE semantic config —
+`lib/custody/vaultRulesConfig.js`), **networks** (cohort custody multi-select + orchestrated
+per-network deployment status), **done**. The connected chain gates nothing: the orchestrator
+(`hooks/useVaultDeployment.js`) switches the wallet per network at signature time (the spec-102
+settle-loop), resolves the write rail FIRST, and isolates every failure to its own row with the
+stage and a member-facing reason.
+
+Four invariants:
+
+1. **Same address on every network** — the deployment uses the chain-independent spec-043
+   initializer (owners + threshold + canonical fallback handler, NO policy setup) plus a per-vault
+   `saltNonce`. `buildDeploymentPlan` refuses any chain whose canonical Safe set would produce a
+   different address. **Never put a policy setup in a multichain initializer**: the realized rules
+   embed the chain's own stable-token address, so the bytes differ per chain and the address
+   identity breaks.
+2. **Rules are ONE semantic config, realized per chain** — `realizeRules` builds the banded
+   everyday lane (over-cap amounts skip it), the identical-scope full-vote big-send lane (the
+   engine's one fall-through), and the catch-all; installation happens POST-deploy through the
+   vault's own machinery (`buildInstallPlan`): directly where the creator alone meets the
+   threshold, queued as hub proposals ("awaiting approval", never shown active) where co-owners
+   must sign. A chain with no configured stable realizes cooldown + catch-all and DISCLOSES the
+   inapplicable tiles.
+3. **The creation record is the replay input** — `lib/custody/vaultCreationRecords.js` (synced
+   object `vaultCreationRecords`, non-network-scoped) holds owners-at-creation / threshold /
+   saltNonce / the semantic rules. Records are immutable (a differing overwrite throws; a
+   conflicting backup merge is reported, existing wins). "Add a network" on Details exists only
+   with a record; without one the row states the honest reason (FR-018). Owner drift since
+   creation ⇒ the original-arrangement disclosure before any signature (FR-017).
+4. **Status truth is the chain's** — in-flight states are session-local; reopen re-derives via
+   `getCode` + policy reads (`deriveNetworkStatus`), a failed probe is `unreadable` (never
+   "not deployed"), and an occupied predicted address is `already-live` — success, not failure.
+
+Details renders ONE card: network status rows (per-row Switch; Not-deployed rows carry the inline
+Deploy), shared facts stated once with drift NAMING the differing network and coverage naming
+unread chains (`sharedFact`), owners once. The Queue adds chips (All / Needs you / per-network)
+and plain-language rows via `lib/custody/describeProposal.js` — which describes ONLY what it
+positively recognises and returns null otherwise, because a guessed money movement is worse than
+calldata.
+
+Multi-NETWORK deployment (two real chains, wallet switches mid-orchestration) is structurally
+untestable in CI (one private chain per full-tier leg) and is validated by the staged manual
+protocol in [the multichain vault staging runbook](../runbooks/multichain-vault-staging-validation.md)
+(issue #1453). The single-network chain truth — including rules realization governing real money —
+is CI-covered by `cypress/e2e/full/29-protect-custody.cy.js` CV-01 and
+`cypress/e2e/full/44-vault-rules-lanes.cy.js` RL-01/RL-02 (issue #1452).
+

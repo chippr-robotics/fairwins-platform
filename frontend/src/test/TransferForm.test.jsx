@@ -28,7 +28,6 @@ const quoteGaslessForAsset = (asset) => Number(asset?.chainId) === 137
 
 vi.mock('wagmi', () => ({
   useSwitchChain: () => ({ switchChainAsync, isPending: false }),
-  useChainId: () => 137,
   useAccount: () => ({ address: '0xAaAa000000000000000000000000000000000001', chainId: 137 }),
 }))
 vi.mock('../hooks/useWalletManagement', () => ({
@@ -150,6 +149,26 @@ describe('TransferForm', () => {
 
     await user.click(switchBtn)
     await waitFor(() => expect(switchChainAsync).toHaveBeenCalledWith({ chainId: 1 }))
+  })
+
+  it('shows an 18-decimal balance rounded for display while MAX keeps full precision (spec 102)', async () => {
+    holdings = [
+      {
+        asset: { id: 'native', chainId: 1, kind: 'native', symbol: 'ETH', name: 'Ethereum', decimals: 18, address: null },
+        balance: 2.006441459389172406, network: 'Ethereum',
+      },
+    ]
+    const user = userEvent.setup()
+    render(<TransferForm />)
+    await user.click(screen.getByLabelText('Asset to send'))
+    await user.click(await screen.findByRole('option', { name: /ETH/ }))
+
+    expect(screen.getByText(/Balance:/, { selector: '#pt-amount-hint' })).toHaveTextContent('Balance: 2.0064 ETH')
+    expect(document.body.textContent).not.toContain('2.00644145938917')
+
+    // MAX is not a display: it fills the amount the form actually holds, untouched.
+    await user.click(screen.getByRole('button', { name: 'MAX' }))
+    expect(screen.getByLabelText('Amount')).toHaveValue(String(2.006441459389172406))
   })
 
   it('renders each asset option with the nested asset logo (spec 064 US4)', async () => {

@@ -24,7 +24,7 @@
 // Amounts here are DEFAULTS, not policy: both knobs are member-editable in the wizard and the
 // summary shown before signing is rendered from the encoded rules, never from this file's prose.
 
-import { parseUnits } from 'ethers'
+import { parseUnits } from '../evm/units'
 import { NETWORKS } from '../../config/networks'
 import { getContractAddressForChain } from '../../config/contracts'
 import { ANY_ASSET, describeRulesV2, isPolicyV2Supported, validateRulesConfig } from './policyV2'

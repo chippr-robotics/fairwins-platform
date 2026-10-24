@@ -80,7 +80,7 @@
  * ─────────────────────────────────────────────────────────────────────────────────────
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits, parseUnits } from 'ethers'
+import { formatUnits, parseUnits } from '../../lib/evm/units'
 import UniversalAssetSelect from '../ui/UniversalAssetSelect'
 import InfoTip from '../ui/InfoTip'
 import BridgeQuoteCard from './BridgeQuoteCard'
@@ -102,7 +102,8 @@ import {
   readBridgeRoute,
   readBridgeRouterConfig,
 } from '../../lib/bridge/bridgeRouter'
-import { SPOKE_POOL_IFACE } from '../../lib/bridge/bridgeStatus'
+import { decodeEventLog } from 'viem'
+import { SPOKE_POOL_ABI } from '../../lib/bridge/bridgeStatus'
 import {
   BRIDGE_DISCLOSURE,
   BRIDGE_TIPS,
@@ -198,11 +199,11 @@ function depositIdFromReceipt(receipt) {
   for (const log of receipt?.logs || []) {
     let parsed
     try {
-      parsed = SPOKE_POOL_IFACE.parseLog({ topics: [...(log.topics || [])], data: log.data })
+      parsed = decodeEventLog({ abi: SPOKE_POOL_ABI, topics: [...(log.topics || [])], data: log.data ?? '0x' })
     } catch {
       parsed = null // a log from some other contract in the same transaction
     }
-    if (parsed && DEPOSIT_EVENT_NAMES.includes(parsed.name)) return String(parsed.args.depositId)
+    if (parsed && DEPOSIT_EVENT_NAMES.includes(parsed.eventName)) return String(parsed.args.depositId)
   }
   return null
 }

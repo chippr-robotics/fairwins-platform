@@ -302,6 +302,72 @@ if (!dashboards.length) {
   }
 }
 
+// ── C6: an asserted $0 must still describe the tier we actually use ──────────────────────────
+//
+// A declared plan price is the operator saying "I checked". C1-C4 make sure a source EXISTS; nothing
+// makes sure its price is still true, and for most vendors that is fine — a plan changes when
+// somebody clicks something on a billing page, which is a human event with a human attached.
+//
+// The Graph is not like that. Its tier is decided by WHICH ENDPOINT THE APP CALLS.
+// `api.studio.thegraph.com` is the free development tier; `gateway.thegraph.com` is the
+// decentralized network, where queries are paid in GRT from a billing balance on Arbitrum One. So
+// the entire cost basis flips on a one-line edit to `frontend/src/config/networks.js`, made by
+// somebody thinking about indexing, in a file that has nothing to do with FinOps — and a $0 that
+// was true on Monday is a confidently wrong number on Tuesday, on a dashboard nobody rechecks.
+//
+// The free allowance also does not bill over, it FAILS. So the wrong figure and a member-facing
+// outage arrive together, and the dashboard says everything is free.
+
+const GATEWAY_HOST = 'gateway.thegraph.com'
+const networksFile = readIfExists('frontend/src/config/networks.js')
+// Reuses C2b's deployment sweep — the same files, for the same reason: a tier assertion lives in a
+// committed deployment, and a gate that cannot see deployment files cannot see it change.
+const deploymentText = deploymentConfigs.map((c) => c.text ?? '').join('\n')
+
+/**
+ * Match on the URL's HOST, parsed — never `text.includes('gateway.thegraph.com')`.
+ *
+ * Two different failures, and the substring version has both. The one CodeQL names
+ * (js/incomplete-url-substring-sanitization) is that a host can appear anywhere in a URL, so
+ * `https://evil.example/?x=gateway.thegraph.com` would match a check meant to identify the vendor.
+ * That is the weaker half here, since this reads a file we commit rather than anything an attacker
+ * supplies.
+ *
+ * The half that would actually have bitten us: a substring scan matches PROSE. A comment in
+ * networks.js reading "to publish, point this at gateway.thegraph.com" — the exact comment someone
+ * writes while preparing this migration — would fail the build with nothing wrong. A gate that
+ * cries wolf is worse than no gate, because it teaches everyone to merge past it, and this file
+ * already carries that lesson at C4 (a naive substring match reported every source as unpanelled).
+ *
+ * So: pull the quoted URL literals out, parse each, compare hostnames exactly. Anything unparseable
+ * is not a URL and cannot be an endpoint.
+ */
+function configuredHosts(text) {
+  const hosts = new Set()
+  for (const [, literal] of text.matchAll(/['"`](https?:\/\/[^'"`\s]+)['"`]/g)) {
+    try {
+      hosts.add(new URL(literal).hostname.toLowerCase())
+    } catch {
+      // Not a URL. A template literal with an interpolation lands here, and is correctly ignored:
+      // this rule is about a committed endpoint, not one assembled at runtime.
+    }
+  }
+  return hosts
+}
+
+if (networksFile && configuredHosts(networksFile).has(GATEWAY_HOST)) {
+  const assertedZero = /FINOPS_THEGRAPH_PLAN_USD:\s*["']?0["']?/.test(deploymentText)
+  if (assertedZero) {
+    fail(
+      'C6',
+      `A subgraph endpoint now points at ${GATEWAY_HOST} (the decentralized network, where queries are paid in GRT), ` +
+        `but a committed deployment still asserts FINOPS_THEGRAPH_PLAN_USD=0. That $0 described Subgraph Studio's free tier.`,
+      'Set FINOPS_THEGRAPH_PLAN_USD to the real modelled spend (and fund the GRT billing balance on Arbitrum One — ' +
+        'the free allowance does not bill over, it fails). See docs/runbooks/finops-operations.md#thegraph-cost.',
+    )
+  }
+}
+
 // ── C5: committed dashboards match a fresh generation ────────────────────────────────────────
 
 try {

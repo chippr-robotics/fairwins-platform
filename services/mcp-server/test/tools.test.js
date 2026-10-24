@@ -7,7 +7,16 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { buildServer } from '../src/server.js'
+import { TOOL_SNAPSHOT } from '../src/tools.js'
 import { rpc, startStubGateway } from './helpers.js'
+
+/**
+ * What this server serves: every shared snapshot tool (the local one runs in the browser and is
+ * never served here) plus the MCP-only build_intent. Derived rather than written as a literal —
+ * mcp.test.js NAMES every tool, which is the assertion a new tool should have to update, and a
+ * second copy of the count here only ever breaks for the same reason.
+ */
+const SERVED_TOOL_COUNT = TOOL_SNAPSHOT.filter((d) => d.auth !== 'local').length + 1
 
 const TOKEN = 'fw1.eyJhY2NvdW50IjoiMHhhYmMifQ.c2ln'
 
@@ -106,7 +115,7 @@ test('with FAIRWINS_API_URL unset the server still answers, with a configuration
 
   // The protocol still works — that is the point of not exiting on a missing env.
   const listed = await handler.handle(rpc(9, 'tools/list'))
-  assert.equal(listed.result.tools.length, 8)
+  assert.equal(listed.result.tools.length, SERVED_TOOL_COUNT)
 
   const res = await call(handler, 'get_profile')
   assert.equal(res.result.isError, true)
@@ -220,5 +229,42 @@ test('a bounded timeout ends a hung read rather than hanging the agent', async (
     assert.match(textOf(res), /api_timeout/)
   } finally {
     await gateway.close()
+  }
+})
+
+// ── spec 104: the shared definitions come from the vendored snapshot ─────────────────────────
+
+test('every shared tool is served EXACTLY as the snapshot defines it, and the local one is not served', async () => {
+  const { TOOL_SNAPSHOT } = await import('../src/tools.js')
+  const { handler } = buildServer({ env: {} })
+  const { tools } = (await handler.handle(rpc(1, 'tools/list'))).result
+  const byName = new Map(tools.map((t) => [t.name, t]))
+
+  for (const def of TOOL_SNAPSHOT) {
+    if (def.auth === 'local') {
+      // find_in_app searches the SPA's navigation index in the browser; there is no gateway route
+      // behind it, so this server must not advertise it.
+      assert.equal(byName.has(def.name), false, `${def.name} is browser-local and must not be served here`)
+      const res = await call(handler, def.name)
+      assert.equal(res.error.code, -32602)
+      continue
+    }
+    const served = byName.get(def.name)
+    assert.ok(served, `${def.name} is in the snapshot but not served`)
+    assert.equal(served.title, def.title)
+    assert.equal(served.description, def.description)
+    assert.deepEqual(served.inputSchema, def.inputSchema)
+  }
+  // build_intent is the one MCP-only tool: defined in tools.js, deliberately absent from the
+  // snapshot (the in-app assistant must not carry a tool that returns something signable).
+  assert.ok(byName.has('build_intent'))
+  assert.equal(TOOL_SNAPSHOT.some((d) => d.name === 'build_intent'), false)
+  assert.equal(tools.length, TOOL_SNAPSHOT.filter((d) => d.auth !== 'local').length + 1)
+})
+
+test('a snapshot tool bound to a route this server cannot map fails at boot, not in a call', async () => {
+  const { ROUTE_PATHS, TOOL_SNAPSHOT } = await import('../src/tools.js')
+  for (const def of TOOL_SNAPSHOT) {
+    if (def.exec.kind === 'route') assert.ok(ROUTE_PATHS[def.exec.route], `${def.name} names route "${def.exec.route}" with no path here`)
   }
 })

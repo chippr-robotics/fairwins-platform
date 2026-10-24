@@ -100,6 +100,27 @@ The frontend is the trust surface for non-technical users.
    docs/specs affected by the change.
 4. **Simplicity** — prefer the smallest change that satisfies the spec (YAGNI).
    Added complexity must earn its place in the plan.
+5. **Coordinated multi-agent work** — this repository is worked by several agents
+   concurrently, and the coordination protocol is binding, not advisory
+   (`docs/developer-guide/multi-agent-workflow.md`):
+   - A spec number is claimed by **merging** a reservation PR into `staging` that
+     contains only the new `specs/<NNN>-<slug>/spec.md` and its e2e coverage-matrix
+     row. Computing a number claims nothing:
+     `max(existing) + 1` is correct exactly once per merge, which is how five
+     numbers came to name two features each — the most recent while the gate that
+     catches it was in review. `npm run check:specs` gates this.
+   - Feature work branches from `staging`. Only a promotion or a declared hotfix
+     reaches `main`.
+   - An issue's state is read from state GitHub already keeps exactly once — its
+     assignee, its linked pull requests, and whether it is closed — never from a
+     mirrored status label, which is a second copy and therefore drifts. Claiming is
+     assigning; closing is `Closes #N` in the PR body, applied on the `staging` merge
+     by `close-linked-issues.yml` because GitHub honours closing keywords only on the
+     default branch — and verified by reading the issue back. Delegated work gets a
+     **sub-issue**, the only representation the parent issue and the next agent can
+     both read.
+   - A subagent's report is a claim. The diff is read and the affected gates are run
+     before the work is accepted; work that was not reviewed is not done.
 
 ## Governance
 
@@ -115,4 +136,4 @@ This constitution supersedes other practices and conventions in the repository.
 - Runtime, day-to-day agent guidance lives in `CLAUDE.md` and the relevant Spec
   Kit plan; this document holds the durable, repeatable standards.
 
-**Version**: 1.0.0 | **Ratified**: 2026-06-05 | **Last Amended**: 2026-06-05
+**Version**: 1.1.0 | **Ratified**: 2026-06-05 | **Last Amended**: 2026-09-05

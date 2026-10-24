@@ -76,6 +76,7 @@ export function getServiceCatalog(chainId) {
   const platform = [
     ['platform.wagerRegistry', 'FairWins — wagers', 'wagerRegistry', 'Create, accept and settle wagers.'],
     ['platform.wagerPoolFactory', 'FairWins — pools', 'wagerPoolFactory', 'Create and join group wager pools.'],
+    ['platform.fundingPoolFactory', 'FairWins — funding pools', 'fundingPoolFactory', 'Pool money toward a shared goal and collect or refund it.'],
     ['platform.membershipManager', 'FairWins — membership', 'membershipManager', 'Buy or renew membership.'],
   ]
   for (const [entryId, name, contractKey, description] of platform) {

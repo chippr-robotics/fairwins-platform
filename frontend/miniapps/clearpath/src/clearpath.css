@@ -70,6 +70,22 @@
 .clearpath .cp-row-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
 
 .clearpath .cp-error { color: var(--semantic-loss, #c0492f); background: color-mix(in srgb, var(--semantic-loss, #c0492f) 10%, transparent); padding: 0.6rem 0.8rem; border-radius: var(--cp-radius); margin: 0.6rem 0; font-size: 0.85rem; }
+/*
+ * The network-fee disclosure on the Launch form (issue #1408). Deliberately quiet rather than a
+ * warning colour: this is a cost the member is being told about honestly, not an alert — and the
+ * package states no colour of its own, only the tokens the host already defines.
+ */
+.clearpath .cp-fee {
+  margin: 0.6rem 0; padding: 0.6rem 0.8rem; border-radius: var(--cp-radius);
+  border: 1px solid var(--cp-border); background: var(--cp-canvas);
+}
+.clearpath .cp-fee-k {
+  display: block; font-size: 0.72rem; letter-spacing: 0.04em; text-transform: uppercase;
+  color: var(--cp-text-3); margin-bottom: 0.25rem;
+}
+.clearpath .cp-fee-v { margin: 0; font-size: 0.85rem; color: var(--cp-text); }
+.clearpath .cp-fee-est { margin: 0.3rem 0 0; font-size: 0.8rem; color: var(--cp-text-2); }
+
 .clearpath .cp-notice { color: var(--cp-text-2); background: var(--cp-canvas); padding: 0.6rem 0.8rem; border-radius: var(--cp-radius); margin: 0.6rem 0; font-size: 0.85rem; }
 .clearpath .cp-ok { color: var(--semantic-win, #2e7d32); font-size: 0.85rem; }
 .clearpath .cp-textarea { resize: vertical; min-height: 4.5rem; font-family: inherit; }

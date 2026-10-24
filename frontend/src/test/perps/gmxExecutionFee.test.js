@@ -90,7 +90,26 @@ function dataStore(values = {}) {
   return { getUint: vi.fn(async (key) => table[key] ?? 0n) }
 }
 
-const provider = (over = {}) => ({ getFeeData: async () => ({ gasPrice: GAS_PRICE }), ...over })
+/**
+ * A viem PublicClient's gas-price surface, which is where ethers' single `getFeeData` went
+ * (spec 110): `getGasPrice` is `eth_gasPrice` — the number GMX validates `tx.gasprice` against —
+ * and `estimateFeesPerGas` is the EIP-1559 ceiling the producer only falls back to. A fake that
+ * still answered `getFeeData` would pass every assertion below while the real client answered
+ * nothing, which is the failure mode this whole migration keeps finding.
+ */
+const client = (over = {}) => ({
+  getGasPrice: async () => GAS_PRICE,
+  estimateFeesPerGas: async () => ({}),
+  ...over,
+})
+
+/** A client whose legacy gas price is unavailable, leaving only the 1559 ceiling. */
+const noLegacyGasPrice = (fees) => ({
+  getGasPrice: async () => {
+    throw new Error('eth_gasPrice unsupported')
+  },
+  estimateFeesPerGas: async () => fees,
+})
 
 /** Every seam injected — this is what makes the producer testable with no network. */
 function deps(over = {}) {
@@ -98,7 +117,7 @@ function deps(over = {}) {
   return {
     store,
     dep: {
-      getProvider: () => provider(),
+      getClient: () => client(),
       makeContract: () => store,
       ...over.dep,
     },
@@ -313,7 +332,7 @@ describe('readExecutionFee — the producer', () => {
   })
 
   it('takes the gas price from the provider, and falls back to the 1559 ceiling — never below it', async () => {
-    const { dep } = deps({ dep: { getProvider: () => ({ getFeeData: async () => ({ maxFeePerGas: 50_000_000n }) }) } })
+    const { dep } = deps({ dep: { getClient: () => noLegacyGasPrice({ maxFeePerGas: 50_000_000n }) } })
     const estimate = await readExecutionFee({ chainId: ARBITRUM, ...dep })
     expect(estimate.gasPrice).toBe(50_000_000n)
   })
@@ -324,9 +343,9 @@ describe('readExecutionFee — the producer', () => {
 
   it('a DataStore that cannot be read yields null, not a fabricated fee', async () => {
     const failures = {
-      'no provider': { getProvider: () => null },
-      'provider throws': {
-        getProvider: () => {
+      'no read connection': { getClient: () => null },
+      'client lookup throws': {
+        getClient: () => {
           throw new Error('endpoint down')
         },
       },
@@ -337,15 +356,22 @@ describe('readExecutionFee — the producer', () => {
           },
         }),
       },
-      'fee data unavailable': { getProvider: () => ({ getFeeData: async () => ({}) }) },
+      'fee data unavailable': { getClient: () => noLegacyGasPrice({}) },
       'fee data rejects': {
-        getProvider: () => ({
-          getFeeData: async () => {
+        getClient: () => ({
+          getGasPrice: async () => {
+            throw new Error('no connection')
+          },
+          estimateFeesPerGas: async () => {
             throw new Error('no connection')
           },
         }),
       },
-      'gas price of zero': { getProvider: () => ({ getFeeData: async () => ({ gasPrice: 0n }) }) },
+      // A chain answering ZERO is an unreadable venue. The producer must NOT quietly substitute the
+      // 1559 ceiling for it — a real number standing in for a refusal is the whole zero rule.
+      'gas price of zero': {
+        getClient: () => client({ getGasPrice: async () => 0n, estimateFeesPerGas: async () => ({ maxFeePerGas: 50_000_000n }) }),
+      },
     }
     for (const [label, over] of Object.entries(failures)) {
       const { dep } = deps({ dep: over })
@@ -423,7 +449,7 @@ describe('defaultReadVenueQuote — what the sheet actually calls', () => {
   })
 
   it('reports a failed read as failed — so the sheet discloses it instead of guessing', async () => {
-    const { dep } = deps({ dep: { getProvider: () => null } })
+    const { dep } = deps({ dep: { getClient: () => null } })
     const quote = await defaultReadVenueQuote({ venue: 'gmx', chainId: ARBITRUM, deps: dep })
     expect(quote).toEqual({ failed: true })
     // …and a failed quote yields no fee, so the descriptor builder refuses rather than sending 0.

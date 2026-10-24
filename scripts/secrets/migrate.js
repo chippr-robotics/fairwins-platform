@@ -122,6 +122,17 @@ async function main() {
 
   const results = []
   for (const entry of SECRETS) {
+    // A DERIVED payload is computed, not copied. Whatever sits under this name in `.env` is a
+    // stand-in — for the per-chain QuickNode endpoints it is a PUBLIC RPC URL — and uploading it
+    // would fill a container labelled "archive endpoint" with a public one that reads back as
+    // correct forever, on every later fetch, with no error anywhere. Skip it and name the command
+    // that does produce the real value.
+    if (entry.derived) {
+      results.push({ entry, status: 'derived' })
+      log(`~ ${entry.id}: derived, not migrated — run \`${entry.derived}\``)
+      continue
+    }
+
     const payload = payloadFor(entry, values)
     if (payload === null) {
       results.push({ entry, status: 'absent-locally' })
@@ -208,7 +219,13 @@ async function main() {
   chmodSync(backupPath, 0o600)
   log(`\nBacked up the original .env to ${backupPath} (0600)`)
 
-  const managedNames = new Set(SECRETS.flatMap((s) => [...s.env, ...(s.expand ?? [])]))
+  // Derived entries are excluded: this run never verified a remote copy of them (it skipped them
+  // above), so commenting out the local value would remove the only endpoint on disk while the
+  // container may still be empty. They are pruned by hand, after `--provision` reports PASS.
+  const managedNames = new Set(
+    SECRETS.filter((s) => !s.derived).flatMap((s) => [...s.env, ...(s.expand ?? [])]),
+  )
+  const derivedNames = SECRETS.filter((s) => s.derived).flatMap((s) => s.env)
   const out = lines.map((line) => {
     const m = /^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/.exec(line)
     if (!m || !managedNames.has(m[1])) return line
@@ -218,6 +235,12 @@ async function main() {
   })
   writeFileSync(ENV_PATH, out.join('\n'), { mode: 0o600 })
   log(`Pruned ${managedNames.size} managed variable(s) from .env`)
+  if (derivedNames.length) {
+    log(
+      `LEFT IN PLACE (derived, never uploaded by this script): ${derivedNames.join(', ')}. `
+        + 'Remove each by hand once its `--provision` run reports PASS.',
+    )
+  }
 }
 
 main().catch((err) => {

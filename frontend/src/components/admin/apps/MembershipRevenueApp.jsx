@@ -17,7 +17,10 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ethers } from 'ethers'
+import { encodeFunctionData, keccak256, stringToHex } from 'viem'
+import { formatUnits, parseUnits } from '../../../lib/evm/units'
+import { readContract, normalizeAbi } from '../../../lib/chains/readContract'
+import { getAddress } from '../../../lib/evm/address'
 import AdminAppShell from '../AdminAppShell'
 import MembershipTreasuryOverview from '../MembershipTreasuryOverview'
 import ChainStateTable from '../ChainStateTable'
@@ -40,15 +43,19 @@ import { contractAuthorityGate } from '../scopeGate'
 
 const APP = adminAppById('membership-revenue')
 
+/** `keccak256(utf8(name))` — byte-compared against `ethers.keccak256(ethers.toUtf8Bytes(...))`
+ *  before the swap. These hashes ARE the roles the contract stores memberships under. */
+const roleId = (name) => keccak256(stringToHex(name))
+
 const TIER_NAMES = { 1: 'Bronze', 2: 'Silver', 3: 'Gold', 4: 'Platinum' }
 const USDC_DECIMALS = 6
-const WAGER_PARTICIPANT_ROLE = ethers.keccak256(ethers.toUtf8Bytes('WAGER_PARTICIPANT_ROLE'))
+const WAGER_PARTICIPANT_ROLE = roleId('WAGER_PARTICIPANT_ROLE')
 // The MembershipManager is role-keyed, and pools (spec 034) gate on their own
 // role: WagerPoolFactory's checkCanCreate(account, POOL_PARTICIPANT_ROLE) is
 // NOT satisfied by a Wager Participant membership. Each form therefore carries
 // a role selector, defaulting to Wager Participant so existing behaviour (and
 // anything driving these forms without touching the selector) is unchanged.
-const POOL_PARTICIPANT_ROLE = ethers.keccak256(ethers.toUtf8Bytes('POOL_PARTICIPANT_ROLE'))
+const POOL_PARTICIPANT_ROLE = roleId('POOL_PARTICIPANT_ROLE')
 const MEMBERSHIP_ROLES = {
   WAGER_PARTICIPANT: { hash: WAGER_PARTICIPANT_ROLE, label: 'Wager Participant' },
   POOL_PARTICIPANT: { hash: POOL_PARTICIPANT_ROLE, label: 'Pool Participant' },
@@ -84,7 +91,8 @@ export default function MembershipRevenueApp() {
     readProviderFor(membershipAdminChainId, chainId, provider) || getProvider(membershipAdminChainId)
   // The statistics panel scans the MembershipManager's event log, which needs history the
   // browser wallet's RPC usually does not keep — see `scanProviderFor`. Point reads
-  // (`accruedFees`, `treasury`) keep using `membershipProvider`; only the scan needs this.
+  // (`accruedFees`, `treasury`) go through the chain seam bound to the membership chain; the
+  // authority read below still takes `membershipProvider`, and only the scan needs this one.
   const membershipScanProvider = scanProviderFor(membershipAdminChainId) || membershipProvider
 
   // `accruedFees` is money. A failed read must not arrive as 0n: an operator
@@ -96,17 +104,30 @@ export default function MembershipRevenueApp() {
   })
   const fetchMembershipState = useCallback(async () => {
     if (!membershipManagerAddr) return
-    const contract = new ethers.Contract(membershipManagerAddr, MEMBERSHIP_ADMIN_ABI, membershipProvider)
+    // Bound to the MEMBERSHIP reference chain (spec 071), which is the point: membership is
+    // readable from one place only because it is written in one place.
+    //
+    // No provider gate here, and there never was one: the old code built a Contract on
+    // `membershipProvider` and, with a null provider, the CALLS rejected into the catch below as
+    // "could not read". `readContract` raises `NoRpcEndpointError` into the same catch, so the
+    // honest-degradation behaviour is unchanged — `accruedFees` is money, and a failed read still
+    // reports `accruedFeesReadable: false` rather than arriving as 0.
+    const ask = (functionName) =>
+      readContract(membershipAdminChainId, {
+        address: membershipManagerAddr,
+        abi: MEMBERSHIP_ADMIN_ABI,
+        functionName,
+      })
     const [fees, treasury] = await Promise.all([
-      contract.accruedFees().then((v) => ({ ok: true, v })).catch(() => ({ ok: false })),
-      contract.treasury().catch(() => ''),
+      ask('accruedFees').then((v) => ({ ok: true, v })).catch(() => ({ ok: false })),
+      ask('treasury').catch(() => ''),
     ])
     setMembershipState({
-      accruedFees: fees.ok ? ethers.formatUnits(fees.v, USDC_DECIMALS) : '0',
+      accruedFees: fees.ok ? formatUnits(fees.v, USDC_DECIMALS) : '0',
       accruedFeesReadable: fees.ok,
       treasury: treasury || '',
     })
-  }, [membershipManagerAddr, membershipProvider])
+  }, [membershipManagerAddr, membershipAdminChainId])
 
   useEffect(() => {
     fetchMembershipState()
@@ -144,6 +165,7 @@ export default function MembershipRevenueApp() {
     let cancelled = false
     setMembershipAuthority(null)
     readAuthority({
+      chainId: membershipAdminChainId,
       provider: membershipProvider,
       address: membershipManagerAddr,
       account,
@@ -154,7 +176,7 @@ export default function MembershipRevenueApp() {
     return () => {
       cancelled = true
     }
-  }, [membershipProvider, membershipManagerAddr, account])
+  }, [membershipProvider, membershipManagerAddr, account, membershipAdminChainId])
 
   const memberGate = contractAuthorityGate({
     authority: membershipAuthority,
@@ -220,6 +242,7 @@ export default function MembershipRevenueApp() {
     setWithdrawAuthority(null)
     if (withdrawChainId == null) return undefined
     readAuthority({
+      chainId: withdrawChainId,
       provider: withdrawProvider,
       address: withdrawManagerAddr,
       account,
@@ -250,20 +273,37 @@ export default function MembershipRevenueApp() {
   }, [membershipState.treasury])
   const withdrawEns = useEnsResolution(withdrawForm.to || '')
 
+  /**
+   * A membership write. `getAddress` on every member-typed target (spec 110 divergence 16):
+   * `isValidEthereumAddress` is a bare regex that accepts an ALL-UPPERCASE address and tests
+   * `address.trim()` while handing the caller the UNTRIMMED value — viem's encoder refuses both.
+   * A withdrawal names where the money goes.
+   */
+  const writeMembership = (addr, functionName, args) =>
+    signer.sendTransaction({
+      to: addr,
+      data: encodeFunctionData({
+        abi: normalizeAbi(MEMBERSHIP_ADMIN_ABI),
+        functionName,
+        args,
+      }),
+    })
+
   // ── Handlers (verbatim from the monolith) ──
   const handleConfigureTier = () => {
     if (!requireMembershipChain()) return false
     if (!requireAuthority(tierGate)) return false
-    const priceUSDC = ethers.parseUnits(String(tierForm.price), USDC_DECIMALS)
+    const priceUSDC = parseUnits(String(tierForm.price), USDC_DECIMALS)
     return runTx(
-      () => new ethers.Contract(membershipManagerAddr, MEMBERSHIP_ADMIN_ABI, signer).setTier(
-        membershipRole(tierForm.role).hash,
-        tierForm.tier,
-        priceUSDC,
-        tierForm.durationDays,
-        { monthlyMarketCreation: tierForm.monthly, maxConcurrentMarkets: tierForm.concurrent },
-        tierForm.active,
-      ),
+      () =>
+        writeMembership(membershipManagerAddr, 'setTier', [
+          membershipRole(tierForm.role).hash,
+          tierForm.tier,
+          priceUSDC,
+          tierForm.durationDays,
+          { monthlyMarketCreation: tierForm.monthly, maxConcurrentMarkets: tierForm.concurrent },
+          Boolean(tierForm.active),
+        ]),
       `${membershipRole(tierForm.role).label} tier ${TIER_NAMES[tierForm.tier]} configured at $${tierForm.price} USDC on ${networkName(membershipAdminChainId)}`,
     )
   }
@@ -274,9 +314,13 @@ export default function MembershipRevenueApp() {
     if (!requireMembershipChain()) return false
     if (!requireAuthority(memberGate)) return false
     return runTx(
-      () => new ethers.Contract(membershipManagerAddr, MEMBERSHIP_ADMIN_ABI, signer).grantMembership(
-        target, membershipRole(grantForm.role).hash, grantForm.tier, grantForm.durationDays,
-      ),
+      () =>
+        writeMembership(membershipManagerAddr, 'grantMembership', [
+          getAddress(String(target).trim()),
+          membershipRole(grantForm.role).hash,
+          grantForm.tier,
+          grantForm.durationDays,
+        ]),
       `Granted ${TIER_NAMES[grantForm.tier]} ${membershipRole(grantForm.role).label} membership to ${shortAddr(target)} on ${networkName(membershipAdminChainId)}`,
     )
   }
@@ -287,9 +331,11 @@ export default function MembershipRevenueApp() {
     if (!requireMembershipChain()) return false
     if (!requireAuthority(memberGate)) return false
     return runTx(
-      () => new ethers.Contract(membershipManagerAddr, MEMBERSHIP_ADMIN_ABI, signer).revokeMembership(
-        target, membershipRole(revokeForm.role).hash,
-      ),
+      () =>
+        writeMembership(membershipManagerAddr, 'revokeMembership', [
+          getAddress(String(target).trim()),
+          membershipRole(revokeForm.role).hash,
+        ]),
       `Revoked ${membershipRole(revokeForm.role).label} membership for ${shortAddr(target)} on ${networkName(membershipAdminChainId)}`,
     )
   }
@@ -311,10 +357,10 @@ export default function MembershipRevenueApp() {
     if (!requireAuthority(withdrawGate)) return false
     const decimals = withdrawScope?.unit?.decimals ?? USDC_DECIMALS
     const symbol = withdrawScope?.unit?.symbol ?? 'USDC'
-    const amount = ethers.parseUnits(String(withdrawForm.amount || '0'), decimals)
+    const amount = parseUnits(String(withdrawForm.amount || '0'), decimals)
     if (amount === 0n) return showNotification('Amount must be greater than 0', 'error')
     return runTx(
-      () => new ethers.Contract(addr, MEMBERSHIP_ADMIN_ABI, signer).withdrawFees(amount, target),
+      () => writeMembership(addr, 'withdrawFees', [amount, getAddress(String(target).trim())]),
       `Withdrew ${withdrawForm.amount} ${symbol} to ${shortAddr(target)} on ${networkName(withdrawChainId)}`,
     ).then((ok) => {
       if (ok) feeEstate.refresh()
@@ -540,7 +586,7 @@ export default function MembershipRevenueApp() {
                   {feeEstate.accrued.map((r) => (
                     <option key={r.chainId} value={String(r.chainId)}>
                       {networkName(r.chainId)}
-                      {isRead(r) ? ` — ${formatUnitAmount(r, ethers.formatUnits)} available` : ''}
+                      {isRead(r) ? ` — ${formatUnitAmount(r, formatUnits)} available` : ''}
                       {isNotDeployed(r) ? ' — not deployed' : ''}
                       {!isRead(r) && !isNotDeployed(r) ? ' — could not be read' : ''}
                     </option>
@@ -550,7 +596,7 @@ export default function MembershipRevenueApp() {
               <p className="card-info">
                 {withdrawScope && isRead(withdrawScope) ? (
                   <>
-                    Withdrawing <strong>{formatUnitAmount(withdrawScope, ethers.formatUnits)}</strong>{' '}
+                    Withdrawing <strong>{formatUnitAmount(withdrawScope, formatUnits)}</strong>{' '}
                     of accrued tier fees on <strong>{networkName(withdrawChainId)}</strong>.
                   </>
                 ) : withdrawScope && isNotDeployed(withdrawScope) ? (
@@ -589,7 +635,7 @@ export default function MembershipRevenueApp() {
                   disabled={!withdrawScope || !isRead(withdrawScope)}
                   onClick={() => setWithdrawForm({
                     ...withdrawForm,
-                    amount: ethers.formatUnits(withdrawScope.value, withdrawScope.unit?.decimals ?? 6),
+                    amount: formatUnits(withdrawScope.value, withdrawScope.unit?.decimals ?? 6),
                   })}>
                   Max
                 </button>

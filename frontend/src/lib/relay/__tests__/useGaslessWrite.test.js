@@ -148,3 +148,90 @@ describe('useGaslessWrite', () => {
     expect(cfg.action).toBe('cancelOpen')
   })
 })
+
+/**
+ * Spec 110 T027 — the target chain is an ARGUMENT.
+ *
+ * The domain is the one that matters most. A correctly-typed intent signed under the wrong domain
+ * is not an error the caller can see: it is a valid signature over something nobody will honour,
+ * and no assertion about the params can catch it. So these assert the chain reaching signIntent and
+ * the verifier lookup, not just the config echo.
+ */
+describe('useGaslessWrite — the chain is named, not inherited (spec 110 T027)', () => {
+  beforeEach(() => {
+    // Clear FIRST: without it `useIntentAction.mock.calls[0]` is the first call of the file, not of
+    // this test, and every assertion below reads a config some earlier test built.
+    vi.clearAllMocks()
+    h.useWeb3.mockReturnValue({ signer: { getAddress: async () => '0xSIGNER' }, chainId: 137, switchNetwork: vi.fn() })
+  })
+
+  it('signs the EIP-712 domain and resolves the verifier on the TARGET chain, not the wallet\u2019s', async () => {
+    renderHook(() => useGaslessWrite('cancelOpen', { chainId: 63, params: (id) => ({ wagerId: id }), selfSubmit: vi.fn() }))
+    const cfg = h.useIntentAction.mock.calls[0][0]
+    expect(cfg.chainId).toBe(63) // the relayer probed is the target chain's
+    await cfg.buildIntent(7)
+    expect(h.getContractAddressForChain).toHaveBeenCalledWith('wagerRegistry', 63)
+    expect(h.signIntent).toHaveBeenCalledWith(expect.objectContaining({ chainId: 63, targetContract: '0xADDR_wagerRegistry_63' }))
+    // Never the wallet's chain — the whole point.
+    expect(h.getContractAddressForChain).not.toHaveBeenCalledWith('wagerRegistry', 137)
+  })
+
+  it('falls back to the wallet chain when none is named, so every pre-T027 call site is unchanged', async () => {
+    const selfSubmit = vi.fn()
+    renderHook(() => useGaslessWrite('cancelOpen', { params: (id) => ({ wagerId: id }), selfSubmit }))
+    const cfg = h.useIntentAction.mock.calls[0][0]
+    expect(cfg.chainId).toBe(137)
+    // Not merely equivalent — the SAME function, so nothing is wrapped on the unchanged path.
+    expect(cfg.selfSubmit).toBe(selfSubmit)
+  })
+
+  it('never wraps a missing selfSubmit into a function, which would silence the never-stranded guard', () => {
+    renderHook(() => useGaslessWrite('cancelOpen', { chainId: 63, params: () => ({}) }))
+    const cfg = h.useIntentAction.mock.calls[0][0]
+    expect(typeof cfg.selfSubmit).not.toBe('function')
+  })
+
+  it('settles the wallet onto the target chain BEFORE self-submitting, since a wallet broadcasts where it is', async () => {
+    const switchNetwork = vi.fn(async () => {
+      h.useWeb3.mockReturnValue({ signer: { getAddress: async () => '0xSIGNER' }, chainId: 63, switchNetwork })
+    })
+    h.useWeb3.mockReturnValue({ signer: { getAddress: async () => '0xSIGNER' }, chainId: 137, switchNetwork })
+    const selfSubmit = vi.fn(async () => '0xhash')
+    const { rerender } = renderHook(() => useGaslessWrite('cancelOpen', { chainId: 63, params: () => ({}), selfSubmit }))
+    const cfg = h.useIntentAction.mock.calls[0][0]
+
+    const pending = cfg.selfSubmit(7)
+    await Promise.resolve()
+    rerender() // the switch lands a render later, exactly as a real one does
+    await expect(pending).resolves.toBe('0xhash')
+    expect(switchNetwork).toHaveBeenCalledWith(63)
+    expect(selfSubmit).toHaveBeenCalledWith(7)
+  })
+
+  it('refuses the fallback naming BOTH chains rather than broadcasting on the wrong one', async () => {
+    const switchNetwork = vi.fn(async () => {
+      throw new Error('user rejected')
+    })
+    h.useWeb3.mockReturnValue({ signer: { getAddress: async () => '0xSIGNER' }, chainId: 137, switchNetwork })
+    const selfSubmit = vi.fn()
+    renderHook(() => useGaslessWrite('cancelOpen', { chainId: 63, params: () => ({}), selfSubmit }))
+    const cfg = h.useIntentAction.mock.calls[0][0]
+
+    const err = await cfg.selfSubmit(7).catch((e) => e)
+    expect(err.message).toMatch(/Mordor/)
+    expect(err.message).toMatch(/Polygon/)
+    expect(err.message).toMatch(/nothing has been signed/i)
+    // THE POINT: the transaction the member would have paid for never went out on Polygon.
+    expect(selfSubmit).not.toHaveBeenCalled()
+  })
+
+  it('does not settle at all when the wallet is already on the target chain', async () => {
+    const switchNetwork = vi.fn()
+    h.useWeb3.mockReturnValue({ signer: { getAddress: async () => '0xSIGNER' }, chainId: 63, switchNetwork })
+    const selfSubmit = vi.fn(async () => '0xhash')
+    renderHook(() => useGaslessWrite('cancelOpen', { chainId: 63, params: () => ({}), selfSubmit }))
+    const cfg = h.useIntentAction.mock.calls[0][0]
+    await expect(cfg.selfSubmit(7)).resolves.toBe('0xhash')
+    expect(switchNetwork).not.toHaveBeenCalled()
+  })
+})

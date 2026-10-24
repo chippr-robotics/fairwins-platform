@@ -31,9 +31,18 @@ function moneyFieldConfig(unit = 'currencyUSD') {
     defaults: {
       unit,
       decimals: 2,
-      // A panel with no series must SAY so. Grafana's default renders an empty panel, which on a
-      // revenue dashboard is indistinguishable from a panel reporting nothing earned.
-      noValue: 'no data — source unreadable or not configured',
+      /**
+       * A panel with no series must SAY so. Grafana's default renders an empty panel, which on a
+       * revenue dashboard is indistinguishable from a panel reporting nothing earned.
+       *
+       * It must also NOT pretend the two absences are one thing. `noValue` is fixed at generate
+       * time and cannot read the runtime state, so the honest move is to stop asserting which of
+       * them this is and point at the panel that knows — which is why every dashboard now carries
+       * a Source health table, not just the overview. Collapsing `unreadable` and `not-configured`
+       * into one sentence is the exact distinction spec 089 exists to draw: one is a vendor to fix,
+       * the other is a feature nobody wired, and they are not the same call to make at 2am.
+       */
+      noValue: 'no value published — see “Source health” for whether this is unreadable or not-configured',
       color: { mode: 'thresholds' },
       thresholds: { mode: 'absolute', steps: [{ color: 'text', value: null }] },
     },
@@ -68,7 +77,7 @@ export function statPanel({ title, expr, unit = 'currencyUSD', gridPos, descript
 export function partialTotalPanel({ kind, gridPos }) {
   return panel({
     type: 'table',
-    title: `${kind === 'revenue' ? 'Revenue' : 'Cost'} totals — sources currently MISSING`,
+    title: `${kind === 'revenue' ? 'Revenue' : kind === 'usage' ? 'Usage' : 'Cost'} totals — sources currently MISSING`,
     description:
       `Any row here means the ${kind} total above is PARTIAL and understated. An empty table means every live ` +
       `${kind} source was read. Sources that are merely not-configured are excluded on purpose: they are unwired ` +
@@ -111,6 +120,34 @@ export function sourcePanel({ source, gridPos }) {
     })
   }
 
+  // A usage source is a COUNTER consumed as a rate, and its interesting axes are its bounded
+  // labels (tier, upstream) — never a currency. Rendering it through the money branch below would
+  // legend by a unit it does not have and plot a cumulative ramp nobody can read.
+  if (source.kind === 'usage') {
+    return panel({
+      type: 'timeseries',
+      title: source.label,
+      description: source.meaning,
+      gridPos,
+      fieldConfig: moneyFieldConfig('short'),
+      options: { legend: { displayMode: 'list', placement: 'bottom' }, tooltip: { mode: 'multi' } },
+      targets: [
+        {
+          refId: 'A',
+          datasource: DATASOURCE,
+          expr: `sum by (tier) (rate(${source.metric}{source="${source.id}",metric="tier_requests"}[10m]))`,
+          legendFormat: 'tier {{tier}}',
+        },
+        {
+          refId: 'B',
+          datasource: DATASOURCE,
+          expr: `sum by (upstream) (rate(${source.metric}{source="${source.id}",metric="upstream_calls"}[10m]))`,
+          legendFormat: 'upstream {{upstream}}',
+        },
+      ],
+    })
+  }
+
   const isCost = source.kind === 'cost'
   return panel({
     type: 'timeseries',
@@ -136,25 +173,32 @@ export function sourcePanel({ source, gridPos }) {
  * This is the panel that makes the whole dashboard trustworthy: it is where an operator confirms
  * that a zero somewhere else is a real zero.
  */
-export function healthPanel({ gridPos }) {
+export function healthPanel({ gridPos, kind = null }) {
+  // Scoped to one kind on the detail dashboards. A "no data" panel is only readable NEXT TO the
+  // thing that says which absence it is, and sending the reader to another dashboard to find that
+  // out is how a source sits broken for weeks looking exactly like one that is merely unwired.
+  const selector = kind ? `{kind="${kind}"}` : ''
   return panel({
     type: 'table',
-    title: 'Source health — read / unreadable / not-configured',
+    title: `Source health${kind ? ` — ${kind} sources` : ''} — read / unreadable / not-configured`,
     description:
       'configured=1 & up=1 → read. configured=1 & up=0 → UNREADABLE (a real problem). configured=0 → not-configured ' +
-      '(a feature that has not been wired up; not an outage).',
+      '(a feature that has not been wired up; not an outage). This is the panel that tells you which of those a ' +
+      'blank panel above is: they look identical everywhere else, and they are not the same thing to act on.',
     gridPos,
     fieldConfig: { defaults: { custom: { align: 'auto' } }, overrides: [] },
     options: { showHeader: true },
     targets: [
-      { refId: 'A', format: 'table', instant: true, datasource: DATASOURCE, expr: 'fairwins_finops_source_configured' },
-      { refId: 'B', format: 'table', instant: true, datasource: DATASOURCE, expr: 'fairwins_finops_source_up' },
+      { refId: 'A', format: 'table', instant: true, datasource: DATASOURCE, expr: `fairwins_finops_source_configured${selector}` },
+      { refId: 'B', format: 'table', instant: true, datasource: DATASOURCE, expr: `fairwins_finops_source_up${selector}` },
       {
         refId: 'C',
         format: 'table',
         instant: true,
         datasource: DATASOURCE,
-        expr: 'time() - fairwins_finops_source_last_success_timestamp_seconds',
+        expr: kind
+          ? `time() - (fairwins_finops_source_last_success_timestamp_seconds and on(source) fairwins_finops_source_configured{kind="${kind}"})`
+          : 'time() - fairwins_finops_source_last_success_timestamp_seconds',
       },
     ],
   })

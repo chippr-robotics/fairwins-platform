@@ -2,6 +2,9 @@
 // Hand-maintained, like externalDAORegistryAbi.js (the repo does not auto-generate frontend ABIs; the
 // sync script only moves addresses). Refresh from the compiled artifact after contract changes.
 
+/** Local, so this module stays a pure ABI helper with no ethers import of its own. */
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000'
+
 /**
  * StandardDAOFactory (UUPS proxy, deployment key `standardDaoFactory`).
  *
@@ -20,6 +23,32 @@ export const STANDARD_DAO_FACTORY_ABI = [
   'function DAO_MEMBER_ROLE() view returns (bytes32)',
   'event StandardDAOCreated(uint256 indexed id, address indexed creator, address indexed governor, address timelock, address token, bool tokenDeployed, string name)',
 ]
+
+/**
+ * Form params → `createDAO` calldata.
+ *
+ * ONE encoder, used by both the submission and the fee estimate (issue #1408). Two encoders would
+ * be two chances to drift, and a fee estimate of a DIFFERENT transaction than the one the member
+ * signs is worse than no estimate: it is a number that looks authoritative and describes nothing.
+ * The tuple order is `IStandardDAOFactory.DAOParams` and is positional — see the ABI note above.
+ */
+export function encodeCreateDAO(iface, params) {
+  return iface.encodeFunctionData('createDAO', [
+    [
+      params.name,
+      params.purpose ?? '',
+      params.votesToken || ZERO_ADDRESS,
+      params.tokenName ?? '',
+      params.tokenSymbol ?? '',
+      params.initialSupply ?? 0n,
+      params.votingDelay,
+      params.votingPeriod,
+      params.proposalThreshold ?? 0n,
+      params.quorumPercent,
+      params.timelockDelay,
+    ],
+  ])
+}
 
 /**
  * The DAO the transaction actually produced, read from the receipt's own log.

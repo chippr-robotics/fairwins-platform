@@ -1,5 +1,7 @@
 import { useState, useMemo, useEffect } from 'react'
-import { ethers } from 'ethers'
+import { encodeFunctionData, stringToHex } from 'viem'
+import { readContract, normalizeAbi } from '../../lib/chains/readContract'
+import { getAddress, isAddress as isAddressSeam } from '../../lib/evm/address'
 import { getContractAddressForChain } from '../../config/contracts'
 import { estateNetworks, networkName, readProviderFor } from '../../lib/chains/estate'
 import { NetworkScopeCard } from './scopeControls'
@@ -55,11 +57,11 @@ function isBytes32Hex(s) {
 }
 
 function isAddress(s) {
-  try { return ethers.isAddress((s || '').trim()) } catch { return false }
+  try { return isAddressSeam((s || '').trim()) } catch { return false }
 }
 
 function shortAddr(a) {
-  if (!a || !ethers.isAddress(a)) return a || '—'
+  if (!a || !isAddressSeam(a)) return a || '—'
   return a.slice(0, 6) + '…' + a.slice(-4)
 }
 
@@ -127,13 +129,16 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
       const next = {}
       for (const a of ADAPTERS) {
         const addr = adapterAddresses[a.addressKey]
-        if (!addr || !ethers.isAddress(addr)) {
+        if (!addr || !isAddressSeam(addr)) {
           next[a.key] = undefined
           continue
         }
         try {
-          const c = new ethers.Contract(addr, COMMON_READS, readProvider)
-          next[a.key] = await c.owner()
+          next[a.key] = await readContract(scopeChainId, {
+            address: addr,
+            abi: COMMON_READS,
+            functionName: 'owner',
+          })
         } catch {
           next[a.key] = null
         }
@@ -141,7 +146,7 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
       if (!cancelled) setAdapterOwners(next)
     })()
     return () => { cancelled = true }
-  }, [readProvider, adapterAddresses])
+  }, [readProvider, adapterAddresses, scopeChainId])
 
   // ── DataFeed forms ────────────────────────────────────────────────────────
   const [dfFeed, setDfFeed]               = useState({ address: '', allow: true })
@@ -160,15 +165,19 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
   // lives here once rather than being repeated (and eventually forgotten) in seven handlers.
   function writer(addressKey, abi) {
     const addr = adapterAddresses[addressKey]
-    if (!addr || !ethers.isAddress(addr) || !signer) return null
+    if (!addr || !isAddressSeam(addr) || !signer) return null
     if (!onScopeNetwork) return null
-    return new ethers.Contract(addr, abi, signer)
+    return (functionName, args) =>
+      signer.sendTransaction({
+        to: addr,
+        data: encodeFunctionData({ abi: normalizeAbi(abi), functionName, args }),
+      })
   }
 
   /** Why a write is unavailable right now, in words — the alerts below all use this. */
   function writeBlockedReason(addressKey, label) {
     const addr = adapterAddresses[addressKey]
-    if (!addr || !ethers.isAddress(addr)) return `${label} is not deployed on ${networkName(scopeChainId)}`
+    if (!addr || !isAddressSeam(addr)) return `${label} is not deployed on ${networkName(scopeChainId)}`
     if (!signer) return 'Connect your wallet to make changes here'
     if (!onScopeNetwork) return `Switch your wallet to ${networkName(scopeChainId)} to make this change`
     return `${label} is unavailable`
@@ -180,7 +189,7 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('chainlinkDataFeedAdapter', CHAINLINK_DATA_FEED_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('chainlinkDataFeedAdapter', 'ChainlinkDataFeedOracleAdapter'))
     runTx(
-      () => c.setFeedAllowed(dfFeed.address.trim(), Boolean(dfFeed.allow)),
+      () => c('setFeedAllowed', [getAddress(dfFeed.address.trim()), Boolean(dfFeed.allow)]),
       `ChainlinkDataFeed: feed ${shortAddr(dfFeed.address)} ${dfFeed.allow ? 'allowlisted' : 'removed'} on ${networkName(scopeChainId)}`,
     )
   }
@@ -198,7 +207,14 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('chainlinkDataFeedAdapter', CHAINLINK_DATA_FEED_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('chainlinkDataFeedAdapter', 'ChainlinkDataFeedOracleAdapter'))
     runTx(
-      () => c.registerCondition(f.conditionId.trim(), f.feed.trim(), BigInt(String(f.threshold).trim()), Number(f.op), BigInt(deadlineSeconds)),
+      () =>
+        c('registerCondition', [
+          f.conditionId.trim(),
+          getAddress(f.feed.trim()),
+          BigInt(String(f.threshold).trim()),
+          Number(f.op),
+          BigInt(deadlineSeconds),
+        ]),
       `ChainlinkDataFeed: condition ${f.conditionId.slice(0, 10)}… registered on ${networkName(scopeChainId)}`,
     )
   }
@@ -209,7 +225,7 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('chainlinkDataFeedAdapter', CHAINLINK_DATA_FEED_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('chainlinkDataFeedAdapter', 'ChainlinkDataFeedOracleAdapter'))
     runTx(
-      () => c.linkMarket(BigInt(dfLink.friendMarketId.trim()), dfLink.conditionId.trim()),
+      () => c('linkMarket', [BigInt(dfLink.friendMarketId.trim()), dfLink.conditionId.trim()]),
       `ChainlinkDataFeed: wager #${dfLink.friendMarketId} linked on ${networkName(scopeChainId)}`,
     )
   }
@@ -225,14 +241,15 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('chainlinkFunctionsAdapter', CHAINLINK_FUNCTIONS_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('chainlinkFunctionsAdapter', 'ChainlinkFunctionsOracleAdapter'))
     runTx(
-      () => c.registerCondition(
-        f.conditionId.trim(),
-        f.encodedRequest.trim(),
-        f.sourceHash.trim(),
-        BigInt(f.subscriptionId.trim()),
-        Number(f.gasLimit.trim()),
-        f.donId.trim(),
-      ),
+      () =>
+        c('registerCondition', [
+          f.conditionId.trim(),
+          f.encodedRequest.trim(),
+          f.sourceHash.trim(),
+          BigInt(f.subscriptionId.trim()),
+          Number(f.gasLimit.trim()),
+          f.donId.trim(),
+        ]),
       `ChainlinkFunctions: condition ${f.conditionId.slice(0, 10)}… registered on ${networkName(scopeChainId)}`,
     )
   }
@@ -243,7 +260,7 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('chainlinkFunctionsAdapter', CHAINLINK_FUNCTIONS_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('chainlinkFunctionsAdapter', 'ChainlinkFunctionsOracleAdapter'))
     runTx(
-      () => c.linkMarket(BigInt(fnLink.friendMarketId.trim()), fnLink.conditionId.trim()),
+      () => c('linkMarket', [BigInt(fnLink.friendMarketId.trim()), fnLink.conditionId.trim()]),
       `ChainlinkFunctions: wager #${fnLink.friendMarketId} linked on ${networkName(scopeChainId)}`,
     )
   }
@@ -258,13 +275,18 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('umaAdapter', UMA_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('umaAdapter', 'UMAOptimisticOracleV3Adapter'))
     runTx(
-      () => c.registerCondition(
-        f.conditionId.trim(),
-        ethers.toUtf8Bytes(f.claim.trim()),
-        f.bondCurrency.trim(),
-        BigInt(f.bondAmount.trim()),
-        BigInt(f.liveness.trim()),
-      ),
+      () =>
+        c('registerCondition', [
+          f.conditionId.trim(),
+          // `stringToHex`, NOT `stringToBytes` (spec 110 divergence 19). viem's encoder REFUSES a
+          // `Uint8Array` for a `bytes` parameter and wants hex — so the obvious name-match for
+          // ethers' `toUtf8Bytes` is the one that throws. `stringToHex` is byte-identical to it,
+          // checked over unicode, emoji, quotes and a hex-looking claim.
+          stringToHex(f.claim.trim()),
+          getAddress(f.bondCurrency.trim()),
+          BigInt(f.bondAmount.trim()),
+          BigInt(f.liveness.trim()),
+        ]),
       `UMA: condition ${f.conditionId.slice(0, 10)}… registered on ${networkName(scopeChainId)}`,
     )
   }
@@ -275,7 +297,7 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
     const c = writer('umaAdapter', UMA_ADMIN_ABI)
     if (!c) return alert(writeBlockedReason('umaAdapter', 'UMAOptimisticOracleV3Adapter'))
     runTx(
-      () => c.linkMarket(BigInt(umaLink.friendMarketId.trim()), umaLink.conditionId.trim()),
+      () => c('linkMarket', [BigInt(umaLink.friendMarketId.trim()), umaLink.conditionId.trim()]),
       `UMA: wager #${umaLink.friendMarketId} linked on ${networkName(scopeChainId)}`,
     )
   }
@@ -284,7 +306,7 @@ function OracleAdaptersTab({ signer, account, contracts, chainId, runTx, pending
   const activeMeta = ADAPTERS.find(a => a.key === activeAdapter)
   const activeAddr = adapterAddresses[activeMeta.addressKey]
   const activeOwner = adapterOwners[activeAdapter]
-  const activeDeployed = Boolean(activeAddr && ethers.isAddress(activeAddr))
+  const activeDeployed = Boolean(activeAddr && isAddressSeam(activeAddr))
   const isActualOwner = activeOwner && account &&
     String(activeOwner).toLowerCase() === String(account).toLowerCase()
 

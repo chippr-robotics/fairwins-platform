@@ -1,15 +1,43 @@
 # Wrap & Unwrap the Native Coin
 
-**Transfer ▸ Wrap** turns the connected network's coin into its canonical wrapped ERC-20 form, and
+**Trade ▸ Wrap** turns any supported network's coin into its canonical wrapped ERC-20 form, and
 back again. It is the plainest money-moving surface in the app, because the operation itself is
 plain: a WETH9-shaped contract mints exactly what you send it on `deposit()` and burns exactly what
 you name on `withdraw(wad)`.
 
 - View: `frontend/src/components/wallet/WrapView.jsx`
 - Engine: `frontend/src/hooks/useWrapNative.js`
-- Address resolution: `frontend/src/config/wrappedNative.js`
+- Picker options + balances: `frontend/src/hooks/useWrapCoinOptions.js`
+- Address resolution + candidate list: `frontend/src/config/wrappedNative.js`
 - ABI: `frontend/src/abis/WNative.js` (already used by `DexContext` for its wrapped-balance read)
-- Tests: `frontend/src/test/wallet/{wrappedNative,useWrapNative,WrapView}.test.*`
+- Tests: `frontend/src/test/wallet/{wrappedNative,useWrapNative,useWrapCoinOptions,WrapView}.test.*`
+
+## The asset is the entry point (spec 108)
+
+The view is no longer pinned to the connected chain. A trading-view-style picker
+(`UniversalAssetSelect`, spec 064) lists every **cohort** chain's base coin that has a configured
+wrapper — `listWrappableCoins()` lives beside the resolver in `config/wrappedNative.js`, so the file
+that answers "what is the wrapped form here?" also owns "which coins are offered" — with the
+member's balance beside each, read per chain through `readBalancesSettled` + `getReadProvider` with
+failure isolation (an unreadable chain's row shows `—`, never `0`, and stays selectable).
+
+The **network is a property of the selection**, resolved at submit time per rail
+(`useWrapNative({ chainId })`, default: the wallet's chain — every pre-108 caller is unchanged):
+
+- **Classic signer, other chain** → switch-then-settle first (the spec-102 / `useEarnSend`
+  device: awaited `switchNetwork`, then a 150 ms poll on a render-updated snapshot until the
+  chain-scoped signer exists, 20 s deadline). A refusal names BOTH chains and sends nothing.
+- **Passkey** → the batch is chain-targeted by parameter (`sendCalls(calls, { chainId })`),
+  offered only where `isPasskeySupported(target)`; elsewhere the rail is stated as unavailable
+  BEFORE the tap, with the support seam's own reason.
+- **Vault / legacy / hardware** → unchanged refusals; the picker pins to the acting account's
+  chain (multichain custody actions belong to spec 102, not this surface).
+
+Changing the coin clears the amount — a MAX quoted against one chain's balance and gas reserve is
+never carried to another. Sponsorship, the reserve, and the fee line all follow the **target**.
+
+E2E: `fast/48-wrap-multi-currency.cy.js` (picker honesty, refused switch) and
+`full/45-wrap-cross-chain.cy.js` (real cross-chain deposit on the local chain).
 
 Members need the wrapped form for anything that only accepts an ERC-20 — a DEX pair, a liquidity
 position, a contract that takes `transferFrom`. Previously the app could *show* a member their

@@ -107,7 +107,7 @@ frontend/src/
 ├── lib/
 │   └── addressBook/
 │       ├── addressBookStore.js      # Pure data layer: schema, CRUD, normalise, (addr+network) identity, merge
-│       ├── addressBookCrypto.js     # Encrypted export/import (wallet-signature key + ChaCha20-Poly1305)
+│       ├── addressBookFile.js       # Plain-text export/import (issue #1550; reads legacy encrypted files)
 │       └── constants.js             # Storage key, export file/version, address-book signing message
 ├── hooks/
 │   ├── useAddressBook.js            # React binding over addressBookStore (per-wallet, reactive)

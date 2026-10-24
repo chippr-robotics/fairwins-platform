@@ -115,3 +115,53 @@ describe('nginx CSP script-src mini-app package grant (spec 073)', () => {
     expect(frameSrc.split(/\s+/), `${path} frame-src must not carry blob:`).not.toContain('blob:')
   })
 })
+
+// Spec 106 (FR-018) — script-src is a PINNED ALLOWLIST, and this block is the pin.
+//
+// Before this gate existed, the assertions above were purely NEGATIVE: no scheme-wide grants, no
+// eval, no wasm. Verified during spec 106's research: a change adding one more NAMED host to
+// script-src broke none of them — the invariant everyone believed ("script-src never widens
+// silently") was unguarded against exactly the kind of change most likely to happen. So every
+// source in script-src is now enumerated, WITH ITS REASON, and any addition fails this test until
+// it is added here deliberately, reason attached. The exception stays countable, which is the
+// difference between an allowlist and an accumulation.
+describe('nginx CSP script-src pinned allowlist (spec 106, FR-018)', () => {
+  const PINNED_SCRIPT_SOURCES = {
+    "'self'": 'the application bundle itself',
+    "'unsafe-inline'": 'legacy inline bootstrapping; predates this gate, tracked by the brand/CSP work',
+    'blob:': 'verified mini-app packages, imported from Blob URLs AFTER hash verification (spec 073)',
+    'https://*.cloudflareinsights.com': 'Cloudflare Web Analytics beacon',
+    'https://challenges.cloudflare.com':
+      'Turnstile — proof-of-human for the caller-identity tiers (spec 106). ONE named host, ' +
+      'operated by the edge provider already fronting the app; the opposite of a scheme grant.',
+  }
+
+  it.each(CONFIGS)('%s script-src contains EXACTLY the pinned sources, no more, no fewer', (path) => {
+    const actual = scriptSrcOf(path).split(/\s+/).filter(Boolean).sort()
+    const pinned = Object.keys(PINNED_SCRIPT_SOURCES).sort()
+    // Not toContain: an EXACT match in both directions. A source added without a pinned reason
+    // fails (that is the widening this gate exists to catch); a pinned source that disappears
+    // fails too, because a silent removal breaks a feature and reads as nothing in review.
+    expect(actual, `${path} script-src diverged from the pinned allowlist`).toEqual(pinned)
+  })
+
+  it.each(CONFIGS)('%s frame-src carries the challenge iframe host alongside the wallet/trezor frames', (path) => {
+    const conf = readFileSync(path, 'utf8')
+    const cspLine = conf.split('\n').find((l) => l.includes('add_header Content-Security-Policy'))
+    const frameSrc = (cspLine.match(/frame-src\s+([^;]*)/)?.[1] || '').split(/\s+/).filter(Boolean).sort()
+    expect(frameSrc).toEqual(
+      [
+        'https://challenges.cloudflare.com',
+        'https://verify.walletconnect.com',
+        'https://verify.walletconnect.org',
+        'https://connect.trezor.io',
+      ].sort(),
+    )
+  })
+
+  it('every pinned source carries a written reason — countable means explained', () => {
+    for (const [source, reason] of Object.entries(PINNED_SCRIPT_SOURCES)) {
+      expect(reason.length, `${source} is pinned without a reason`).toBeGreaterThan(10)
+    }
+  })
+})

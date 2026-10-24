@@ -28,11 +28,11 @@ profile it needs and gets exactly that. The same list is what the Terraform modu
 
 | Profile | Contains | Used by |
 |---|---|---|
-| `deploy` | deployer key, floppy keystore passwords, QuickNode endpoint | contract deploys and upgrades |
+| `deploy` | deployer key, floppy keystore passwords, the five per-chain QuickNode endpoints | contract deploys and upgrades |
 | `verify` | Etherscan key | `npm run verify:<net>` |
 | `publish` | Pinata JWT, Graph deploy + query keys | mini-app / subgraph publishing |
 | `seed` | creator key, 10 seed player keys | testnet market seeding |
-| `rpc` | QuickNode token and endpoint | archive-RPC reads |
+| `rpc` | QuickNode token and the five per-chain endpoints | archive-RPC reads |
 
 `compile` and `test` need no secrets and are not wrapped — that is deliberate, and is why fetching
 happens in a wrapper rather than inside `hardhat.config.js`.
@@ -82,6 +82,61 @@ a 64-hex key, a JWT, a URL with an embedded token — under a name the registry 
 new credential arrives under a new name by definition, so a check that only knows today's names
 would never see the next one.
 
+## QuickNode endpoints are PER-CHAIN, and the derivation happens exactly once
+
+A QuickNode *multichain* endpoint serves every network enabled on it from one name and one token;
+the chain is chosen by a **hostname infix** — `https://<name>.<slug>.quiknode.pro/<token>`, with
+Ethereum mainnet omitting the infix entirely. That is convenient and it is the whole problem: **a
+wrong infix answers HTTP 200 with another chain's state, not 401.** There is no error to notice.
+
+So the estate does not hand consumers a multichain URL to slice up. Each chain has its own
+container holding a URL that has been *verified against `eth_chainId`*:
+
+| Chain | Secret | Delivered as |
+|---|---|---|
+| Ethereum 1 | `fairwins-quicknode-ethereum-url` | `MAINNET_RPC_URL` |
+| Optimism 10 | `fairwins-quicknode-optimism-url` | `OPTIMISM_RPC_URL` |
+| Polygon 137 | `fairwins-quicknode-polygon-url` | `POLYGON_RPC_URL`, `QUICKNODE_POLYGON_RPC_URL`, `ALTO_RPC_URL` |
+| Base 8453 | `fairwins-quicknode-base-url` | `BASE_RPC_URL` |
+| Arbitrum 42161 | `fairwins-quicknode-arbitrum-url` | `ARBITRUM_RPC_URL` |
+
+`hardhat.config.js` hard-requires the four non-Polygon names (`requiredRpcUrl`), so before this
+existed a deploy or fork test on any of those chains ran against a public node with no archive
+depth. They are not optional extras — `npm run sec -- --profile deploy` fails without them.
+
+Amoy 80002 deliberately has **no** container (`secretId: null` in `quicknode-chains.js`): there is
+no Amoy-cohort node, and the fork tests that read `AMOY_RPC_URL` run against the public endpoint.
+
+### Provisioning or rotating one
+
+```bash
+# 1. containers first — terraform apply, after adding the id to BOTH tfvars lists
+# 2. derive, verify and store, in one audited step
+gcloud secrets versions access latest --secret=QUICKNODE_RPC_001_API \
+  | node scripts/secrets/quicknode-chains.js --provision 1,10,8453,42161
+```
+
+All four chains were verified off endpoint 001 on 2026-09-01 (`--verify` returned PASS for 1, 10,
+8453 and 42161), which is why no dedicated per-chain QuickNode endpoint was bought. Buying four
+would have given rate-limit isolation and independent revocation — a real argument, but a different
+one from "the app cannot reach these chains", which is false. Note also that **the network an
+endpoint was created on says nothing about its reach**: the Admin API reports 001 as `chain: matic`
+and it serves Ethereum mainnet fine. Ask the chain; never infer it.
+
+`--provision` derives each chain's URL, asserts `eth_chainId`, and **only then** adds a version.
+A chain that does not verify is skipped and named; nothing unverified is ever stored. The payload
+reaches `gcloud` on stdin, never argv (world-readable in `/proc`) and never disk, and is written
+**without a trailing newline** — `fetch-secrets.sh` emits `VAR='<payload>'` verbatim, so a stored
+newline would land inside the quoted value. Use `--verify` for a dry run; it writes nothing.
+
+Only after a chain verifies should its line be removed from a local `.env`. `check:env-hygiene`
+fails while a managed name still holds a value on disk — that failure is the migration prompt, not
+a bug.
+
+**Polygon is not re-provisioned as a side effect.** Its payload also reaches alto as
+`ALTO_RPC_URL`, alto's *only* RPC endpoint with no failover. Repointing 137 is a deliberate
+rotation with the bundler in scope; `--provision 137` will do it, so do not pass 137 casually.
+
 ## `VITE_` variables are not secrets and cannot be made into them
 
 `frontend/.env`'s `VITE_PINATA_JWT` is compiled into the client bundle and is public the moment it
@@ -98,8 +153,14 @@ rotatable, least-privilege credential that is safe to publish — not a hiding p
    — without that, the grant silently never appears and the failure surfaces later as
    `PERMISSION_DENIED`, which reads exactly like a broken login.
 3. `npm run secrets:migrate -- --apply` to create the container, or `gcloud secrets versions add`.
-4. Add an import block in `imports.tf` so Terraform adopts the container rather than trying to
-   create it.
+   **If the payload is COMPUTED rather than copied from `.env`, set `derived` on the entry** to the
+   command that produces it. `migrate.js` then skips it and leaves the local value alone, instead
+   of uploading a stand-in — the per-chain QuickNode endpoints are the case that forced this: the
+   value on disk was a *public* RPC URL, and uploading it would have filled a container labelled
+   "archive endpoint" with a public one that reads back byte-exact forever, erroring nowhere.
+4. Add an import block in `imports.tf` **only if the container already exists**. A secret Terraform
+   is creating for the first time must have no import block — importing something absent fails the
+   plan outright. Record that absence as a deliberate one, the way the file does elsewhere.
 
 See also: `docs/runbooks/workstation-operations.md`, `infra/observability/README.md`, and the
 `ops-workstation` module in `chippr-tf-modules`.

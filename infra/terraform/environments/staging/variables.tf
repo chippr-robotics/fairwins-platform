@@ -55,6 +55,23 @@ variable "staging_testnet_secret_env" {
   default = {}
 }
 
+variable "run_noperm_service_account" {
+  description = <<-EOT
+    Runtime account for the Cloud Run services in this root, all of which need NO GCP permission:
+    the two SPA cohort services serve a static bundle, and the MCP server forwards the member's own
+    capability token. Declared in infra/terraform/bootstrap, which is where every account the apply
+    identity may `actAs` is enumerated.
+
+    NOT OPTIONAL, and not a hardening nicety. Terraform cannot manage a Cloud Run service without
+    `actAs` on that service's runtime account, so leaving these on the Cloud Run DEFAULT COMPUTE
+    account does not avoid a grant — it forces one on an account holding roles/editor project-wide,
+    in a project shared with unrelated workloads. This account holds no role at all, which is what
+    makes the grant harmless.
+  EOT
+  type        = string
+  default     = "fairwins-run-noperm@chippr-bots-site-wp.iam.gserviceaccount.com"
+}
+
 variable "manage_staging_services" {
   description = <<-EOT
     Whether Terraform declares the two staging SPA Cloud Run services.

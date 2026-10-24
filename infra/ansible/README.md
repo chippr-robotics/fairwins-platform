@@ -14,11 +14,45 @@ If a playbook cannot connect, **fix the tunnel — never the firewall.** A playb
 SSH cannot reach these hosts at all, and widening the source range to make it work would undo the
 network's whole posture.
 
+## Setting up a controller
+
+The controller needs three things, and each one fails in a way that does not name itself.
+
 ```bash
-gcloud auth login
-ansible-galaxy collection install -r requirements.yml
+# 1. Ansible and the inventory plugin's Python dependencies, in a venv.
+#    The dynamic inventory imports google-auth IN THE CONTROLLER's interpreter. Distro Ansible runs
+#    on a PEP-668 `EXTERNALLY-MANAGED` /usr/bin/python3 that cannot be pip-installed into, and the
+#    apt build of google-auth is years behind what google.cloud 1.15.0 expects — so a venv is the
+#    supported path, and it is what CI installs too.
+python3 -m venv ~/.venvs/fairwins-ansible
+~/.venvs/fairwins-ansible/bin/pip install ansible-core ansible-lint google-auth requests
+export PATH="$HOME/.venvs/fairwins-ansible/bin:$PATH"
+
+# 2. Application Default Credentials. `auth_kind: application` reads ADC, which `gcloud auth login`
+#    does NOT write — that command authenticates the CLI and leaves the inventory unauthenticated.
+gcloud auth application-default login
+
+# 3. The pinned collections, into the path ansible.cfg declares.
+ansible-galaxy collection install -r requirements.yml -p collections
+
 ansible-inventory -i inventory/gcp.yml --graph      # both nodes, discovered by label
 ```
+
+**Seed the SSH key once per workstation.** These nodes do not use OS Login: `ssh-keys` metadata is
+owned by gcloud, which injects a short-lived key for your own local username on every
+`gcloud compute ssh`. The inventory connects as that same operator and reads
+`~/.ssh/google_compute_engine`, so a converge run is attributed to a named human — but the key has to
+exist before Ansible can use it, and an expired one reads as `Permission denied (publickey)` from a
+host the tunnel already reached:
+
+```bash
+gcloud compute ssh fairwins-gateway --zone=us-central1-a --tunnel-through-iap --command=true
+ansible all -i inventory/gcp.yml -m ping     # expect SUCCESS / pong from both nodes
+```
+
+Do not "fix" a `publickey` denial by adding an `ansible` user to the inventory. There is no such
+account on these nodes, and a shared one would attribute every converge run to nobody.
+
 
 ## Running
 

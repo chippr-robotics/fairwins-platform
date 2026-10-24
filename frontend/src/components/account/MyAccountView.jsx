@@ -7,6 +7,7 @@ import { useEffectiveAccount } from '../../hooks/useEffectiveAccount'
 import { ACCOUNT_VIEWS, ACCOUNT_DEFAULT_VIEW, accountViewFromParam } from '../../config/appNav'
 import AccountCardsCarousel from './AccountCardsCarousel'
 import PortfolioPanel from '../wallet/PortfolioPanel'
+import DeviceLossWarning from '../wallet/DeviceLossWarning'
 import SummaryTiles from './SummaryTiles'
 import PnlChart from './PnlChart'
 import ActivityBreakdowns from './ActivityBreakdowns'
@@ -57,6 +58,23 @@ function MyAccountView() {
   // snapshot cache warms — the moment My Account opens, whichever view shows.
   const portfolio = usePortfolio(isActingAccount ? { accountAddress: actingAddress } : undefined)
   const activeTotalUsd = portfolio.status === 'ready' ? portfolio.totalUsd : null
+  /*
+   * FR-021 moment 2 of 3 — FIRST FUNDING (spec 041 US5, issue #1405).
+   *
+   * The app has no "money arrived" event to hang this on: there is no incoming-transfer watcher,
+   * and the passkey account is counterfactual until its first action, so nothing fires when a
+   * transfer lands. The honest definition, and the one this mount uses, is the observable one the
+   * spec's own wording ("first meaningful balance", US5) points at: the first time the wallet home
+   * shows this single-controller passkey account holding something.
+   *
+   * Judged on BALANCES, not on `totalUsd`. A holding with no resolvable on-chain price carries
+   * `usd: null` and adds nothing to the total (usePortfolio's honest-state rules), so a funded
+   * account whose price feed was unreachable would total $0 — and would go unwarned exactly when
+   * it holds value. `holdings` only ever contains assets that were actually READ (a failed read is
+   * skipped and reported in `failedAssets`, never rendered as zero), so a non-zero balance here is
+   * a fact, and a read that failed simply does not claim one.
+   */
+  const funded = portfolio.status === 'ready' && (portfolio.holdings || []).some((h) => h.balance > 0)
   // Defaults matter here, not just for tidiness: `staleClasses`/`partialChains`
   // are read unconditionally below (they decide whether an empty feed may be
   // called "no activity"), so a hook shape that omits them must degrade to
@@ -206,6 +224,13 @@ function MyAccountView() {
 
   return (
     <div className="my-account">
+      {funded && (
+        <DeviceLossWarning
+          moment="first-funding"
+          onAddController={() => navigate('/wallet?tab=security#controllers')}
+        />
+      )}
+
       <div className="my-account-sticky" ref={stickyRef}>
         <AccountCardsCarousel activeTotalUsd={activeTotalUsd} />
 

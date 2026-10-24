@@ -12,7 +12,7 @@ because there is no key on the server that could sign one.
 ## Architecture
 
 ```
-  browser (Settings ▸ API access)                  gateway (services/relay-gateway)
+  browser (Tools ▸ Assistant ▸ API access)         gateway (services/relay-gateway)
   ─────────────────────────────────                ─────────────────────────────────
   wagmi signTypedData(ApiKeyGrant)                 src/memberApi/
         │                                            contract.js   scopes · error codes · routes
@@ -252,15 +252,26 @@ gets broadcast.
 The signing half lives in the host, because a key is created by a wallet signature and a member has
 to be able to see what they are signing:
 
-- **Settings ▸ API access** (accordion card `api-access`, `ApiAccessPanel`) — create, list and
-  revoke keys, and generate an MCP configuration snippet. The token is displayed **once**; only
+- **Tools ▸ Assistant ▸ API access** (accordion card `api-access`, `ApiAccessPanel`, on the
+  `assistant` tab at `/wallet?tab=assistant` since spec 104 — the old `?tab=settings#api-access`
+  link redirects) — create, list and revoke keys, and generate an MCP configuration snippet. The token is displayed **once**; only
   metadata (`keyId`, `label`, `scopes`, `issuedAt`, `expiresAt`) is kept, wallet-scoped in
   `userStorage` under `api_access_keys`, and **deliberately not in `lib/backup/syncedObjects.js`** —
   the metadata is a convenience, and putting a key inventory into the encrypted backup would make
   the backup a more attractive target than the keys themselves. Because signing is entirely local,
   a member can still **create** a key with the gateway unreachable; only introspection and
   revocation registration need it.
-- **Settings ▸ Assistant** (card `assistant-prefs`) — see [Agentic Assistant](agentic-chat.md).
+- **Tools ▸ Assistant** (card `assistant-prefs`, same tab) — see [Agentic Assistant](agentic-chat.md).
+- **The assistant's tool reads are ordinary member-API calls.** When the in-app assistant reads a
+  member's profile, membership, wagers or fee rates (spec 104), the browser issues the same
+  `GET /v1/member/*` requests the MCP server would, under the same 24-hour session grant, and they
+  are authenticated, scoped, quota'd and audited exactly like any other call — there is no
+  assistant-specific read route and no server-side tool executor on the member's behalf. On the
+  FairWins rail the grant is the chat bearer and exists before the first message; on the GutterToken
+  rail (where the chat itself never touches this gateway) the grant is optional and offered from the
+  panel the first time a member-data tool is needed. The public tools (`/status`,
+  `/v1/polymarket/137/markets`, `/v1/perps/pairs`) need no token, as always. Audit records for tool
+  reads carry counts only.
 - Key creation and revocation are durable events in the client activity ledger under the **`access`**
   notification domain ("Programmatic access"). Metadata only: `keyId`, label and scopes — **never a
   token**.

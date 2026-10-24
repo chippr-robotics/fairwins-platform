@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { cohortChainIds } from '../../config/networks'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 
-const m = vi.hoisted(() => ({ routerAddr: null, reads: {}, qfEvents: [] }))
+const m = vi.hoisted(() => ({ routerAddr: null, reads: {}, qfEvents: [], scanCalls: [] }))
 
 vi.mock('../../config/contracts', () => ({ getContractAddressForChain: vi.fn(() => m.routerAddr) }))
 vi.mock('../../config/blockExplorer', () => ({ getBlockscoutUrl: () => 'https://explorer.example/address/0x' }))
@@ -15,23 +15,11 @@ vi.mock('../../lib/fees/feeQuote', async (orig) => ({
   ...(await orig()),
   fetchFeeQuote: vi.fn(() => Promise.resolve({ available: false, bps: 0, capBps: 0 })),
 }))
-vi.mock('ethers', async (orig) => {
-  const actual = await orig()
-  function FakeContract() {
-    return new Proxy({}, {
-      get(_t, prop) {
-        if (prop === 'then') return undefined
-        if (prop === 'filters') return new Proxy({}, { get: () => () => ({}) })
-        const key = String(prop)
-        return (...args) => (m.reads[key] ? m.reads[key](...args) : Promise.resolve(undefined))
-      },
-    })
-  }
-  const FakeCtor = vi.fn(FakeContract)
-  // StakingTab uses `ethers.Contract` (the namespace object), so override BOTH the named
-  // export and the namespace's Contract; keep everything else real (isAddress, ZeroAddress…).
-  return { ...actual, Contract: FakeCtor, ethers: { ...actual.ethers, Contract: FakeCtor } }
-})
+/**
+ * The ethers fake that stood here is GONE: StakingTab reads through the chain seam now (spec
+ * 110), so it intercepted nothing — the retired-mock shape `src/test/lint/ethersMockRatchet.test.js`
+ * fails on. The `readContract` mock below already serves `m.reads`, so every seed is unchanged.
+ */
 
 
 // Spec 071: the tab scopes to a network the operator picks (seeded from the wallet's chain when
@@ -43,7 +31,52 @@ const WALLET_CHAIN = cohortChainIds()[0]
 const ACCOUNT = '0x2222222222222222222222222222222222222222'
 
 import { ethers } from 'ethers'
+// The estate AUTHORITY read (`hasRole` on the router that will enforce it) moved onto the
+// spec-110 chain seam; the tab's own router reads still go through the contract mock above.
+// Both serve `m.reads`, so what a test seeds is unchanged.
+vi.mock('../../lib/chains/eventScan', () => ({
+  eventScanHandle: (chainId, { address }) => {
+    // Honours the address, so a scan pointed at nothing cannot quietly return seeded events —
+    // a mock that ignores its address cannot distinguish what the assertion claims it does.
+    if (!address) return null
+    m.scanCalls.push({ chainId, address })
+    return {
+    target: address,
+    provider: {
+      getBlockNumber: async () => 1_000_000,
+      // Seeded events, already decoded — the seam's own parseLog has its own suite.
+      getLogs: async () => (m.qfEvents || []).map((e, i) => ({ ...e, index: e.index ?? i })),
+    },
+    filters: new Proxy(
+      {},
+      { get: (_f, name) => () => ({ getTopicFilter: () => ({ __event: String(name) }) }) },
+    ),
+    interface: { parseLog: (log) => ({ name: log.__name, args: log.args || {} }) },
+    }
+  },
+}))
+
+vi.mock('../../lib/chains/publicClient', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    getPublicClient: () => ({ getBlock: async () => ({ timestamp: 1_752_800_000n }) }),
+  }
+})
+
+vi.mock('../../lib/chains/readContract', async (orig) => {
+  const actual = await orig()
+  return {
+    ...actual,
+    readContract: async (_chainId, { functionName, args = [] }) => {
+      const f = m.reads[functionName]
+      return f ? f(...args) : undefined
+    },
+  }
+})
+
 import StakingTab from '../../components/admin/StakingTab'
+import { STAKING_ROUTER_ABI } from '../../abis/StakingRouter'
 // Capability now comes from the router's own AccessControl, so "a guardian" in these tests means
 // the router answers hasRole(GUARDIAN_ROLE) — not that an app-wide prop said so. The props stay
 // as the pre-read stand-in and are mirrored here so each test's intent is unchanged.
@@ -67,15 +100,46 @@ const ROUTER = '0x1111111111111111111111111111111111111111'
 const VALID = '0x00000000000000000000000000000000000000a1' // all-lowercase ⇒ checksum-safe
 const provider = { getBlockNumber: () => Promise.resolve(1000), getBlock: () => Promise.resolve({ timestamp: 0 }) }
 
+/**
+ * `runTx` INVOKES the thunk it is handed.
+ *
+ * It used to be `vi.fn(() => Promise.resolve())`, which ignored its first argument entirely — so
+ * every assertion below ("dispatches pause", "dispatches add and remove") proved only that the tab
+ * had CALLED runTx with the right toast message, never that the closure inside it could run.
+ *
+ * That gap hid a real regression for nineteen commits. Converting this tab turned `write` from a
+ * signer-bound contract into a FUNCTION `write(functionName, args)`, and two call sites kept the
+ * old `write()[fn](...)` shape: `write()` now returns a Promise, so `promise['pause']` is
+ * `undefined` and the call throws. Pause/resume and the provider-address forms were both dead on
+ * the operator's console, with this file green the whole time. It only surfaced in the on-chain
+ * tier (`31-earn-lend-stake` ES-03), which had been CANCELLED on every head since.
+ *
+ * The signer is a spy for the same reason: a thunk that runs has to reach something.
+ */
 function props(overrides = {}) {
-  const runTx = vi.fn(() => Promise.resolve())
+  const sent = []
+  const runTx = vi.fn(async (thunk) => { await thunk() })
   seedRoles(overrides)
   return {
     runTx,
+    sent,
     node: {
-      signer: {}, chainId: WALLET_CHAIN, account: ACCOUNT, provider, runTx, pendingTx: false,
+      signer: {
+        sendTransaction: async (tx) => { sent.push(tx); return { hash: '0xtx', wait: async () => ({ status: 1 }) } },
+      },
+      chainId: WALLET_CHAIN, account: ACCOUNT, provider, runTx, pendingTx: false,
       isAdmin: false, isStakingAdmin: false, isGuardian: false, ...overrides,
     },
+  }
+}
+
+/** The function name in a sent transaction's calldata, by selector, via the real ethers Interface. */
+const sentFnName = (tx) => {
+  const iface = new ethers.Interface(STAKING_ROUTER_ABI)
+  try {
+    return iface.getFunction(String(tx.data).slice(0, 10))?.name ?? null
+  } catch {
+    return null
   }
 }
 
@@ -101,18 +165,23 @@ beforeEach(() => {
 
 describe('US2 pause/resume (GUARDIAN)', () => {
   it('dispatches pause for a guardian', async () => {
-    const { node, runTx } = props({ isGuardian: true })
+    const { node, runTx, sent } = props({ isGuardian: true })
     render(<StakingTab {...node} />)
     const btn = await screen.findByRole('button', { name: 'Pause staking' })
     fireEvent.click(btn)
     await waitFor(() => expect(runTx).toHaveBeenCalled())
     expect(runTx.mock.calls.some((c) => c[1] === 'Staking paused')).toBe(true)
+    // …and the thunk actually SENT a `pause`, decoded by selector. The toast message alone is
+    // what this asserted before, and the toast is right even when the write throws.
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sent[0].to).toBe(ROUTER)
+    expect(sentFnName(sent[0])).toBe('pause')
   })
 })
 
 describe('US3 provider addresses (STAKING_ADMIN)', () => {
   it('rejects invalid input before send and dispatches a valid update', async () => {
-    const { node, runTx } = props({ isStakingAdmin: true })
+    const { node, runTx, sent } = props({ isStakingAdmin: true })
     render(<StakingTab {...node} />)
     await screen.findByText('Provider addresses')
 
@@ -128,12 +197,15 @@ describe('US3 provider addresses (STAKING_ADMIN)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Set Lido' }))
     await waitFor(() => expect(runTx).toHaveBeenCalled())
     expect(runTx.mock.calls.some((c) => c[1] === 'Lido contracts updated')).toBe(true)
+    // The pair form used the same retired `write()[fn](...)` shape as the pause button.
+    await waitFor(() => expect(sent).toHaveLength(1))
+    expect(sentFnName(sent[0])).toBe('setLidoContracts')
   })
 })
 
 describe('US4 validator allowlist (STAKING_ADMIN)', () => {
   it('dispatches add and remove', async () => {
-    const { node, runTx } = props({ isStakingAdmin: true })
+    const { node, runTx, sent } = props({ isStakingAdmin: true })
     render(<StakingTab {...node} />)
     await screen.findByText('Validator allowlist')
 
@@ -144,6 +216,8 @@ describe('US4 validator allowlist (STAKING_ADMIN)', () => {
     const removeBtn = await screen.findByRole('button', { name: 'Remove' })
     fireEvent.click(removeBtn)
     await waitFor(() => expect(runTx.mock.calls.some((c) => /removed/.test(c[1]))).toBe(true))
+    await waitFor(() => expect(sent).toHaveLength(2))
+    expect(sent.map(sentFnName)).toEqual(['addValidator', 'removeValidator'])
   })
 })
 

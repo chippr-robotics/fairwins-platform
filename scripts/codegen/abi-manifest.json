@@ -76,6 +76,18 @@
       ]
     },
     {
+      "name": "FundingPool",
+      "consumers": [
+        "frontend"
+      ]
+    },
+    {
+      "name": "FundingPoolFactory",
+      "consumers": [
+        "frontend"
+      ]
+    },
+    {
       "name": "TokenInstance",
       "verifyAgainst": "contracts/tokens/templates/OpenERC20V2.sol:OpenERC20V2",
       "events": [

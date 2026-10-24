@@ -28,7 +28,8 @@
     "safePolicyGuardV2": 488059135,
     "policyGuardSetup": 488059144,
     "safeProposalHub": 488059169,
-    "feeRouter": 488093602
+    "feeRouter": 488093602,
+    "accountFactory": 488330461
   },
   "treasury": "0x8cc564E3dF4003c2F0a33C679c8DfE6237c5c3fa",
   "deployer": "0x52502d049571C7893447b86c4d8B38e6184bF6e1",

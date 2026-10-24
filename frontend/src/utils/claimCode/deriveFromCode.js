@@ -11,8 +11,10 @@
  * and the encryption key are independent keccak outputs with distinct domain tags, so neither leaks the
  * other.
  */
-import { keccak256, toUtf8Bytes, getBytes, SigningKey, computeAddress, Wallet } from 'ethers'
+import { hexToBytes, keccak256, stringToBytes } from 'viem'
+import { privateKeyToAccount } from 'viem/accounts'
 import { CONTRACT_DOMAINS, OPEN_ACCEPT_TYPES, domainFor } from '@fairwins/intent-types'
+import { primaryTypeOf } from '../../lib/evm/typedData'
 import { normalizeCode } from './wordlist.js'
 
 const CLAIM_DOMAIN = 'FairWins/claim/v1'
@@ -43,12 +45,19 @@ export function deriveFromCode(code) {
   if (!normalized) throw new Error('deriveFromCode: empty code')
 
   // secp256k1 private key: keccak("FairWins/claim/v1" || normalized). The keccak output is a valid scalar
-  // (1..n-1) with overwhelming probability (~1 - 2^-128); SigningKey validates and would throw otherwise.
-  const claimPrivateKey = keccak256(toUtf8Bytes(CLAIM_DOMAIN + normalized))
-  const claimAddress = computeAddress(new SigningKey(claimPrivateKey).publicKey)
+  // (1..n-1) with overwhelming probability (~1 - 2^-128); the refusal below is what covers the rest.
+  //
+  // Spec 110 T028 — `privateKeyToAccount` replaces `computeAddress(new SigningKey(pk).publicKey)`,
+  // and it refuses EXACTLY what SigningKey refused: zero, n, n+1, all-ones, short hex and non-hex
+  // all throw in both libraries. That is not assumed — the whole derivation was byte-compared
+  // against ethers before the swap (private key, address and symmetric key identical over eight
+  // codes including empty, 200-char, unicode and mixed-case), because `claimAddress` IS the
+  // on-chain `claimAuthority`: a single changed byte orphans every open challenge ever created.
+  const claimPrivateKey = keccak256(stringToBytes(CLAIM_DOMAIN + normalized))
+  const claimAddress = privateKeyToAccount(claimPrivateKey).address
 
   // Symmetric key: independent domain-separated keccak output.
-  const symKey = getBytes(keccak256(toUtf8Bytes(TERMS_DOMAIN + normalized)))
+  const symKey = hexToBytes(keccak256(stringToBytes(TERMS_DOMAIN + normalized)))
 
   return { claimPrivateKey, claimAddress, symKey }
 }
@@ -64,9 +73,17 @@ export function deriveFromCode(code) {
  */
 export async function signOpenAccept(code, { wagerId, taker, chainId, verifyingContract }) {
   const { claimPrivateKey } = deriveFromCode(code)
-  const wallet = new Wallet(claimPrivateKey)
   const domain = domainFor('wagerRegistry', chainId, verifyingContract)
-  return wallet.signTypedData(domain, OPEN_ACCEPT_TYPES, { wagerId, taker })
+  // viem needs the primary type ethers inferred; `primaryTypeOf` is that inference, not a guess at
+  // the first key (which for a nested table can be a SUB-type — see lib/evm/typedData.js).
+  const primaryType = primaryTypeOf(OPEN_ACCEPT_TYPES)
+  if (!primaryType) throw new Error('signOpenAccept: the acceptance struct has no single primary type.')
+  return privateKeyToAccount(claimPrivateKey).signTypedData({
+    domain,
+    types: OPEN_ACCEPT_TYPES,
+    primaryType,
+    message: { wagerId, taker },
+  })
 }
 
 export { OPEN_ACCEPT_TYPES, EIP712_DOMAIN_NAME, EIP712_DOMAIN_VERSION }

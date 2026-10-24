@@ -26,6 +26,10 @@ gateway_secret_ids = [
   "origin-lock-secret",
   "relay-webhook-secret",
   "relay-engine-api-key",
+  # #1652: the engine's at-rest encryption key for its redis state, delivered to engine.env ONLY by
+  # fetch-secrets.sh. REQUIRED, not optional: the engine refuses to boot in redis storage mode
+  # without it. Granted to this node because the engine container runs on it.
+  "relay-engine-storage-key",
   # FinOps exporter + Alloy (spec 089). All OPTIONAL: an absent vendor credential makes that source
   # `not-configured`, which is a first-class honest state, never a fabricated zero (FR-006).
   "finops-cloudflare-token",
@@ -44,7 +48,21 @@ gateway_secret_ids = [
   # node. Handing a node a credential nothing on it reads is the opposite of least privilege, and
   # the AMOY pair is the same token behind a `matic-amoy` infix, so a node holding it could be
   # pointed at the wrong chain by a four-character typo that returns 200 rather than 401.
+  #
+  # The four per-chain endpoints added for Ethereum 1 / Optimism 10 / Base 8453 / Arbitrum 42161
+  # (fairwins-quicknode-<chain>-url) are NOT granted here either, for the plainer reason that the
+  # gateway does not define those chains at all — CHAIN_DEFS covers 61, 63, 137 and 80002, and
+  # ENABLED_CHAIN_IDS is "63,137". They are workstation-only until a node actually reads one.
   "QUICKNODE_POLYGON_API",
+  # Keyed RPC issuance signing key (spec 107, #1469). KEY MATERIAL: the ES256 private half whose
+  # public twin is registered at the provider (endpoint 657013, kid k1 — the #1468 ceremony).
+  # OPTIONAL by the same never-stranded rule as everything above: absent => POST /v1/access/rpc
+  # answers 503 access_unconfigured and the SPA reads public capacity exactly as it does today.
+  # The ONLY new grant this feature needs: RPC_ACCESS_ADMIN_KEY deliberately delivers from
+  # finops-quicknode-key, which this node already holds for the exporter — verified live to read
+  # per-endpoint security state, so granting QUICKNODE_ADMIN_API to the public-facing gateway
+  # would widen its blast radius for nothing.
+  "fairwins-rpc-access-signing-key",
 ]
 
 # Secret CONTAINERS under management. Versions and payloads are never declared (guardrail G-04).
@@ -53,6 +71,10 @@ managed_secret_ids = [
   "alto-executor-key-137",
   "relay-webhook-secret",
   "relay-engine-api-key",
+  # #1652. Container only — the payload is created out of band (guardrail G-04). Losing or rotating
+  # it makes the engine's encrypted redis records undecryptable, so it is under prevent_destroy with
+  # the rest of this list.
+  "relay-engine-storage-key",
   # spec 089. Containers only — payloads are created out of band (guardrail G-04). Every one holds a
   # READ-only vendor credential; the exporter must never hold anything that can move value (FR-026).
   "finops-cloudflare-token",
@@ -86,18 +108,34 @@ managed_secret_ids = [
   # slug map and verifies a derived URL answers the right eth_chainId before anyone configures it,
   # because a wrong infix returns 200 with another chain's state, not 401.
   #
-  #   001 = base eth   → serves Ethereum 1, Optimism 10, Base 8453, Arbitrum 42161 (frontend
-  #         VITE_RPC_URL_* build primaries; the VM nodes read only 63/137 today, so NO node is
-  #         granted this — see the commented wiring in infra/vm/common/fetch-secrets.sh for the
-  #         day ENABLED_CHAIN_IDS grows)
-  #   002 = base matic → same chains as the QUICKNODE_POLYGON/AMOY pair above, which stays the
-  #         live credential (alto's ONLY RPC is REQUIRED on it — consolidating onto 002 is a
-  #         deliberate future rotation, never a side effect)
-  #   003 = base sol   → spec 100 (Solana) is spec+plan only; no consumer exists yet
-  #   004 = base btc   → NO CURRENT CONSUMER AND NOT A DROP-IN: the spec-061 gateway module reads
-  #         an Esplora-compatible REST API (BTC_ESPLORA_URL, mempool.space shape), not Bitcoin
-  #         Core JSON-RPC, which is what this endpoint speaks
-  #   005 = base zec   → spec 101 (Zcash) is spec+plan only; no consumer exists yet
+  # ⚠ THE "BASE NETWORK" IS COSMETIC — corrected 2026-09-01 against the Admin API, which reports
+  # `is_multichain: true` on ALL FIVE. An earlier version of this list read 001 as "base eth" and
+  # reasoned from that; the API reports endpoint `radial-necessary-tree` (which 001 addresses) as
+  # `chain: matic, network: matic`. It is a MATIC-base endpoint whose stored URL carries an
+  # `ethereum-mainnet` infix, and it answers eth_chainId 0x1 anyway. Do not infer a credential's
+  # reach from the network it was created on: the INFIX decides the chain, and the base network is
+  # only what the console happened to open with.
+  #
+  #   001 → the SOURCE the four per-chain `fairwins-quicknode-<chain>-url` containers are derived
+  #         from (`quicknode-chains.js --provision`), NOT a credential anything reads directly.
+  #         MEASURED 2026-09-01: Ethereum 1, Optimism 10, Base 8453 and Arbitrum 42161 all PASS a
+  #         live eth_chainId check off it, which is why no dedicated per-chain endpoint was bought —
+  #         the isolation one would buy (separate rate limit, independent revocation) is a real but
+  #         SEPARATE argument from reachability, and reachability was the one being asserted here.
+  #         The VM nodes read only 63/137, so NO node is granted this or its derivatives.
+  #   002 → ⚠ NOT a second credential. Byte-compared 2026-09-01: `QUICKNODE_RPC_002_API` and
+  #         `QUICKNODE_POLYGON_API` are the SAME endpoint (`chaotic-still-smoke.matic`) with the
+  #         SAME token. They differ by ONE BYTE — 002 has a TRAILING NEWLINE (88 vs 87). So
+  #         "consolidating onto 002" (what this comment used to promise as a future rotation) is
+  #         not a rotation at all, and doing it naively would be a REGRESSION: fetch-secrets.sh
+  #         emits `VAR='<payload>'` verbatim, so 002 yields a URL with a newline inside the quotes.
+  #         alto reads QUICKNODE_POLYGON_API, the clean one — that is luck, not design. If 002 is
+  #         ever wired, re-store it without the trailing byte FIRST.
+  #   003 → spec 100 (Solana) is spec+plan only; no consumer exists yet
+  #   004 → NO CURRENT CONSUMER AND NOT A DROP-IN: the spec-061 gateway module reads an
+  #         Esplora-compatible REST API (BTC_ESPLORA_URL, mempool.space shape), not Bitcoin Core
+  #         JSON-RPC, which is what this endpoint speaks
+  #   005 → spec 101 (Zcash) is spec+plan only; no consumer exists yet
   #
   # Declared (not busywork): management is what makes these show as drift instead of vanishing
   # into unmanaged secrets, and prevent_destroy is what stops a container deletion destroying the
@@ -125,9 +163,26 @@ managed_secret_ids = [
   "fairwins-android-upload-keystore",
   "fairwins-android-upload-keystore-password",
 
+  # Keyed RPC issuance signing key (spec 107). Created BY THE OPERATOR during the #1468 ceremony —
+  # generated and piped straight into Secret Manager, never on disk — and adopted here via an
+  # import block (imports.tf, spec-107 stanza), the audit-visible path spec 087 prescribes for
+  # resources that already exist. Container only, as everything here is (G-04); prevent_destroy
+  # protects the one credential in this feature that cannot be re-derived. Granted to the gateway
+  # node alone (gateway_secret_ids above).
+  "fairwins-rpc-access-signing-key",
+
 
   # Workstation secrets (spec 097). Mirrors scripts/secrets/registry.js — the parity test keeps
   # these in step; do not edit one list without the other.
+  #
+  # The four fairwins-quicknode-<chain>-url entries are the PER-CHAIN archive endpoints for
+  # Ethereum 1, Optimism 10, Base 8453 and Arbitrum 42161. They are containers only, as everything
+  # here is (G-04): the payloads are derived from the QUICKNODE_RPC_001_API multichain endpoint and
+  # written by `node scripts/secrets/quicknode-chains.js --provision`, which VERIFIES eth_chainId
+  # before it writes — a wrong hostname infix answers 200 with another chain's state, not 401.
+  # Before them, hardhat's required MAINNET/OPTIMISM/BASE/ARBITRUM_RPC_URL were public endpoints
+  # kept in a local .env. NO NODE is granted any of the four: the VM cohort is 63,137 and the
+  # gateway does not define these chains at all (services/relay-gateway/src/config/chains.js).
   "fairwins-creator-key",
   "fairwins-deployer-key",
   "fairwins-etherscan-api-key",
@@ -137,6 +192,10 @@ managed_secret_ids = [
   "fairwins-graph-api-key",
   "fairwins-graph-deploy-key",
   "fairwins-pinata-jwt",
+  "fairwins-quicknode-arbitrum-url",
+  "fairwins-quicknode-base-url",
+  "fairwins-quicknode-ethereum-url",
+  "fairwins-quicknode-optimism-url",
   "fairwins-quicknode-polygon-token",
   "fairwins-quicknode-polygon-url",
   "fairwins-seed-player-keys",
@@ -246,6 +305,13 @@ workstation_secret_ids = [
   "fairwins-graph-api-key",
   "fairwins-graph-deploy-key",
   "fairwins-pinata-jwt",
+  # Per-chain QuickNode archive endpoints (profiles `rpc` + `deploy`). The workstation is their
+  # ONLY reader: hardhat.config.js hard-requires MAINNET/OPTIMISM/BASE/ARBITRUM_RPC_URL, and
+  # `--provision` needs write access to the same containers to store a verified derivation.
+  "fairwins-quicknode-arbitrum-url",
+  "fairwins-quicknode-base-url",
+  "fairwins-quicknode-ethereum-url",
+  "fairwins-quicknode-optimism-url",
   "fairwins-quicknode-polygon-token",
   "fairwins-quicknode-polygon-url",
   "fairwins-seed-player-keys",

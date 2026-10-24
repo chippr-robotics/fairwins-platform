@@ -16,8 +16,8 @@
  */
 
 import { useEffect, useState } from 'react'
-import { Contract, formatUnits } from 'ethers'
-import { getProvider } from '../utils/blockchainService'
+import { formatUnits } from '../lib/evm/units'
+import { readContract } from '../lib/chains/readContract'
 import { getContractAddressForChain } from '../config/contracts'
 import { useWeb3 } from './useWeb3'
 import { WAGER_REGISTRY_ABI } from '../abis/WagerRegistry'
@@ -107,8 +107,11 @@ async function fetchFromRpc(chainId) {
   const stats = emptyStats()
   const address = getContractAddressForChain('wagerRegistry', chainId)
   if (!address) return stats
-  const registry = new Contract(address, WAGER_REGISTRY_ABI, getProvider(chainId))
-  const nextId = await registry.nextWagerId()
+  const nextId = await readContract(chainId, {
+    address,
+    abi: WAGER_REGISTRY_ABI,
+    functionName: 'nextWagerId',
+  })
   // ids start at 1, so total created = nextWagerId - 1
   stats.totalWagers = Math.max(0, Number(nextId) - 1)
   return stats
