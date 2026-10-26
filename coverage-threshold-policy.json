@@ -1,5 +1,5 @@
 {
-  "_comment": "Coverage threshold policy — spec 046-contract-audit-coverage. Single source of truth for the tiered gate (scripts/coverage/check-thresholds.js). `tier` is the audit-readiness TARGET (A=95/90, B=90/80, C=80/70). `min` is the currently-ENFORCED floor for a contract not yet at target: the gate fails below `min` (no regression) and the target is raised toward `tier` as gaps close (ratchet). A gated entry with no `min` is enforced at the full tier. Report-only contracts are measured/printed but never fail the gate (FR-013a). Ratchet `baseline` and per-contract `min` up as coverage rises (FR-016). Floors below were captured 2026-07-10 from a green local coverage run (674 passing, 0 out-of-gas).",
+  "_comment": "Coverage threshold policy — spec 046-contract-audit-coverage. Single source of truth for the tiered gate (scripts/coverage/check-thresholds.js). `tier` is the audit-readiness TARGET (A=95/90, B=90/80, C=80/70). `min` is the currently-ENFORCED floor for a contract not yet at target: the gate fails below `min` (no regression) and the target is raised toward `tier` as gaps close (ratchet). A gated entry with no `min` is enforced at the full tier. Report-only contracts are measured/printed but never fail the gate (FR-013a). Ratchet `baseline` and per-contract `min` up as coverage rises (FR-016). Floors below were captured 2026-07-10 from a green local coverage run (674 passing, 0 out-of-gas). Spec 112 (2026-10-26) added the ten previously ungated value contracts plus the StandardDAO{Deployers,Governor,Token} trio, with `min` equal to the measured coverage on staging @ 10e82f76 (1165 passing); contracts already at their tier carry no `min`. `npm run check:contract-gates` fails a first-party contract under a value directory that is in none of gated / reportOnly / excluded (scripts/coverage/check-policy-completeness.js). StandardDAOToken/Governor/Deployers are stock-OpenZeppelin wrappers with no FairWins logic (the factory wires the authority), so they are gated at tier C rather than left report-only: the Token holds the DAO electorate supply and a regression there is a value regression.",
   "tiers": {
     "A": { "minStatements": 95, "minBranches": 90 },
     "B": { "minStatements": 90, "minBranches": 80 },
@@ -38,7 +38,20 @@
     { "path": "contracts/custody/SafeProposalHub.sol", "tier": "B" },
     { "path": "contracts/custody/SafePolicyGuard.sol", "tier": "A" },
     { "path": "contracts/custody/PolicyGuardSetup.sol", "tier": "A", "min": { "statements": 100, "branches": 87 } },
-    { "path": "contracts/custody/SafePolicyGuardV2.sol", "tier": "A", "min": { "statements": 93, "branches": 90 } }
+    { "path": "contracts/custody/SafePolicyGuardV2.sol", "tier": "A", "min": { "statements": 93, "branches": 90 } },
+    { "path": "contracts/naming/CallsignRegistry.sol", "tier": "B", "min": { "statements": 92, "branches": 62 } },
+    { "path": "contracts/account/FairWinsVerifyingPaymaster.sol", "tier": "A", "min": { "statements": 82, "branches": 63 } },
+    { "path": "contracts/liquidity/LiquidityRouter.sol", "tier": "A", "min": { "statements": 100, "branches": 70 } },
+    { "path": "contracts/staking/StakingRouter.sol", "tier": "A", "min": { "statements": 100, "branches": 79 } },
+    { "path": "contracts/clearpath/StandardDAOFactory.sol", "tier": "B", "min": { "statements": 92, "branches": 50 } },
+    { "path": "contracts/clearpath/StandardDAODeployers.sol", "tier": "C" },
+    { "path": "contracts/clearpath/StandardDAOGovernor.sol", "tier": "C" },
+    { "path": "contracts/clearpath/StandardDAOToken.sol", "tier": "C", "min": { "statements": 80, "branches": 50 } },
+    { "path": "contracts/pools/FundingPoolFactory.sol", "tier": "A", "min": { "statements": 100, "branches": 86 } },
+    { "path": "contracts/pools/FundingPool.sol", "tier": "A" },
+    { "path": "contracts/bridge/BridgeRouter.sol", "tier": "A" },
+    { "path": "contracts/fees/FeeRouter.sol", "tier": "A" },
+    { "path": "contracts/apps/MiniAppRegistry.sol", "tier": "B" }
   ],
   "reportOnly": [
     { "path": "contracts/tokens/templates/OpenERC20.sol", "tier": "C", "rationale": "token template not on active launch path" },

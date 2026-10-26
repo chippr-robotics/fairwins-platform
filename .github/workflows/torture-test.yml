@@ -192,11 +192,18 @@ jobs:
       - name: Compile contracts
         uses: ./.github/actions/setup-hardhat-solc  # seeds + caches BOTH pinned solc versions (spec 075, T026)
 
+      # No `continue-on-error` (spec 112 FR-009, Constitution IV): a violated property fails the
+      # run. The PR-time job (ci-manager.yml `medusa-pr`) runs the same harnesses on a 600s budget;
+      # this one keeps the long 3600s campaign. The verdict is fail-closed - see
+      # scripts/ci/check-medusa-output.js. `tee` would otherwise swallow medusa's exit status.
       - name: Run Medusa fuzzing (extended)
         run: |
           export PATH=$PATH:$HOME/go/bin
+          set +e
           medusa fuzz --timeout 3600 2>&1 | tee medusa-output.txt
-        continue-on-error: true
+          status=${PIPESTATUS[0]}
+          set -e
+          node scripts/ci/check-medusa-output.js medusa-output.txt --exit-code "$status" --medusa-config medusa.json
 
       - name: Summarize Medusa results
         if: always()
