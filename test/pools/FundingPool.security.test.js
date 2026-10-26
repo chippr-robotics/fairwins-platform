@@ -95,6 +95,10 @@ describe('FundingPool — security properties', function () {
             await expect(pool.connect(outsider).voteRefund()).to.be.revertedWithCustomError(pool, state === STATE.Open ? "NotContributor" : "WrongState");
           }
         } catch (e) {
+          // A failed expectation is a finding, never an illegal move: chai's own message ("Expected
+          // transaction to be reverted…") matches the pattern below, so without this the outsider
+          // checks could never fail (spec 112 #1678).
+          if (e?.name === "AssertionError") throw e;
           // Reverts are expected for illegal moves; the invariants below are what must hold.
           if (!/revert|custom error|reverted/i.test(String(e?.message))) throw e;
         }
