@@ -132,3 +132,18 @@ test("extractAssertions handles multi-line calls, nested call receivers and all 
   assert.deepStrictEqual([...a.custom].sort(), ["One", "Three", "Two"]);
   assert.deepStrictEqual([...a.message], ["with, comma"]);
 });
+
+test("extractAssertions credits Prettier's trailing comma when a call wraps", () => {
+  // Prettier wraps a long call one argument per line and appends a trailing comma; the
+  // gate missed exactly this shape and allowlisted four reverts the custody suites assert.
+  const a = extractAssertions(`
+    await expect(hub.propose(vault, to, 0, data, 2)).to.be.revertedWithCustomError(
+      hub,
+      "InvalidOperation",
+    );
+    await expect(x).to.be.revertedWith(
+      "Only callable by owner",
+    );`);
+  assert.deepStrictEqual([...a.custom], ["InvalidOperation"]);
+  assert.deepStrictEqual([...a.message], ["Only callable by owner"]);
+});

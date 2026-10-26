@@ -60,8 +60,8 @@ function walkFiles(dir, rx, out, skipDirs) {
 }
 
 const Q = "[\"'`]";
-const RX_CUSTOM = new RegExp(`revertedWithCustomError\\s*\\(\\s*[^,()]*(?:\\([^()]*\\))?[^,()]*,\\s*(${Q})([A-Za-z_]\\w*)\\1\\s*\\)`, "g");
-const RX_MESSAGE = new RegExp(`revertedWith\\s*\\(\\s*(${Q})((?:\\\\.|(?!\\1)[^\\\\])*)\\1\\s*\\)`, "g");
+const RX_CUSTOM = new RegExp(`revertedWithCustomError\\s*\\(\\s*[^,()]*(?:\\([^()]*\\))?[^,()]*,\\s*(${Q})([A-Za-z_]\\w*)\\1\\s*,?\\s*\\)`, "g");
+const RX_MESSAGE = new RegExp(`revertedWith\\s*\\(\\s*(${Q})((?:\\\\.|(?!\\1)[^\\\\])*)\\1\\s*,?\\s*\\)`, "g");
 
 /** Assertions in one test file: { custom:Set, message:Set }. */
 function extractAssertions(src) {
