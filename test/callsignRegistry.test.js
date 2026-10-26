@@ -303,9 +303,9 @@ describe("CallsignRegistry — moderation & verification (US5)", () => {
     const { reg, gold } = await fixture();
     await claim(reg, gold, "guarded");
     const h = ethers.keccak256(ethers.toUtf8Bytes("guarded"));
-    await expect(reg.connect(gold).setSuspended(h, true)).to.be.reverted;
-    await expect(reg.connect(gold).setVerified(h, true)).to.be.reverted;
-    await expect(reg.connect(gold).setReserved([h], true)).to.be.reverted;
+    await expect(reg.connect(gold).setSuspended(h, true)).to.be.revertedWithCustomError(reg, "AccessControlUnauthorizedAccount").withArgs(gold.address, await reg.MODERATOR_ROLE());
+    await expect(reg.connect(gold).setVerified(h, true)).to.be.revertedWithCustomError(reg, "AccessControlUnauthorizedAccount").withArgs(gold.address, await reg.VERIFIER_ROLE());
+    await expect(reg.connect(gold).setReserved([h], true)).to.be.revertedWithCustomError(reg, "AccessControlUnauthorizedAccount").withArgs(gold.address, await reg.REGISTRY_CURATOR_ROLE());
   });
 });
 

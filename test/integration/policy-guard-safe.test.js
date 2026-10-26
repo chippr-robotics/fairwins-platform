@@ -159,11 +159,13 @@ describe("SafePolicyGuard × real Safe v1.4.1 (integration)", function () {
 
   it("a half-configured vault cannot deploy: invalid initial policy aborts creation", async () => {
     // Allowlist enabled with zero entries → guard reverts → setup delegatecall reverts → GS000.
+    // ANY-REVERT: SafeProxyFactory v1.4.1 discards the initializer's revert data (`revert(0, 0)`), so
+    // neither the guard's EmptyAllowlist nor Safe's GS000 is observable from here.
     await expect(
       createVault({
         setupTo: setup.target,
         setupData: enablePolicyCalldata(configureCalldata({ allowlistEnabled: true })),
       }),
-    ).to.be.reverted;
+    ).to.be.revertedWithoutReason();
   });
 });

@@ -1,5 +1,6 @@
 const { expect } = require("chai");
 const { ethers } = require("hardhat");
+const { anyValue } = require("@nomicfoundation/hardhat-chai-matchers/withArgs");
 const path = require("path");
 const { pathToFileURL } = require("url");
 
@@ -76,7 +77,15 @@ describe("SafePolicyGuardV2 — shared policy scenarios", function () {
         if (attempt.allowed) {
           await expect(call, label).to.not.be.reverted;
         } else {
-          await expect(call, label).to.be.reverted;
+          // `ruleIndex` is the rule that DECIDED: null ⇒ nothing matched; otherwise that rule refused
+          // (every refusal in the shared table is a per-tx limit).
+          if (attempt.ruleIndex === null) {
+            await expect(call, label).to.be.revertedWithCustomError(guard, "NoRuleMatches");
+          } else {
+            await expect(call, label)
+              .to.be.revertedWithCustomError(guard, "RulePerTxExceeded")
+              .withArgs(attempt.ruleIndex, NATIVE, ethers.parseEther(attempt.amount), anyValue);
+          }
         }
       }
     }
