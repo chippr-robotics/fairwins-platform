@@ -1,80 +1,15 @@
 {
-  "_comment": "Shrink-only allowlist for scripts/coverage/check-revert-coverage.js (spec 112 FR-006). Each entry is a named revert a production contract raises that no test asserts by name. Entries may only be REMOVED: the gate fails an entry whose revert is now asserted or no longer raised. Adding one needs a reason a reviewer will accept (e.g. genuinely unreachable defence in depth) — the seeded entries are TEMPORARY placeholders owned by the workstream issue named in `reason`, which deletes them as it writes the tests.",
+  "_comment": "Shrink-only allowlist for scripts/coverage/check-revert-coverage.js (spec 112 FR-006). Each entry is a named revert a production contract raises that no test asserts by name. Entries may only be REMOVED: the gate fails an entry whose revert is now asserted or no longer raised. Since the spec-112 close-out (T021, #1673) every entry is `unreachable — <why>` with file:line evidence; a reachable revert gets a test, not an entry.",
   "entries": [
-    {
-      "contract": "contracts/account/utils/ERC1271InputGenerator.sol",
-      "error": "AccountDeploymentFailed",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/utils/ERC1271InputGenerator.sol",
-      "error": "ReturnedAddressDoesNotMatchAccount",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/clearpath/StandardDAOFactory.sol",
-      "error": "ZeroAddress",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/custody/SafePolicyGuardV2.sol",
-      "error": "CooldownTooLong",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/custody/SafePolicyGuardV2.sol",
-      "error": "TooManyTargets",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/custody/SafeProposalHub.sol",
-      "error": "DataTooLong",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/custody/SafeProposalHub.sol",
-      "error": "InvalidOperation",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/liquidity/LiquidityRouter.sol",
-      "error": "ResidualFunds",
-      "reason": "pending spec 112 — #1676"
-    },
     {
       "contract": "contracts/oracles/ChainlinkDataFeedOracleAdapter.sol",
       "error": "InvalidComparisonOp",
-      "reason": "unreachable — the ABI decoder rejects an out-of-range Comparison enum with empty revert data before the body runs (pinned by test/oracles/ChainlinkDataFeedOracleAdapter.negative.test.js) — #1677"
-    },
-    {
-      "contract": "contracts/tokens/templates/OpenERC721V2.sol",
-      "error": "BatchTooLarge",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/tokens/templates/OpenERC721V2.sol",
-      "error": "SelfTransfer",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/tokens/templates/OpenERC721V2.sol",
-      "error": "ZeroAddress",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/tokens/TokenFactory.sol",
-      "error": "ZeroAddress",
-      "reason": "pending spec 112 — #1676"
+      "reason": "unreachable — ChainlinkDataFeedOracleAdapter.sol:71 is dead code: the ABI decoder rejects an out-of-range Comparison enum with empty revert data before the body runs (pinned by test/oracles/ChainlinkDataFeedOracleAdapter.negative.test.js) — #1677"
     },
     {
       "contract": "contracts/wagers/WagerRegistryCore.sol",
       "error": "AuthorizationNotSupported",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/wagers/WagerRegistryIntents.sol",
-      "error": "ConditionNotResolved",
-      "reason": "pending spec 112 — #1676"
+      "reason": "unreachable — the base _pullStake raises it only when viaAuth is true (WagerRegistryCore.sol:245), and no caller that runs the base implementation passes true: every main-facet entry point passes false (WagerRegistry.sol:193, :220, :321, :335), and the only viaAuth=true callers (WagerRegistryIntents.sol:97, :118, :140) run in the Intents facet, whose override routes true to _pullWithAuthorization and calls super only with false (WagerRegistryIntents.sol:66-78) — #1673"
     }
   ]
 }
