@@ -13,8 +13,8 @@
  * (that asserts SUCCESS, not a revert), and anything inside a comment.
  *
  * EXEMPT: an annotation `// ANY-REVERT: <non-empty reason>` on the matcher's line, the line
- * before it, or — for a chain split over several lines — the line before the `expect(` that
- * starts the statement.
+ * before it, or anywhere in the contiguous `//` comment block that ends right above the `expect(`
+ * that starts the statement (a reason may wrap across comment lines).
  *
  * SHRINK-ONLY BASELINE (scripts/coverage/bare-revert-baseline.json, { files: { path: count } }).
  * The sites that exist today are being converted by another workstream, so the gate ratchets:
@@ -72,6 +72,9 @@ function findBareReverts(src) {
       if (/\bexpect\s*\(/.test(rawLines[l - 1] || "")) { stmtLine = l; break; }
     }
     const candidates = new Set([line, line - 1, stmtLine, stmtLine - 1]);
+    // A reason often wraps onto a second comment line, so also accept the annotation anywhere in
+    // the contiguous `//` comment block that ends right above the statement.
+    for (let l = stmtLine - 1; l >= 1 && /^\s*\/\//.test(rawLines[l - 1] || ""); l--) candidates.add(l);
     let annotated = false, bad = false;
     for (const l of candidates) {
       const a = RX_ANNOTATION.exec(rawLines[l - 1] || "");

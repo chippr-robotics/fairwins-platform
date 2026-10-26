@@ -68,11 +68,6 @@
     },
     {
       "contract": "contracts/account/MultiOwnable.sol",
-      "error": "NoOwnerAtIndex",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/MultiOwnable.sol",
       "error": "NotLastOwner",
       "reason": "pending spec 112 — #1675"
     },
@@ -289,11 +284,6 @@
     {
       "contract": "contracts/tokens/templates/RestrictedERC20V2.sol",
       "error": "BatchTooLarge",
-      "reason": "pending spec 112 — #1676"
-    },
-    {
-      "contract": "contracts/tokens/templates/RestrictedERC20V2.sol",
-      "error": "WrongInitializer",
       "reason": "pending spec 112 — #1676"
     },
     {

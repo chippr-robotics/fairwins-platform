@@ -73,6 +73,30 @@ test("ANY-REVERT annotation on the same line, the preceding line, or above the e
   assert.strictEqual(r.total, 0);
 });
 
+test("an ANY-REVERT reason that wraps onto further comment lines still exempts", () => {
+  const r = run({
+    "test/a.test.js": [
+      `// context line before the annotation`,
+      `// ANY-REVERT: SafeProxyFactory discards the initializer's revert data, so`,
+      `// neither the guard's error nor GS000 is observable from here.`,
+      `await expect(x()).to.be.revertedWithoutReason();`,
+    ].join("\n"),
+  });
+  assert.deepStrictEqual(r.violations, []);
+  assert.strictEqual(r.total, 0);
+});
+
+test("MUST FAIL B-01: an annotation separated from the statement by code does not exempt", () => {
+  const r = run({
+    "test/a.test.js": [
+      `// ANY-REVERT: belongs to nothing below`,
+      `const tx = build();`,
+      `await expect(x()).to.be.reverted;`,
+    ].join("\n"),
+  });
+  assert.deepStrictEqual(rules(r), ["B-01"]);
+});
+
 test("MUST FAIL B-01/B-03: an annotation with no reason does not exempt", () => {
   const r = run({ "test/a.test.js": `// ANY-REVERT:\nawait expect(x()).to.be.reverted;` });
   assert.deepStrictEqual(rules(r).sort(), ["B-01", "B-03"]);
