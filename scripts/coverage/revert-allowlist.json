@@ -22,56 +22,6 @@
       "reason": "pending spec 112 — #1676"
     },
     {
-      "contract": "contracts/account/CoinbaseSmartWallet.sol",
-      "error": "InvalidEthereumAddressOwner",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/CoinbaseSmartWallet.sol",
-      "error": "InvalidImplementation",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/CoinbaseSmartWallet.sol",
-      "error": "InvalidNonceKey",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/CoinbaseSmartWallet.sol",
-      "error": "InvalidOwnerBytesLength",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/CoinbaseSmartWallet.sol",
-      "error": "SelectorNotAllowed",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/CoinbaseSmartWalletFactory.sol",
-      "error": "ImplementationUndeployed",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/MultiOwnable.sol",
-      "error": "AlreadyOwner",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/MultiOwnable.sol",
-      "error": "InvalidEthereumAddressOwner",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/MultiOwnable.sol",
-      "error": "InvalidOwnerBytesLength",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
-      "contract": "contracts/account/MultiOwnable.sol",
-      "error": "NotLastOwner",
-      "reason": "pending spec 112 — #1675"
-    },
-    {
       "contract": "contracts/account/utils/ERC1271InputGenerator.sol",
       "error": "AccountDeploymentFailed",
       "reason": "pending spec 112 — #1675"
