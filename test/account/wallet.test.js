@@ -152,7 +152,7 @@ describe('CoinbaseSmartWallet (vendored) — owners & execution', function () {
           { target: stranger.address, value: ethers.parseEther('0.1'), data: '0x' },
           { target: await account.getAddress(), value: 0, data: failingRemove },
         ])
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(account, 'NoOwnerAtIndex').withArgs(7);
       // First call's transfer must not have survived the revert.
       expect(await account.isOwnerAddress(secondOwner.address)).to.equal(false);
     });
