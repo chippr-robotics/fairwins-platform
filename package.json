@@ -26,7 +26,7 @@
     "test:fork": "hardhat test test/fork/*.test.js",
     "test:all": "hardhat test test/**/*.test.js",
     "test:gas": "REPORT_GAS=true hardhat test",
-    "test:coverage": "COVERAGE=true TZ=UTC hardhat coverage --testfiles '{test/*.test.js,test/access/**/*.test.js,test/account/**/*.test.js,test/bridge/**/*.test.js,test/clearpath/**/*.test.js,test/custody/**/*.test.js,test/intent/**/*.test.js,test/liquidity/**/*.test.js,test/oracles/**/*.test.js,test/pools/**/*.test.js,test/staking/**/*.test.js,test/tokens/**/*.test.js,test/upgradeable/**/*.test.js,test/integration/**/*.test.js}'",
+    "test:coverage": "COVERAGE=true TZ=UTC hardhat coverage --testfiles '{test/*.test.js,test/access/**/*.test.js,test/account/**/*.test.js,test/bridge/**/*.test.js,test/clearpath/**/*.test.js,test/custody/**/*.test.js,test/intent/**/*.test.js,test/liquidity/**/*.test.js,test/oracles/**/*.test.js,test/pools/**/*.test.js,test/staking/**/*.test.js,test/tokens/**/*.test.js,test/upgradeable/**/*.test.js,test/integration/**/*.test.js,test/negative/**/*.test.js}'",
     "deploy:local": "hardhat run scripts/deploy/deploy.js --network localhost",
     "deploy:mordor": "hardhat run scripts/deploy/deploy.js --network mordor",
     "deploy:polygon": "hardhat run scripts/deploy/deploy.js --network polygon",
