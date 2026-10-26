@@ -372,12 +372,13 @@ describe("LiquidityRouter", function () {
       expect(functionNames.filter((n) => /^(remove|delete|unlist)/i.test(n))).to.deep.equal([]);
 
       // No fallback either, so a hand-rolled call cannot reach a hidden one.
+      // ANY-REVERT: non-existent selector and no fallback — refused with empty revert data, no reason to name.
       await expect(
         admin.sendTransaction({
           to: routerAddr,
           data: ethers.id("removePool(bytes32)").slice(0, 10) + tradingPoolId.slice(2),
         })
-      ).to.be.reverted;
+      ).to.be.revertedWithoutReason();
 
       // The sanctioned retirement path leaves the entry intact and enumerable.
       await router.connect(liquidityAdmin).setPoolEnabled(tradingPoolId, false);

@@ -100,7 +100,7 @@ describe("ExternalDAORegistry (spec 030 / US3)", () => {
     await impl2.waitForDeployment();
     await expect(
       registry.connect(member).upgradeToAndCall(await impl2.getAddress(), "0x")
-    ).to.be.reverted; // not UPGRADER_ROLE
+    ).to.be.revertedWithCustomError(registry, "AccessControlUnauthorizedAccount").withArgs(member.address, await registry.UPGRADER_ROLE());
     await expect(registry.connect(owner).upgradeToAndCall(await impl2.getAddress(), "0x")).to.not.be.reverted;
   });
 });

@@ -90,9 +90,9 @@ describe('FundingPool — security properties', function () {
           } else {
             // An outsider (never a contributor) trying every exit must always fail.
             const outsider = signers[7];
-            await expect(pool.connect(outsider).close()).to.be.reverted;
-            await expect(pool.connect(outsider).claimRefund()).to.be.reverted;
-            await expect(pool.connect(outsider).voteRefund()).to.be.reverted;
+            await expect(pool.connect(outsider).close()).to.be.revertedWithCustomError(pool, "NotOrganizer");
+            await expect(pool.connect(outsider).claimRefund()).to.be.revertedWithCustomError(pool, state === STATE.Refunding ? "NothingToRefund" : "WrongState");
+            await expect(pool.connect(outsider).voteRefund()).to.be.revertedWithCustomError(pool, state === STATE.Open ? "NotContributor" : "WrongState");
           }
         } catch (e) {
           // Reverts are expected for illegal moves; the invariants below are what must hold.
