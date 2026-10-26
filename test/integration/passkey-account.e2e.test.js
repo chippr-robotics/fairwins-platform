@@ -134,7 +134,7 @@ describe('Integration: passkey smart account as msg.sender (spec 041)', function
         },
         { target: await fx.reg.getAddress(), data },
       ])
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(fx.reg, 'MembershipDenied');
   });
 
   it('runs the full wager round-trip with the account as creator: create -> accept -> declare -> claim', async function () {
@@ -184,7 +184,7 @@ describe('Integration: passkey smart account as msg.sender (spec 041)', function
         },
         { target: await fx.reg.getAddress(), data: fx.reg.interface.encodeFunctionData('createWager', params) },
       ])
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(fx.guard, 'SanctionedAddress').withArgs(fx.accountAddr);
   });
 
   it('accepts a wager as the ACCOUNT (opponent side) with stake pulled from the account balance', async function () {

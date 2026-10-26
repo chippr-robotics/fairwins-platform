@@ -290,6 +290,87 @@ jobs:
       # definition above before touching this.
       run_e2e: ${{ needs.detect-changes.outputs.app == 'true' }}
 
+  # PR-time property fuzzing (spec 112, FR-009). Medusa used to run weekly only, so an invariant
+  # broken by a contract change was found days later. This runs every `targetContracts` harness in
+  # medusa.json on a pull request that touches contracts, bounded to ~10 minutes of fuzzing, and
+  # FAILS the PR on any violated property.
+  #
+  # Gated on the `contracts` filter above (not `security`, which also fires on test-only changes),
+  # and on pull_request only: pushes to staging/main were already fuzzed on the way in. The longer
+  # budget stays in torture-test.yml; a property that needs a long campaign stays weekly-only.
+  #
+  # NO `continue-on-error` (Constitution IV). The verdict comes from scripts/ci/check-medusa-output.js,
+  # which fails closed: a non-zero exit, an unrecognisable transcript, zero tests, or a target
+  # contract that silently dropped out all fail the job.
+  medusa-pr:
+    name: Medusa Property Fuzzing (PR)
+    needs: detect-changes
+    if: github.event_name == 'pull_request' && needs.detect-changes.outputs.contracts == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Setup Go
+        uses: actions/setup-go@v7
+        with:
+          go-version: '1.26'
+
+      # Same pinned toolchain as torture-test.yml's weekly job - change both together.
+      - name: Install Medusa
+        run: |
+          go install github.com/crytic/medusa@v1.5.1
+          echo "$HOME/go/bin" >> $GITHUB_PATH
+
+      - name: Install crytic-compile
+        run: pip install crytic-compile==0.4.2
+
+      - name: Compile contracts
+        uses: ./.github/actions/setup-hardhat-solc  # seeds + caches BOTH pinned solc versions (spec 075, T026)
+
+      # `--timeout 600` bounds the campaign (medusa.json leaves timeout/testLimit at 0 = unbounded).
+      # The exit status is captured separately from `tee`, because a pipeline's status is tee's.
+      - name: Run Medusa (600s budget)
+        run: |
+          set +e
+          medusa fuzz --timeout 600 2>&1 | tee medusa-output.txt
+          status=${PIPESTATUS[0]}
+          set -e
+          node scripts/ci/check-medusa-output.js medusa-output.txt --exit-code "$status" --medusa-config medusa.json
+
+      - name: Summarize Medusa results
+        if: always()
+        run: |
+          echo "### Medusa (PR, 600s budget)" >> $GITHUB_STEP_SUMMARY
+          if [ -f medusa-output.txt ]; then
+            echo '```' >> $GITHUB_STEP_SUMMARY
+            grep -E "Test summary|\[FAILED\]|\[PASSED\]" medusa-output.txt | tail -60 >> $GITHUB_STEP_SUMMARY || true
+            echo '```' >> $GITHUB_STEP_SUMMARY
+          else
+            echo "No Medusa output was produced." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Upload Medusa results
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: medusa-pr-results
+          path: |
+            medusa-output.txt
+            medusa-corpus/
+          retention-days: 7
+
   frontend-tests:
     name: Frontend Tests
     needs: detect-changes
@@ -393,6 +474,7 @@ jobs:
       - frontend-tests
       - docs-build
       - security-analysis
+      - medusa-pr
     # `always()` alone would ALSO run this after the whole run is cancelled — which is what
     # `cancel-in-progress` does to the previous run on every new push — and the cancelled-counts-as-
     # failure rule below would then paint a superseded commit red for no reason. `!cancelled()`
@@ -437,6 +519,15 @@ jobs:
             echo "| Documentation Build | ❌ Failed | Build failed |" >> $GITHUB_STEP_SUMMARY
           fi
           
+          # Medusa (PR)
+          if [[ "${{ needs.medusa-pr.result }}" == "success" ]]; then
+            echo "| Medusa (PR) | ✅ Success | Every property held |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.medusa-pr.result }}" == "skipped" ]]; then
+            echo "| Medusa (PR) | ⏭️ Skipped | Not a pull request touching contracts |" >> $GITHUB_STEP_SUMMARY
+          elif [[ "${{ needs.medusa-pr.result }}" == "failure" ]]; then
+            echo "| Medusa (PR) | ❌ Failed | A property failed or the campaign did not complete |" >> $GITHUB_STEP_SUMMARY
+          fi
+
           # Security Analysis
           if [[ "${{ needs.security-analysis.result }}" == "success" ]]; then
             echo "| Security Analysis | ✅ Success | Analysis completed |" >> $GITHUB_STEP_SUMMARY
@@ -461,12 +552,13 @@ jobs:
       - name: Check overall status
         run: |
           failed=""
-          for job in smart-contract-tests frontend-tests docs-build security-analysis; do
+          for job in smart-contract-tests frontend-tests docs-build security-analysis medusa-pr; do
             case "$job" in
               smart-contract-tests) result="${{ needs.smart-contract-tests.result }}" ;;
               frontend-tests)       result="${{ needs.frontend-tests.result }}" ;;
               docs-build)           result="${{ needs.docs-build.result }}" ;;
               security-analysis)    result="${{ needs.security-analysis.result }}" ;;
+              medusa-pr)            result="${{ needs.medusa-pr.result }}" ;;
             esac
             if [[ "$result" == "failure" || "$result" == "cancelled" ]]; then
               failed="$failed $job($result)"

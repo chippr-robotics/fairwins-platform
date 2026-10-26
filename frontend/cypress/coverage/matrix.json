@@ -3479,6 +3479,13 @@
           "issue": "#1633"
         }
       ]
+    },
+    {
+      "id": "112-contract-negative-path-testing",
+      "title": "Contract negative-path test hardening",
+      "memberFacing": false,
+      "reason": "A contract test-infrastructure spec (coverage policy, revert-assertion gates, fuzz harnesses, adversarial unit tests). It adds no member-facing flow and changes no production bytecode.",
+      "flows": []
     }
   ]
 }

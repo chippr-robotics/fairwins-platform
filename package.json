@@ -98,6 +98,8 @@
     "check:ci-gating": "node scripts/ci/check-ci-gating.js",
     "check:build-args": "node scripts/ci/check-build-args.js && node --test scripts/ci/__tests__/check-build-args.test.js",
     "test:ci": "node --test \"scripts/ci/__tests__/*.test.js\"",
+    "test:contract-gates": "node --test \"scripts/coverage/__tests__/*.test.js\"",
+    "check:contract-gates": "node scripts/coverage/check-policy-completeness.js && node scripts/coverage/check-revert-coverage.js && node scripts/coverage/check-bare-reverts.js",
     "test:specs": "node --test \"scripts/specs/__tests__/*.test.js\"",
     "e2e:split": "node scripts/e2e/split-full-tier.js",
     "e2e:split:fast": "node scripts/e2e/split-fast-tier.js",

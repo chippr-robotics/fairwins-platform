@@ -73,12 +73,12 @@ describe("Tenant isolation (spec 072)", function () {
     const limits = { monthlyMarketCreation: 1, maxConcurrentMarkets: 1 };
     await expect(
       tenantB.connect(adminA).setTier(WAGER_PARTICIPANT_ROLE, Tier.Bronze, usdc(1), 30, limits, true)
-    ).to.be.reverted;
-    await expect(tenantB.connect(adminA).setTreasury(adminA.address)).to.be.reverted;
-    await expect(tenantB.connect(adminA).withdrawFees(1, adminA.address)).to.be.reverted;
+    ).to.be.revertedWithCustomError(tenantB, "AccessControlUnauthorizedAccount").withArgs(adminA.address, DEFAULT_ADMIN_ROLE);
+    await expect(tenantB.connect(adminA).setTreasury(adminA.address)).to.be.revertedWithCustomError(tenantB, "AccessControlUnauthorizedAccount").withArgs(adminA.address, DEFAULT_ADMIN_ROLE);
+    await expect(tenantB.connect(adminA).withdrawFees(1, adminA.address)).to.be.revertedWithCustomError(tenantB, "AccessControlUnauthorizedAccount").withArgs(adminA.address, DEFAULT_ADMIN_ROLE);
     await expect(
       tenantB.connect(adminA).grantRole(ROLE_MANAGER_ROLE, adminA.address)
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(tenantB, "AccessControlUnauthorizedAccount").withArgs(adminA.address, DEFAULT_ADMIN_ROLE);
   });
 
   it("US2.3: fees accrue only in the acting tenant's contract and treasury", async () => {
