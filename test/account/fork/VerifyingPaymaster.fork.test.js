@@ -125,6 +125,8 @@ describeFork("FairWinsVerifyingPaymaster against real EntryPoint v0.6 [fork]", f
     userOp.paymasterAndData = ethers.solidityPacked(["address", "uint48", "uint48", "bytes"], [pmAddr, validUntil, 0, sig]);
 
     // EntryPoint reverts the whole bundle with an AA34 signature error for the paymaster.
+    // ANY-REVERT: the revert is raised by the canonical EntryPoint v0.6 on the fork (external dependency);
+    // not narrowed to FailedOp(0, "AA34 signature error") because it could not be run here without an RPC.
     await expect(entryPoint.handleOps([userOp], deployer.address)).to.be.reverted;
   });
 });

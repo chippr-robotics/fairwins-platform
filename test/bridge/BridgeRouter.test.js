@@ -138,10 +138,10 @@ describe("BridgeRouter", function () {
 
     it("reverts on a zero admin, feeRouter, or spokePool", async function () {
       const fr = await feeRouter.getAddress();
-      await expect(deployBridgeRouter([ethers.ZeroAddress, fr, spokeAddr, ethers.ZeroAddress])).to.be.reverted;
+      await expect(deployBridgeRouter([ethers.ZeroAddress, fr, spokeAddr, ethers.ZeroAddress])).to.be.revertedWithCustomError(router, "ZeroAddress");
       await expect(deployBridgeRouter([admin.address, ethers.ZeroAddress, spokeAddr, ethers.ZeroAddress])).to.be
-        .reverted;
-      await expect(deployBridgeRouter([admin.address, fr, ethers.ZeroAddress, ethers.ZeroAddress])).to.be.reverted;
+        .revertedWithCustomError(router, "ZeroAddress");
+      await expect(deployBridgeRouter([admin.address, fr, ethers.ZeroAddress, ethers.ZeroAddress])).to.be.revertedWithCustomError(router, "ZeroAddress");
     });
   });
 

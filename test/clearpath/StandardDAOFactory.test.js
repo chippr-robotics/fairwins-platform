@@ -242,7 +242,7 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
     });
 
     it("refuses a sanctioned wallet even at a sufficient tier", async () => {
-      await expect(factory.connect(sanctioned).createDAO(baseParams())).to.be.reverted;
+      await expect(factory.connect(sanctioned).createDAO(baseParams())).to.be.revertedWithCustomError(sanctions, "SanctionedAddress").withArgs(sanctioned.address);
       expect(await factory.daoCount()).to.equal(0n);
     });
   });
@@ -289,14 +289,15 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
         timelock
           .connect(asFactory)
           .schedule(creator.address, 0, "0x", ethers.ZeroHash, ethers.ZeroHash, DAY),
-      ).to.be.reverted;
+      ).to.be.revertedWithCustomError(timelock, "AccessControlUnauthorizedAccount").withArgs(factoryAddr, ethers.id("PROPOSER_ROLE"));
       await ethers.provider.send("hardhat_stopImpersonatingAccount", [factoryAddr]);
     });
 
     it("holds no funds and refuses plain value", async () => {
+      // ANY-REVERT: no receive/fallback — the call is refused with empty revert data, so there is no reason to name.
       await expect(
         creator.sendTransaction({ to: await factory.getAddress(), value: 1n }),
-      ).to.be.reverted;
+      ).to.be.revertedWithoutReason();
       expect(await ethers.provider.getBalance(await factory.getAddress())).to.equal(0n);
     });
   });
@@ -349,7 +350,7 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
       expect(await governor.state(proposalId)).to.equal(5); // Queued
 
       // Executing before the timelock elapses is refused.
-      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.reverted;
+      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(await ethers.getContractAt("TimelockController", created.timelock), "TimelockUnexpectedOperationState");
 
       await time.increase(DAY + 1);
       await governor.execute(targets, values, calldatas, descriptionHash);
@@ -359,7 +360,7 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
       expect(await governor.state(proposalId)).to.equal(7); // Executed
 
       // Exactly once: a second execute of the same proposal is refused.
-      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.reverted;
+      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(governor, "GovernorUnexpectedProposalState").withArgs(proposalId, 7, ethers.toBeHex(0x30, 32));
     });
 
     it("performs no treasury action for a defeated proposal", async () => {
@@ -396,8 +397,8 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
       await mine(21);
 
       expect(await governor.state(proposalId)).to.equal(3); // Defeated
-      await expect(governor.queue(targets, values, calldatas, descriptionHash)).to.be.reverted;
-      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.reverted;
+      await expect(governor.queue(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(governor, "GovernorUnexpectedProposalState").withArgs(proposalId, 3, ethers.toBeHex(0x10, 32));
+      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(governor, "GovernorUnexpectedProposalState").withArgs(proposalId, 3, ethers.toBeHex(0x30, 32));
       expect(await usdc.balanceOf(created.timelock)).to.equal(1_000_000n);
     });
   });
@@ -448,7 +449,7 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
       const other = await Membership.deploy();
       await other.waitForDeployment();
 
-      await expect(factory.connect(creator).setMembershipManager(await other.getAddress())).to.be.reverted;
+      await expect(factory.connect(creator).setMembershipManager(await other.getAddress())).to.be.revertedWithCustomError(factory, "AccessControlUnauthorizedAccount").withArgs(creator.address, ethers.ZeroHash);
       await factory.connect(owner).setMembershipManager(await other.getAddress());
       expect(await factory.membershipManager()).to.equal(await other.getAddress());
 
