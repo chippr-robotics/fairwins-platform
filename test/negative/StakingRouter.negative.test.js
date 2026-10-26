@@ -54,18 +54,21 @@ describe("StakingRouter — negative paths (spec 112 FR-004)", function () {
 
   describe("zero-address checks", function () {
     const Z = ethers.ZeroAddress;
+    // Thunks, not promises: building every call up front sends them all at once, and a
+    // revert that lands before its `await expect` is an unhandled rejection that fails the
+    // test intermittently (it surfaced under coverage instrumentation).
     const CASES = [
-      ["setFeeRouter", (r) => [r.setFeeRouter(Z)]],
-      ["setLidoContracts", (r, fx) => [r.setLidoContracts(Z, fx.a2.address), r.setLidoContracts(fx.a1.address, Z)]],
-      ["setSpolContracts", (r, fx) => [r.setSpolContracts(Z, fx.a2.address), r.setSpolContracts(fx.a1.address, Z)]],
-      ["setPolygonContracts", (r, fx) => [r.setPolygonContracts(Z, fx.a2.address), r.setPolygonContracts(fx.a1.address, Z)]],
-      ["addValidator", (r) => [r.addValidator(Z)]],
+      ["setFeeRouter", (r) => [() => r.setFeeRouter(Z)]],
+      ["setLidoContracts", (r, fx) => [() => r.setLidoContracts(Z, fx.a2.address), () => r.setLidoContracts(fx.a1.address, Z)]],
+      ["setSpolContracts", (r, fx) => [() => r.setSpolContracts(Z, fx.a2.address), () => r.setSpolContracts(fx.a1.address, Z)]],
+      ["setPolygonContracts", (r, fx) => [() => r.setPolygonContracts(Z, fx.a2.address), () => r.setPolygonContracts(fx.a1.address, Z)]],
+      ["addValidator", (r) => [() => r.addValidator(Z)]],
     ];
     for (const [name, calls] of CASES) {
       it(`[G:SR.${name}.zero] ${name} reverts ZeroAddress for each zero argument`, async function () {
         const fx = await loadFixture(fixture);
-        for (const p of calls(fx.router.connect(fx.stakingAdmin), fx)) {
-          await expect(p).to.be.revertedWithCustomError(fx.router, "ZeroAddress");
+        for (const send of calls(fx.router.connect(fx.stakingAdmin), fx)) {
+          await expect(send()).to.be.revertedWithCustomError(fx.router, "ZeroAddress");
         }
       });
     }
