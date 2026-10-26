@@ -206,6 +206,41 @@ jobs:
       - name: Check the dependency alert policy
         run: npm run check:dep-alerts
 
+  # Gates (spec 112, FR-002 / FR-006 / FR-007): the three STATIC checks that keep contract negative
+  # paths honest. None needs a compile or a coverage run, so they live in a fast job of their own
+  # instead of waiting behind `smart-contract-tests`:
+  #   * policy completeness  - every value-directory contract is in the coverage policy;
+  #   * revert coverage      - every named revert a contract raises is asserted by name, or is on
+  #                            the SHRINK-ONLY allowlist (scripts/coverage/revert-allowlist.json);
+  #   * bare reverts         - `.to.be.reverted` needs `// ANY-REVERT: <reason>`, against a
+  #                            SHRINK-ONLY per-file baseline.
+  # Fixtures first (each rule is driven against a tree it must REJECT), then the real repo.
+  # Dependency-free, so no npm ci. Must fail loudly; do NOT add continue-on-error (Constitution IV).
+  contract-gates:
+    name: Contract Negative-Path Gates
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: '22'
+
+      - name: Test the contract gates' own rules
+        run: npm run test:contract-gates
+
+      - name: Policy completeness (every value contract is gated, report-only or excluded)
+        run: node scripts/coverage/check-policy-completeness.js
+
+      - name: Revert coverage (every named revert is asserted or allowlisted)
+        run: node scripts/coverage/check-revert-coverage.js
+
+      - name: Bare revert assertions (shrink-only baseline)
+        run: node scripts/coverage/check-bare-reverts.js
+
   # Gate (spec 089, FR-019…FR-023): a revenue or cost source that reaches production without a
   # dashboard entry is money moving that nobody is watching. The brief stated updating the dashboard
   # as a MUST; every comparable invariant in this repo that survived was made a gate, because a prose

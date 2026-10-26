@@ -1,0 +1,32 @@
+{
+  "_comment": "Shrink-only per-file baseline for scripts/coverage/check-bare-reverts.js (spec 112 FR-007/FR-008). Counts of unannotated bare .reverted / .revertedWithoutReason assertions. A file may not exceed its count and a new file may not appear; the gate also FAILS if an entry overstates the real count, so whoever converts a site must lower (or delete) the entry in the same change. Annotated sites (// ANY-REVERT: <reason>) are not counted.",
+  "files": {
+    "test/access/MembershipManager.redeem.test.js": 1,
+    "test/account/fork/VerifyingPaymaster.fork.test.js": 1,
+    "test/account/wallet.test.js": 1,
+    "test/bridge/BridgeRouter.test.js": 3,
+    "test/callsignRegistry.test.js": 3,
+    "test/clearpath/ExternalDAORegistry.test.js": 1,
+    "test/clearpath/StandardDAOFactory.test.js": 8,
+    "test/custody/PolicyGuardSetup.test.js": 1,
+    "test/custody/PolicyScenarioParity.test.js": 1,
+    "test/custody/SafeProposalHub.test.js": 1,
+    "test/fork/liquidityRouter.fork.test.js": 1,
+    "test/fork/usdc-erc1271-authorization.test.js": 1,
+    "test/integration/oracle/WagerRegistry_PolymarketOpenChallenge.test.js": 1,
+    "test/integration/passkey-account.e2e.test.js": 2,
+    "test/integration/policy-guard-safe.test.js": 1,
+    "test/integration/tenant-isolation.test.js": 4,
+    "test/liquidity/LiquidityRouter.test.js": 1,
+    "test/pools/FundingPool.security.test.js": 3,
+    "test/pools/FundingPool.test.js": 1,
+    "test/pools/FundingPool.withsig.test.js": 1,
+    "test/pools/FundingPoolFactory.test.js": 5,
+    "test/pools/WagerPoolFactory.security.test.js": 1,
+    "test/pools/WagerPoolFactory.test.js": 1,
+    "test/staking/StakingRouter.test.js": 1,
+    "test/tokens/RestrictedERC20V2.test.js": 1,
+    "test/upgradeable/FundingPoolFactory.upgrade.test.js": 1,
+    "test/upgradeable/WagerPoolFactory.upgrade.test.js": 1
+  }
+}
