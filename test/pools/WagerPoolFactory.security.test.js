@@ -204,7 +204,7 @@ describe('WagerPoolFactory — security & access control', function () {
     });
 
     it('cannot deploy with screeningRequired but unset guards (init InvalidParams)', async function () {
-      await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.reverted;
+      await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.revertedWithCustomError(await ethers.getContractFactory('WagerPoolFactory'), 'InvalidParams');
     });
   });
 

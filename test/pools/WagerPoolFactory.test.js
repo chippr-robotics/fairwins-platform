@@ -28,7 +28,7 @@ describe('WagerPoolFactory', function () {
   });
 
   it('reverts deployment when screening is required but guards are unset (FR-021a)', async function () {
-    await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.reverted;
+    await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.revertedWithCustomError(await ethers.getContractFactory('WagerPoolFactory'), 'InvalidParams');
   });
 
   it('creates a pool: emits PoolCreated, clones a pool, records it, resolves by phrase', async function () {

@@ -1,0 +1,175 @@
+{
+  "_comment": "Shrink-only allowlist for scripts/coverage/check-revert-coverage.js (spec 112 FR-006). Each entry is a named revert a production contract raises that no test asserts by name. Entries may only be REMOVED: the gate fails an entry whose revert is now asserted or no longer raised. Adding one needs a reason a reviewer will accept (e.g. genuinely unreachable defence in depth) — the seeded entries are TEMPORARY placeholders owned by the workstream issue named in `reason`, which deletes them as it writes the tests.",
+  "entries": [
+    {
+      "contract": "contracts/access/MembershipManager.sol",
+      "error": "InsufficientFees",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/access/MembershipManager.sol",
+      "error": "PriceZero",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/access/MembershipVoucher.sol",
+      "error": "PriceZero",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/access/VoucherBatchMinter.sol",
+      "error": "PriceZero",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/account/utils/ERC1271InputGenerator.sol",
+      "error": "AccountDeploymentFailed",
+      "reason": "pending spec 112 — #1675"
+    },
+    {
+      "contract": "contracts/account/utils/ERC1271InputGenerator.sol",
+      "error": "ReturnedAddressDoesNotMatchAccount",
+      "reason": "pending spec 112 — #1675"
+    },
+    {
+      "contract": "contracts/bridge/BridgeRouter.sol",
+      "error": "TreasuryTransferFailed",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/clearpath/StandardDAOFactory.sol",
+      "error": "ZeroAddress",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/custody/PolicyGuardSetup.sol",
+      "error": "NotAGuard",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/custody/SafePolicyGuardV2.sol",
+      "error": "CooldownTooLong",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/custody/SafePolicyGuardV2.sol",
+      "error": "TooManyTargets",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/custody/SafeProposalHub.sol",
+      "error": "DataTooLong",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/custody/SafeProposalHub.sol",
+      "error": "InvalidOperation",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/liquidity/LiquidityRouter.sol",
+      "error": "InvalidPoolListing",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/liquidity/LiquidityRouter.sol",
+      "error": "PoolListingMismatch",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/liquidity/LiquidityRouter.sol",
+      "error": "ResidualFunds",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "BadRepointTarget",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "NoCallsign",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "NoPendingRepoint",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "RepointNotReady",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "SanctionedAccount",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "TargetHasCallsign",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/naming/CallsignRegistry.sol",
+      "error": "ZeroAddress",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/oracles/ChainlinkDataFeedOracleAdapter.sol",
+      "error": "InvalidComparisonOp",
+      "reason": "unreachable — the ABI decoder rejects an out-of-range Comparison enum with empty revert data before the body runs (pinned by test/oracles/ChainlinkDataFeedOracleAdapter.negative.test.js) — #1677"
+    },
+    {
+      "contract": "contracts/pools/WagerPool.sol",
+      "error": "PoolFull",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/tokens/templates/OpenERC20V2.sol",
+      "error": "ZeroAddress",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/tokens/templates/OpenERC721V2.sol",
+      "error": "BatchTooLarge",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/tokens/templates/OpenERC721V2.sol",
+      "error": "SelfTransfer",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/tokens/templates/OpenERC721V2.sol",
+      "error": "ZeroAddress",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/tokens/templates/RestrictedERC20V2.sol",
+      "error": "BatchTooLarge",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/tokens/TokenFactory.sol",
+      "error": "ZeroAddress",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/upgradeable/SignerIntentBase.sol",
+      "error": "FeeRecipientUnset",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/wagers/WagerRegistryCore.sol",
+      "error": "AuthorizationNotSupported",
+      "reason": "pending spec 112 — #1676"
+    },
+    {
+      "contract": "contracts/wagers/WagerRegistryIntents.sol",
+      "error": "ConditionNotResolved",
+      "reason": "pending spec 112 — #1676"
+    }
+  ]
+}

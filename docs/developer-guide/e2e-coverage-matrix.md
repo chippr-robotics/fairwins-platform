@@ -26,7 +26,7 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 115 |
+| Spec directories | 116 |
 | With a member-facing flow | 91 |
 | Member-facing flows | 214 |
 | 🟢 covered | 193 |
@@ -902,6 +902,7 @@ Listed so the gate can tell "correctly omitted" from "forgotten".
 | `101-passkey-zcash` — Passkey-native Zcash | Spec + plan landed in release 1.14.0; no member surface exists yet. Implementation follows the constitution-checked plan (#1364). |
 | `106-gateway-caller-auth` — Gateway caller authentication | Gateway-side caller-identity tiers, quota re-keying and enforcement — server behaviour with no member surface of its own, covered by 34 gateway vitest files (test/identity/). The one member-visible artifact today is the invisible, silently-degrading Turnstile widget (aria-hidden until a surface opts into interactive escalation); member-facing flows arrive when a surface adopts it and when IDENTITY_ENFORCE changes refusal paths on the Predict/Collect/BTC write flows already rowed under specs 055-057/061. |
 | `107-keyed-rpc-access` — Keyed RPC access | Runtime-issued read-only RPC credentials. Dormant end to end until an issuance endpoint is configured (#1438 runbook); every client failure mode falls back to the public default the app uses today, so there is no member-distinguishable flow yet. Covered by gateway vitest (test/access.test.js) and frontend vitest (src/test/network/issuedAccess.test.js); a member-facing degradation-disclosure flow gets a row when the disclosure surface ships. |
+| `112-contract-negative-path-testing` — Contract negative-path test hardening | A contract test-infrastructure spec (coverage policy, revert-assertion gates, fuzz harnesses, adversarial unit tests). It adds no member-facing flow and changes no production bytecode. |
 
 ## Covered but not proven
 
