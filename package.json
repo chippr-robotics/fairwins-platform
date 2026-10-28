@@ -158,7 +158,7 @@
     "@openzeppelin/contracts": "5.4.0",
     "@openzeppelin/contracts-upgradeable": "5.4.0",
     "@openzeppelin/hardhat-upgrades": "^3.9.0",
-    "@openzeppelin/upgrades-core": "^1.44.2",
+    "@openzeppelin/upgrades-core": "^1.47.0",
     "@safe-global/safe-contracts": "1.4.1",
     "@safe-global/safe-singleton-factory": "^2.0.0",
     "@typechain/ethers-v6": "^0.5.1",
