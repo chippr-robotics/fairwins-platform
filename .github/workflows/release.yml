@@ -98,7 +98,7 @@ jobs:
       # compatibility 21, and javac answers an older toolchain with
       # `invalid source release: 21` — which is what failed every Android job on
       # the v1.16.0 attempt, the first time this chain ever ran.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
@@ -227,7 +227,7 @@ jobs:
       # compatibility 21, and javac answers an older toolchain with
       # `invalid source release: 21` — which is what failed every Android job on
       # the v1.16.0 attempt, the first time this chain ever ran.
-      - uses: actions/setup-java@v4
+      - uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: '21'
