@@ -197,6 +197,7 @@ nav:
     - "07 On-Chain Estate": architecture/workbook/07-onchain-estate.md
     - "08 Spec Index": architecture/workbook/08-spec-index.md
     - "09 Findings & Drift": architecture/workbook/09-findings-and-drift.md
+    - "Proposal: Streaming Backbone": architecture/streaming-backbone.md
   - Architecture Decisions:
     - Overview: adr/README.md
     - ADR-001 Trail of Bits Toolchain: adr/001-trail-of-bits-toolchain.md
