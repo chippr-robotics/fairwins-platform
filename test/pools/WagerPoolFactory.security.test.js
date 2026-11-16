@@ -204,7 +204,10 @@ describe('WagerPoolFactory — security & access control', function () {
     });
 
     it('cannot deploy with screeningRequired but unset guards (init InvalidParams)', async function () {
-      await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.revertedWithCustomError(await ethers.getContractFactory('WagerPoolFactory'), 'InvalidParams');
+      // Factory resolved first: an `await` inside the matcher's argument list runs while the deploy
+      // is already in flight with no handler attached (see StandardDAOFactory.test.js).
+      const Factory = await ethers.getContractFactory('WagerPoolFactory');
+      await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.revertedWithCustomError(Factory, 'InvalidParams');
     });
   });
 

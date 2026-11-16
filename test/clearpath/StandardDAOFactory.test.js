@@ -350,7 +350,14 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
       expect(await governor.state(proposalId)).to.equal(5); // Queued
 
       // Executing before the timelock elapses is refused.
-      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(await ethers.getContractAt("TimelockController", created.timelock), "TimelockUnexpectedOperationState");
+      // Resolve the error's home contract BEFORE starting the call. Written inline —
+      // `expect(governor.execute(...)).to.be.revertedWithCustomError(await getContractAt(...), ...)` —
+      // the call is already in flight while the `await` in the argument list yields, and no handler
+      // is attached to it yet. If it rejects first (it does under coverage instrumentation, where
+      // reading the artifact is the slower of the two), Node reports an unhandled rejection and
+      // mocha fails the test with "Uncaught Error" and then "done() called multiple times".
+      const timelockErrors = await ethers.getContractAt("TimelockController", created.timelock);
+      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(timelockErrors, "TimelockUnexpectedOperationState");
 
       await time.increase(DAY + 1);
       await governor.execute(targets, values, calldatas, descriptionHash);
