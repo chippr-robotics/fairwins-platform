@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { usePools } from '../hooks/usePools'
 import { poolStateDisplay } from '../lib/pools/poolContracts'
 import { readProposedMatrix, readStoredMatrix } from '../lib/pools/proposalStore'
+import { payoutMatrixHash } from '../lib/pools/payout'
 import Button from '../components/ui/Button'
 import PoolParticipants from '../components/pools/PoolParticipants'
 import PoolResolutionActions from '../components/pools/PoolResolutionActions'
@@ -166,10 +167,28 @@ export default function PoolPage() {
 
   const joinThisPool = () => run(() => joinPool(address))
 
+  // The id of the payout THIS PAGE IS SHOWING — the hash of the rendered matrix, never a fresh read.
+  // It is what the approval is bound to on every rail, so a creator who revises the payout after the
+  // member read it gets a refusal, not a vote (the residual of #1667). No matrix on screen ⇒ null ⇒
+  // approval is not offered: a member cannot approve a payout they were never shown.
+  const reviewedProposalId = useMemo(() => {
+    if (!verifiedProposal?.entries?.length) return null
+    try {
+      return payoutMatrixHash(verifiedProposal.entries)
+    } catch {
+      return null
+    }
+  }, [verifiedProposal])
+
   const approve = () =>
     run(async () => {
       try {
-        await vote(address, (msg) => setVoteProgress(msg))
+        await vote(address, reviewedProposalId, (msg) => setVoteProgress(msg))
+      } catch (e) {
+        // A failed approval may mean the payout moved on. Re-read so the page shows what is current
+        // before the member is asked again; the notice then says why nothing was approved.
+        await reload()
+        throw e
       } finally {
         setVoteProgress(null)
       }
@@ -277,10 +296,17 @@ export default function PoolPage() {
                   <Button
                     data-testid="approve-outcome"
                     onClick={approve}
-                    disabled={status === 'voting'}
+                    disabled={status === 'voting' || !reviewedProposalId}
+                    aria-describedby={reviewedProposalId ? undefined : 'approve-needs-payout'}
                   >
                     {status === 'voting' ? 'Approving…' : 'Approve the proposed payout'}
                   </Button>
+                  {!reviewedProposalId && (
+                    <p className="pool-hint" id="approve-needs-payout" data-testid="approve-needs-payout">
+                      The proposed payout could not be shown yet, so it cannot be approved. Paste the
+                      payout the creator shared below, or try again shortly.
+                    </p>
+                  )}
                   {voteProgress && <p className="pool-hint" role="status" data-testid="vote-progress">{voteProgress}</p>}
                 </>
               )}
