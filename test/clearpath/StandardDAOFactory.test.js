@@ -350,7 +350,12 @@ describe("StandardDAOFactory (spec 030 / US1 + US4, pillar A)", () => {
       expect(await governor.state(proposalId)).to.equal(5); // Queued
 
       // Executing before the timelock elapses is refused.
-      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(await ethers.getContractAt("TimelockController", created.timelock), "TimelockUnexpectedOperationState");
+      // Resolve the error-ABI contract BEFORE starting the tx. Writing `await getContractAt(...)` inside
+      // the matcher's arguments starts the reverting tx first and attaches the matcher's handler only
+      // after that await — a rejection that lands in between is briefly unhandled, which CI's coverage
+      // run reported as an "Uncaught" failure + "done() called multiple times" (intermittent).
+      const timelock = await ethers.getContractAt("TimelockController", created.timelock);
+      await expect(governor.execute(targets, values, calldatas, descriptionHash)).to.be.revertedWithCustomError(timelock, "TimelockUnexpectedOperationState");
 
       await time.increase(DAY + 1);
       await governor.execute(targets, values, calldatas, descriptionHash);
