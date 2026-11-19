@@ -37,6 +37,13 @@
 
   "acceptances": [
     {
+      "ghsa": "GHSA-587h-7wmj-h5pm",
+      "package": "vite",
+      "issue": 1707,
+      "expires": "2026-12-03",
+      "reason": "Maintainer decision 2026-11-19 (unblocker for promotion #1698): vite 8.3.0 is fixed in >=8.3.3, but changing the bundler changes the keccak-committed bytes of every registry mini-app (spec 075 FR-022), so the upgrade must ship WITH a baseline re-record and an on-chain re-publish/re-approval on Polygon and Mordor — tracked in #1707, never as a routine bump. Exposure: launch-editor's Windows existence-check bypass in the vite DEV server; production serves the static build, no vite server runs in any deployed surface. Two weeks; do not renew without #1707 moving."
+    },
+    {
       "ghsa": "GHSA-v5mp-jgw5-2x6j",
       "package": "toml",
       "issue": 1519,

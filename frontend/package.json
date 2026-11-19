@@ -84,9 +84,9 @@
     "wagmi": "^3.6.21"
   },
   "devDependencies": {
-    "@capacitor/android": "8.5.0",
-    "@capacitor/cli": "8.5.0",
-    "@capacitor/ios": "8.5.0",
+    "@capacitor/android": "8.5.2",
+    "@capacitor/cli": "8.5.2",
+    "@capacitor/ios": "8.5.2",
     "@cypress/webpack-preprocessor": "^7.0.2",
     "@eslint/js": "^10.0.1",
     "@fairwins/miniapp-build": "*",
