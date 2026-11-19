@@ -170,7 +170,7 @@
     "dotenv": "^17.2.4",
     "ethereum-cryptography": "^3.2.0",
     "ethers": "^6.17.0",
-    "hardhat": "^2.28.2",
+    "hardhat": "^2.29.2",
     "hardhat-gas-reporter": "^2.3.0",
     "js-yaml": "^5.2.3",
     "solc": "0.8.24",
