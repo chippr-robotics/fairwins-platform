@@ -469,7 +469,7 @@ services:
   # own snappy-protobuf remote_write, a WAL, or retry semantics (research R10).
   alloy:
     container_name: fairwins-gateway-alloy
-    image: grafana/alloy:v1.10.2
+    image: grafana/alloy:v1.22.0
     restart: unless-stopped
     pull_policy: missing
     network_mode: "service:gateway"
@@ -517,7 +517,7 @@ services:
   # Do NOT change this image string without the version-pin gate (scripts/deps/version-pins.json).
   redis:
     container_name: fairwins-gateway-redis
-    image: redis:7.4.11-alpine
+    image: redis:7.4.12-alpine
     restart: unless-stopped
     pull_policy: missing
     network_mode: "service:gateway"
