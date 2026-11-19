@@ -1,5 +1,35 @@
 # Host nginx: the TLS terminator in front of the role's container stack (spec 087, US3).
 ---
+- name: Keep the nginx package at the newest available build
+  # `state: latest`, not `present`: a security fix only helps once it is installed, and nginx is the
+  # one package on these nodes that faces the internet. Debian backports fixes without moving the
+  # upstream version (bookworm stays "1.22.1"; the fix is a +deb12uN suffix), so `nginx -v` never
+  # tells you whether a node is patched — the package version does. nginx2root (CVE-2026-123007 et
+  # al.) had no fixed bookworm build at disclosure; this is what picks it up on the next converge.
+  ansible.builtin.apt:
+    name: nginx
+    state: latest
+    only_upgrade: true   # nginx is installed by the VM startup script; this only ever upgrades it
+    update_cache: true
+    cache_valid_time: 3600
+  become: true
+  notify: restart nginx
+
+- name: Detect an nginx master still running a replaced binary
+  # A reload re-reads config but keeps the old EXECUTABLE, and unattended-upgrades can replace the
+  # package between converges without restarting the service. A master whose /proc/<pid>/exe reads
+  # "(deleted)" is still running the pre-patch code no matter what dpkg reports.
+  ansible.builtin.shell:
+    cmd: |
+      set -eu
+      pid="$(cat /run/nginx.pid 2>/dev/null || true)"
+      [ -n "$pid" ] || { echo none; exit 0; }
+      readlink "/proc/$pid/exe" 2>/dev/null || echo none
+  register: nginx_running_exe
+  changed_when: "'(deleted)' in nginx_running_exe.stdout"
+  become: true
+  notify: restart nginx
+
 - name: Ensure the nginx config and TLS directories exist
   ansible.builtin.file:
     path: "{{ item }}"
