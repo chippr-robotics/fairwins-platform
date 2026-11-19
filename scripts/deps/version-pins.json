@@ -189,16 +189,16 @@
       "id": "nginx-image",
       "kind": "container-image",
       "owner": "mark",
-      "pinned": "1.30.5",
+      "pinned": "1.30.7",
       "status": "track",
       "locations": [
         {
           "path": "Dockerfile",
-          "contains": "nginx:1.30.5-alpine"
+          "contains": "nginx:1.30.7-alpine"
         },
         {
           "path": "services/alto-bundler/nginx/Dockerfile",
-          "contains": "nginx:1.30.5-alpine"
+          "contains": "nginx:1.30.7-alpine"
         }
       ],
       "upstream": {
