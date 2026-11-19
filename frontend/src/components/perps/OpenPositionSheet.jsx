@@ -987,7 +987,8 @@ export default function OpenPositionSheet({
               href={venueUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Trade ${pair.symbol || 'this market'} on ${linkFullName} (opens in a new tab)`}
+              // WCAG 2.5.3: the accessible name starts with the visible text (see PerpsPositions).
+              aria-label={`Trade on ${linkLabel}: ${pair.symbol || 'this market'} on ${linkFullName} (opens in a new tab)`}
             >
               Trade on {linkLabel} ↗
             </a>
