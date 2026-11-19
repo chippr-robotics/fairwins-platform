@@ -22,7 +22,7 @@ The controller needs three things, and each one fails in a way that does not nam
 # 1. Ansible and the inventory plugin's Python dependencies, in a venv.
 #    The dynamic inventory imports google-auth IN THE CONTROLLER's interpreter. Distro Ansible runs
 #    on a PEP-668 `EXTERNALLY-MANAGED` /usr/bin/python3 that cannot be pip-installed into, and the
-#    apt build of google-auth is years behind what google.cloud 1.14.0 expects — so a venv is the
+#    apt build of google-auth is years behind what google.cloud 1.15.0 expects — so a venv is the
 #    supported path, and it is what CI installs too.
 python3 -m venv ~/.venvs/fairwins-ansible
 ~/.venvs/fairwins-ansible/bin/pip install ansible-core ansible-lint google-auth requests

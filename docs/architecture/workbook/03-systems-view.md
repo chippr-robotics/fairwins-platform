@@ -228,7 +228,7 @@ alto config: `ALTO_ENTRYPOINTS=0x5FF137D4…2789` (EntryPoint v0.6), `ALTO_PORT=
 | `fairwins-gateway-engine` (OZ Relayer) | `…/fairwins-relay-engine:multichain-v1.5.0` | joiner | none | 0.35 / 320m |
 | `fairwins-gateway-finops` | `…/fairwins-finops-exporter:spec107-1ac148bf` | joiner | none; binds `127.0.0.1:9464` | 0.2 / 192m |
 | `fairwins-gateway-alloy` | `grafana/alloy:v1.10.2` | joiner | none; own UI pinned to `127.0.0.1:12345` | 0.15 / 192m |
-| `fairwins-gateway-redis` | `redis:7-alpine` | joiner | none; `--save "" --appendonly no` (ephemeral) | 0.15 / 128m |
+| `fairwins-gateway-redis` | `redis:7.4.11-alpine` | joiner | none; `--save "" --appendonly no` (ephemeral) | 0.15 / 128m |
 
 Evidence: `infra/vm/gateway/docker-compose.yml:27-48,241-246,286-292,362-371,395-401`; volume `alloy-data` (persisted WAL) `…:416-422`.
 The four verbatim localhost couplings that the shared namespace makes correct: `ENGINE_URL=http://localhost:8080`, `REDIS_URL=redis://localhost:6379`, engine webhook `http://localhost:8788/v1/engine/webhook`, bundler nginx `upstream 127.0.0.1:3000` — `…:3-13`; webhook in `services/oz-relayer/deploy/production/config.json` (`notifications[0].url`).
@@ -315,7 +315,7 @@ Executor EOA per chain: chain 137 executor `0x7C6da19ae005D4F13BB8660Ac989c48aCc
 1. Browser → `https://relay.fairwins.app` → Cloudflare (proxied A record → `fairwins-gateway-ip`) — `prod/main.tf:418-423`.
 2. Geo gate (451) then origin-lock header injection, same two phases as (a).
 3. Cloudflare egress IP → GCP firewall `fairwins-allow-cloudflare(-v6)`, tcp 443, target tag `fairwins-edge` — tf-modules:`modules/network/main.tf:69-98`.
-4. Host nginx on the gateway VM: `listen 443 ssl http2`, `server_name relay.fairwins.app`, Origin CA cert, `location /` → `proxy_pass http://127.0.0.1:8788` (300 s read timeout; sets `X-Real-IP`/`X-Forwarded-*`) — `infra/vm/nginx/fairwins-gateway.conf:10-14,35-44`. Port 80 exists only to 301 (`:47-51`).
+4. Host nginx on the gateway VM: `listen 443 ssl` (HTTP/2 deliberately off — nginx2root), `server_name relay.fairwins.app`, Origin CA cert, `location /` → `proxy_pass http://127.0.0.1:8788` (300 s read timeout; sets `X-Real-IP`/`X-Forwarded-*`) — `infra/vm/nginx/fairwins-gateway.conf:10-14,35-44`. Port 80 exists only to 301 (`:47-51`).
 5. → the `fairwins-gateway-gateway` container (namespace owner, loopback-published `8788`) — `infra/vm/gateway/docker-compose.yml:47-48`. The gateway itself verifies `ORIGIN_AUTH_SECRET` (fail-open if unset) and `ALLOWED_ORIGINS=https://fairwins.app`.
 6. For a relayed intent: gateway → `ENGINE_URL=http://localhost:8080` (same namespace) → OZ Relayer engine, which signs with a **Google Cloud KMS** signer (`gas-key-mordor` / `gas-key-polygon`, key ring `fairwins-relayer`, credentials from `GCP_PRIVATE_KEY` in engine.env only) and broadcasts over its **own** public `rpc_urls` from `config.json` — `services/oz-relayer/deploy/production/config.json` (relayers/signers/networks); `infra/vm/gateway/docker-compose.yml:250-271`.
 7. Confirmation returns engine → `http://localhost:8788/v1/engine/webhook` (HMAC by `WEBHOOK_SIGNING_KEY`) → gateway marks the intent landed — `config.json` notifications; `…docker-compose.yml:10-13`.

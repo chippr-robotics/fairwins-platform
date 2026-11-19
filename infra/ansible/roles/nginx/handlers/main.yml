@@ -15,3 +15,29 @@
     state: reloaded
   become: true
   listen: reload nginx service
+
+- name: Restart nginx
+  # RESTART, not reload: only a restart replaces the running executable, so this is the handler a
+  # package upgrade must use. Validate first — a restart onto a broken config takes the origin down,
+  # where a failed reload would have kept the old one serving.
+  ansible.builtin.command:
+    cmd: nginx -t
+  become: true
+  changed_when: false
+  listen: restart nginx
+  notify: restart nginx service
+
+- name: Read nginx service state before restarting
+  ansible.builtin.service_facts:
+  become: true
+  listen: restart nginx service
+
+- name: Restart nginx service
+  # Only if it is already running: `state: restarted` STARTS a stopped unit, and nginx is left
+  # stopped on purpose until the Origin CA certificate is installed (see tasks/main.yml).
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: restarted
+  become: true
+  when: ansible_facts.services['nginx.service'].state | default('') == 'running'
+  listen: restart nginx service

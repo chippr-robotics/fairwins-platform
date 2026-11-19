@@ -156,11 +156,11 @@ describe('WagerPool (address-based)', function () {
     expect(await pool.currentProposalId()).to.equal(pid);
     await expect(pool.connect(m2).proposeOutcome(entries)).to.be.revertedWithCustomError(pool, 'NotCreator');
 
-    await expect(pool.connect(creator).approve()).to.emit(pool, 'Approved').withArgs(pid, creator.address);
+    await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.emit(pool, 'Approved').withArgs(pid, creator.address);
     expect(await pool.proposalApprovals(pid)).to.equal(1);
     expect(await pool.state()).to.equal(1n);
-    await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'AlreadyApproved');
-    await expect(pool.connect(m2).approve()).to.emit(pool, 'OutcomeLocked').withArgs(pid);
+    await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'AlreadyApproved');
+    await expect(pool.connect(m2).approve(await pool.currentProposalId())).to.emit(pool, 'OutcomeLocked').withArgs(pid);
     expect(await pool.state()).to.equal(2n); // Resolved
     expect(await pool.lockedOutcome()).to.equal(pid);
 
@@ -185,9 +185,9 @@ describe('WagerPool (address-based)', function () {
       { winner: m3.address, amount: usdc(0) },
     ];
     await pool.connect(creator).proposeOutcome(entries);
-    await pool.connect(creator).approve();
+    await pool.connect(creator).approve(await pool.currentProposalId());
     expect(await pool.state()).to.equal(1n); // 1 of 2 required — not yet
-    await pool.connect(m2).approve();
+    await pool.connect(m2).approve(await pool.currentProposalId());
     expect(await pool.state()).to.equal(2n); // 2 approvals locks
   });
 
@@ -201,13 +201,46 @@ describe('WagerPool (address-based)', function () {
     const a = matrixHash(entriesA);
     const b = matrixHash(entriesB);
     await pool.connect(creator).proposeOutcome(entriesA);
-    await pool.connect(creator).approve();
+    await pool.connect(creator).approve(await pool.currentProposalId());
     expect(await pool.proposalApprovals(a)).to.equal(1);
     await pool.connect(creator).proposeOutcome(entriesB); // revise
     expect(await pool.proposalApprovals(b)).to.equal(0);
-    await pool.connect(creator).approve();
-    await pool.connect(m2).approve();
+    await pool.connect(creator).approve(await pool.currentProposalId());
+    await pool.connect(m2).approve(await pool.currentProposalId());
     expect(await pool.lockedOutcome()).to.equal(b);
+  });
+
+  it('approve binds the proposalId: a re-proposal ahead of a pending approve cannot capture it (#1667)', async function () {
+    await closedPool(); // 2 members ⇒ 2 approvals required
+    const selfDeal = [
+      { winner: creator.address, amount: usdc(20) },
+      { winner: m2.address, amount: usdc(0) },
+    ];
+    const fair = evenSplit();
+    const a = matrixHash(selfDeal);
+    const b = matrixHash(fair);
+
+    // Creator pre-approves the self-dealing matrix, then shows the fair one.
+    await pool.connect(creator).proposeOutcome(selfDeal);
+    await pool.connect(creator).approve(a);
+    await pool.connect(creator).proposeOutcome(fair);
+    expect(await pool.currentProposalId()).to.equal(b);
+
+    // m2 reads B and signs approve(B); the creator re-proposes A before it lands.
+    await pool.connect(creator).proposeOutcome(selfDeal);
+    await expect(pool.connect(m2).approve(b)).to.be.revertedWithCustomError(pool, 'OutcomeMismatch');
+    expect(await pool.state()).to.equal(1n); // still JoiningClosed — nothing locked
+    expect(await pool.proposalApprovals(a)).to.equal(1);
+    expect(await pool.approvedBy(a, m2.address)).to.equal(false);
+  });
+
+  it('approve rejects any id other than the current proposal', async function () {
+    await closedPool();
+    const entries = evenSplit();
+    await pool.connect(creator).proposeOutcome(entries);
+    await expect(pool.connect(m2).approve(ethers.ZeroHash)).to.be.revertedWithCustomError(pool, 'OutcomeMismatch');
+    await expect(pool.connect(m2).approve(ethers.id('not-a-matrix'))).to.be.revertedWithCustomError(pool, 'OutcomeMismatch');
+    await expect(pool.connect(m2).approve(matrixHash(entries))).to.emit(pool, 'Approved');
   });
 
   it('guards resolution state: propose/approve only while closed and before the resolve deadline', async function () {
@@ -220,14 +253,14 @@ describe('WagerPool (address-based)', function () {
     );
     await pool.connect(creator).closeJoining();
     // approve with no proposal
-    await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'NoProposal');
+    await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'NoProposal');
     // non-member approve
     const soloEntries = [{ winner: creator.address, amount: usdc(10) }];
     await pool.connect(creator).proposeOutcome(soloEntries);
-    await expect(pool.connect(outsider).approve()).to.be.revertedWithCustomError(pool, 'NotMember');
+    await expect(pool.connect(outsider).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'NotMember');
     // after the resolve deadline: refund-only
     await time.increaseTo((await pool.resolveDeadline()) + 1n);
-    await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'ResolutionWindowClosed');
+    await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'ResolutionWindowClosed');
     await expect(pool.connect(creator).proposeOutcome(soloEntries)).to.be.revertedWithCustomError(pool, 'ResolutionWindowClosed');
   });
 
@@ -237,8 +270,8 @@ describe('WagerPool (address-based)', function () {
     await closedPool();
     const pid = matrixHash(entries);
     await pool.connect(creator).proposeOutcome(entries);
-    await pool.connect(creator).approve();
-    await pool.connect(m2).approve(); // locks
+    await pool.connect(creator).approve(await pool.currentProposalId());
+    await pool.connect(m2).approve(await pool.currentProposalId()); // locks
     return pid;
   }
 
@@ -283,9 +316,9 @@ describe('WagerPool (address-based)', function () {
     await join(m2); // auto-close, denominator 2
     const entries = evenSplit();
     await pool.connect(creator).proposeOutcome(entries);
-    await pool.connect(creator).approve();
+    await pool.connect(creator).approve(await pool.currentProposalId());
     expect(await pool.state()).to.equal(1n); // the creator's lone approval does NOT resolve
-    await pool.connect(m2).approve();
+    await pool.connect(m2).approve(await pool.currentProposalId());
     expect(await pool.state()).to.equal(2n); // it takes the other member too
   });
 
@@ -377,7 +410,7 @@ describe('WagerPool (address-based)', function () {
     await pool.connect(creator).proposeOutcome(entries);
 
     // creator approves via self-submit; m2 approves via a relayed signature
-    await pool.connect(creator).approve();
+    await pool.connect(creator).approve(await pool.currentProposalId());
     const { sig, nonce, validAfter, validBefore } = await signApprove(pool, m2, pid);
     await expect(pool.connect(relayer).approveWithSig(pid, m2.address, nonce, validAfter, validBefore, sig))
       .to.emit(pool, 'OutcomeLocked')

@@ -26,7 +26,7 @@ permissions:
   actions: read
 
 env:
-  TERRAFORM_VERSION: "1.15.8"
+  TERRAFORM_VERSION: "1.15.9"
 
 # Queue, never cancel. Two infra PRs merging close together would otherwise race for the state lock,
 # with the loser failing after having already passed review. Combined with Terraform's own
@@ -50,7 +50,7 @@ jobs:
       matrix:
         environment: [prod, staging]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # actions/checkout persists a credential as `http.https://github.com/.extraheader` in the
           # workspace's LOCAL git config. An explicit Authorization header OVERRIDES a URL-embedded
@@ -135,12 +135,12 @@ jobs:
           echo "Plan provenance verified: $merged_digest"
 
       - id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ vars.WIF_PROVIDER }}
           service_account: ${{ vars.TF_APPLY_SERVICE_ACCOUNT }}
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
 

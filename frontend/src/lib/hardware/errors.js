@@ -19,6 +19,17 @@ export const HW_ERROR_CODES = Object.freeze({
   DISCONNECTED: 'disconnected',
   TIMEOUT: 'timeout',
   POPUP_BLOCKED: 'popup-blocked',
+  // Spec 111 — Sigil (MPC floppy signer). Each is its own code because each has its own remedy:
+  // start the bridge, re-pair, insert the disk, refill it at the mother device, or insert the RIGHT
+  // disk. Folding them into DISCONNECTED would tell a member with an empty disk to "reconnect".
+  SIGIL_BRIDGE_UNREACHABLE: 'sigil-bridge-unreachable',
+  SIGIL_NOT_PAIRED: 'sigil-not-paired',
+  SIGIL_DAEMON_DOWN: 'sigil-daemon-down',
+  SIGIL_NO_DISK: 'sigil-no-disk',
+  SIGIL_DISK_EXHAUSTED: 'sigil-disk-exhausted',
+  SIGIL_DISK_INVALID: 'sigil-disk-invalid',
+  SIGIL_WRONG_DISK: 'sigil-wrong-disk',
+  SIGIL_DAEMON_OUTDATED: 'sigil-daemon-outdated',
   UNKNOWN: 'unknown',
 })
 
@@ -56,6 +67,21 @@ const DESCRIPTIONS = {
   [HW_ERROR_CODES.TIMEOUT]: 'The device did not respond in time. Check the connection and try again.',
   [HW_ERROR_CODES.POPUP_BLOCKED]:
     'The vendor window could not open or did not respond. Allow popups for this site and try again.',
+  [HW_ERROR_CODES.SIGIL_BRIDGE_UNREACHABLE]:
+    'The Sigil bridge on this computer did not answer. Start sigil-bridge (with this site as an allowed origin), allow this site to reach devices on your local network if the browser asks, then try again.',
+  [HW_ERROR_CODES.SIGIL_NOT_PAIRED]:
+    'The Sigil bridge did not accept this browser’s pairing token. Pair again in Protect ▸ Off chain with the token from the bridge’s token file.',
+  [HW_ERROR_CODES.SIGIL_DAEMON_DOWN]:
+    'The Sigil bridge is running but the Sigil daemon is not. Start sigil-daemon on this computer, then try again.',
+  [HW_ERROR_CODES.SIGIL_NO_DISK]: 'No Sigil disk is inserted. Insert the floppy disk for this account, then try again.',
+  [HW_ERROR_CODES.SIGIL_DISK_EXHAUSTED]:
+    'This Sigil disk has no signatures left. Take it to your mother device to reconcile and refill it. Nothing was signed.',
+  [HW_ERROR_CODES.SIGIL_DISK_INVALID]:
+    'This Sigil disk has expired or failed its integrity check. Take it to your mother device to reconcile it. Nothing was signed.',
+  [HW_ERROR_CODES.SIGIL_WRONG_DISK]:
+    'The inserted Sigil disk belongs to a different account. Insert the disk for this account. Nothing was signed.',
+  [HW_ERROR_CODES.SIGIL_DAEMON_OUTDATED]:
+    'This Sigil daemon does not report its disk’s public key, so the account cannot be identified. Update sigil-daemon to a version that does, then try again.',
   [HW_ERROR_CODES.UNKNOWN]: 'Something went wrong talking to the device. Reconnect it and try again.',
 }
 

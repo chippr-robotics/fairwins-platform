@@ -50,6 +50,22 @@ runs:
           node scripts/native/sync-native-config.js
         fi
         cd frontend && npx cap sync "${{ inputs.platform }}"
+    # Serve Maven Central from Google's public mirror (init script, applied to every Gradle build on
+    # the runner). GitHub-hosted runners share egress IPs and Maven Central rate-limits them: on
+    # 2026-11-19 `Android shell compiles` failed twice in a row on promotion #1698 with HTTP 429 for
+    # kotlin-stdlib, protobuf, grpc… — nothing to do with the code. Gradle caching would not cure
+    # it (a cache is only saved after a SUCCESSFUL build, so a cold run still hits Central). The
+    # script rewrites the mavenCentral() URL in place, so the build's own order — google() first —
+    # is kept, and it lives HERE so all three Android jobs (native-build + both release.yml jobs)
+    # resolve identically. Gradle reads ~/.gradle/init.d/*.gradle automatically.
+    - name: Route Maven Central through Google's mirror
+      if: inputs.platform == 'android'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p "$HOME/.gradle/init.d"
+        cp "${{ github.action_path }}/maven-central-mirror.gradle" "$HOME/.gradle/init.d/"
+        echo "Installed $HOME/.gradle/init.d/maven-central-mirror.gradle"
     # Select the newest Xcode on the image, and SAY WHICH. Capacitor 8 ships its
     # Swift API as prebuilt XCFrameworks (`capacitor-swift-pm` resolves
     # Capacitor.xcframework / Cordova.xcframework, not source), and a binary

@@ -204,7 +204,9 @@ describe('WagerPoolFactory — security & access control', function () {
     });
 
     it('cannot deploy with screeningRequired but unset guards (init InvalidParams)', async function () {
-      await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.reverted;
+      // Resolve the error ABI before starting the deploy (see StandardDAOFactory.test.js).
+      const factoryAbi = await ethers.getContractFactory('WagerPoolFactory');
+      await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.revertedWithCustomError(factoryAbi, 'InvalidParams');
     });
   });
 

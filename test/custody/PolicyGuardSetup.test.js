@@ -88,7 +88,9 @@ describe("PolicyGuardSetup", function () {
     const notGuard = await (await ethers.getContractFactory("SafeProposalHub")).deploy();
     await notGuard.waitForDeployment();
     const data = setup.interface.encodeFunctionData("enablePolicy", [await notGuard.getAddress(), "0x"]);
-    await expect(mockSafe.setupDelegate(setupAddr, data)).to.be.reverted; // ERC-165 probe reverts or NotAGuard
+    // The hub has no supportsInterface and no fallback, so the ERC-165 probe itself reverts with empty
+    // data before NotAGuard can be reached; MockSafe surfaces an empty delegatecall failure as DelegateSetupFailed.
+    await expect(mockSafe.setupDelegate(setupAddr, data)).to.be.revertedWithCustomError(mockSafe, "DelegateSetupFailed");
     expect(await ethers.provider.getStorage(mockSafeAddr, GUARD_SLOT)).to.equal(ethers.ZeroHash);
   });
 

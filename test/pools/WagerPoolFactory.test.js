@@ -28,7 +28,10 @@ describe('WagerPoolFactory', function () {
   });
 
   it('reverts deployment when screening is required but guards are unset (FR-021a)', async function () {
-    await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.reverted;
+    // Resolve the error ABI before starting the deploy — an `await` inside the matcher's arguments
+    // leaves the deploy's rejection briefly unhandled (see StandardDAOFactory.test.js).
+    const factoryAbi = await ethers.getContractFactory('WagerPoolFactory');
+    await expect(deployPoolFactory({ admin: admin.address, screeningRequired: true })).to.be.revertedWithCustomError(factoryAbi, 'InvalidParams');
   });
 
   it('creates a pool: emits PoolCreated, clones a pool, records it, resolves by phrase', async function () {

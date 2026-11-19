@@ -51,8 +51,8 @@ describe('WagerPool — security & invariants', function () {
     const pool = await closedPool();
     const entries = evenSplit();
     await pool.connect(creator).proposeOutcome(entries);
-    await pool.connect(creator).approve();
-    await pool.connect(m2).approve(); // locks (threshold 100% of 2)
+    await pool.connect(creator).approve(await pool.currentProposalId());
+    await pool.connect(m2).approve(await pool.currentProposalId()); // locks (threshold 100% of 2)
     return { pool, entries };
   }
   async function cancelledPool() {
@@ -116,8 +116,8 @@ describe('WagerPool — security & invariants', function () {
         { winner: m2.address, amount: usdc(5) },
       ];
       await pool.connect(creator).proposeOutcome(entries);
-      await pool.connect(creator).approve();
-      await pool.connect(m2).approve(); // resolved
+      await pool.connect(creator).approve(await pool.currentProposalId());
+      await pool.connect(m2).approve(await pool.currentProposalId()); // resolved
       const data = pool.interface.encodeFunctionData('claim', [entries, 0, creator.address]);
       await rt.arm(await pool.getAddress(), data);
       await expect(pool.connect(creator).claim(entries, 0, creator.address)).to.be.revertedWithCustomError(
@@ -156,7 +156,7 @@ describe('WagerPool — security & invariants', function () {
     it('from JoiningOpen: propose/approve/claim/refund/poke are all rejected', async function () {
       const pool = await openPool();
       await expect(pool.connect(creator).proposeOutcome(evenSplit())).to.be.revertedWithCustomError(pool, 'WrongState');
-      await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'WrongState');
+      await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'WrongState');
       await expect(pool.connect(creator).claim(evenSplit(), 0, creator.address)).to.be.revertedWithCustomError(
         pool,
         'WrongState'
@@ -180,7 +180,7 @@ describe('WagerPool — security & invariants', function () {
 
     it('from JoiningClosed with no proposal: approve reverts NoProposal (approve-before-propose)', async function () {
       const pool = await closedPool();
-      await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'NoProposal');
+      await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'NoProposal');
     });
 
     it('from Resolved: join/close/cancel/poke/propose/approve/refund are all rejected', async function () {
@@ -190,7 +190,7 @@ describe('WagerPool — security & invariants', function () {
       await expect(pool.connect(creator).cancel()).to.be.revertedWithCustomError(pool, 'WrongState');
       await expect(pool.pokeDeadline()).to.be.revertedWithCustomError(pool, 'WrongState');
       await expect(pool.connect(creator).proposeOutcome(entries)).to.be.revertedWithCustomError(pool, 'WrongState');
-      await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'WrongState');
+      await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'WrongState');
       await expect(pool.connect(creator).refund()).to.be.revertedWithCustomError(pool, 'WrongState');
     });
 
@@ -201,7 +201,7 @@ describe('WagerPool — security & invariants', function () {
       await expect(pool.connect(creator).cancel()).to.be.revertedWithCustomError(pool, 'WrongState'); // double cancel
       await expect(pool.pokeDeadline()).to.be.revertedWithCustomError(pool, 'WrongState');
       await expect(pool.connect(creator).proposeOutcome(evenSplit())).to.be.revertedWithCustomError(pool, 'WrongState');
-      await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'WrongState');
+      await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'WrongState');
       await expect(pool.connect(creator).claim(evenSplit(), 0, creator.address)).to.be.revertedWithCustomError(
         pool,
         'WrongState'
@@ -231,10 +231,10 @@ describe('WagerPool — security & invariants', function () {
         { winner: creator.address, amount: usdc(15) }, // creator again -> per-index claiming
       ];
       await pool.connect(creator).proposeOutcome(entries);
-      await pool.connect(creator).approve();
-      await pool.connect(m2).approve();
+      await pool.connect(creator).approve(await pool.currentProposalId());
+      await pool.connect(m2).approve(await pool.currentProposalId());
       expect(await pool.state()).to.equal(1n); // 2 of 3 required
-      await pool.connect(m3).approve(); // resolves
+      await pool.connect(m3).approve(await pool.currentProposalId()); // resolves
       expect(await pool.state()).to.equal(2n);
 
       let claimed = 0n;
@@ -300,7 +300,7 @@ describe('WagerPool — security & invariants', function () {
       await time.setNextBlockTimestamp(resolve - 1);
       await expect(pool.connect(creator).proposeOutcome(entries)).to.emit(pool, 'OutcomeProposed');
       await time.setNextBlockTimestamp(resolve);
-      await expect(pool.connect(creator).approve()).to.be.revertedWithCustomError(pool, 'ResolutionWindowClosed');
+      await expect(pool.connect(creator).approve(await pool.currentProposalId())).to.be.revertedWithCustomError(pool, 'ResolutionWindowClosed');
     });
 
     it('refund: reverts at resolveDeadline-1 (window not elapsed), succeeds at exactly resolveDeadline', async function () {
@@ -498,7 +498,7 @@ describe('WagerPool — security & invariants', function () {
         const entries = [{ winner: members[0].address, amount: usdc(10 * denom) }];
         await pool.connect(members[0]).proposeOutcome(entries);
         for (let i = 0; i < req; i++) {
-          await pool.connect(members[i]).approve();
+          await pool.connect(members[i]).approve(await pool.currentProposalId());
           expect(await pool.state()).to.equal(i < req - 1 ? 1n : 2n);
         }
       });

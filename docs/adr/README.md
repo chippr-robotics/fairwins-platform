@@ -46,6 +46,7 @@ Each ADR follows a consistent structure:
 | [003](./003-xwing-post-quantum-encryption.md) | X-Wing Post-Quantum Encryption for Private Markets | Accepted | 2026-01-24 | Security |
 | [004](./004-upgradeable-registry-uups.md) | Upgradeable contracts via UUPS proxies | Accepted | 2026-06-20 | Architecture |
 | [005](./005-remove-unused-x3dh-messaging-layer.md) | Remove the unused X3DH/Double-Ratchet messaging layer | Accepted | 2026-06-22 | Security |
+| [006](./006-dependency-version-policy.md) | Dependency version policy: selection, holds, detection, review | Accepted | 2026-10-09 | Supply chain |
 
 ### Superseded ADRs
 

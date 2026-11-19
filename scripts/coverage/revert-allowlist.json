@@ -1,0 +1,15 @@
+{
+  "_comment": "Shrink-only allowlist for scripts/coverage/check-revert-coverage.js (spec 112 FR-006). Each entry is a named revert a production contract raises that no test asserts by name. Entries may only be REMOVED: the gate fails an entry whose revert is now asserted or no longer raised. Since the spec-112 close-out (T021, #1673) every entry is `unreachable — <why>` with file:line evidence; a reachable revert gets a test, not an entry.",
+  "entries": [
+    {
+      "contract": "contracts/oracles/ChainlinkDataFeedOracleAdapter.sol",
+      "error": "InvalidComparisonOp",
+      "reason": "unreachable — ChainlinkDataFeedOracleAdapter.sol:71 is dead code: the ABI decoder rejects an out-of-range Comparison enum with empty revert data before the body runs (pinned by test/oracles/ChainlinkDataFeedOracleAdapter.negative.test.js) — #1677"
+    },
+    {
+      "contract": "contracts/wagers/WagerRegistryCore.sol",
+      "error": "AuthorizationNotSupported",
+      "reason": "unreachable — the base _pullStake raises it only when viaAuth is true (WagerRegistryCore.sol:245), and no caller that runs the base implementation passes true: every main-facet entry point passes false (WagerRegistry.sol:193, :220, :321, :335), and the only viaAuth=true callers (WagerRegistryIntents.sol:97, :118, :140) run in the Intents facet, whose override routes true to _pullWithAuthorization and calls super only with false (WagerRegistryIntents.sol:66-78) — #1673"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+// Serve Maven Central from Google's public mirror. GitHub-hosted runners share egress IPs and
+// Maven Central rate-limits them (HTTP 429), which failed `Android shell compiles` repeatedly.
+// The URL is rewritten IN PLACE, so the build's own repository ORDER (google() first) is kept.
+def central = 'https://repo.maven.apache.org/maven2'
+def mirror = 'https://maven-central.storage-download.googleapis.com/maven2/'
+def redirect = { repos ->
+    repos.withType(MavenArtifactRepository).configureEach { repo ->
+        if (repo.url.toString().startsWith(central)) { repo.url = mirror }
+    }
+}
+beforeSettings { settings ->
+    redirect(settings.pluginManagement.repositories)
+    redirect(settings.dependencyResolutionManagement.repositories)
+}
+allprojects {
+    redirect(buildscript.repositories)
+    redirect(repositories)
+}

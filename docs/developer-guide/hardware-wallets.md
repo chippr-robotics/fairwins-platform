@@ -5,6 +5,9 @@ them through a guided flow, watch their balances, receive to them from every add
 when they choose to act as one — sign with the device itself, confirming every action on its own
 screen. It is a **frontend-only** feature: no contracts, no gateway, no subgraph.
 
+A third vendor, **Sigil** (MPC signer, floppy-held presignatures, reached through a loopback
+bridge), rides the same seam — see [Sigil cold signer](sigil-cold-signer.md) for what differs.
+
 The point of a hardware wallet is that its keys never touch a browser. Everything below follows
 from taking that seriously.
 

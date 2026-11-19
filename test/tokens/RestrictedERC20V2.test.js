@@ -101,7 +101,7 @@ describe("RestrictedERC20V2 (role-based ERC-1404)", function () {
     const data = Impl.interface.encodeFunctionData("initialize", ["X", "X", 18, 0, 0, owner.address, ZERO]);
     const Proxy = await ethers.getContractFactory("ERC1967Proxy");
     // The proxy constructor runs initialize via delegatecall → reverts WrongInitializer.
-    await expect(Proxy.deploy(await impl.getAddress(), data)).to.be.reverted;
+    await expect(Proxy.deploy(await impl.getAddress(), data)).to.be.revertedWithCustomError(impl, "WrongInitializer");
   });
 
   it("mint to an ineligible recipient is blocked by the same policy", async function () {

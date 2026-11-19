@@ -305,7 +305,7 @@ for (const [name, cfg] of Object.entries(CHAINS)) {
       await router.setPoolEnabled(await poolId(), false);
 
       // New supplies are refused...
-      await expect(supply()).to.be.reverted;
+      await expect(supply()).to.be.revertedWithCustomError(router, "EnforcedPause");
 
       // ...but the exit is untouched, because it never goes through the router.
       const pos = await nfpm.positions(tokenId);

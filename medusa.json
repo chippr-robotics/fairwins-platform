@@ -7,7 +7,7 @@
     "callSequenceLength": 100,
     "corpusDirectory": "medusa-corpus",
     "coverageEnabled": true,
-    "targetContracts": ["WagerRegistryFuzzTest", "MembershipManagerFuzzTest", "KeyRegistryFuzzTest", "PolymarketOracleAdapterFuzzTest"],
+    "targetContracts": ["WagerRegistryFuzzTest", "MembershipManagerFuzzTest", "KeyRegistryFuzzTest", "PolymarketOracleAdapterFuzzTest", "MembershipVoucherFuzzTest", "BackupPointerRegistryFuzzTest", "WagerPoolFuzzTest", "FundingPoolFuzzTest", "BridgeRouterFuzzTest", "LiquidityRouterFuzzTest", "StakingRouterFuzzTest", "FeeRouterFuzzTest"],
     "targetContractsBalances": [],
     "constructorArgs": {},
     "deployerAddress": "0x30000",

@@ -116,7 +116,7 @@ describe('FundingPool', function () {
 
   it('a contribute without allowance fails and records nothing', async function () {
     await newPool();
-    await expect(pool.connect(c1).contribute(usdc(1))).to.be.reverted;
+    await expect(pool.connect(c1).contribute(usdc(1))).to.be.revertedWithCustomError(token, "ERC20InsufficientAllowance");
     expect(await pool.totalRaised()).to.equal(0n);
     expect(await pool.contributorCount()).to.equal(0);
   });

@@ -38,6 +38,6 @@ describe('WagerPoolFactory (UUPS upgrade)', function () {
     const V2 = await ethers.getContractFactory('WagerPoolFactoryV2Mock', creator);
     await expect(
       upgrades.upgradeProxy(await factory.getAddress(), V2, { unsafeAllow: ['missing-initializer'] })
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(factory, 'AccessControlUnauthorizedAccount').withArgs(creator.address, await factory.UPGRADER_ROLE());
   });
 });

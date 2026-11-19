@@ -39,6 +39,6 @@ describe('FundingPoolFactory (UUPS upgrade)', function () {
     const V2 = await ethers.getContractFactory('FundingPoolFactoryV2Mock', organizer);
     await expect(
       upgrades.upgradeProxy(await factory.getAddress(), V2, { unsafeAllow: ['missing-initializer'] })
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(factory, 'AccessControlUnauthorizedAccount').withArgs(organizer.address, await factory.UPGRADER_ROLE());
   });
 });

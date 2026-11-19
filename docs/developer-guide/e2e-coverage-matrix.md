@@ -26,10 +26,10 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 114 |
-| With a member-facing flow | 90 |
-| Member-facing flows | 210 |
-| 🟢 covered | 189 |
+| Spec directories | 116 |
+| With a member-facing flow | 91 |
+| Member-facing flows | 214 |
+| 🟢 covered | 193 |
 | 🟡 partial | 5 |
 | 🔴 absent | 7 |
 | ⚪ out of scope | 9 |
@@ -40,7 +40,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Custody — member funds are escrowed, moved, bridged, swept or sent
 
-86 flows — 🟢 69 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
+89 flows — 🟢 72 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
 
 ### `001-cypress-e2e-flows` — Core wager lifecycle (create → accept → resolve → claim/refund)
 
@@ -343,9 +343,17 @@ establish the outcome. They are listed in full at the end of this document.
 | `multichain.claim-on-action-chain` | With the wallet on network B, tapping Claim on a wager living on network A resolves the target chain from the wager, moves the wallet through the one switch-and-settle seam, and completes the claim as a real settled transaction — no in-app 'switch network' step | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
 | `multichain.intent-signs-without-switch` | A relayed EIP-712 intent targeting network A is signed while connected to network B with no network change requested at all — the chain lives in the signature domain | 🔴 absent | none | — (proposed: on-chain) | #1552 |  |
 
+### `111-sigil-cold-signer` — Sigil cold signer in Protect ▸ Off chain
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `sigil.pair-and-add` | Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only; the pairing token device-scoped) | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-01, SIG-04) |  |
+| `sigil.sign-message` | Acting as the Sigil account, Protect ▸ Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address | 🟢 covered | settled | `no-chain` | `51-protect-sigil.cy.js` (SIG-03) |  |
+| `sigil.operate-as-send` | Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log | 🟢 covered | settled | `on-chain` | `46-sigil-operate-as-send.cy.js` (SGO-01) |  |
+
 ## Disclosure — a member consents to a cost
 
-19 flows — 🟢 18 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
+20 flows — 🟢 19 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -420,6 +428,12 @@ establish the outcome. They are listed in full at the end of this document.
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
 | `multichain.refused-switch-discloses` | A wallet declining the network change signs nothing, and one message names both networks and what would fix it (spec 108 WXC-04 wording precedent, generalized to every write surface) | 🟢 covered | flow | `no-chain` | `50-multichain-write-seam.cy.js` (MCW-01, MCW-02, MCW-03) |  |
+
+### `111-sigil-cold-signer` — Sigil cold signer in Protect ▸ Off chain
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `sigil.failure-vocabulary` | An unpaired bridge, a missing disk, no bridge at all, and an exhausted disk each render a named state and sign nothing | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-02, SIG-04) |  |
 
 ## Access — gating, identity and permission
 
@@ -888,6 +902,7 @@ Listed so the gate can tell "correctly omitted" from "forgotten".
 | `101-passkey-zcash` — Passkey-native Zcash | Spec + plan landed in release 1.14.0; no member surface exists yet. Implementation follows the constitution-checked plan (#1364). |
 | `106-gateway-caller-auth` — Gateway caller authentication | Gateway-side caller-identity tiers, quota re-keying and enforcement — server behaviour with no member surface of its own, covered by 34 gateway vitest files (test/identity/). The one member-visible artifact today is the invisible, silently-degrading Turnstile widget (aria-hidden until a surface opts into interactive escalation); member-facing flows arrive when a surface adopts it and when IDENTITY_ENFORCE changes refusal paths on the Predict/Collect/BTC write flows already rowed under specs 055-057/061. |
 | `107-keyed-rpc-access` — Keyed RPC access | Runtime-issued read-only RPC credentials. Dormant end to end until an issuance endpoint is configured (#1438 runbook); every client failure mode falls back to the public default the app uses today, so there is no member-distinguishable flow yet. Covered by gateway vitest (test/access.test.js) and frontend vitest (src/test/network/issuedAccess.test.js); a member-facing degradation-disclosure flow gets a row when the disclosure surface ships. |
+| `112-contract-negative-path-testing` — Contract negative-path test hardening | A contract test-infrastructure spec (coverage policy, revert-assertion gates, fuzz harnesses, adversarial unit tests). It adds no member-facing flow and changes no production bytecode. |
 
 ## Covered but not proven
 

@@ -236,7 +236,7 @@ describe("WagerRegistry — oracle-settled open challenges (041, Polymarket)", f
       const { wagerId, key } = await createOracleOpen(fx, conditionId);
 
       await acceptWithCode(fx, wagerId, key, fx.taker);
-      await expect(acceptWithCode(fx, wagerId, key, fx.otherTaker)).to.be.reverted;
+      await expect(acceptWithCode(fx, wagerId, key, fx.otherTaker)).to.be.revertedWithCustomError(fx.reg, "NotOpenChallenge");
       expect((await fx.reg.getWager(wagerId)).opponent).to.equal(fx.taker.address);
     });
   });

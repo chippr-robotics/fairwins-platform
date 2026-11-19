@@ -38,10 +38,10 @@ describe('FundingPoolFactory', function () {
 
   it('refuses to initialize with a zero template, or screeningRequired without both guards', async function () {
     const Factory = await ethers.getContractFactory('FundingPoolFactory');
-    await expect(upgrades.deployProxy(Factory, [admin.address, ZERO, ZERO, ZERO, false], { kind: 'uups' })).to.be.reverted;
+    await expect(upgrades.deployProxy(Factory, [admin.address, ZERO, ZERO, ZERO, false], { kind: 'uups' })).to.be.revertedWithCustomError(Factory, "InvalidParams");
     await expect(
       upgrades.deployProxy(Factory, [admin.address, await poolImpl.getAddress(), ZERO, ZERO, true], { kind: 'uups' })
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(Factory, "InvalidParams");
   });
 
   it('createPool: clones, registers, assigns a phrase, emits PoolCreated with the purpose', async function () {
@@ -111,7 +111,7 @@ describe('FundingPoolFactory', function () {
     await token.connect(organizer).approve(await pool.getAddress(), usdc(1));
     await pool.connect(organizer).contribute(usdc(1));
     // Non-admins cannot repoint the guard.
-    await expect(factory.connect(other).setSanctionsGuard(ZERO)).to.be.reverted;
+    await expect(factory.connect(other).setSanctionsGuard(ZERO)).to.be.revertedWithCustomError(factory, "AccessControlUnauthorizedAccount").withArgs(other.address, ethers.ZeroHash);
   });
 
   it('screeningRequired: the token must be allow-listed, and neither guard can be unset', async function () {
@@ -153,11 +153,11 @@ describe('FundingPoolFactory', function () {
   it('admin: setTemplate swaps the clone template for FUTURE pools only; non-admins are refused', async function () {
     const Pool = await ethers.getContractFactory('FundingPool');
     const impl2 = await Pool.deploy();
-    await expect(factory.connect(other).setTemplate(await impl2.getAddress())).to.be.reverted;
+    await expect(factory.connect(other).setTemplate(await impl2.getAddress())).to.be.revertedWithCustomError(factory, "AccessControlUnauthorizedAccount").withArgs(other.address, ethers.ZeroHash);
     await expect(factory.connect(admin).setTemplate(ZERO)).to.be.revertedWithCustomError(factory, 'InvalidParams');
     await expect(factory.connect(admin).setTemplate(await impl2.getAddress())).to.emit(factory, 'TemplateUpdated').withArgs(await impl2.getAddress());
     expect(await factory.poolImpl()).to.equal(await impl2.getAddress());
-    await expect(factory.connect(other).setAllowedToken(await token.getAddress(), true)).to.be.reverted;
+    await expect(factory.connect(other).setAllowedToken(await token.getAddress(), true)).to.be.revertedWithCustomError(factory, "AccessControlUnauthorizedAccount").withArgs(other.address, ethers.ZeroHash);
     await expect(factory.connect(admin).setAllowedToken(await token.getAddress(), true)).to.emit(factory, 'TokenAllowed');
   });
 

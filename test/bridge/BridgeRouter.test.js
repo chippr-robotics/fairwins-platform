@@ -138,10 +138,10 @@ describe("BridgeRouter", function () {
 
     it("reverts on a zero admin, feeRouter, or spokePool", async function () {
       const fr = await feeRouter.getAddress();
-      await expect(deployBridgeRouter([ethers.ZeroAddress, fr, spokeAddr, ethers.ZeroAddress])).to.be.reverted;
+      await expect(deployBridgeRouter([ethers.ZeroAddress, fr, spokeAddr, ethers.ZeroAddress])).to.be.revertedWithCustomError(router, "ZeroAddress");
       await expect(deployBridgeRouter([admin.address, ethers.ZeroAddress, spokeAddr, ethers.ZeroAddress])).to.be
-        .reverted;
-      await expect(deployBridgeRouter([admin.address, fr, ethers.ZeroAddress, ethers.ZeroAddress])).to.be.reverted;
+        .revertedWithCustomError(router, "ZeroAddress");
+      await expect(deployBridgeRouter([admin.address, fr, ethers.ZeroAddress, ethers.ZeroAddress])).to.be.revertedWithCustomError(router, "ZeroAddress");
     });
   });
 
@@ -739,6 +739,18 @@ describe("BridgeRouter", function () {
       await oracle.setSanctioned(member.address, false);
       await bridge(member, await args());
       expect(await spoke.lastDepositor()).to.equal(member.address);
+    });
+
+    it("refuses a deny-listed RECIPIENT even when the sender is clean (#1667)", async function () {
+      await guard.connect(admin).setDenied(recipient.address, true, "test deny-list");
+      await expect(bridge(member, await args()))
+        .to.be.revertedWithCustomError(guard, "SanctionedAddress")
+        .withArgs(recipient.address);
+      expect(await spoke.depositCount()).to.equal(0);
+
+      await guard.connect(admin).setDenied(recipient.address, false, "cleared");
+      await bridge(member, await args());
+      expect(await spoke.lastRecipient()).to.equal(recipient.address);
     });
 
     it("skips screening entirely when the guard is unset", async function () {

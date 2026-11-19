@@ -129,6 +129,8 @@ describeFork("Native USDC accepts smart-account (ERC-1271) EIP-3009 authorizatio
     });
     const signature = signAsPasskeyOwner(passkey, 0, await account.replaySafeHash(digest));
 
+    // ANY-REVERT: the refusal originates inside Circle's live FiatToken on the fork (a dependency we do
+    // not control); its reason string is theirs to change, and the property is only that it refuses.
     await expect(
       receiver.connect(deployer).pull(USDC, accountAddr, value - 1n, 0, now + 3600, nonce, signature)
     ).to.be.reverted;

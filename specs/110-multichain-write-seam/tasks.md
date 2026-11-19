@@ -182,8 +182,19 @@ its phase. Counts marked *(re-measure)* are re-taken at phase start — they dri
       other direction, and it is the second divergence in this migration that fails toward a
       CONFIDENT WRONG ANSWER rather than toward reporting less. Keep an explicit checksum check;
       `viem/accounts` exports `english` but no `validateMnemonic`.
-- [ ] T023 [P] `lib/chain/revertError.js` → `decodeErrorResult` + `BaseError.walk()`; keep
-      `useAdminTx`'s per-call `errorAbi` contract (#1267).
+- [x] T023 [P] `lib/chain/revertError.js` → `decodeErrorResult` + `BaseError.walk()`; keep
+      `useAdminTx`'s per-call `errorAbi` contract (#1267). **Done in substance; ticked late (the
+      box was stale, found in the 2026-09-23 review of #1593).** Decoding is
+      `lib/evm/revertParser.js#errorParser(abi)` — a `{ parseError }` adapter over viem's
+      `decodeErrorResult` — and `revertError.js` stays library-neutral, so it cannot become a
+      second place that decides which ABI describes a failure. Two departures from the task text,
+      both deliberate: (1) the cause chain is walked by a bounded breadth-first search rather than
+      `BaseError.walk()`, because the revert bytes sit at a depth that varies by transport and
+      under a key that is `raw` in one shape and `data` in the other (DIVERGENCE 22 in the file
+      header) — a single-predicate walk has to encode both anyway; (2) viem returns error args as a
+      bare array where ethers also exposed them by name (DIVERGENCE 13), so `errorParser`
+      re-attaches the names — without that, `revert.args.nextAllowedAt` is silently `undefined`.
+      `useAdminTx` still takes `errorAbi` per call and routes it through `errorParser`.
 
 **The seam:**
 

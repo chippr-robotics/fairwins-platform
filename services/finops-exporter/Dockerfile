@@ -7,7 +7,7 @@
 # HOLDS NO KEYS AND CANNOT HOLD ONE. There is no signer in this service and no write route: it
 # reports on money and must never be able to move any (FR-026). Vendor READ tokens are injected at
 # runtime from Secret Manager and are never baked in.
-FROM node:20-alpine AS deps
+FROM node:22.23.3-alpine3.24 AS deps
 WORKDIR /app
 # Spec 075: a workspace member's dependencies live in the single ROOT lockfile. Copy the root
 # manifest+lock plus this workspace's manifest, then install only this workspace.
@@ -21,7 +21,7 @@ COPY packages/finops-catalogue/package.json ./packages/finops-catalogue/
 RUN npm ci --omit=dev --no-audit --no-fund \
       --workspace fairwins-finops-exporter --include-workspace-root=false
 
-FROM node:20-alpine AS runtime
+FROM node:22.23.3-alpine3.24 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 COPY --from=deps /app/node_modules ./node_modules

@@ -232,7 +232,7 @@ export const NAV_DESTINATIONS = [
     summary: 'Cold storage: add and use Ledger or Trezor accounts.',
     path: '/wallet?tab=custody',
     hash: '#custody-offchain',
-    keywords: ['hardware wallet', 'ledger', 'trezor', 'cold storage', 'offline', 'off chain', 'device', 'usb wallet'],
+    keywords: ['hardware wallet', 'ledger', 'trezor', 'sigil', 'floppy', 'mpc', 'cold signer', 'cold storage', 'offline', 'off chain', 'device', 'usb wallet'],
   },
 
   // ─── Tools ▸ Recovery (specs 032 / 045 / 062) — AccordionSection cards ────────────────────

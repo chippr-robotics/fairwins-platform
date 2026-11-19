@@ -71,8 +71,8 @@ describe('WagerPool — relayer twins (…WithSig)', function () {
   }
   async function resolvedPool() {
     const { pool, entries, pid } = await proposedPool();
-    await pool.connect(creator).approve();
-    await pool.connect(m2).approve(); // locks
+    await pool.connect(creator).approve(await pool.currentProposalId());
+    await pool.connect(m2).approve(await pool.currentProposalId()); // locks
     return { pool, entries, pid };
   }
   async function cancelledPool() {

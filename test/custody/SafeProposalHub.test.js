@@ -55,7 +55,8 @@ describe("SafeProposalHub", function () {
     // via SELFDESTRUCT is not preventable by any contract, so we assert the reachable property: normal sends
     // revert and the balance stays zero.)
     const addr = await hub.getAddress();
-    await expect(alice.sendTransaction({ to: addr, value: 1n })).to.be.reverted;
+    // ANY-REVERT: no receive/fallback — refused with empty revert data, so there is no reason to name.
+    await expect(alice.sendTransaction({ to: addr, value: 1n })).to.be.revertedWithoutReason();
     expect(await ethers.provider.getBalance(addr)).to.equal(0n);
   });
 });

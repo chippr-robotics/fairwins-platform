@@ -464,6 +464,8 @@
   /* hardware vendor marks (spec 085) — vendor identity, deliberately not brand */
   --hw-ledger-color: #1C333B;
   --hw-trezor-color: #1F5966;
+  /* Sigil (spec 111) is a Chippr product, so its mark is the brand's own text-safe teal. */
+  --hw-sigil-color: var(--accent-color);
 
   --shadow-xl: var(--shadow-lg);
 }

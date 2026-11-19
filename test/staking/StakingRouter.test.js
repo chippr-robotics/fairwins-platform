@@ -64,7 +64,7 @@ describe("StakingRouter", function () {
     });
 
     it("reverts on a zero admin or feeRouter", async function () {
-      await expect(newRouter(ethers.ZeroAddress)).to.be.reverted; // feeRouter zero
+      await expect(newRouter(ethers.ZeroAddress)).to.be.revertedWithCustomError(router, "ZeroAddress"); // feeRouter zero
     });
   });
 

@@ -84,27 +84,41 @@ async function createKmsTransactionSigner({ keyName, provider }) {
     throw new Error('KMS signature: could not recover signer parity — wrong key for this address?');
   }
 
-  /** Build, sign and broadcast an EIP-1559 transaction. Returns the mined receipt. */
+  /**
+   * Build, sign and broadcast a transaction. Returns the mined receipt.
+   *
+   * TYPE IS CHOSEN BY ASKING THE CHAIN, NOT BY A LIST. Ethereum Classic never adopted EIP-1559, so
+   * Mordor 63 and ETC 61 reject a type-2 transaction outright:
+   *
+   *     transaction type not supported: type 2 rejected, pool not yet in London
+   *
+   * This signer hardcoded `type: 2` and, having had no callers until now, had never met that. The
+   * detection is the same fact the error names: a chain that has activated London puts
+   * `baseFeePerGas` in its blocks, and one that has not does not. Reading it self-corrects if ETC
+   * ever activates London, where a hardcoded chain-id list would silently keep sending legacy
+   * transactions and overpaying forever.
+   *
+   * Note `getFeeData()` is NOT a reliable signal here — ethers synthesises `maxFeePerGas` from
+   * `gasPrice` on a pre-London chain, so it comes back non-null and looks like 1559 support.
+   */
   async function sendTransaction({ to, data = '0x', value = 0n, gasLimit }) {
-    const [net, nonce, fee] = await Promise.all([
+    const [net, nonce, fee, block] = await Promise.all([
       provider.getNetwork(),
       provider.getTransactionCount(address, 'pending'),
       provider.getFeeData(),
+      provider.getBlock('latest'),
     ]);
 
     const limit = gasLimit ?? ((await provider.estimateGas({ from: address, to, data, value })) * 12n) / 10n;
+    const london = block?.baseFeePerGas != null;
 
-    const tx = ethers.Transaction.from({
-      type: 2,
-      chainId: net.chainId,
-      to,
-      data,
-      value,
-      nonce,
-      gasLimit: limit,
-      maxFeePerGas: fee.maxFeePerGas,
-      maxPriorityFeePerGas: fee.maxPriorityFeePerGas,
-    });
+    const common = { chainId: net.chainId, to, data, value, nonce, gasLimit: limit };
+    const tx = ethers.Transaction.from(
+      london
+        ? { ...common, type: 2, maxFeePerGas: fee.maxFeePerGas, maxPriorityFeePerGas: fee.maxPriorityFeePerGas }
+        // Pre-London: type 0 with a flat gasPrice. `fee.gasPrice` is what the node itself suggests.
+        : { ...common, type: 0, gasPrice: fee.gasPrice },
+    );
 
     tx.signature = await signDigest(tx.unsignedHash);
     const sent = await provider.broadcastTransaction(tx.serialized);

@@ -26,6 +26,10 @@ gateway_secret_ids = [
   "origin-lock-secret",
   "relay-webhook-secret",
   "relay-engine-api-key",
+  # #1652: the engine's at-rest encryption key for its redis state, delivered to engine.env ONLY by
+  # fetch-secrets.sh. REQUIRED, not optional: the engine refuses to boot in redis storage mode
+  # without it. Granted to this node because the engine container runs on it.
+  "relay-engine-storage-key",
   # FinOps exporter + Alloy (spec 089). All OPTIONAL: an absent vendor credential makes that source
   # `not-configured`, which is a first-class honest state, never a fabricated zero (FR-006).
   "finops-cloudflare-token",
@@ -67,6 +71,10 @@ managed_secret_ids = [
   "alto-executor-key-137",
   "relay-webhook-secret",
   "relay-engine-api-key",
+  # #1652. Container only — the payload is created out of band (guardrail G-04). Losing or rotating
+  # it makes the engine's encrypted redis records undecryptable, so it is under prevent_destroy with
+  # the rest of this list.
+  "relay-engine-storage-key",
   # spec 089. Containers only — payloads are created out of band (guardrail G-04). Every one holds a
   # READ-only vendor credential; the exporter must never hold anything that can move value (FR-026).
   "finops-cloudflare-token",

@@ -59,12 +59,20 @@ export default function HardwareConnectDialog({ open, entry, onClose, onConnecte
   const busy = phase === 'connecting'
 
   return (
-    <ActionSheet open={open} onClose={close} title="Connect your device" closeDisabled={busy}>
+    <ActionSheet open={open} onClose={close} title="Connect your device" closeDisabled={busy} tier="ceremony">
       <div className="recover-step">
-        <p>
-          Act as <code>{shortAddr(entry?.address)}</code> — every action will be confirmed on your{' '}
-          {vendorLabel} screen while the app signs with this account on {networkName}.
-        </p>
+        {entry?.vendor === 'sigil' ? (
+          // Sigil has no screen: its consent is the disk in the drive, one presignature per signature.
+          <p>
+            Act as <code>{shortAddr(entry?.address)}</code> — every signature needs this account&apos;s Sigil disk in
+            the drive and uses one of its presignatures while the app signs with this account on {networkName}.
+          </p>
+        ) : (
+          <p>
+            Act as <code>{shortAddr(entry?.address)}</code> — every action will be confirmed on your{' '}
+            {vendorLabel} screen while the app signs with this account on {networkName}.
+          </p>
+        )}
         <p className="recover-step__hint">{entry?.vendor ? guidance(entry.vendor).reconnectHint : ''}</p>
         {error && (
           <p role="alert" className="lkr-notice lkr-notice--error">

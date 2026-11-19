@@ -274,6 +274,9 @@ contract BridgeRouter is IBridgeRouter, UUPSManaged, ReentrancyGuardUpgradeable,
         }
 
         _screen(msg.sender);
+        // The recipient is screened too: the README's "screening at the contract layer" must hold for a
+        // direct call, not only for the app (which always bridges to the sender). Issue #1667.
+        if (recipient != msg.sender) _screen(recipient);
 
         IFeeRouter router = IFeeRouter(feeRouter);
         (uint256 fee, uint256 net) = router.quoteFee(bridgeTransferServiceId, inputAmount);

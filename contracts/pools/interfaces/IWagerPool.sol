@@ -62,7 +62,7 @@ interface IWagerPool {
 
     // ---- Resolution (FR-020: creator proposes the full validated matrix, members approve) ----
     function proposeOutcome(PayoutEntry[] calldata entries) external; // onlyCreator, while JoiningClosed
-    function approve() external;
+    function approve(bytes32 proposalId) external; // must equal currentProposalId
 
     // ---- Payout / refund ----
     /// @notice Claim a winning share to any `recipient`. `msg.sender` must equal

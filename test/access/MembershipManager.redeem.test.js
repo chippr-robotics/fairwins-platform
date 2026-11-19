@@ -122,7 +122,7 @@ describe("MembershipManager.redeemVoucher", function () {
 
     const id = await mintTo(alice);
     await oracle.setSanctioned(alice.address, true);
-    await expect(mgr.connect(alice).redeemVoucher(id, TERMS)).to.be.reverted; // fail-closed
+    await expect(mgr.connect(alice).redeemVoucher(id, TERMS)).to.be.revertedWithCustomError(guard, "SanctionedAddress").withArgs(alice.address); // fail-closed
     expect(await voucher.ownerOf(id)).to.equal(alice.address); // NOT burned — re-tradable
     expect(await mgr.hasActiveRole(alice.address, WAGER_PARTICIPANT_ROLE)).to.equal(false);
 

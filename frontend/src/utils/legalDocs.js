@@ -19,7 +19,7 @@
  */
 
 import { sha256 } from '@noble/hashes/sha2.js'
-import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils'
+import { bytesToHex, utf8ToBytes } from '@noble/ciphers/utils.js'
 
 // Versioned document sources (Vite ?raw). Each VERSION is pinned to IPFS per-version (not
 // per-event) and recorded on-chain by hash at consent (Spec 007, FR-017–FR-030).

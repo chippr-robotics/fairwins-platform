@@ -334,7 +334,8 @@ export function usePools() {
       const { signer: s } = await requireContext()
       if (!s) throw new Error('No signer available for self-submitted approval.')
       step?.('Confirm the approval in your wallet…')
-      const tx = await s.sendTransaction({ to: poolAddress, data: encodePoolCall('approve', []) })
+      // approve(proposalId) reverts if the creator revised the matrix after we read it (#1667).
+      const tx = await s.sendTransaction({ to: poolAddress, data: encodePoolCall('approve', [proposalId]) })
       step?.('Submitting your approval on-chain…')
       return tx.wait()
     },
@@ -639,8 +640,9 @@ export function usePools() {
     setError(null)
     try {
       const { signer: writeSigner, chainId: activeChainId } = await requireContext()
-      // Pin the CURRENT proposalId the member is approving — approveWithSig binds it so a relayer can
-      // never retarget the approval to a matrix the member never saw (anti-rug).
+      // Pin the CURRENT proposalId the member is approving — EVERY rail binds it (approveWithSig and
+      // approve(proposalId) both revert on a stale id), so neither a relayer nor a creator re-proposing
+      // ahead of us can retarget the approval to a matrix the member never saw (anti-rug, #1667).
       const proposalId = await readPool(activeChainId, poolAddress, 'currentProposalId')
       if (!proposalId || proposalId === zeroHash) {
         throw new Error('There is no proposed payout to approve yet.')
@@ -653,7 +655,7 @@ export function usePools() {
       } else {
         const send = requireSendCalls()
         step('Confirm the approval in your wallet…')
-        const submitted = await send([{ target: poolAddress, data: encodePoolCall('approve', []), value: 0n }])
+        const submitted = await send([{ target: poolAddress, data: encodePoolCall('approve', [proposalId]), value: 0n }])
         txHash = submitted?.txHash ?? submitted?.userOpHash ?? submitted?.intentId
         if (!txHash) throw new Error('Approval submitted but no transaction hash was returned.')
       }

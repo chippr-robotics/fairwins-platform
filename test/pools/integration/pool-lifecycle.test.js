@@ -54,8 +54,8 @@ describe('WagerPool lifecycle (compliance enabled)', function () {
       { winner: m2.address, amount: usdc(8) },
     ];
     await pool.connect(creator).proposeOutcome(entries);
-    await pool.connect(creator).approve();
-    await pool.connect(m2).approve(); // locks
+    await pool.connect(creator).approve(await pool.currentProposalId());
+    await pool.connect(m2).approve(await pool.currentProposalId()); // locks
     expect(await pool.state()).to.equal(2n);
 
     await pool.connect(creator).claim(entries, 0, recipient.address);

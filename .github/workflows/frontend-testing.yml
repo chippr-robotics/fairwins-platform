@@ -140,7 +140,7 @@ jobs:
         working-directory: .  # root install; the child has no lockfile (spec 075)
 
       - name: Install Lighthouse CI
-        run: npm install -g @lhci/cli@0.13.x
+        run: npm install -g @lhci/cli@0.13.0
 
       - name: Build frontend
         run: npm run build

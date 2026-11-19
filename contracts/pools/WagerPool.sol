@@ -324,9 +324,14 @@ contract WagerPool is Initializable, ReentrancyGuardUpgradeable, SignerIntentBas
         emit OutcomeProposed(proposalId, entries);
     }
 
-    /// @notice A joined member approves the current proposal (one approval per member per proposal). The
-    ///         pool resolves once approvals reach the fraction-of-joined threshold.
-    function approve() external {
+    /// @notice A joined member approves `proposalId` (one approval per member per proposal). The pool
+    ///         resolves once approvals reach the fraction-of-joined threshold.
+    /// @dev `proposalId` MUST equal `currentProposalId`, exactly as in {approveWithSig}. Approving
+    ///      "whatever is current at execution" let a creator re-propose a self-dealing matrix (that
+    ///      already held their own approval) ahead of a member's pending approve, so the member's vote
+    ///      landed on — and locked — a matrix they never saw (issue #1667).
+    function approve(bytes32 proposalId) external {
+        if (currentProposalId != proposalId) revert OutcomeMismatch();
         _approveBy(msg.sender);
     }
 

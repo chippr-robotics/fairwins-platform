@@ -19,9 +19,8 @@ import { ml_kem768 } from '@noble/post-quantum/ml-kem.js'
 import { hkdf } from '@noble/hashes/hkdf.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { sha3_256 } from '@noble/hashes/sha3.js'
-import { chacha20poly1305, xchacha20poly1305 } from '@noble/ciphers/chacha'
-import { randomBytes } from '@noble/ciphers/webcrypto'
-import { bytesToHex, hexToBytes, utf8ToBytes, concatBytes } from '@noble/ciphers/utils'
+import { chacha20poly1305, xchacha20poly1305 } from '@noble/ciphers/chacha.js'
+import { bytesToHex, hexToBytes, utf8ToBytes, concatBytes, randomBytes } from '@noble/ciphers/utils.js'
 import { keccak256, stringToBytes, toBytes } from 'viem'
 import {
   CURRENT_ENCRYPTION_VERSION,

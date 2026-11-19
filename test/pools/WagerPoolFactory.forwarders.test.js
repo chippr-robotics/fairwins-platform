@@ -75,8 +75,8 @@ describe('WagerPoolFactory — relayer forwarders (Tier 2)', function () {
   }
   async function resolvedPool() {
     const { pool, entries, pid } = await proposedPool();
-    await pool.connect(creator).approve();
-    await pool.connect(m2).approve(); // locks (100% threshold)
+    await pool.connect(creator).approve(await pool.currentProposalId());
+    await pool.connect(m2).approve(await pool.currentProposalId()); // locks (100% threshold)
     return { pool, entries, pid };
   }
 

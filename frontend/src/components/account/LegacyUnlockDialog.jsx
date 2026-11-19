@@ -59,7 +59,7 @@ export default function LegacyUnlockDialog({ open, entry, onClose, onUnlocked, d
   const busy = phase === 'unlocking'
 
   return (
-    <ActionSheet open={open} onClose={close} title="Use this account" closeDisabled={busy}>
+    <ActionSheet open={open} onClose={close} title="Use this account" closeDisabled={busy} tier="ceremony">
       <div className="recover-step">
         <p>
           Act as <code>{shortAddr(entry?.address)}</code> — the app will sign with this recovered account on{' '}

@@ -26,7 +26,7 @@
     "test:fork": "hardhat test test/fork/*.test.js",
     "test:all": "hardhat test test/**/*.test.js",
     "test:gas": "REPORT_GAS=true hardhat test",
-    "test:coverage": "COVERAGE=true TZ=UTC hardhat coverage --testfiles '{test/*.test.js,test/access/**/*.test.js,test/account/**/*.test.js,test/bridge/**/*.test.js,test/clearpath/**/*.test.js,test/custody/**/*.test.js,test/intent/**/*.test.js,test/liquidity/**/*.test.js,test/oracles/**/*.test.js,test/pools/**/*.test.js,test/staking/**/*.test.js,test/tokens/**/*.test.js,test/upgradeable/**/*.test.js,test/integration/**/*.test.js}'",
+    "test:coverage": "COVERAGE=true TZ=UTC hardhat coverage --testfiles '{test/*.test.js,test/access/**/*.test.js,test/account/**/*.test.js,test/bridge/**/*.test.js,test/clearpath/**/*.test.js,test/custody/**/*.test.js,test/intent/**/*.test.js,test/liquidity/**/*.test.js,test/oracles/**/*.test.js,test/pools/**/*.test.js,test/staking/**/*.test.js,test/tokens/**/*.test.js,test/upgradeable/**/*.test.js,test/integration/**/*.test.js,test/negative/**/*.test.js}'",
     "deploy:local": "hardhat run scripts/deploy/deploy.js --network localhost",
     "deploy:mordor": "hardhat run scripts/deploy/deploy.js --network mordor",
     "deploy:polygon": "hardhat run scripts/deploy/deploy.js --network polygon",
@@ -88,6 +88,8 @@
     "check:chainlink-closure": "node scripts/security/chainlink-closure.js",
     "dismiss:alerts": "node scripts/security/dismiss-alerts.js",
     "check:iac": "node scripts/infra/check-iac-guardrails.js",
+    "audit:admin-roles": "node scripts/ops/audit-admin-roles.js",
+    "ops:revoke-stale-admin": "node scripts/ops/revoke-stale-admin.js",
     "check:finops": "node scripts/finops/check-finops-coverage.js",
     "e2e:matrix": "node scripts/e2e/generate-coverage-matrix.js",
     "check:e2e-matrix": "node scripts/e2e/generate-coverage-matrix.js --check",
@@ -96,6 +98,8 @@
     "check:ci-gating": "node scripts/ci/check-ci-gating.js",
     "check:build-args": "node scripts/ci/check-build-args.js && node --test scripts/ci/__tests__/check-build-args.test.js",
     "test:ci": "node --test \"scripts/ci/__tests__/*.test.js\"",
+    "test:contract-gates": "node --test \"scripts/coverage/__tests__/*.test.js\"",
+    "check:contract-gates": "node scripts/coverage/check-policy-completeness.js && node scripts/coverage/check-revert-coverage.js && node scripts/coverage/check-bare-reverts.js",
     "test:specs": "node --test \"scripts/specs/__tests__/*.test.js\"",
     "e2e:split": "node scripts/e2e/split-full-tier.js",
     "e2e:split:fast": "node scripts/e2e/split-fast-tier.js",
@@ -120,6 +124,9 @@
     "check:env-hygiene": "node scripts/secrets/check-env-hygiene.js",
     "check:dep-alerts": "node scripts/security/check-dependency-alerts.js",
     "check:dep-alerts:live": "node scripts/security/check-dependency-alerts.js --live",
+    "check:version-pins": "node scripts/deps/check-version-pins.js",
+    "check:version-pins:live": "node scripts/deps/check-version-pins.js --live",
+    "test:version-pins": "node --test \"scripts/deps/__tests__/*.test.js\"",
     "test:dep-alerts": "node --test \"scripts/security/__tests__/*.test.js\"",
     "test:secrets": "node --test \"scripts/secrets/__tests__/*.test.js\""
   },
@@ -176,6 +183,12 @@
   "overrides": {
     "@safe-global/safe-contracts": {
       "ethers": "$ethers"
+    },
+    "@coinbase/cdp-sdk": {
+      "axios": "^1.19.0"
+    },
+    "@stellar/stellar-sdk": {
+      "toml": "^5.0.1"
     },
     "@ledgerhq/hw-app-eth": {
       "axios": "^1.19.0"

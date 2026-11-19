@@ -1,0 +1,4 @@
+{
+  "_comment": "Shrink-only per-file baseline for scripts/coverage/check-bare-reverts.js (spec 112 FR-007/FR-008). Counts of unannotated bare .reverted / .revertedWithoutReason assertions. A file may not exceed its count and a new file may not appear; the gate also FAILS if an entry overstates the real count, so whoever converts a site must lower (or delete) the entry in the same change. Annotated sites (// ANY-REVERT: <reason>) are not counted.",
+  "files": {}
+}

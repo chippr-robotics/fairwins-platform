@@ -57,7 +57,7 @@ describe('FundingPool — …WithSig twins + EIP-3009 contribute', function () {
       pool.connect(relayer).contributeWithAuthorization(
         c1.address, usdc(12), auth.validAfter, auth.validBefore, auth.nonce, auth.v, auth.r, auth.s
       )
-    ).to.be.reverted;
+    ).to.be.revertedWithCustomError(token, "InvalidSignature");
     expect(await pool.contributed(c1.address)).to.equal(0n);
     expect(await pool.contributorCount()).to.equal(0);
   });

@@ -49,6 +49,10 @@ const MANAGED = [
   { key: "membershipManager", contract: "MembershipManager" },
   { key: "callsignRegistry", contract: "CallsignRegistry" },
   { key: "wagerPoolFactory", contract: "WagerPoolFactory" },
+  // spec 103 (#1410). deploy-funding-pool-factory.js now initialises with the chain's admin Safe
+  // (#966), so a fresh deploy needs no handoff; factories deployed before that, or with
+  // POOL_ADMIN=deployer, hold a deployer admin and need the same handoff as the rest.
+  { key: "fundingPoolFactory", contract: "FundingPoolFactory" },
 ];
 
 /** Every `X_ROLE()` view a contract exposes — so a new role cannot be silently left behind. */

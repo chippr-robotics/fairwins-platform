@@ -5,6 +5,7 @@ import { createRequire } from 'module'
 import { fileURLToPath } from 'url'
 import { dirname, resolve } from 'path'
 import clearpathTasks from './cypress/support/tasks/clearpath.js'
+import sigilTasks from './cypress/support/tasks/sigil.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 
@@ -164,7 +165,7 @@ const POOL_ABI = [
   'function closeJoining()',
   'function cancel()',
   'function proposeOutcome((address winner,uint256 amount)[] entries)',
-  'function approve()',
+  'function approve(bytes32 proposalId)',
   'function claim((address winner,uint256 amount)[] entries, uint256 index, address recipient)',
   'function refund()',
   'function state() view returns (uint8)',
@@ -902,7 +903,8 @@ export default defineConfig({
             }
             case 'approvePoolOutcome': {
               const apw = new ethers.Wallet(ACCOUNT_KEYS[args.callerIndex ?? 0], provider)
-              tx = await new ethers.Contract(args.pool, POOL_ABI, apw).approve()
+              const apool = new ethers.Contract(args.pool, POOL_ABI, apw)
+              tx = await apool.approve(await apool.currentProposalId())
               break
             }
             case 'claimPool': {
@@ -2837,6 +2839,7 @@ export default defineConfig({
          * chain. See frontend/cypress/support/tasks/clearpath.js.
          */
         ...clearpathTasks(config),
+        ...sigilTasks(config),
       })
 
       /*

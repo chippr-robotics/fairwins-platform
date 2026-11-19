@@ -45,5 +45,21 @@ node scripts/coverage/check-thresholds.js \
   --policy coverage-threshold-policy.json --scope all
 ```
 
+## Negative-path gates (spec 112)
+
+Coverage proves a revert line RAN, not that a test asserted WHICH revert fired, and it only
+enforces what the policy lists. Three static, dependency-free gates (no compile, no coverage run)
+close that; each is proven by must-fail fixtures (`npm run test:contract-gates`) and runs in the
+`Contract Negative-Path Gates` job of `test.yml` (`npm run check:contract-gates` locally).
+
+| Script | Fails when | Ratchet file |
+|--------|-----------|--------------|
+| `check-policy-completeness.js` | a first-party `.sol` under a value directory is in none of `gated` / `reportOnly` / `excluded` (interface-only and signature-only abstract files are skipped) | the policy itself |
+| `check-revert-coverage.js` | a named revert (`revert X()`, `require(c, X())`, `require(c, "m")`) is raised but no test asserts it by name, or an allowlist entry is now asserted / no longer raised | `revert-allowlist.json` (shrink-only, a `reason` per entry) |
+| `check-bare-reverts.js` | `.to.be.reverted` / `.revertedWithoutReason` without `// ANY-REVERT: <reason>` rises above the per-file baseline, or the baseline overstates | `bare-revert-baseline.json` (shrink-only) |
+
+Both ratchets fail in BOTH directions on purpose: whoever writes the missing test must delete the
+entry in the same change, so the files can only get shorter. Never add to either to get green.
+
 See `specs/046-contract-audit-coverage/` for the spec, plan, and the policy/gate
 interface contract (`contracts/coverage-threshold-policy.md`).
