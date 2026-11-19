@@ -27,10 +27,17 @@
   listen: restart nginx
   notify: restart nginx service
 
-- name: Restart nginx service
-  # `try-restart`, not `state: restarted`: the latter STARTS a stopped unit, and nginx is left
-  # stopped on purpose until the Origin CA certificate is installed (see tasks/main.yml).
-  ansible.builtin.command:
-    cmd: systemctl try-restart nginx
+- name: Read nginx service state before restarting
+  ansible.builtin.service_facts:
   become: true
+  listen: restart nginx service
+
+- name: Restart nginx service
+  # Only if it is already running: `state: restarted` STARTS a stopped unit, and nginx is left
+  # stopped on purpose until the Origin CA certificate is installed (see tasks/main.yml).
+  ansible.builtin.systemd_service:
+    name: nginx
+    state: restarted
+  become: true
+  when: ansible_facts.services['nginx.service'].state | default('') == 'running'
   listen: restart nginx service

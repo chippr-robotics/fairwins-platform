@@ -9,6 +9,7 @@
   ansible.builtin.apt:
     name: nginx
     state: latest
+    only_upgrade: true   # nginx is installed by the VM startup script; this only ever upgrades it
     update_cache: true
     cache_valid_time: 3600
   become: true
