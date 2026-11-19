@@ -150,7 +150,7 @@ ENV VITE_GIT_SHA=${VITE_GIT_SHA}
 RUN npm run build
 
 # Stage 2: Serve with nginx
-FROM nginx:1.30.5-alpine
+FROM nginx:1.30.7-alpine
 
 # Install envsubst for runtime environment variable substitution
 RUN apk add --no-cache gettext
