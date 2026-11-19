@@ -40,9 +40,9 @@ updates:
           - "@uma/core"
           - "@safe-global/safe-contracts"
       # Minor + patch ONLY. Majors open as their own PRs, because a major is a migration, not a
-      # bump: #1702 grouped 24 updates and carried four independent breakages at once (Cypress 16
-      # removed `Cypress.env()`; vitest 5; jsdom 31; dotenv 18), none of which could land until
-      # all of them did.
+      # bump: #1702 grouped 24 updates including Cypress 16 (which removed `Cypress.env()`, used
+      # across the e2e suite), vitest 5, jsdom 31 and dotenv 18, and none of the routine bumps
+      # could land until every migration did.
       dev-tooling:
         dependency-type: development
         update-types: ["minor", "patch"]
@@ -55,10 +55,6 @@ updates:
           # MiniAppRegistry (spec 075 FR-022): a vite bump must travel alone, with its baseline
           # re-record and the re-publish/re-approval plan — never inside a routine group.
           - "vite"
-          # The local chain the contract suite runs on. hardhat 2.28 -> 2.29 (a MINOR) broke the
-          # StandardDAOFactory timelock lifecycle test in #1702 with bytecode unchanged; it gets
-          # its own PR so a test-harness change is never mistaken for noise in a group.
-          - "hardhat"
     ignore:
       # Pinned deliberately: hardhat's internal evmVersion default is a build input (spec 075
       # FR-001), so a major bump must be adopted with the byte-diff gate, not auto-merged.
