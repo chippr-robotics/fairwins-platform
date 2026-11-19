@@ -131,7 +131,9 @@ export default function PerpsPositions({
                       href={href}
                       target="_blank"
                       rel="noopener noreferrer"
-                      aria-label={`Manage this position on ${venueLabel} (opens in a new tab)`}
+                      // WCAG 2.5.3: the accessible name must START with the visible text, or a speech-input user
+                      // saying what they see ("click Manage on venue") cannot activate it.
+                      aria-label={`Manage on venue: this position on ${venueLabel} (opens in a new tab)`}
                     >
                       Manage on venue ↗
                     </a>

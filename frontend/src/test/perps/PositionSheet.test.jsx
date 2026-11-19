@@ -252,7 +252,7 @@ describe('the position as the venue reports it', () => {
     renderSheet()
     await settle()
     expect(screen.getByText(/On Gains Network/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Manage this position on Gains Network/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Manage on [^:]*: this position on Gains Network/ })).toHaveAttribute(
       'href',
       expect.stringContaining('gains.trade'),
     )
@@ -525,7 +525,7 @@ describe('the async lifecycle', () => {
     )
     // Still exitable — a refusal by the venue is not the end of the member's options.
     expect(screen.getByRole('button', { name: 'Close this position' })).toBeEnabled()
-    expect(screen.getByRole('link', { name: /Manage this position on Gains Network/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Manage on [^:]*: this position on Gains Network/ })).toBeInTheDocument()
   })
 
   it('refuses with a plain reason, before any wallet prompt, when the venue handle is missing', async () => {
@@ -798,7 +798,7 @@ describe('confirming a Gains protection change from the venue (US2 acceptance 3)
     expect(onActionComplete).not.toHaveBeenCalled()
     // The way through is named, and it is the venue's own surface.
     expect(screen.getByText(/could not confirm what Gains stored/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Manage this position on Gains Network/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Manage on [^:]*: this position on Gains Network/ })).toBeInTheDocument()
     // The controls come back — a confirmation we lost must not leave the sheet frozen.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Save protection' })).toBeEnabled())
   })
