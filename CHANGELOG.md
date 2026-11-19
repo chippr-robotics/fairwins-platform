@@ -14,6 +14,118 @@ production releases are.
 
 <!-- RELEASES:START -->
 
+## v1.20.0 — 2026-11-19
+
+Promoted from: v1.20.0-rc.29
+Previous release: v1.19.1 · Range: `v1.19.1..v1.20.0` (122 commits)
+
+### 🚀 Features
+
+- feat(relayer): ship engine logs to Cloud Logging with the gcplogs driver
+- feat(relayer): persist engine state in Redis (AOF, noeviction, encrypted signers)
+- feat(supply-chain): version-pin policy + gate; hold OZ Relayer and mitigate #808 (#1648)
+- feat(111): Sigil cold signer in Protect ▸ Off chain (#1635)
+- feat(966): publish proposal preimages to SafeProposalHub so a UI can show them
+- feat(103): initialise the funding pool factory with the Safe, not the deployer
+- feat(966): revoke-stale-admin — remove the superseded Safe and retired EOA
+
+### 🐛 Bug Fixes
+
+- fix(deps): clear the open high/critical dependency alerts blocking the live gate
+- fix(ci): route Maven Central through Google's mirror for the Android builds
+- fix(dependabot): drop the hardhat exclusion — its stated reason was wrong
+- fix(a11y): Perps venue links' accessible names start with their visible text; split risky dev-tooling bumps
+- fix(infra): satisfy ansible-lint production profile in the nginx restart path
+- fix(infra): mitigate nginx2root — HTTP/2 off on VM origins, nginx 1.30.7, restart on upgrade
+- fix(coverage): credit revert assertions that Prettier wrapped with a trailing comma
+- fix(966): default the funding-pool admin to the deployer on local networks
+- fix(deps): upgrade @noble/ciphers to 2.x with a 1.x decrypt-compat fixture
+- fix(security): bind WagerPool approve to proposalId; screen bridge recipient
+- fix(ansible): keep the engine.env description under ansible-lint's 160-char line limit
+- fix(relayer): make Redis arming one-way; validate the storage key
+- fix(relayer): arm Redis storage from the secret, never hard-require it at boot
+- fix(relayer): move Polygon to EIP-1559 and re-derive its gas_price_cap
+- fix(supply-chain): close review bypasses in the version-pin gate; runbook ordering
+- fix(supply-chain): close version-pin gate coverage holes found in review
+- fix(ci): version-watch publish steps must not gate on hashFiles(runner.temp)
+- fix(deps): override the two nested pins behind the 12 runtime alerts (#1519)
+- fix(966): a failed receipt poll is not a failed transaction
+- fix(kms): choose transaction type by asking the chain, not by assuming London
+- fix(966): correct the admin-authority record, and make it reproducible
+
+### 📚 Documentation
+
+- docs(spec-112): plan and tasks for contract negative-path hardening
+- spec(112): reserve — contract-negative-path-testing
+- docs: transaction lifecycle across the network-agnostic write seam
+- docs(relayer): reference infra/vm paths as code, not out-of-tree links
+- docs(relayer): record the GCE VM estate as production; retire Cloud Run as history
+- docs(110): tick T023 — revert decoding was done, the box was stale
+- spec(111): reserve — sigil-cold-signer
+
+### 🧪 Tests
+
+- test: fix the intermittent StandardDAOFactory "moves treasury funds exactly once" failure
+- test(coverage): ratchet every gated contract's floor to its measured coverage
+- test(staking): send zero-address calls lazily so a revert is never unhandled
+- test(contracts): spec 112 T021 — close the revert allowlist to unreachable-only
+- test(coverage): count test/negative in coverage; prune 19 entries B2 now asserts
+- test(contracts): negative-path suites for intents, admin setters and named reverts
+- test(coverage): prune account allowlist entries and raise account floors
+- test(account): negative-path coverage for wallet, owners, factory, paymaster
+- test(coverage): drop the 17 oracle allowlist entries B3 now asserts
+- test(oracles): assert every adapter guard on its failing side (spec 112 B3)
+- test(contracts): add Medusa property harnesses for pools and routers
+- test(gates): reconcile the ratchets with #1681 and accept wrapped ANY-REVERT reasons
+- test(contracts): gate value contracts, revert coverage, bare reverts, PR-time Medusa
+- test(pools): adversarial attacker-ordering suites for WagerPool and FundingPool
+- test(pools): stop the random-sequence catch from swallowing assertion failures
+- test: assert specific revert reasons instead of bare .reverted
+- test(crypto): freeze @noble/ciphers 1.3.0 ciphertext as a decrypt-compat fixture
+
+### 🏗️ Infrastructure
+
+- build(relayer): make the engine image self-describing with OCI labels
+
+### 🧹 Maintenance
+
+- chore(security): renew the toml bridge acceptances one week to unjam the PR queue
+- chore(security): bridge the toml acceptances until #1588 reaches main
+- chore(security): re-anchor the two baselined BridgeRouter Slither findings
+- chore(e2e): soak alto v1.2.8 on the passkey stack only
+- chore(native): Gradle wrapper 8.14.5; register native toolchain pins
+- chore(infra): Terraform 1.15.9, google.cloud 1.15.0, community.docker 5.4.0
+- chore(supply-chain): pin floating CI/build tool versions
+- chore(ci): retire Manticore, pin Medusa/Slither/solc-select/crytic-compile
+- chore(supply-chain): point registry holds/exemptions at their follow-up issues
+- chore(agents): address roster review — colors, seams, writeRail path
+- chore(agents): add Claude subagent roster under .claude/agents
+- chore(deps): bump actions/checkout from 4 to 7
+- chore(deps): Bump @capacitor/core from 8.5.1 to 8.5.2
+- chore(deps): Bump @scure/bip32 from 2.3.0 to 2.4.0
+- chore(deps): Bump viem from 2.56.3 to 2.56.5
+- chore(deps): bump google-github-actions/auth from 2 to 3
+- chore(deps): bump hashicorp/setup-terraform from 3 to 4
+
+### Artifacts
+
+Range: `v1.19.1..v1.20.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | moved | `amoy-chain80002-v2/membershipManagerImpl` → `0xb6499596703cEE6eA4BE5b5F01DEc4d7ccfe10bD`<br>`amoy-chain80002-v2/wagerRegistryImpl` → `0xa2176F5Fea39888cD1697Be4651415490C78905d`<br>`amoy-chain80002-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`arbitrum-chain42161-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`arbitrum-chain42161-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`arbitrum-chain42161-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`arbitrum-chain42161-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`base-chain8453-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`base-chain8453-v2/bridgeRouterImpl` → `0x41ba6bcA216bd6A4c5A0Bf8F9b2d682ec0a879D5`<br>`base-chain8453-v2/liquidityRouterImpl` → `0x7Af46728e7c969b75723398E3f93b565E968A3bA`<br>`base-chain8453-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`etc-chain61-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mainnet-chain1-v2/feeRouterImpl` → `0x5cCd55D62Ce7Df730c39543B332dD8d6054B5d00`<br>`mainnet-chain1-v2/bridgeRouterImpl` → `0xcA277Cc3485Da12771d6171a9D0A894B8DD159f8`<br>`mainnet-chain1-v2/liquidityRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`mainnet-chain1-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/membershipManagerImpl` → `0x7D38F7Ef26f7E2409d5C04a62c1d9A3Ec002A49e`<br>`mordor-chain63-v2/wagerRegistryImpl` → `0x9FfE701be18Ff033706f2df19cd8730F5CB884B2`<br>`mordor-chain63-v2/tokenFactoryImpl` → `0x135108EB6f81e361b6cF131d2Cb9A01E92Cd8ED9`<br>`mordor-chain63-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`mordor-chain63-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`mordor-chain63-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`mordor-chain63-v2/openERC20V2Impl` → `0x92169007926fBc8Ac90cdD311dD3C2557158C395`<br>`mordor-chain63-v2/openERC721V2Impl` → `0xEeaBC05214FF0C42cbA42b365aB400b7ca4311cE`<br>`mordor-chain63-v2/restrictedERC20V2Impl` → `0x664d87bed13ea4D50Cd3da8e0aC5A8D70A302A0B`<br>`mordor-chain63-v2/externalDAORegistryImpl` → `0x28270cB71E87D2D6C662e61CFE6eD02d05d43B7A`<br>`mordor-chain63-v2/zkWagerPoolFactoryImpl` → `0xd3e851FDDa9D5796D503daFd34b2403D7336d9fD`<br>`mordor-chain63-v2/poolImpl` → `0xd0b94a77DA7Aaa488343CF89978f1Bbf9E72E277`<br>`mordor-chain63-v2/wagerPoolFactoryImpl` → `0xfB6F9F7EfD86a220eE1aD7906278247051B25430`<br>`mordor-chain63-v2/feeRouterImpl` → `0x744b8E56d84bb8D7657b2Bb13426cB882c93B7E6`<br>`mordor-chain63-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`mordor-chain63-v2/miniAppRegistryImpl` → `0xc8Dd8601b35aDa3AF367C9E41f24Fd0503Ced674`<br>`optimism-chain10-v2/feeRouterImpl` → `0x9B68fDbBaEaeafbe2349549A4994A4697462AFea`<br>`optimism-chain10-v2/bridgeRouterImpl` → `0x41ba6bca216bd6A4c5a0bf8F9B2d682EC0a879d5`<br>`optimism-chain10-v2/liquidityRouterImpl` → `0x7Af46728e7C969b75723398e3F93b565E968A3ba`<br>`optimism-chain10-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/membershipManagerImpl` → `0x7177470fE3c5D89CEf965A596540E57cE290C939`<br>`polygon-chain137-v2/wagerRegistryImpl` → `0x9c52C1ef4Bbe65CF19a5C26bebD4A22100964898`<br>`polygon-chain137-v2/tokenFactoryImpl` → `0xE819f7b672D81A8b78d40b1C99Fe5d646513D12C`<br>`polygon-chain137-v2/openERC20Impl` → `0xd8E67C6C058a6D35E69c691B44b8D5f858591971`<br>`polygon-chain137-v2/openERC721Impl` → `0x02819fd0d338F4C3FC58E6d9aF299ACA75d624BB`<br>`polygon-chain137-v2/restrictedERC20Impl` → `0x0dD67E2af8Ad301a3B5308c2AD41CCb2220b0444`<br>`polygon-chain137-v2/wagerPoolFactoryImpl` → `0x754d8aa4785Ec4bEE7c921f8d032D5E3a78d9308`<br>`polygon-chain137-v2/poolImpl` → `0xB153e4456FaD1A7E96e35e14094Cf6964348BC40`<br>`polygon-chain137-v2/accountImpl` → `0xfC5086A397e4FbAAF8f73892807415Da8d255E61`<br>`polygon-chain137-v2/callsignRegistryImpl` → `0xD220D34ed2148B9F4DC65C1bc75169D7DECFBB49`<br>`polygon-chain137-v2/feeRouterImpl` → `0x40ee755246E60f66E7bA425F99C6d704859d38db`<br>`polygon-chain137-v2/bridgeRouterImpl` → `0x8F7A7e7437733326BD2F8045BFceD9B821aF1De1`<br>`polygon-chain137-v2/liquidityRouterImpl` → `0x33818052Ca8B5b8Bb9777Bf6eBbaFCD8Faae6e65`<br>`polygon-chain137-v2/miniAppRegistryImpl` → `0x41858006aD6dd0788b84F9fb17A28d8167C7b331` |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.20.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.20.0.aab` | `d315945dc287dd5a533ddc38885de88953ace39bcb827cb52a2fec05ab0ea4d6` | yes |
+| ios | `FairWins-v1.20.0-ios.xcarchive.zip` | `accccae4cd0d1e15c1be9836caafd15b681af861d4879f33c8dc9b67546ec8db` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
 ## v1.19.1 — 2026-10-04
 
 Promoted from: none — released directly from main
