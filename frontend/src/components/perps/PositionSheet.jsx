@@ -952,7 +952,8 @@ export default function PositionSheet({
               href={venueUrl}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`Manage this position on ${venueMeta?.label ?? venueLabel} (opens in a new tab)`}
+              // WCAG 2.5.3: the accessible name starts with the visible text (see PerpsPositions).
+              aria-label={`Manage on ${venueLabel}: this position on ${venueMeta?.label ?? venueLabel} (opens in a new tab)`}
             >
               Manage on {venueLabel} ↗
             </a>

@@ -563,7 +563,7 @@ describe('PerpsView management controls', () => {
     // passes vacuously on an empty list and loses the race on a slow worker — which it did,
     // once, in the full-suite CI run. The never-stranded link is phase 0's own artifact.
     const manageLink = await screen.findByRole('link', {
-      name: /Manage this position on Gains Network/i,
+      name: /Manage on [^:]*: this position on Gains Network/i,
     })
     expect(manageLink).toBeInTheDocument()
 
@@ -626,7 +626,7 @@ describe('PerpsView management controls', () => {
     // Not a disabled button — no button at all, plus the honest per-venue statement.
     expect(screen.queryByRole('button', { name: /close or protect/i })).not.toBeInTheDocument()
     expect(screen.getByText(/Hyperliquid positions are read-only in FairWins this release/i)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: /Manage this position on Hyperliquid/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Manage on [^:]*: this position on Hyperliquid/i })).toBeInTheDocument()
   })
 
   it('states management per venue when one venue is manageable and another is not', async () => {
@@ -805,7 +805,7 @@ describe('PerpsView prices the exit from the venue’s own feed', () => {
     await waitFor(() => expect(screen.getByText(/keeper fee for this order could not be read/i)).toBeInTheDocument())
     // Refused BEFORE a wallet prompt, and the venue's own surface is named as the way through.
     expect(sheet.trade.sendOnChain).not.toHaveBeenCalled()
-    expect(screen.getAllByRole('link', { name: /Manage this position on GMX/i }).length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('link', { name: /Manage on [^:]*: this position on GMX/i }).length).toBeGreaterThan(0)
   })
 
   it('keeps the price when the member filters the pairs table down to nothing', async () => {
@@ -1313,7 +1313,7 @@ describe('PerpsView with the management flag OFF is exactly the phase-0 view', (
       wallet: { isConnected: true },
     })
     await waitFor(() => expect(screen.getByText('Your positions')).toBeInTheDocument())
-    expect(screen.getByRole('link', { name: /Manage this position on Gains Network/i })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /Manage on [^:]*: this position on Gains Network/i })).toBeInTheDocument()
     expect(screen.getByText(/positions are read-only in FairWins this release/i)).toBeInTheDocument()
   })
 })

@@ -757,7 +757,7 @@ describe('venue status', () => {
     expect(screen.queryByRole('button', { name: /Open this/ })).not.toBeInTheDocument()
     expect(screen.queryByLabelText(/^Amount/)).not.toBeInTheDocument()
     // Not a dead end: the venue's own surface stays a tap away.
-    expect(screen.getByRole('link', { name: /Trade BTC\/USD on Gains Network/ })).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: /^Trade on [^:]*: BTC\/USD on Gains Network/ })).toBeInTheDocument()
   })
 
   it('says plainly that nothing already held is affected', async () => {
