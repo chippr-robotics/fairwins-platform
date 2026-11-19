@@ -168,10 +168,29 @@ describe('PoolPage', () => {
     renderPoolAt(sum)
     expect(await screen.findByTestId('approval-progress')).toBeInTheDocument()
     await waitFor(() => expect(fetchProposedMatrix).toHaveBeenCalled())
+    // The lookup has ANSWERED with nothing: now, and only now, the page may say so.
+    expect(await screen.findByTestId('approve-needs-payout')).toBeInTheDocument()
+    expect(screen.queryByTestId('approve-loading-payout')).not.toBeInTheDocument()
     expect(screen.getByTestId('approve-outcome')).toBeDisabled()
-    expect(screen.getByTestId('approve-needs-payout')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('approve-outcome'))
     expect(vote).not.toHaveBeenCalled()
+  })
+
+  it('says it is still loading — not that the payout could not be shown — while the lookup is in flight', async () => {
+    const vote = vi.fn().mockResolvedValue('0xtx')
+    const sum = votingSummary()
+    let answer
+    const fetchProposedMatrix = vi.fn(() => new Promise((resolve) => { answer = resolve }))
+    usePools.mockReturnValue(base({ getPoolSummary: vi.fn().mockResolvedValue(sum), fetchProposedMatrix, vote }))
+    renderPoolAt(sum)
+    expect(await screen.findByTestId('approve-loading-payout')).toBeInTheDocument()
+    expect(screen.queryByTestId('approve-needs-payout')).not.toBeInTheDocument()
+    expect(screen.getByTestId('approve-outcome')).toBeDisabled()
+    // The lookup answers with the matrix: both hints go, and approval is offered.
+    answer(SHOWN)
+    await waitFor(() => expect(screen.getByTestId('approve-outcome')).toBeEnabled())
+    expect(screen.queryByTestId('approve-loading-payout')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('approve-needs-payout')).not.toBeInTheDocument()
   })
 
   it('re-reads the pool and says why when an approval is refused', async () => {

@@ -65,6 +65,7 @@ export default function PoolPage() {
   // `proposalNonce` when a member pastes a freshly-received payout (fallback path) so this re-reads.
   const [proposalNonce, setProposalNonce] = useState(0)
   const [verifiedProposal, setVerifiedProposal] = useState(null)
+  const [settledLookup, setSettledLookup] = useState(null)
 
   const reload = useCallback(async () => {
     try {
@@ -134,18 +135,28 @@ export default function PoolPage() {
           : readStoredMatrix(address)
       return stored ? { entries: stored.entries } : null
     }
+    // Which lookup has ANSWERED. Recorded from the callbacks, so "still looking" and "looked and found
+    // nothing" stay different facts: only the second may tell a member the payout could not be shown.
+    const lookup = `${address}:${summary.state}:${summary.currentProposalId ?? ''}:${proposalNonce}`
     fetchProposedMatrix(address)
       .then((entries) => {
         if (!active) return
         setVerifiedProposal(entries && entries.length ? { entries } : fromStore())
+        setSettledLookup(lookup)
       })
       .catch(() => {
-        if (active) setVerifiedProposal(fromStore())
+        if (!active) return
+        setVerifiedProposal(fromStore())
+        setSettledLookup(lookup)
       })
     return () => {
       active = false
     }
   }, [loaded, summary?.state, summary?.currentProposalId, address, proposalNonce, fetchProposedMatrix])
+
+  const proposalLookupSettled =
+    !!summary &&
+    settledLookup === `${address}:${summary.state}:${summary.currentProposalId ?? ''}:${proposalNonce}`
 
   // { addressLower → amount } for the roster, built directly from the verified matrix (winner = address).
   const payoutByAddress = useMemo(() => {
@@ -297,14 +308,21 @@ export default function PoolPage() {
                     data-testid="approve-outcome"
                     onClick={approve}
                     disabled={status === 'voting' || !reviewedProposalId}
-                    aria-describedby={reviewedProposalId ? undefined : 'approve-needs-payout'}
+                    aria-describedby={
+                      reviewedProposalId ? undefined : proposalLookupSettled ? 'approve-needs-payout' : 'approve-loading-payout'
+                    }
                   >
                     {status === 'voting' ? 'Approving…' : 'Approve the proposed payout'}
                   </Button>
-                  {!reviewedProposalId && (
+                  {!reviewedProposalId && !proposalLookupSettled && (
+                    <p className="pool-hint" id="approve-loading-payout" role="status" data-testid="approve-loading-payout">
+                      Loading the proposed payout…
+                    </p>
+                  )}
+                  {!reviewedProposalId && proposalLookupSettled && (
                     <p className="pool-hint" id="approve-needs-payout" data-testid="approve-needs-payout">
-                      The proposed payout could not be shown yet, so it cannot be approved. Paste the
-                      payout the creator shared below, or try again shortly.
+                      The proposed payout could not be shown, so it cannot be approved. Paste the payout
+                      the creator shared below, or try again shortly.
                     </p>
                   )}
                   {voteProgress && <p className="pool-hint" role="status" data-testid="vote-progress">{voteProgress}</p>}
