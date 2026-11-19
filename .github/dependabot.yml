@@ -39,13 +39,22 @@ updates:
           - "@chainlink/contracts"
           - "@uma/core"
           - "@safe-global/safe-contracts"
+      # Minor + patch ONLY. Majors open as their own PRs, because a major is a migration, not a
+      # bump: #1702 grouped 24 updates including Cypress 16 (which removed `Cypress.env()`, used
+      # across the e2e suite), vitest 5, jsdom 31 and dotenv 18, and none of the routine bumps
+      # could land until every migration did.
       dev-tooling:
         dependency-type: development
+        update-types: ["minor", "patch"]
         exclude-patterns:
           - "@openzeppelin/*"
           - "@chainlink/*"
           - "@uma/*"
           - "@safe-global/*"
+          # The BUNDLER changes mini-app output bytes, which are keccak-committed on-chain in
+          # MiniAppRegistry (spec 075 FR-022): a vite bump must travel alone, with its baseline
+          # re-record and the re-publish/re-approval plan — never inside a routine group.
+          - "vite"
     ignore:
       # Pinned deliberately: hardhat's internal evmVersion default is a build input (spec 075
       # FR-001), so a major bump must be adopted with the byte-diff gate, not auto-merged.
