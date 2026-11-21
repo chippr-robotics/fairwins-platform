@@ -54,6 +54,19 @@ async function waitReceipt(runner, txHash, tries = 8, delayMs = 1500) {
   return null
 }
 
+/**
+ * The on-chain proposal is no longer the one the member reviewed. Its own class so a surface can
+ * tell "the payout changed — show the new one" from any other failed approval, without matching on
+ * a sentence. Nothing has been signed when this is thrown.
+ */
+export class ProposalChangedError extends Error {
+  constructor() {
+    super('The proposed payout changed after you reviewed it. Check the new payout before approving.')
+    this.name = 'ProposalChangedError'
+    this.code = 'PROPOSAL_CHANGED'
+  }
+}
+
 const FACTORY_ABI_PARSED = normalizeAbi(WAGER_POOL_FACTORY_ABI)
 
 /** Parse the PoolCreated event from a create receipt into the hook's return shape. */
@@ -631,21 +644,41 @@ export function usePools() {
   }, [signer, proposeTx, requireContext, requireSendCalls])
 
   /**
-   * Member: approve the current proposal with your wallet (one approval per member per proposal). Plain
+   * Member: approve a proposal with your wallet (one approval per member per proposal). Plain
    * transaction — no ZK proof, no WASM. `onProgress(message)` reports the submission phase.
+   *
+   * `reviewedProposalId` is the id of the payout matrix THE MEMBER WAS SHOWN — the caller passes the
+   * hash of what it rendered. It is not optional and it is never replaced by a fresh read: every rail
+   * binds the id it is given (`approveWithSig` and `approve(proposalId)` both revert on a stale one),
+   * so the id submitted decides which matrix the vote can land on. Reading `currentProposalId` here
+   * and submitting THAT bound the vote to "whatever is current when the button is tapped" — a creator
+   * who re-proposed between the member reading the screen and tapping had the replacement read,
+   * pinned and approved, by all three rails (the residual of #1667). The read below is only an early,
+   * honest refusal; the contract is what enforces.
    */
-  const vote = useCallback(async (poolAddress, onProgress) => {
+  const vote = useCallback(async (poolAddress, reviewedProposalId, onProgress) => {
     const step = (m) => { try { onProgress?.(m) } catch { /* ignore */ } }
     setStatus('voting')
     setError(null)
     try {
+      const proposalId = typeof reviewedProposalId === 'string' ? reviewedProposalId.toLowerCase() : null
+      if (!proposalId || !/^0x[0-9a-f]{64}$/.test(proposalId) || proposalId === zeroHash) {
+        throw new Error('Review the proposed payout before approving it.')
+      }
       const { signer: writeSigner, chainId: activeChainId } = await requireContext()
-      // Pin the CURRENT proposalId the member is approving — EVERY rail binds it (approveWithSig and
-      // approve(proposalId) both revert on a stale id), so neither a relayer nor a creator re-proposing
-      // ahead of us can retarget the approval to a matrix the member never saw (anti-rug, #1667).
-      const proposalId = await readPool(activeChainId, poolAddress, 'currentProposalId')
-      if (!proposalId || proposalId === zeroHash) {
+      // Refuse BEFORE the wallet prompt when the chain already says the payout moved on. A failed
+      // read is not a mismatch: the submission carries the reviewed id and the contract decides.
+      let onChainId = null
+      try {
+        onChainId = await readPool(activeChainId, poolAddress, 'currentProposalId')
+      } catch {
+        onChainId = null
+      }
+      if (onChainId && onChainId === zeroHash) {
         throw new Error('There is no proposed payout to approve yet.')
+      }
+      if (onChainId && String(onChainId).toLowerCase() !== proposalId) {
+        throw new ProposalChangedError()
       }
       let txHash
       if (writeSigner) {
@@ -661,7 +694,13 @@ export function usePools() {
       }
       setStatus('idle')
       return txHash
-    } catch (e) {
+    } catch (raw) {
+      // The contract's own refusal — the proposal moved between the read above and inclusion — is the
+      // same fact as the early refusal, so it reaches the surface as the same error.
+      const mismatch =
+        !(raw instanceof ProposalChangedError) &&
+        /OutcomeMismatch/.test(`${raw?.shortMessage ?? ''} ${raw?.message ?? ''} ${raw?.cause?.data?.errorName ?? ''}`)
+      const e = mismatch ? new ProposalChangedError() : raw
       setStatus('error')
       setError(e?.shortMessage || e?.message || String(e))
       throw e

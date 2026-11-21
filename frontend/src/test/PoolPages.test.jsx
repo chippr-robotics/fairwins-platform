@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { ethers } from 'ethers'
 import { saveProposedMatrix } from '../lib/pools/proposalStore'
+import { payoutMatrixHash } from '../lib/pools/payout'
 
 // PoolPage (spec 034, address-based): the routed pool-management view — live state + the member's
 // address-derived alias (no signature, no reveal/restore) + the state-driven actions (creator
@@ -107,17 +108,103 @@ describe('PoolPage', () => {
     expect(screen.getByTestId('cancel-pool')).toBeInTheDocument()
   })
 
-  it('a joined member can approve the proposed outcome (with progress)', async () => {
+  // The approval is bound to the payout ON SCREEN (the residual of #1667). These three tests are the
+  // page's half of that: what it hands the hook, what it refuses to offer, and what it does when the
+  // hook says no. `SHOWN` is a real matrix so the id asserted below is a real hash of it, computed by
+  // the same helper the contract's proposalId is defined by — not a placeholder the page could echo.
+  const SHOWN = [
+    { winner: '0x1111111111111111111111111111111111111111', amount: 15000000n },
+    { winner: '0x2222222222222222222222222222222222222222', amount: 5000000n },
+  ]
+  const votingSummary = (over = {}) => ({
+    ...openSummary, state: 1, stateLabel: 'JoiningClosed', withinResolutionWindow: true,
+    currentProposalId: payoutMatrixHash(SHOWN), hasJoined: true, approvalCount: 1, requiredApprovals: 2,
+    ...over,
+  })
+
+  it('a joined member approves the payout the page is showing (with progress)', async () => {
     const vote = vi.fn().mockResolvedValue('0xtx')
-    const sum = {
-      ...openSummary, state: 1, stateLabel: 'JoiningClosed', withinResolutionWindow: true,
-      currentProposalId: '0xabc', hasJoined: true, approvalCount: 1, requiredApprovals: 2,
-    }
-    usePools.mockReturnValue(base({ getPoolSummary: vi.fn().mockResolvedValue(sum), vote }))
+    const sum = votingSummary()
+    usePools.mockReturnValue(base({
+      getPoolSummary: vi.fn().mockResolvedValue(sum),
+      fetchProposedMatrix: vi.fn().mockResolvedValue(SHOWN),
+      vote,
+    }))
     renderPoolAt(sum)
     expect(await screen.findByTestId('approval-progress')).toHaveTextContent('1 / 2')
+    await waitFor(() => expect(screen.getByTestId('approve-outcome')).toBeEnabled())
     fireEvent.click(screen.getByTestId('approve-outcome'))
-    await waitFor(() => expect(vote).toHaveBeenCalled())
+    await waitFor(() => expect(vote).toHaveBeenCalledTimes(1))
+    const [pool, reviewedId, onProgress] = vote.mock.calls[0]
+    expect(pool).toBe(sum.address)
+    expect(reviewedId).toBe(payoutMatrixHash(SHOWN))
+    expect(typeof onProgress).toBe('function')
+  })
+
+  it('binds the approval to the matrix on screen even when the summary names a different proposal', async () => {
+    // The creator revised the payout: the chain's id has moved on, the page still shows the old
+    // matrix. The id handed to the hook must be the hash of what is DISPLAYED — handing over the
+    // summary's (or a fresh read's) id is exactly the bug: it approves a payout nobody was shown.
+    const vote = vi.fn().mockResolvedValue('0xtx')
+    const sum = votingSummary({ currentProposalId: `0x${'ab'.repeat(32)}` })
+    usePools.mockReturnValue(base({
+      getPoolSummary: vi.fn().mockResolvedValue(sum),
+      fetchProposedMatrix: vi.fn().mockResolvedValue(SHOWN),
+      vote,
+    }))
+    renderPoolAt(sum)
+    await waitFor(() => expect(screen.getByTestId('approve-outcome')).toBeEnabled())
+    fireEvent.click(screen.getByTestId('approve-outcome'))
+    await waitFor(() => expect(vote).toHaveBeenCalledTimes(1))
+    expect(vote.mock.calls[0][1]).toBe(payoutMatrixHash(SHOWN))
+    expect(vote.mock.calls[0][1]).not.toBe(sum.currentProposalId)
+  })
+
+  it('does not offer approval while no payout is on screen', async () => {
+    const vote = vi.fn().mockResolvedValue('0xtx')
+    const sum = votingSummary()
+    const fetchProposedMatrix = vi.fn().mockResolvedValue(null)
+    usePools.mockReturnValue(base({ getPoolSummary: vi.fn().mockResolvedValue(sum), fetchProposedMatrix, vote }))
+    renderPoolAt(sum)
+    expect(await screen.findByTestId('approval-progress')).toBeInTheDocument()
+    await waitFor(() => expect(fetchProposedMatrix).toHaveBeenCalled())
+    // The lookup has ANSWERED with nothing: now, and only now, the page may say so.
+    expect(await screen.findByTestId('approve-needs-payout')).toBeInTheDocument()
+    expect(screen.queryByTestId('approve-loading-payout')).not.toBeInTheDocument()
+    expect(screen.getByTestId('approve-outcome')).toBeDisabled()
+    fireEvent.click(screen.getByTestId('approve-outcome'))
+    expect(vote).not.toHaveBeenCalled()
+  })
+
+  it('says it is still loading — not that the payout could not be shown — while the lookup is in flight', async () => {
+    const vote = vi.fn().mockResolvedValue('0xtx')
+    const sum = votingSummary()
+    let answer
+    const fetchProposedMatrix = vi.fn(() => new Promise((resolve) => { answer = resolve }))
+    usePools.mockReturnValue(base({ getPoolSummary: vi.fn().mockResolvedValue(sum), fetchProposedMatrix, vote }))
+    renderPoolAt(sum)
+    expect(await screen.findByTestId('approve-loading-payout')).toBeInTheDocument()
+    expect(screen.queryByTestId('approve-needs-payout')).not.toBeInTheDocument()
+    expect(screen.getByTestId('approve-outcome')).toBeDisabled()
+    // The lookup answers with the matrix: both hints go, and approval is offered.
+    answer(SHOWN)
+    await waitFor(() => expect(screen.getByTestId('approve-outcome')).toBeEnabled())
+    expect(screen.queryByTestId('approve-loading-payout')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('approve-needs-payout')).not.toBeInTheDocument()
+  })
+
+  it('re-reads the pool and says why when an approval is refused', async () => {
+    const vote = vi.fn().mockRejectedValue(new Error('The proposed payout changed after you reviewed it.'))
+    const sum = votingSummary()
+    const getPoolSummary = vi.fn().mockResolvedValue(sum)
+    usePools.mockReturnValue(base({ getPoolSummary, fetchProposedMatrix: vi.fn().mockResolvedValue(SHOWN), vote }))
+    renderPoolAt(sum)
+    await waitFor(() => expect(screen.getByTestId('approve-outcome')).toBeEnabled())
+    const readsBefore = getPoolSummary.mock.calls.length
+    fireEvent.click(screen.getByTestId('approve-outcome'))
+    await waitFor(() => expect(vote).toHaveBeenCalledTimes(1))
+    await waitFor(() => expect(getPoolSummary.mock.calls.length).toBeGreaterThan(readsBefore))
+    expect(await screen.findByText(/payout changed after you reviewed it/i)).toBeInTheDocument()
   })
 
   it('a refund-eligible member can recover the buy-in', async () => {

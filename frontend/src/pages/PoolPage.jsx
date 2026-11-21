@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { usePools } from '../hooks/usePools'
 import { poolStateDisplay } from '../lib/pools/poolContracts'
 import { readProposedMatrix, readStoredMatrix } from '../lib/pools/proposalStore'
+import { payoutMatrixHash } from '../lib/pools/payout'
 import Button from '../components/ui/Button'
 import PoolParticipants from '../components/pools/PoolParticipants'
 import PoolResolutionActions from '../components/pools/PoolResolutionActions'
@@ -64,6 +65,7 @@ export default function PoolPage() {
   // `proposalNonce` when a member pastes a freshly-received payout (fallback path) so this re-reads.
   const [proposalNonce, setProposalNonce] = useState(0)
   const [verifiedProposal, setVerifiedProposal] = useState(null)
+  const [settledLookup, setSettledLookup] = useState(null)
 
   const reload = useCallback(async () => {
     try {
@@ -133,18 +135,28 @@ export default function PoolPage() {
           : readStoredMatrix(address)
       return stored ? { entries: stored.entries } : null
     }
+    // Which lookup has ANSWERED. Recorded from the callbacks, so "still looking" and "looked and found
+    // nothing" stay different facts: only the second may tell a member the payout could not be shown.
+    const lookup = `${address}:${summary.state}:${summary.currentProposalId ?? ''}:${proposalNonce}`
     fetchProposedMatrix(address)
       .then((entries) => {
         if (!active) return
         setVerifiedProposal(entries && entries.length ? { entries } : fromStore())
+        setSettledLookup(lookup)
       })
       .catch(() => {
-        if (active) setVerifiedProposal(fromStore())
+        if (!active) return
+        setVerifiedProposal(fromStore())
+        setSettledLookup(lookup)
       })
     return () => {
       active = false
     }
   }, [loaded, summary?.state, summary?.currentProposalId, address, proposalNonce, fetchProposedMatrix])
+
+  const proposalLookupSettled =
+    !!summary &&
+    settledLookup === `${address}:${summary.state}:${summary.currentProposalId ?? ''}:${proposalNonce}`
 
   // { addressLower → amount } for the roster, built directly from the verified matrix (winner = address).
   const payoutByAddress = useMemo(() => {
@@ -166,10 +178,28 @@ export default function PoolPage() {
 
   const joinThisPool = () => run(() => joinPool(address))
 
+  // The id of the payout THIS PAGE IS SHOWING — the hash of the rendered matrix, never a fresh read.
+  // It is what the approval is bound to on every rail, so a creator who revises the payout after the
+  // member read it gets a refusal, not a vote (the residual of #1667). No matrix on screen ⇒ null ⇒
+  // approval is not offered: a member cannot approve a payout they were never shown.
+  const reviewedProposalId = useMemo(() => {
+    if (!verifiedProposal?.entries?.length) return null
+    try {
+      return payoutMatrixHash(verifiedProposal.entries)
+    } catch {
+      return null
+    }
+  }, [verifiedProposal])
+
   const approve = () =>
     run(async () => {
       try {
-        await vote(address, (msg) => setVoteProgress(msg))
+        await vote(address, reviewedProposalId, (msg) => setVoteProgress(msg))
+      } catch (e) {
+        // A failed approval may mean the payout moved on. Re-read so the page shows what is current
+        // before the member is asked again; the notice then says why nothing was approved.
+        await reload()
+        throw e
       } finally {
         setVoteProgress(null)
       }
@@ -277,10 +307,24 @@ export default function PoolPage() {
                   <Button
                     data-testid="approve-outcome"
                     onClick={approve}
-                    disabled={status === 'voting'}
+                    disabled={status === 'voting' || !reviewedProposalId}
+                    aria-describedby={
+                      reviewedProposalId ? undefined : proposalLookupSettled ? 'approve-needs-payout' : 'approve-loading-payout'
+                    }
                   >
                     {status === 'voting' ? 'Approving…' : 'Approve the proposed payout'}
                   </Button>
+                  {!reviewedProposalId && !proposalLookupSettled && (
+                    <p className="pool-hint" id="approve-loading-payout" role="status" data-testid="approve-loading-payout">
+                      Loading the proposed payout…
+                    </p>
+                  )}
+                  {!reviewedProposalId && proposalLookupSettled && (
+                    <p className="pool-hint" id="approve-needs-payout" data-testid="approve-needs-payout">
+                      The proposed payout could not be shown, so it cannot be approved. Paste the payout
+                      the creator shared below, or try again shortly.
+                    </p>
+                  )}
                   {voteProgress && <p className="pool-hint" role="status" data-testid="vote-progress">{voteProgress}</p>}
                 </>
               )}
