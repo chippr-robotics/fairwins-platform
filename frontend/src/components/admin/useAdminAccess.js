@@ -19,12 +19,26 @@
 import { useEffect, useState } from 'react'
 import { useRoles } from '../../hooks/useRoles'
 import { useWeb3 } from '../../hooks/useWeb3'
+import { useAdminWeb3, useAdminActing } from './adminActing/useAdminWeb3'
 import { ROLES, ADMIN_ROLES } from '../../contexts/RoleContext'
 import { readCuratorAuthority } from '../../lib/miniapps/registryAuthority'
 
 export function useAdminAccess() {
-  const { hasRole, hasAnyRole, estateRead, chainsForRole, loadRoles } = useRoles()
-  const { account, chainId } = useWeb3()
+  const walletRoles = useRoles()
+  const { account: walletAccount, chainId } = useWeb3()
+  // The console answers for the account it is ACTING as (adminActing/): on the live estate that
+  // is the admin Safe, whose owners' keys hold no role of their own. When it is acting as the
+  // wallet itself nothing changes and the wallet's own sweep is used.
+  const { account } = useAdminWeb3()
+  const acting = useAdminActing()
+  const sweep = acting?.roleSweep ?? null
+  const hasRole = sweep ? (role) => sweep.roles.includes(role) : walletRoles.hasRole
+  const hasAnyRole = sweep
+    ? (list) => Array.isArray(list) && list.some((r) => sweep.roles.includes(r))
+    : walletRoles.hasAnyRole
+  const estateRead = sweep ? sweep.estateRead : walletRoles.estateRead
+  const chainsForRole = sweep ? (role) => sweep.roleChains[role] || [] : walletRoles.chainsForRole
+  const retryRoles = sweep ? acting.retrySweep : () => walletRoles.loadRoles?.(walletAccount, chainId)
 
   const [curatorAuthority, setCuratorAuthority] = useState(null)
   useEffect(() => {
@@ -78,7 +92,7 @@ export function useAdminAccess() {
     curatorAuthority,
     estateRead,
     chainsForRole,
-    retry: () => loadRoles?.(account, chainId),
+    retry: retryRoles,
   }
 }
 

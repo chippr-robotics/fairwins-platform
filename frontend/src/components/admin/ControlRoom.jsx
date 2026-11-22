@@ -21,6 +21,7 @@ import { useAdminAccess, adminBadgeLabel } from './useAdminAccess'
 import { buildAdminApps } from './adminApps'
 import { ROLES } from '../../contexts/RoleContext'
 import { useWeb3 } from '../../hooks/useWeb3'
+import { useAdminWeb3 } from './adminActing/useAdminWeb3'
 import { useChainTokens } from '../../hooks/useChainTokens'
 import { useFeeEstate } from '../../hooks/useFeeEstate'
 import { useGatewayStatus } from '../../hooks/useGatewayStatus'
@@ -196,7 +197,7 @@ function TileStatus({ status }) {
 
 function ControlRoomBody({ access }) {
   const { flags, estateRead, chainsForRole } = access
-  const { account, provider, chainId } = useWeb3()
+  const { account, provider, chainId } = useAdminWeb3()
   const { native: nativeSymbol } = useChainTokens()
 
   const apps = useMemo(() => buildAdminApps(flags), [flags])

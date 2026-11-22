@@ -19,6 +19,7 @@ import { adminAppById } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
 import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { useCallsignRegistryMetrics } from '../../../hooks/useCallsignRegistryMetrics'
 import { DEPLOYED_CONTRACTS, getContractAddressForChain } from '../../../config/contracts'
 import { getProvider } from '../../../utils/blockchainService'
@@ -139,7 +140,7 @@ function IdentityDashboard() {
 
 export default function IdentityApp() {
   const access = useAdminAccess()
-  const { account, signer, chainId } = useWeb3()
+  const { account, signer, chainId } = useAdminWeb3()
   const { runTx, pendingTx } = useAdminTx()
 
   const renderView = (viewId) => {

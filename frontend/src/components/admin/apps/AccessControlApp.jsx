@@ -23,7 +23,7 @@ import { useScopedChain, contractAuthorityGate } from '../scopeGate'
 import { adminAppById } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
-import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { useNotification } from '../../../hooks/useUI'
 import { useEnsResolution } from '../../../hooks/useEnsResolution'
 import { isValidEthereumAddress } from '../../../utils/validation'
@@ -95,7 +95,7 @@ function shortAddr(address) {
 
 export default function AccessControlApp() {
   const access = useAdminAccess()
-  const { account, signer, provider, chainId } = useWeb3()
+  const { account, signer, provider, chainId } = useAdminWeb3()
   const { showNotification } = useNotification()
   const { runTx, pendingTx } = useAdminTx()
 

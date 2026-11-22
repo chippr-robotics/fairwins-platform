@@ -19,6 +19,7 @@ import { adminAppById, adminViewPath } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
 import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { getContractAddressForChain } from '../../../config/contracts'
 import { getProvider } from '../../../utils/blockchainService'
 import { readContract } from '../../../lib/chains/readContract'
@@ -129,7 +130,7 @@ export default function LiquidityApp() {
   const access = useAdminAccess()
   const { flags } = access
   const navigate = useNavigate()
-  const { account, signer, provider, chainId } = useWeb3()
+  const { account, signer, provider, chainId } = useAdminWeb3()
   const estate = useRouterEstate()
   const { runTx, pendingTx } = useAdminTx({ onSuccess: estate.refresh })
 

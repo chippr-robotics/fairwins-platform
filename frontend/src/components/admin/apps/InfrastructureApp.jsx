@@ -15,7 +15,7 @@ import AdminStatTile from '../charts/AdminStatTile'
 import { adminAppById } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
-import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { useChainTokens } from '../../../hooks/useChainTokens'
 import { useGatewayStatus } from '../../../hooks/useGatewayStatus'
 import { getProvider } from '../../../utils/blockchainService'
@@ -91,7 +91,7 @@ function InfrastructureDashboard() {
 
 export default function InfrastructureApp() {
   const access = useAdminAccess()
-  const { account, signer, provider, chainId } = useWeb3()
+  const { account, signer, provider, chainId } = useAdminWeb3()
   const { native: nativeSymbol } = useChainTokens()
   const { runTx, pendingTx } = useAdminTx()
 
