@@ -53,7 +53,8 @@ import {
 
 const lower = (a) => String(a || '').toLowerCase()
 
-/** `${safe}:${chainId}` → the last nonce this browser reserved for a proposal there. */
+/** `${safe}:${chainId}` → { nonce, previous } — the last nonce this browser reserved there, and the
+ *  reservation it replaced (so a failed proposal can hand its nonce back). */
 const RESERVED_NONCES = new Map()
 
 /** The Safe's facts on one chain, three-state. `value` exists only when `state === 'read'`. */
@@ -178,11 +179,24 @@ export default function AdminActingProvider({ children }) {
     const next = nextFreeNonce({
       onchainNonce,
       queuedNonces: (queue || []).map((p) => p.nonce).filter((n) => n != null),
-      lastReserved: RESERVED_NONCES.get(key) ?? null,
+      lastReserved: RESERVED_NONCES.get(key)?.nonce ?? null,
     })
-    RESERVED_NONCES.set(key, next)
+    RESERVED_NONCES.set(key, { nonce: next, previous: RESERVED_NONCES.get(key) ?? null })
     return next
   }, [chainId, safeAddress, queue])
+
+  const releaseNonce = useCallback(
+    (nonce) => {
+      const key = `${lower(safeAddress)}:${chainId}`
+      const held = RESERVED_NONCES.get(key)
+      // Only undo the reservation that is still the latest; a later one already moved past it.
+      if (held && BigInt(held.nonce) === BigInt(nonce)) {
+        if (held.previous) RESERVED_NONCES.set(key, held.previous)
+        else RESERVED_NONCES.delete(key)
+      }
+    },
+    [chainId, safeAddress],
+  )
 
   const simulate = useCallback(
     ({ from, to, data, value }) => getPublicClient(chainId).call({ account: from, to, data, value }),
@@ -200,6 +214,7 @@ export default function AdminActingProvider({ children }) {
       hubAddress: getContractAddressForChain('safeProposalHub', writeChainId),
       safeContracts: getSafeContracts(chainId),
       reserveNonce,
+      releaseNonce,
       simulate,
       onStep: setProposalStep,
       onProposed: () => {
@@ -208,7 +223,7 @@ export default function AdminActingProvider({ children }) {
         setFactsRev((n) => n + 1)
       },
     })
-  }, [safeAddress, ownerSigner, chainId, reserveNonce, simulate, refreshQueue])
+  }, [safeAddress, ownerSigner, chainId, reserveNonce, releaseNonce, simulate, refreshQueue])
 
   // ── Device connection ──────────────────────────────────────────────────────────────────────
   const [deviceState, setDeviceState] = useState({ status: 'idle', error: null })

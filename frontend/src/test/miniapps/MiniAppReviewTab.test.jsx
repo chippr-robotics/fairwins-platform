@@ -520,6 +520,22 @@ describe('lifecycle actions carry the hash the reviewer saw (FR-004a)', () => {
     expect(info.refs.manifestHash).toBe(PROPOSED_HASH)
     expect(info.dedupeKey).toBe('0xtxapproveApp')
   })
+
+  it('records NO audit decision for a proposal to the admin Safe — nothing was decided yet', async () => {
+    // useAdminTx resolves 'proposed' when the console acts as the admin Safe (adminActing/).
+    const proposingRunTx = vi.fn(async (fn) => {
+      const tx = await fn()
+      await tx.wait()
+      return 'proposed'
+    })
+    const user = userEvent.setup()
+    renderTab({ runTx: proposingRunTx })
+    const card = await recordCard('Ledger Sync')
+    await user.click(within(card).getByRole('button', { name: 'Suspend' }))
+    await waitFor(() => expect(proposingRunTx).toHaveBeenCalled())
+    await waitFor(() => expect(state.calls).toHaveLength(1))
+    expect(captureMiniAppLog).not.toHaveBeenCalled()
+  })
 })
 
 describe('deprecation is terminal, so it takes two deliberate steps', () => {

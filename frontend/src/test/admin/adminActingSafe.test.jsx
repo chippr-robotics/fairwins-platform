@@ -110,6 +110,18 @@ describe('createSafeProposingSigner', () => {
     expect(ownerSigner.sendTransaction).not.toHaveBeenCalled()
   })
 
+  it('hands the nonce back when the device prompt is rejected, so no gap is left', async () => {
+    const releaseNonce = vi.fn()
+    const ownerSigner = { sendTransaction: vi.fn().mockRejectedValue(new Error('rejected on device')) }
+    const signer = createSafeProposingSigner({
+      safeAddress: SAFE, chainId: 137, ownerSigner, hubAddress: HUB,
+      safeContracts: { multiSendCallOnly: '0x' + '33'.repeat(20) },
+      reserveNonce: vi.fn().mockResolvedValue(41n), releaseNonce, simulate: vi.fn().mockResolvedValue({}),
+    })
+    await expect(signer.sendTransaction({ to: TARGET, data: '0x' })).rejects.toThrow(/rejected on device/)
+    expect(releaseNonce).toHaveBeenCalledWith(41n)
+  })
+
   it('reports the Safe as its address and refuses to sign messages (a Safe has no key)', async () => {
     const { signer } = setup()
     expect(await signer.getAddress()).toBe(SAFE)
@@ -209,7 +221,7 @@ describe('the console speaks for the account it ACTS as', () => {
         'Role revoked',
       )
     })
-    expect(ok).toBe(true)
+    expect(ok).toBe('proposed') // truthy, but never mistaken for APPLIED
     expect(m.notify).not.toHaveBeenCalledWith('Role revoked', 'success')
     expect(m.notify).toHaveBeenCalledWith(expect.stringMatching(/Proposed to the admin Safe at nonce 41 — not applied yet/), 'info')
   })

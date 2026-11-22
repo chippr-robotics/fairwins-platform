@@ -428,6 +428,15 @@ export default function MiniAppReviewTab({ signer, account, chainId, runTx, pend
 
       if (!ok) return
 
+      // Proposed to the admin Safe, not applied (adminActing/): nothing was decided yet, so no
+      // audit record — it is written when someone acts on the registry, and a proposal may never
+      // be executed. The record will refresh into its new state once the Safe executes it.
+      if (ok === 'proposed') {
+        setConfirmingDeprecate(null)
+        refreshAll()
+        return
+      }
+
       // Audit trail (FR-019/FR-020): what was decided, about which package, by which account.
       // Keyed on the transaction hash so a repeat render or a restored backup cannot inflate it.
       // Attribution uses the IMMUTABLE registry id, never the editable display name.

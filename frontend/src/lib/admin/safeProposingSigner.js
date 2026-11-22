@@ -61,6 +61,7 @@ export function nextFreeNonce({ onchainNonce, queuedNonces = [], lastReserved = 
  * @param {string|undefined} cfg.hubAddress    SafeProposalHub on this chain
  * @param {object|undefined} cfg.safeContracts Safe v1.4.1 set on this chain
  * @param {() => Promise<bigint>} cfg.reserveNonce
+ * @param {(nonce: bigint) => void} [cfg.releaseNonce] undo a reservation whose proposal never landed
  * @param {(call: {from:string,to:string,data:string,value:bigint}) => Promise<unknown>} cfg.simulate
  * @param {(step: {step: 'publish'|'approve', of: 2}) => void} [cfg.onStep]
  * @param {(result: {safeTxHash:string, nonce:bigint}) => void} [cfg.onProposed]
@@ -72,6 +73,7 @@ export function createSafeProposingSigner({
   hubAddress,
   safeContracts,
   reserveNonce,
+  releaseNonce,
   simulate,
   onStep,
   onProposed,
@@ -114,21 +116,32 @@ export function createSafeProposingSigner({
       await simulate({ from: safeAddress, to, data, value })
 
       const nonce = await reserveNonce()
-      const safeTx = buildActiveAccountSafeTx({ to, value, data }, { nonce, multiSendCallOnly: safeContracts.multiSendCallOnly })
-      const safeTxHash = computeSafeTxHash(safeAddress, chainId, safeTx)
+      let safeTxHash
+      try {
+        const safeTx = buildActiveAccountSafeTx({ to, value, data }, { nonce, multiSendCallOnly: safeContracts.multiSendCallOnly })
+        safeTxHash = computeSafeTxHash(safeAddress, chainId, safeTx)
 
-      // 2. Publish the preimage so the other owners can see and verify it.
-      onStep?.({ step: 'publish', of: 2 })
-      const published = await emitProposal({ hubAddress, safe: safeAddress, safeTx, safeTxHash, signer: ownerSigner })
-      if (published?.wait) await published.wait()
+        // 2. Publish the preimage so the other owners can see and verify it.
+        onStep?.({ step: 'publish', of: 2 })
+        const published = await emitProposal({ hubAddress, safe: safeAddress, safeTx, safeTxHash, signer: ownerSigner })
+        if (published?.wait) await published.wait()
 
-      // 3. This owner's approval, recorded on the Safe itself.
-      onStep?.({ step: 'approve', of: 2 })
-      const approval = await ownerSigner.sendTransaction({
-        to: safeAddress,
-        data: encodeFunctionData({ abi: SAFE_ABI_PARSED, functionName: 'approveHash', args: [safeTxHash] }),
-      })
-      if (approval?.wait) await approval.wait()
+        // 3. This owner's approval, recorded on the Safe itself.
+        onStep?.({ step: 'approve', of: 2 })
+        const approval = await ownerSigner.sendTransaction({
+          to: safeAddress,
+          data: encodeFunctionData({ abi: SAFE_ABI_PARSED, functionName: 'approveHash', args: [safeTxHash] }),
+        })
+        if (approval?.wait) await approval.wait()
+      } catch (err) {
+        // A rejected device prompt must not leave the nonce reserved: the next proposal would
+        // take N+1 with nothing at N, and a Safe executes strictly in nonce order, so it could
+        // never run. Releasing is safe even if the publish DID land — the queue then lists the
+        // proposal at N and `nextFreeNonce` steps past it.
+        releaseNonce?.(nonce)
+        onStep?.(null)
+        throw err
+      }
 
       onProposed?.({ safeTxHash, nonce })
       const result = { status: 1, proposed: true, safeTxHash, hash: safeTxHash, nonce }

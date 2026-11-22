@@ -9,6 +9,10 @@
  * could not observe a revert, so rejecting the first prompt still queued the
  * remaining four.
  *
+ * A Safe proposal resolves the string `'proposed'` — truthy, so a sequence carries on, but
+ * distinguishable from `true` for callers that must not treat it as APPLIED (an audit record of a
+ * decision, for instance: a proposal on a 2-of-3 Safe has changed nothing yet).
+ *
  * `onSuccess` replaces the monolith's hard-wired `fetchContractState()`:
  * each app passes its own refresh so a write refreshes the state it changed.
  *
@@ -74,7 +78,7 @@ export function useAdminTx({ onSuccess } = {}) {
             'info',
           )
           onSuccess?.()
-          return true
+          return 'proposed'
         }
         showNotification(successMsg, 'success')
         onSuccess?.()
