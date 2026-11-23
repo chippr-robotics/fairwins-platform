@@ -13,7 +13,8 @@
  *
  *   1. SIMULATE the call from the Safe's address, so a write the Safe itself is not allowed to make
  *      (a missing role, a bad argument) fails on screen BEFORE the device is asked for anything —
- *      the same promise the wallet rail keeps with its pre-send gas estimate;
+ *      the same promise the wallet rail keeps with its pre-send gas estimate — and confirm the
+ *      signing key is still an owner, for the same reason;
  *   2. publish the preimage to the SafeProposalHub (device prompt 1) and wait for it to land, so the
  *      second prompt cannot be populated with the same account nonce;
  *   3. record this owner's `approveHash` on the Safe (device prompt 2).
@@ -36,20 +37,28 @@ import { emitProposal } from '../custody/proposalHub'
 const SAFE_ABI_PARSED = normalizeAbi(SAFE_ABI)
 
 /**
- * The nonce a new proposal should take. Same-nonce proposals on a Safe are mutually exclusive —
- * executing one invalidates the rest — so a new admin action must queue BEHIND everything already
- * waiting, not beside it, and two actions proposed back to back in one session must not collide.
+ * The nonce a new proposal should take.
  *
- * @param {{ onchainNonce: bigint|number, queuedNonces?: Array<bigint|number>, lastReserved?: bigint|number|null }} f
+ * Same-nonce proposals on a Safe are mutually exclusive — executing one invalidates the rest — so
+ * a new admin action must not land on a nonce another real proposal holds. But "real" is the
+ * whole question: `SafeProposalHub.propose` is PERMISSIONLESS, and a verified preimage proves only
+ * that the hash matches, not that any owner wants it. If every hub entry counted, anyone could
+ * publish a zero-approval proposal at nonce 1,000,000 and push every admin action past it, where
+ * none could ever execute (a Safe runs strictly in nonce order).
+ *
+ * So: walk UP from the on-chain nonce, contiguously, skipping only nonces that are taken by an
+ * owner-ENDORSED proposal (at least one current owner's approval) or that this session already
+ * reserved. An unendorsed entry never moves the allocation; at worst it shares a nonce with ours,
+ * and whichever the owners actually approve and execute wins.
+ *
+ * @param {{ onchainNonce: bigint|number, endorsedNonces?: Array<bigint|number>,
+ *   reserved?: Iterable<bigint|number> }} f
  * @returns {bigint}
  */
-export function nextFreeNonce({ onchainNonce, queuedNonces = [], lastReserved = null }) {
+export function nextFreeNonce({ onchainNonce, endorsedNonces = [], reserved = [] }) {
+  const taken = new Set([...endorsedNonces, ...reserved].map((n) => BigInt(n).toString()))
   let next = BigInt(onchainNonce)
-  for (const n of queuedNonces) {
-    const after = BigInt(n) + 1n
-    if (after > next) next = after
-  }
-  if (lastReserved != null && BigInt(lastReserved) + 1n > next) next = BigInt(lastReserved) + 1n
+  while (taken.has(next.toString())) next += 1n
   return next
 }
 
@@ -60,6 +69,7 @@ export function nextFreeNonce({ onchainNonce, queuedNonces = [], lastReserved = 
  * @param {object} cfg.ownerSigner             ethers-shaped signer of a Safe OWNER (wallet or device)
  * @param {string|undefined} cfg.hubAddress    SafeProposalHub on this chain
  * @param {object|undefined} cfg.safeContracts Safe v1.4.1 set on this chain
+ * @param {() => Promise<void>} [cfg.assertOwner] refuse unless the signing key owns the Safe NOW
  * @param {() => Promise<bigint>} cfg.reserveNonce
  * @param {(nonce: bigint) => void} [cfg.releaseNonce] undo a reservation whose proposal never landed
  * @param {(call: {from:string,to:string,data:string,value:bigint}) => Promise<unknown>} cfg.simulate
@@ -72,6 +82,7 @@ export function createSafeProposingSigner({
   ownerSigner,
   hubAddress,
   safeContracts,
+  assertOwner,
   reserveNonce,
   releaseNonce,
   simulate,
@@ -114,6 +125,10 @@ export function createSafeProposingSigner({
       // 1. Would the SAFE be allowed to do this? A revert here is rethrown untouched so the
       //    caller's revert decoder can name it ("Refused on-chain: AccessControlUnauthorizedAccount").
       await simulate({ from: safeAddress, to, data, value })
+
+      // A key that does not own the Safe would pay to publish, then have `approveHash` revert.
+      // Asked of the chain at submit time, not taken from what the bar showed on render.
+      if (assertOwner) await assertOwner()
 
       const nonce = await reserveNonce()
       let safeTxHash

@@ -52,15 +52,22 @@ beforeEach(() => {
   m.roles = []
 })
 
-describe('nextFreeNonce — a new proposal queues BEHIND everything waiting', () => {
+describe('nextFreeNonce — contiguous from the chain, skipping only ENDORSED work', () => {
   it('uses the on-chain nonce when nothing is queued', () => {
     expect(nextFreeNonce({ onchainNonce: 7n })).toBe(7n)
   })
-  it('goes past the highest queued nonce (same-nonce proposals cancel each other)', () => {
-    expect(nextFreeNonce({ onchainNonce: 7n, queuedNonces: [7n, 9n, 8n] })).toBe(10n)
+  it('steps past owner-endorsed proposals sitting at the next nonces', () => {
+    expect(nextFreeNonce({ onchainNonce: 7n, endorsedNonces: [7n, 8n] })).toBe(9n)
+  })
+  it('does NOT jump past a far-future entry — a gap would make ours unexecutable', () => {
+    // SafeProposalHub.propose is permissionless: anyone can publish at nonce 1,000,000.
+    expect(nextFreeNonce({ onchainNonce: 7n, endorsedNonces: [1_000_000n] })).toBe(7n)
+  })
+  it('fills the first hole rather than queueing behind it', () => {
+    expect(nextFreeNonce({ onchainNonce: 7n, endorsedNonces: [7n, 9n] })).toBe(8n)
   })
   it('never reuses a nonce this session already reserved', () => {
-    expect(nextFreeNonce({ onchainNonce: 7n, queuedNonces: [], lastReserved: 7n })).toBe(8n)
+    expect(nextFreeNonce({ onchainNonce: 7n, reserved: ['7', '8'] })).toBe(9n)
   })
 })
 
@@ -120,6 +127,20 @@ describe('createSafeProposingSigner', () => {
     })
     await expect(signer.sendTransaction({ to: TARGET, data: '0x' })).rejects.toThrow(/rejected on device/)
     expect(releaseNonce).toHaveBeenCalledWith(41n)
+  })
+
+  it('refuses a key that does not own the Safe BEFORE any device prompt or nonce', async () => {
+    const reserveNonce = vi.fn()
+    const ownerSigner = { sendTransaction: vi.fn() }
+    const signer = createSafeProposingSigner({
+      safeAddress: SAFE, chainId: 137, ownerSigner, hubAddress: HUB,
+      safeContracts: { multiSendCallOnly: '0x' + '33'.repeat(20) },
+      assertOwner: vi.fn().mockRejectedValue(new Error('not an owner of this Safe')),
+      reserveNonce, simulate: vi.fn().mockResolvedValue({}),
+    })
+    await expect(signer.sendTransaction({ to: TARGET, data: '0x' })).rejects.toThrow(/not an owner/)
+    expect(ownerSigner.sendTransaction).not.toHaveBeenCalled()
+    expect(reserveNonce).not.toHaveBeenCalled()
   })
 
   it('reports the Safe as its address and refuses to sign messages (a Safe has no key)', async () => {

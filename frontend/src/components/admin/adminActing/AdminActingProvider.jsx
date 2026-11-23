@@ -53,8 +53,8 @@ import {
 
 const lower = (a) => String(a || '').toLowerCase()
 
-/** `${safe}:${chainId}` → { nonce, previous } — the last nonce this browser reserved there, and the
- *  reservation it replaced (so a failed proposal can hand its nonce back). */
+/** `${safe}:${chainId}` → the Set of nonces (as strings) this browser has reserved there. A failed
+ *  proposal hands its nonce back (`releaseNonce`), so a rejected prompt never leaves a gap. */
 const RESERVED_NONCES = new Map()
 
 /** The Safe's facts on one chain, three-state. `value` exists only when `state === 'read'`. */
@@ -95,6 +95,12 @@ export default function AdminActingProvider({ children }) {
   const writeChainId = web3.chainId ?? null
   const chainId = writeChainId
   const { safeAddress, hardwareSigner } = useSyncExternalStore(subscribeAdminActing, getAdminActing, getAdminActing)
+
+  // The device session lives in a module store so it survives moving between console routes, but
+  // it must never outlive the console itself: this observer only runs under /admin, so a login
+  // changed ELSEWHERE would otherwise be missed and the previous login's device reused on return.
+  // Leaving the console closes the transport.
+  useEffect(() => () => setAdminHardwareSigner(null), [])
 
   // An identity must not carry across accounts: a device session opened under one login is
   // dropped (and its transport closed) when the login changes.
@@ -171,32 +177,55 @@ export default function AdminActingProvider({ children }) {
   const proposals = useVaultProposals(vault, { signer: ownerSigner })
   const { queue, refresh: refreshQueue } = proposals
 
-  // Nonces this session has handed out, so two proposals in a row never share one. Kept per
-  // (Safe, chain) at module scope: a remount between two proposals must not forget the first.
+  // Nonces this session has reserved, per (Safe, chain), at module scope: a remount between two
+  // proposals must not forget the first.
+  const reservationKey = `${lower(safeAddress)}:${chainId}`
+  const { loading: queueLoading, partial: queuePartial, error: queueError } = proposals
+
   const reserveNonce = useCallback(async () => {
-    const key = `${lower(safeAddress)}:${chainId}`
+    // The queue must be a COMPLETE, CURRENT read of THIS Safe on THIS chain. Allocating from a
+    // list that is still loading, only partly scanned, or failed could hand out a nonce another
+    // endorsed proposal already holds — retryable, so say so instead of guessing.
+    if (queueLoading || queuePartial || queueError) {
+      throw new Error(
+        'The Safe queue is still being read (or could not be read), so a safe nonce cannot be chosen yet. Nothing was proposed — wait for the queue to finish loading and try again.',
+      )
+    }
     const onchainNonce = await readContract(chainId, { address: safeAddress, abi: SAFE_ABI, functionName: 'nonce' })
-    const next = nextFreeNonce({
-      onchainNonce,
-      queuedNonces: (queue || []).map((p) => p.nonce).filter((n) => n != null),
-      lastReserved: RESERVED_NONCES.get(key)?.nonce ?? null,
-    })
-    RESERVED_NONCES.set(key, { nonce: next, previous: RESERVED_NONCES.get(key) ?? null })
+    const endorsedNonces = (queue || [])
+      .filter((p) => lower(p.safe) === lower(safeAddress) && Number(p.approvals) > 0)
+      .map((p) => p.nonce)
+      .filter((n) => n != null)
+    const reserved = RESERVED_NONCES.get(reservationKey) ?? new Set()
+    const next = nextFreeNonce({ onchainNonce, endorsedNonces, reserved })
+    RESERVED_NONCES.set(reservationKey, new Set([...reserved, next.toString()]))
     return next
-  }, [chainId, safeAddress, queue])
+  }, [chainId, safeAddress, queue, queueLoading, queuePartial, queueError, reservationKey])
 
   const releaseNonce = useCallback(
     (nonce) => {
-      const key = `${lower(safeAddress)}:${chainId}`
-      const held = RESERVED_NONCES.get(key)
-      // Only undo the reservation that is still the latest; a later one already moved past it.
-      if (held && BigInt(held.nonce) === BigInt(nonce)) {
-        if (held.previous) RESERVED_NONCES.set(key, held.previous)
-        else RESERVED_NONCES.delete(key)
-      }
+      const reserved = RESERVED_NONCES.get(reservationKey)
+      if (!reserved) return
+      const next = new Set(reserved)
+      next.delete(BigInt(nonce).toString())
+      RESERVED_NONCES.set(reservationKey, next)
     },
-    [chainId, safeAddress],
+    [reservationKey],
   )
+
+  const assertOwner = useCallback(async () => {
+    const ok = await readContract(chainId, {
+      address: safeAddress,
+      abi: SAFE_ABI,
+      functionName: 'isOwner',
+      args: [ownerAddress],
+    })
+    if (!ok) {
+      throw new Error(
+        `${ownerAddress} is not an owner of this Safe on this network, so it cannot propose. Nothing was signed or sent — sign with a key that owns the Safe.`,
+      )
+    }
+  }, [chainId, safeAddress, ownerAddress])
 
   const simulate = useCallback(
     ({ from, to, data, value }) => getPublicClient(chainId).call({ account: from, to, data, value }),
@@ -213,6 +242,7 @@ export default function AdminActingProvider({ children }) {
       ownerSigner,
       hubAddress: getContractAddressForChain('safeProposalHub', writeChainId),
       safeContracts: getSafeContracts(chainId),
+      assertOwner,
       reserveNonce,
       releaseNonce,
       simulate,
@@ -223,7 +253,7 @@ export default function AdminActingProvider({ children }) {
         setFactsRev((n) => n + 1)
       },
     })
-  }, [safeAddress, ownerSigner, chainId, reserveNonce, releaseNonce, simulate, refreshQueue])
+  }, [safeAddress, ownerSigner, chainId, assertOwner, reserveNonce, releaseNonce, simulate, refreshQueue])
 
   // ── Device connection ──────────────────────────────────────────────────────────────────────
   const [deviceState, setDeviceState] = useState({ status: 'idle', error: null })
