@@ -113,9 +113,16 @@ The result is marked `proposed: true` and `useAdminTx` says "proposed, not appli
 success message. A 2-of-3 Safe has changed nothing until a second owner approves and someone
 executes.
 
-**Nonces.** A new proposal takes `max(on-chain nonce, highest queued + 1, last reserved + 1)`.
-Same-nonce proposals on a Safe are mutually exclusive, so an admin action queues behind
-everything waiting rather than beside it.
+**Nonces.** The SafeProposalHub is PERMISSIONLESS. A verified preimage proves the hash
+matches, not that any owner wants the proposal. So allocation walks up from the on-chain nonce
+contiguously, and skips only two kinds of nonce: those held by an owner-endorsed proposal (at
+least one current owner's approval) and those this session already reserved. A spam entry at
+nonce 1,000,000 therefore cannot push admin actions out of reach. Allocation also refuses
+(retryably) while the queue is loading, partial or failed.
+
+**Before any device prompt** the signer checks two things on chain: that the Safe can make the
+call, and that the signing key still `isOwner`. The device session closes when the console
+unmounts, so a login changed elsewhere cannot reuse it.
 
 **The Safe queue** (`AdminSafeQueue`, opened from the acting bar) is where the second owner
 finishes the job. It uses the same `useVaultProposals` hook as Protect, which now takes an
