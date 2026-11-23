@@ -1,10 +1,127 @@
-previous: v1.19.0
-commits:  5
-  [unclassified] Merge pull request #1645 from chippr-robotics/hotfix/dependency-alerts
-  [fix -> patch] drop the cdp-sdk axios acceptance the override resolves
-  [fix -> patch] patch decompress, axios and grpc-js advisories
-  [unclassified] Merge pull request #1639 from chippr-robotics/release/v1.19.0-changelog
-  [skipped] chore(release): v1.19.0 [skip release]
-bump:     patch
+previous: v1.19.1
+commits:  122
+  [unclassified] Merge pull request #1698 from chippr-robotics/staging
+  [unclassified] Merge pull request #1708 from chippr-robotics/ccr-ec4ea6bf-9jo2i2-dep-alerts
+  [fix -> patch] clear the open high/critical dependency alerts blocking the live gate
+  [unclassified] Merge pull request #1706 from chippr-robotics/ccr-ec4ea6bf-9jo2i2-gradle-cache
+  [fix -> patch] route Maven Central through Google's mirror for the Android builds
+  [unclassified] Merge pull request #1704 from chippr-robotics/ccr-ec4ea6bf-9jo2i2-followups
+  [unclassified] Merge pull request #1705 from chippr-robotics/ccr-ec4ea6bf-9jo2i2-dao-flake
+  [test -> patch] fix the intermittent StandardDAOFactory "moves treasury funds exactly once" failure
+  [unclassified] Merge remote-tracking branch 'origin/staging' into ccr-ec4ea6bf-9jo2i2-followups
+  [unclassified] Merge pull request #1703 from chippr-robotics/ccr-ec4ea6bf-9jo2i2
+  [fix -> patch] drop the hardhat exclusion — its stated reason was wrong
+  [fix -> patch] Perps venue links' accessible names start with their visible text; split risky dev-tooling bumps
+  [chore -> patch] renew the toml bridge acceptances one week to unjam the PR queue
+  [fix -> patch] satisfy ansible-lint production profile in the nginx restart path
+  [fix -> patch] mitigate nginx2root — HTTP/2 off on VM origins, nginx 1.30.7, restart on upgrade
+  [unclassified] Merge pull request #1692 from chippr-robotics/test/112-closeout
+  [test -> patch] ratchet every gated contract's floor to its measured coverage
+  [unclassified] Merge remote-tracking branch 'origin/staging' into test/112-closeout
+  [test -> patch] send zero-address calls lazily so a revert is never unhandled
+  [unclassified] Merge pull request #1691 from chippr-robotics/test/1676-negative-paths
+  [fix -> patch] credit revert assertions that Prettier wrapped with a trailing comma
+  [test -> patch] spec 112 T021 — close the revert allowlist to unreachable-only
+  [test -> patch] count test/negative in coverage; prune 19 entries B2 now asserts
+  [unclassified] Merge remote-tracking branch 'origin/staging' into test/1676-negative-paths
+  [unclassified] Merge pull request #1690 from chippr-robotics/test/112-account-negative
+  [test -> patch] negative-path suites for intents, admin setters and named reverts
+  [unclassified] Merge pull request #1689 from chippr-robotics/test/1679-medusa-property-harnesses
+  [unclassified] Merge pull request #1687 from chippr-robotics/test/112-b3-oracle-negative
+  [unclassified] Merge pull request #1683 from chippr-robotics/test/1680-pool-adversarial
+  [test -> patch] prune account allowlist entries and raise account floors
+  [test -> patch] negative-path coverage for wallet, owners, factory, paymaster
+  [test -> patch] drop the 17 oracle allowlist entries B3 now asserts
+  [unclassified] Merge remote-tracking branch 'origin/staging' into test/1679-medusa-property-harnesses
+  [test -> patch] assert every adapter guard on its failing side (spec 112 B3)
+  [test -> patch] add Medusa property harnesses for pools and routers
+  [unclassified] Merge branch 'staging' into test/1680-pool-adversarial
+  [unclassified] Merge pull request #1684 from chippr-robotics/feat/112a-contract-gates
+  [docs -> patch] plan and tasks for contract negative-path hardening
+  [test -> patch] reconcile the ratchets with #1681 and accept wrapped ANY-REVERT reasons
+  [unclassified] Merge remote-tracking branch 'origin/staging' into feat/112a-contract-gates
+  [test -> patch] gate value contracts, revert coverage, bare reverts, PR-time Medusa
+  [unclassified] Merge pull request #1681 from chippr-robotics/test/1678-specific-reverts
+  [test -> patch] adversarial attacker-ordering suites for WagerPool and FundingPool
+  [unclassified] Merge pull request #1672 from chippr-robotics/spec/112-reserve
+  [test -> patch] stop the random-sequence catch from swallowing assertion failures
+  [test -> patch] assert specific revert reasons instead of bare .reverted
+  [spec -> patch] reserve — contract-negative-path-testing
+  [unclassified] Merge pull request #1409 from chippr-robotics/fix/966-correct-admin-authority-record
+  [unclassified] Merge pull request #1671 from chippr-robotics/fix/1670-noble-ciphers-2x
+  [unclassified] Merge pull request #1564 from chippr-robotics/dependabot/github_actions/staging/actions/checkout-7
+  [unclassified] Merge pull request #1329 from chippr-robotics/dependabot/github_actions/staging/hashicorp/setup-terraform-4
+  [unclassified] Merge pull request #1610 from chippr-robotics/dependabot/npm_and_yarn/staging/capacitor/core-8.5.2
+  [unclassified] Merge pull request #1609 from chippr-robotics/dependabot/npm_and_yarn/staging/scure/bip32-2.4.0
+  [unclassified] Merge pull request #1330 from chippr-robotics/dependabot/github_actions/staging/google-github-actions/auth-3
+  [unclassified] Merge pull request #1608 from chippr-robotics/dependabot/npm_and_yarn/staging/viem-2.56.5
+  [fix -> patch] default the funding-pool admin to the deployer on local networks
+  [fix -> patch] upgrade @noble/ciphers to 2.x with a 1.x decrypt-compat fixture
+  [test -> patch] freeze @noble/ciphers 1.3.0 ciphertext as a decrypt-compat fixture
+  [unclassified] Merge remote-tracking branch 'origin/staging' into fix/966-correct-admin-authority-record
+  [unclassified] Merge branch 'staging' into dependabot/github_actions/staging/hashicorp/setup-terraform-4
+  [unclassified] Merge branch 'staging' into dependabot/github_actions/staging/google-github-actions/auth-3
+  [unclassified] Merge branch 'staging' into dependabot/github_actions/staging/actions/checkout-7
+  [unclassified] Merge branch 'staging' into dependabot/npm_and_yarn/staging/capacitor/core-8.5.2
+  [unclassified] Merge branch 'staging' into dependabot/npm_and_yarn/staging/scure/bip32-2.4.0
+  [unclassified] Merge branch 'staging' into dependabot/npm_and_yarn/staging/viem-2.56.5
+  [unclassified] Merge pull request #1668 from chippr-robotics/ccr-b1117b74-lm4mjn
+  [chore -> patch] bridge the toml acceptances until #1588 reaches main
+  [unclassified] Merge remote-tracking branch 'origin/staging' into ccr-b1117b74-lm4mjn
+  [unclassified] Merge pull request #1588 from chippr-robotics/claude/oz-alerts-1520-ttlkss
+  [chore -> patch] re-anchor the two baselined BridgeRouter Slither findings
+  [fix -> patch] bind WagerPool approve to proposalId; screen bridge recipient
+  [unclassified] Merge pull request #1663 from chippr-robotics/claude/transaction-lifecycle-doc-oyqnuj
+  [docs -> patch] transaction lifecycle across the network-agnostic write seam
+  [unclassified] Merge pull request #1662 from chippr-robotics/ccr-c0d6d4ed-go9kfj
+  [docs -> patch] reference infra/vm paths as code, not out-of-tree links
+  [fix -> patch] keep the engine.env description under ansible-lint's 160-char line limit
+  [fix -> patch] make Redis arming one-way; validate the storage key
+  [fix -> patch] arm Redis storage from the secret, never hard-require it at boot
+  [unclassified] Merge branch 'worktree-agent-a319c22c242ee18a0' into ccr-c0d6d4ed-go9kfj
+  [docs -> patch] record the GCE VM estate as production; retire Cloud Run as history
+  [build -> patch] make the engine image self-describing with OCI labels
+  [feat -> minor] ship engine logs to Cloud Logging with the gcplogs driver
+  [feat -> minor] persist engine state in Redis (AOF, noeviction, encrypted signers)
+  [fix -> patch] move Polygon to EIP-1559 and re-derive its gas_price_cap
+  [chore -> patch] soak alto v1.2.8 on the passkey stack only
+  [chore -> patch] Gradle wrapper 8.14.5; register native toolchain pins
+  [chore -> patch] Terraform 1.15.9, google.cloud 1.15.0, community.docker 5.4.0
+  [chore -> patch] pin floating CI/build tool versions
+  [chore -> patch] retire Manticore, pin Medusa/Slither/solc-select/crytic-compile
+  [unclassified] Merge pull request #1661 from chippr-robotics/ccr-c0d6d4ed-go9kfj
+  [fix -> patch] close review bypasses in the version-pin gate; runbook ordering
+  [fix -> patch] close version-pin gate coverage holes found in review
+  [fix -> patch] version-watch publish steps must not gate on hashFiles(runner.temp)
+  [chore -> patch] point registry holds/exemptions at their follow-up issues
+  [feat -> minor] version-pin policy + gate; hold OZ Relayer and mitigate #808 (#1648)
+  [unclassified] Merge pull request #1641 from chippr-robotics/ccr-1efdabc7-iykjh8
+  [unclassified] Merge remote-tracking branch 'origin/staging' into ccr-1efdabc7-iykjh8
+  [unclassified] Merge pull request #1643 from chippr-robotics/chore/auto-backmerge-main-into-staging
+  [unclassified] Merge pull request #1646 from chippr-robotics/release/v1.19.1-changelog
+  [skipped] chore(release): v1.19.1 [skip release]
+  [chore -> patch] address roster review — colors, seams, writeRail path
+  [chore -> patch] add Claude subagent roster under .claude/agents
+  [unclassified] Merge pull request #1637 from chippr-robotics/claude/multichain-ux-digital-assets-vw4h7v
+  [chore -> patch] bump actions/checkout from 4 to 7
+  [feat -> minor] Sigil cold signer in Protect ▸ Off chain (#1635)
+  [docs -> patch] tick T023 — revert decoding was done, the box was stale
+  [unclassified] Merge pull request #1634 from chippr-robotics/claude/sigil-cold-signer-ux-j3lxgy
+  [spec -> patch] reserve — sigil-cold-signer
+  [chore -> patch] Bump @capacitor/core from 8.5.1 to 8.5.2
+  [chore -> patch] Bump @scure/bip32 from 2.3.0 to 2.4.0
+  [chore -> patch] Bump viem from 2.56.3 to 2.56.5
+  [fix -> patch] override the two nested pins behind the 12 runtime alerts (#1519)
+  [feat -> minor] publish proposal preimages to SafeProposalHub so a UI can show them
+  [fix -> patch] a failed receipt poll is not a failed transaction
+  [fix -> patch] choose transaction type by asking the chain, not by assuming London
+  [feat -> minor] initialise the funding pool factory with the Safe, not the deployer
+  [unclassified] Merge remote-tracking branch 'origin/staging' into fix/966-correct-admin-authority-record
+  [feat -> minor] revoke-stale-admin — remove the superseded Safe and retired EOA
+  [unclassified] Merge remote-tracking branch 'origin/staging' into fix/966-correct-admin-authority-record
+  [fix -> patch] correct the admin-authority record, and make it reproducible
+  [chore -> patch] bump google-github-actions/auth from 2 to 3
+  [chore -> patch] bump hashicorp/setup-terraform from 3 to 4
+bump:     minor
 reason:   computed
-next:     v1.19.1
+next:     v1.20.0
