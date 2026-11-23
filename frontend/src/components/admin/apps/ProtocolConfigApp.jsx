@@ -16,7 +16,7 @@ import AdminBarList from '../charts/AdminBarList'
 import { adminAppById } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
-import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { DEPLOYED_CONTRACTS, NETWORK_CONFIG, getContractAddressForChain } from '../../../config/contracts'
 import { getProvider } from '../../../utils/blockchainService'
 import { networkName, estateNetworks } from '../../../lib/chains/estate'
@@ -77,7 +77,7 @@ function ProtocolDashboard() {
 export default function ProtocolConfigApp() {
   const access = useAdminAccess()
   const { flags } = access
-  const { account, signer, provider, chainId } = useWeb3()
+  const { account, signer, provider, chainId } = useAdminWeb3()
   const { runTx, pendingTx } = useAdminTx()
 
   const renderView = (viewId) => {

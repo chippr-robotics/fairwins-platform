@@ -566,7 +566,7 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
 - **The admin console is NINE HOST-BUNDLED MINI-APPS behind a Control Room (spec 093), and
   `adminApps.js` is the ONLY app/view/role matrix.** `/admin` is the launcher; each group of
   admin controls is a lazily-loaded app at `/admin/<appId>` with `?view=` addressing
-  (`components/admin/adminApps.js`, `AdminAppShell`, `AdminAppRoute`). Five rules: (1) never
+  (`components/admin/adminApps.js`, `AdminAppShell`, `AdminAppRoute`). Six rules: (1) never
   introduce a second app→view→gate mapping — the Control Room tiles, per-app rails, route guard
   and least-privilege tests all read `adminApps.js`, and its gates are the retired
   `buildAdminNavGroups` matrix verbatim (changing one is a role-model change, not a nav tweak);
@@ -580,7 +580,11 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
   (5) entry keeps the three-way granted / denied / "Could Not Verify Access" distinction
   (`useAdminAccess`), all data hooks mount BEHIND the gate, and write plumbing (`useAdminTx`,
   `useScopedChain`, membership reference-chain pinning, single-chain incident controls) moved
-  unchanged. Discovery: the Apps store lists the operator's own tools ("Operator tools",
+  unchanged; (6) admin apps take `account`/`signer` from `adminActing/useAdminWeb3`, NEVER bare
+  `useWeb3()` — the estate's roles are held by the admin Safe, so the console acts AS the Safe
+  (writes become simulate-then-propose-then-approve via `lib/admin/safeProposingSigner.js`, and
+  `useAdminTx` says "proposed", never "updated") signed by an owner's wallet or Ledger/Trezor,
+  and finishes proposals in the in-console Safe queue. Discovery: the Apps store lists the operator's own tools ("Operator tools",
   `adminToolCatalog.js` + `useOperatorFlags` — role-derived client-side, NEVER a registry
   record, never under the verified badge, no curator read added to the member path) and they
   pin to Quick Access under the reserved `admin-tool:<appId>` favorite namespace. See

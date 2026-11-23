@@ -39,6 +39,7 @@ import AssistantLauncher from './components/assistant/AssistantLauncher'
 //admin
 import ControlRoom from './components/admin/ControlRoom'
 import AdminAppRoute from './components/admin/AdminAppRoute'
+import AdminActingLayout from './components/admin/adminActing/AdminActingLayout'
 
 // dev
 import DevelopmentWarningBanner from './components/ui/DevelopmentWarningBanner'
@@ -208,8 +209,12 @@ function AppContent() {
               group is its own lazily-loaded mini-app at /admin/:appId, with ?view=
               addressing the interior view. Access gating lives in the shared shell,
               so every depth shows the same honest denied/unverified screens. */}
-          <Route path="/admin" element={<ControlRoom />} />
-          <Route path="/admin/:appId" element={<AdminAppRoute />} />
+          {/* The layout holds the console's acting identity (act as the admin Safe, sign with
+              an owner's key) for both, and renders the acting bar above the gate. */}
+          <Route element={<AdminActingLayout />}>
+            <Route path="/admin" element={<ControlRoom />} />
+            <Route path="/admin/:appId" element={<AdminAppRoute />} />
+          </Route>
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

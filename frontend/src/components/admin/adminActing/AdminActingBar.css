@@ -1,0 +1,256 @@
+/* The console's acting-identity bar (adminActing/). Colours come from theme.css tokens only. */
+.admin-acting-bar {
+  background: var(--bg-secondary);
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  padding: 0.75rem 2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.admin-acting-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1.5rem;
+}
+
+.admin-acting-group,
+.admin-acting-safe-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.admin-acting-label {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+
+.admin-acting-value {
+  font-weight: 600;
+}
+
+.admin-acting-mono,
+.admin-safe-mono {
+  font-family: var(--font-mono);
+}
+
+.admin-acting-input {
+  min-width: 0;
+  width: 26rem;
+  max-width: 100%;
+  padding: 0.4rem 0.6rem;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+.admin-acting-bar .admin-acting-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent-color);
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+  min-height: 36px;
+}
+
+.admin-acting-bar a {
+  color: var(--accent-color);
+}
+
+.admin-acting-muted,
+.admin-safe-muted {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.admin-acting-facts {
+  margin: 0;
+}
+
+.admin-acting-ok,
+.admin-safe-ok {
+  color: var(--success-text);
+  font-weight: 600;
+}
+
+.admin-acting-error,
+.admin-safe-error {
+  color: var(--danger-color);
+  margin: 0;
+}
+
+.admin-acting-step {
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--warning-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-primary);
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+.admin-acting-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* ── Queue ─────────────────────────────────────────────────────────────── */
+.admin-safe-queue {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 0.5rem;
+}
+
+.admin-safe-queue-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.admin-safe-queue-head h3 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.admin-safe-proposals {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.admin-safe-proposal {
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-md);
+  background: var(--bg-primary);
+  padding: 0.75rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.admin-safe-proposal.is-critical {
+  border-color: var(--warning-color);
+}
+
+.admin-safe-proposal-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+}
+
+.admin-safe-proposal-title {
+  margin: 0;
+  font-weight: 700;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.admin-safe-proposal-detail {
+  margin: 0.25rem 0 0;
+  color: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.admin-safe-proposal-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.125rem;
+  color: var(--text-secondary);
+}
+
+.admin-safe-chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 0.1rem 0.5rem;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.admin-safe-chip-critical {
+  border-color: var(--warning-color);
+  color: var(--warning-text);
+}
+
+.admin-safe-warning {
+  margin: 0;
+  color: var(--warning-text);
+  font-weight: 600;
+}
+
+.admin-safe-details summary {
+  cursor: pointer;
+  color: var(--accent-color);
+  min-height: 36px;
+  display: flex;
+  align-items: center;
+}
+
+.admin-safe-details dl {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.25rem 1rem;
+  margin: 0.5rem 0;
+}
+
+.admin-safe-details dt {
+  color: var(--text-secondary);
+}
+
+.admin-safe-details dd {
+  margin: 0;
+  min-width: 0;
+}
+
+.admin-safe-wrap {
+  overflow-wrap: anywhere;
+  word-break: break-all;
+}
+
+.admin-safe-device-hint {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.admin-safe-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+@media (max-width: 640px) {
+  .admin-acting-bar {
+    padding: 0.75rem 1rem;
+  }
+
+  .admin-safe-proposal-meta {
+    align-items: flex-start;
+  }
+
+  .admin-safe-details dl {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

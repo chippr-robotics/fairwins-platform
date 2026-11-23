@@ -81,6 +81,63 @@ permissive" for killswitches; membership writes stay pinned to `membershipChainI
 controls act on exactly one named chain, refused at the call site as well as the button, and
 there is deliberately no control that acts on several chains at once.
 
+## Acting as the admin Safe, signed by an owner's key
+
+Every operator role on the live estate is held by the 2-of-3 admin Safe
+(`deployments/admin-safe.json`: KMS + Ledger + Trezor), not by any key. The console used to ask
+only what the CONNECTED key held and send every write from it, so an owner connecting their
+Ledger was refused entry ("Access Restricted"), and any write would have reverted on a missing
+role. `components/admin/adminActing/` separates the two things that were fused:
+
+- **Acting account**: whose authority is used, either the Safe or the signing key itself. Entry,
+  role flags, per-contract authority reads and "this account" labels follow it.
+  `useAdminWeb3()` is `useWeb3()` with `account`/`signer` swapped for the acting ones. Admin apps
+  read it instead of `useWeb3()`, which is why no write site changed. Outside the provider it IS
+  `useWeb3()`. Maintenance stays on the wallet: its writes are permissionless, and routing them
+  through the Safe would spend owner approvals on nothing.
+- **Owner key**: who signs, either the connected wallet (an extension-connected Ledger is
+  already this) or a Protect ▸ Off chain hardware account (spec 085 `HardwareSigner`), re-derived
+  on the device and bound to the wallet's chain. The device session is memory-only and its
+  transport is closed when dropped. The Safe choice is a device-local preference (a public
+  address), never synced.
+
+When acting as a Safe, the signer handed to the apps is `lib/admin/safeProposingSigner.js`. Its
+`sendTransaction`:
+
+1. **Simulates the call FROM the Safe**, so a write the Safe cannot make fails before the
+   device is asked for anything.
+2. **Publishes the preimage to the SafeProposalHub** (prompt 1) and waits for it to land.
+3. **Records this owner's `approveHash`** (prompt 2).
+
+The result is marked `proposed: true` and `useAdminTx` says "proposed, not applied", never the
+success message. A 2-of-3 Safe has changed nothing until a second owner approves and someone
+executes.
+
+**Nonces.** A new proposal takes `max(on-chain nonce, highest queued + 1, last reserved + 1)`.
+Same-nonce proposals on a Safe are mutually exclusive, so an admin action queues behind
+everything waiting rather than beside it.
+
+**The Safe queue** (`AdminSafeQueue`, opened from the acting bar) is where the second owner
+finishes the job. It uses the same `useVaultProposals` hook as Protect, which now takes an
+optional `{ signer }` override for the device key. Each row has four parts:
+
+- **The decoded action**: `lib/admin/describeAdminCall.js`. Role grants and revokes,
+  upgrades, pause, treasury and intents-facet changes are recognised and flagged *Sensitive*.
+  Anything else stays raw, never guessed.
+- **The raw call underneath.**
+- **The device check**: a device approving shows only `approveHash` on the Safe, with data
+  `0xd4d9bdcd…<hash>`, so the row prints the hash tail to compare on screen.
+- **The action buttons.** The owner whose approval reaches the threshold gets **Approve and
+  execute** as ONE transaction. Safe v1.4.1 accepts a pre-validated signature from
+  `msg.sender` itself.
+
+The acting bar renders ABOVE the access gate (layout route `AdminActingLayout`), because an owner
+whose key holds nothing is refused until they choose the Safe.
+
+**Where it cannot run.** Proposals need a `safeProposalHub` with a recorded deploy block and a
+Safe contract set (`config/safeContracts.js`). Ethereum mainnet (chain 1) has neither today, so
+the console refuses there by name. Use the Safe's own tooling on chain 1.
+
 ## Discovery: the store's "Operator tools" section and Quick Access pins
 
 Admin apps also surface in the Apps store (FR-013/FR-014 follow-up) so operators can find and pin
@@ -115,6 +172,9 @@ them — **derived client-side, never from the registry**:
 - `test/admin/adminEstateGuard.test.js` — recursive scan: no admin file resolves a contract from
   the wallet's chain, no cross-chain sums.
 - `test/admin/adminCharts.test.jsx`, `appDashboards.test.jsx` — three-state honesty + axe.
+- `test/admin/adminActingSafe.test.jsx` — the proposing signer (simulate-from-Safe before any
+  prompt, publish then approve, `proposed` wording), nonce reservation, the any-address role sweep,
+  Safe-role entry, and the queue's decode / device-check / view-only / unreadable states.
 - Screenshot record: `specs/093-admin-mini-apps/screenshots/` (actor-critic loop, harness at
   `scripts/ui/capture-admin-apps.mjs`).
 

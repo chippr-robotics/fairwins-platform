@@ -9,6 +9,10 @@
  * could not observe a revert, so rejecting the first prompt still queued the
  * remaining four.
  *
+ * A Safe proposal resolves the string `'proposed'` — truthy, so a sequence carries on, but
+ * distinguishable from `true` for callers that must not treat it as APPLIED (an audit record of a
+ * decision, for instance: a proposal on a 2-of-3 Safe has changed nothing yet).
+ *
  * `onSuccess` replaces the monolith's hard-wired `fetchContractState()`:
  * each app passes its own refresh so a write refreshes the state it changed.
  *
@@ -20,7 +24,7 @@
  * it is writing to is the one that supplies the fragments.
  */
 import { useCallback, useState } from 'react'
-import { useWeb3 } from '../../hooks/useWeb3'
+import { useAdminWeb3 } from './adminActing/useAdminWeb3'
 import { useNotification } from '../../hooks/useUI'
 import { errorParser } from '../../lib/evm/revertParser'
 import { describeRevert, extractRevert } from '../../lib/chain/revertError'
@@ -47,20 +51,35 @@ function describeFailure(err, errorAbi) {
 }
 
 export function useAdminTx({ onSuccess } = {}) {
-  const { signer } = useWeb3()
+  const { signer, adminActing } = useAdminWeb3()
   const { showNotification } = useNotification()
   const [pendingTx, setPendingTx] = useState(false)
 
   const runTx = useCallback(
     async (fn, successMsg, { errorAbi = null } = {}) => {
       if (!signer) {
-        showNotification('Connect your wallet first', 'error')
+        showNotification(
+          adminActing?.mode === 'safe'
+            ? 'Choose a key that owns the admin Safe before acting as it.'
+            : 'Connect your wallet first',
+          'error',
+        )
         return false
       }
       setPendingTx(true)
       try {
         const tx = await fn()
-        await tx.wait()
+        const receipt = await tx.wait()
+        // A Safe proposal has changed NOTHING yet — it needs the other owners and an execution.
+        // Saying "updated" here would be the one wrong answer (see safeProposingSigner.js).
+        if (tx?.proposed || receipt?.proposed) {
+          showNotification(
+            `Proposed to the admin Safe at nonce ${String(tx.nonce ?? receipt.nonce)} — not applied yet. It needs the other owners' approval; finish it in the Safe queue at the top of the console.`,
+            'info',
+          )
+          onSuccess?.()
+          return 'proposed'
+        }
         showNotification(successMsg, 'success')
         onSuccess?.()
         return true

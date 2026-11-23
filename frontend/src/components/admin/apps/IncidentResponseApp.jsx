@@ -25,6 +25,7 @@ import { adminAppById } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
 import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { useNotification } from '../../../hooks/useUI'
 import { useEnsResolution } from '../../../hooks/useEnsResolution'
 import { isValidEthereumAddress } from '../../../utils/validation'
@@ -132,7 +133,7 @@ function IncidentDashboard({ pauseEstate }) {
 
 export default function IncidentResponseApp() {
   const access = useAdminAccess()
-  const { signer, chainId } = useWeb3()
+  const { signer, chainId } = useAdminWeb3()
   const { showNotification } = useNotification()
 
   const registryNetworks = useMemo(
