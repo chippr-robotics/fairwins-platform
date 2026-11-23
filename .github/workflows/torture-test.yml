@@ -266,11 +266,12 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      - name: Install root dependencies
-        run: npm ci
-
-      - name: Install frontend dependencies
-        working-directory: frontend
+      # ONE install. The repo is an npm workspace (spec 075) and `frontend` is a member, so the
+      # root `npm ci` already installs the frontend's dependencies. A second `npm ci` run inside
+      # frontend/ is NOT additive: npm resolves the workspace root and REINSTALLS the whole tree
+      # with only the frontend's dependencies (~1.4k packages instead of ~2.4k), deleting hardhat.
+      # `setup:e2e` then died on `sh: hardhat: not found` before Cypress started, every week.
+      - name: Install dependencies (all workspaces)
         run: npm ci
 
       - name: Start Hardhat node

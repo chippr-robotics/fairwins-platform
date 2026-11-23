@@ -143,6 +143,13 @@ module "gateway" {
   ]
 
   startup_script = file("${path.module}/../../../vm/startup.sh")
+
+  # The module grants access to secrets by NAME, so Terraform sees no edge to the containers below
+  # and runs both at once. On 2026-11-19 (Infra Apply run 44609282870) a newly declared container,
+  # relay-engine-storage-key, was created in the same apply as its grant; the grant read the
+  # secret's IAM policy first, got a 404, and failed the prod apply. Same edge the workstation
+  # module already declares.
+  depends_on = [google_secret_manager_secret.managed]
 }
 
 /**
