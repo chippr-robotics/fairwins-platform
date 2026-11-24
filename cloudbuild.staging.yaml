@@ -65,7 +65,8 @@ steps:
       #
       # These are on the MAINNET-cohort build only. The staging-testnet image below deliberately
       # gets none of them: chains 1/10/8453/42161 are mainnet, and constitution III forbids a
-      # testnet build carrying a route to mainnet state.
+      # testnet build carrying a route to mainnet state. Polygon 137 rides VITE_RPC_URL_POLYGON (the
+      # name config/networks.js reads); VITE_RPC_URL never reached the read path or wallet transport.
       - '--build-arg'
       - 'VITE_RPC_URL_MAINNET=${_RPC_URL_MAINNET}'
       - '--build-arg'
@@ -74,6 +75,8 @@ steps:
       - 'VITE_RPC_URL_BASE=${_RPC_URL_BASE}'
       - '--build-arg'
       - 'VITE_RPC_URL_ARBITRUM=${_RPC_URL_ARBITRUM}'
+      - '--build-arg'
+      - 'VITE_RPC_URL_POLYGON=${_RPC_URL_POLYGON}'
       - '--build-arg'
       - 'VITE_IPFS_GATEWAY=https://gateway.pinata.cloud'
       - '--build-arg'
@@ -183,6 +186,7 @@ substitutions:
   _RPC_URL_OPTIMISM: ''
   _RPC_URL_BASE: ''
   _RPC_URL_ARBITRUM: ''
+  _RPC_URL_POLYGON: ''
 
 images:
   - 'us-central1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/prediction-dao-research/staging:$COMMIT_SHA'
