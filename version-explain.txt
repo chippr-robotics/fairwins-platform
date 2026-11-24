@@ -1,15 +1,12 @@
-previous: v1.20.0
-commits:  10
-  [unclassified] Merge pull request #1725 from chippr-robotics/staging
-  [fix -> patch] nonce allocation ignores unendorsed hub spam; owner preflight; close device on exit (#1727)
-  [unclassified] Merge pull request #1724 from chippr-robotics/ccr-4c0c6afd-tbrfyp
-  [unclassified] Merge branch 'main' into staging (back-merge after v1.20.0 record)
-  [unclassified] Merge pull request #1717 from chippr-robotics/release/v1.20.0-changelog
-  [unclassified] Merge pull request #1721 from chippr-robotics/ccr-4c0c6afd-tbrfyp
-  [chore -> patch] sync shells to v1.20.0 so check:native-versions passes
-  [fix -> patch] no nonce gap on a rejected prompt; no audit record for a mere proposal
-  [feat -> minor] act as the admin Safe from the console, signed by a Ledger/Trezor
-  [skipped] chore(release): v1.20.0 [skip release]
-bump:     minor
+previous: v1.21.0
+commits:  7
+  [unclassified] Merge pull request #1732 from chippr-robotics/staging
+  [unclassified] Merge pull request #1731 from chippr-robotics/fix/polygon-rpc-wiring
+  [fix -> patch] give Polygon its own RPC build arg so the SPA can leave publicnode
+  [unclassified] Merge pull request #1730 from chippr-robotics/ccr-4c0c6afd-tbrfyp
+  [unclassified] Merge branch 'main' into staging (back-merge after v1.21.0 record)
+  [unclassified] Merge pull request #1729 from chippr-robotics/release/v1.21.0-changelog
+  [skipped] chore(release): v1.21.0 [skip release]
+bump:     patch
 reason:   computed
-next:     v1.21.0
+next:     v1.21.1
