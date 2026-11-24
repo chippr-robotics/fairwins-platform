@@ -66,6 +66,10 @@ ARG VITE_RPC_URL_MAINNET
 ARG VITE_RPC_URL_OPTIMISM
 ARG VITE_RPC_URL_BASE
 ARG VITE_RPC_URL_ARBITRUM
+# Polygon 137 — the app's own chain. `config/networks.js` reads THIS name for 137 (read path AND
+# wallet transport); the global VITE_RPC_URL above never reaches either, so without this ARG the
+# production build had no way to give Polygon anything but the publicnode default.
+ARG VITE_RPC_URL_POLYGON
 ARG VITE_IPFS_GATEWAY
 # v2 WagerRegistry subgraph (Spec 017 / #707) — public, build-time only.
 ARG VITE_SUBGRAPH_URL
@@ -128,6 +132,7 @@ ENV VITE_RPC_URL_MAINNET=${VITE_RPC_URL_MAINNET}
 ENV VITE_RPC_URL_OPTIMISM=${VITE_RPC_URL_OPTIMISM}
 ENV VITE_RPC_URL_BASE=${VITE_RPC_URL_BASE}
 ENV VITE_RPC_URL_ARBITRUM=${VITE_RPC_URL_ARBITRUM}
+ENV VITE_RPC_URL_POLYGON=${VITE_RPC_URL_POLYGON}
 ENV VITE_IPFS_GATEWAY=${VITE_IPFS_GATEWAY}
 ENV VITE_SUBGRAPH_URL=${VITE_SUBGRAPH_URL}
 ENV VITE_WAGER_SOURCE=${VITE_WAGER_SOURCE}
