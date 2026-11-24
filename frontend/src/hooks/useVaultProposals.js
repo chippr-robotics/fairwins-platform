@@ -34,8 +34,16 @@ const SAFE_ABI_PARSED = normalizeAbi(SAFE_ABI)
 const safeCall = (functionName, args) =>
   encodeFunctionData({ abi: SAFE_ABI_PARSED, functionName, args })
 
-export function useVaultProposals(vault) {
-  const { chainId, signer, provider, sendCalls, loginMethod } = useWallet()
+export function useVaultProposals(vault, { signer: signerOverride = null } = {}) {
+  const { chainId, signer: walletSigner, provider, sendCalls, loginMethod } = useWallet()
+  /*
+   * An owner's key need not be the connected wallet. The operations console approves admin-Safe
+   * proposals with a Ledger or Trezor reached directly over USB (spec 085's HardwareSigner) while
+   * the session itself is a passkey or another wallet — so a caller may name the signer. It is
+   * bound to the wallet's chain by that caller; everything else (rail, reads, chain gating) is
+   * unchanged, and the rail rule already prefers a signer to the passkey rail.
+   */
+  const signer = signerOverride ?? walletSigner
   /*
    * The rail is a property of the SIGNER, not the login (lib/chains/writeRail.js).
    *

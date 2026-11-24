@@ -22,7 +22,7 @@ import AdminStatTile from '../charts/AdminStatTile'
 import { adminAppById } from '../adminApps'
 import { useAdminAccess } from '../useAdminAccess'
 import { useAdminTx } from '../useAdminTx'
-import { useWeb3 } from '../../../hooks/useWeb3'
+import { useAdminWeb3 } from '../adminActing/useAdminWeb3'
 import { DEPLOYED_CONTRACTS } from '../../../config/contracts'
 import { fetchCatalog, REGISTRY_STATUS, registryLocation } from '../../../lib/miniapps/registryClient'
 import { AppStatus } from '../../../abis/miniAppRegistry'
@@ -140,7 +140,7 @@ function ComplianceDashboard() {
 
 export default function ComplianceApp() {
   const access = useAdminAccess()
-  const { account, signer, chainId } = useWeb3()
+  const { account, signer, chainId } = useAdminWeb3()
   const { runTx, pendingTx } = useAdminTx()
 
   const renderView = (viewId) => {

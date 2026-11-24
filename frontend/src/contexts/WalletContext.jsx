@@ -4,6 +4,7 @@ import ConnectModal from '../components/wallet/ConnectModal'
 import { createWalletClient, createPublicClient, custom } from 'viem'
 import { isSupportedChainId, getNetwork, NETWORKS, PRIMARY_CHAIN_ID, cohortChainIds } from '../config/networks'
 import { classifyEstateProbes } from '../lib/chains/estateSweep'
+import { SWEPT_ADMIN_ROLES, probeAdminRoles } from '../lib/admin/adminRoleSweep'
 import { ChainSwitchRefused } from '../lib/chains/submitOn'
 import { useWalletChainId } from '../hooks/useWalletChainId'
 import { makeReadProvider } from '../utils/rpcProvider'
@@ -422,10 +423,9 @@ export function WalletProvider({ children }) {
     // console's nav, so a staking administrator's role was never synced: `isStakingAdmin` read
     // false forever and the Staking tab never opened for the one operator who could use it.
     // Exactly the class of lockout spec 071 exists to end, so it is fixed here.
-    const adminRoles = [
-      'ADMIN', 'GUARDIAN', 'ACCOUNT_MODERATOR', 'ROLE_MANAGER',
-      'SANCTIONS_ADMIN', 'FEE_ADMIN', 'STAKING_ADMIN', 'LIQUIDITY_ADMIN',
-    ]
+    // The list lives with the sweep (lib/admin/adminRoleSweep.js) so the console's acting-account
+    // sweep and this one can never ask about different roles.
+    const adminRoles = SWEPT_ADMIN_ROLES
     const allSyncedRoles = [...premiumRoles, ...adminRoles]
 
     // ── ESTATE-WIDE, NOT WALLET-CHAIN (spec 071 FR-009) ───────────────────────────────────────
@@ -439,29 +439,9 @@ export function WalletProvider({ children }) {
     ]
 
     // Concurrent: 8 roles across the cohort is far too many round-trips to do in sequence, and
-    // FR-015 says one slow chain must not hold up the rest.
-    const probes = await Promise.all(
-      adminRoles.flatMap((roleName) =>
-        walletChainFirst.map(async (id) => {
-          try {
-            const r = await hasRoleOnChain(walletAddress, roleName, id, { detailed: true })
-            return {
-              roleName,
-              chainId: id,
-              held: Boolean(r?.held),
-              readable: r?.readable !== false,
-              // Carried through, not derived: only `hasRoleOnChain` knows whether there was a
-              // contract to ask. Dropping it here is what let a chain with nothing deployed
-              // count as a chain that answered.
-              deployed: r?.deployed !== false,
-            }
-          } catch (e) {
-            // A thrown probe reached for something and failed — an outage, not an absence.
-            return { roleName, chainId: id, held: false, readable: false, deployed: true, reason: e?.message }
-          }
-        }),
-      ),
-    )
+    // FR-015 says one slow chain must not hold up the rest. One implementation, shared with the
+    // console's acting-account sweep (`lib/admin/adminRoleSweep.js`).
+    const probes = await probeAdminRoles(walletAddress, walletChainFirst, { probe: hasRoleOnChain })
 
     // Membership resolves on the REFERENCE chain regardless of what is passed (spec 071 FR-003) —
     // `hasRoleOnChain` enforces that internally, so the wallet's chain is irrelevant here.
