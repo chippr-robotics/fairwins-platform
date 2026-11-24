@@ -12,15 +12,15 @@
  *     free plan";
  *   - 1rpc: 50 blocks; flashbots: 2,000; merkle / meowrpc: rate-limited on the first request.
  *
- * So the Protect queue and every admin event tab asked the default rail for history it would never
- * give, got refused, retried each 10k chunk as ten 1k chunks, failed over into a 100-block cap, and
- * repeated that per chain and per mount — the request storm members saw as 429s, with a queue that
- * never finished loading on Optimism, Base or Arbitrum.
+ * So on Optimism, Base and Arbitrum the Protect queue (and every admin event tab) asked the default
+ * rail for history it would never give: the first wave was refused (403) on both rails within a
+ * second, the read failed, and every mount, poll and refresh tried again — a queue that could never
+ * finish loading, whatever the member did. (Measured cold: 5 HTTP requests, then an error.)
  *
  * The rows below are the PUBLIC, keyless endpoints that DO serve address-filtered history, with the
  * range each accepted. They are defaults, not policy: a member's own endpoint (spec 069) always
  * wins, because a member who configured a node has chosen where their reads go. Chains with no row
- * (Polygon, Ethereum, Amoy, local) keep the normal route — Polygon/Amoy reach history through the
+ * (Polygon, Ethereum, Base, Amoy, local) keep the normal route — Polygon/Amoy reach history through the
  * platform-issued keyed access (spec 107), and no free Ethereum endpoint was found that serves it.
  *
  * `maxRange` is the widest `eth_getLogs` block span the endpoint accepted; the scanner starts there
@@ -35,10 +35,14 @@ export const DEFAULT_LOG_RANGE = 10_000
 const LOG_SCAN_ENDPOINTS = {
   // Optimism: the OP Labs public endpoint serves history; capped at exactly 10,000 blocks.
   10: { url: 'https://mainnet.optimism.io', maxRange: 10_000, rps: 4 },
-  // Base: the Coinbase public endpoint serves history but rate-limits hard — pace it gently.
-  8453: { url: 'https://mainnet.base.org', maxRange: 10_000, rps: 2 },
-  // Arbitrum One: the Offchain Labs endpoint accepted a 10,000,000-block address-filtered range.
-  42161: { url: 'https://arb1.arbitrum.io/rpc', maxRange: 5_000_000, rps: 4 },
+  // Base: NO row. `mainnet.base.org` answers `eth_getLogs` with HTTP 429 "request limit reached"
+  // (`x-ratelimit-remaining: 0`) on the FIRST request while `eth_blockNumber` works, and every other
+  // free endpoint probed refuses history — so Base history needs a member endpoint, and without one
+  // the scan fails fast and says so (logScan LogHistoryUnavailableError), never crawls.
+  // Arbitrum One: the Offchain Labs endpoint serves history at up to 100,000 blocks per request
+  // ("query spans N blocks …, but only 100000 are allowed") — it answered a single 10M probe, but
+  // enforces 100k across a real scan, so 100k is the width to start from.
+  42161: { url: 'https://arb1.arbitrum.io/rpc', maxRange: 100_000, rps: 4 },
   // ETC + Mordor: the build defaults already serve history and accepted 10M-block ranges.
   61: { maxRange: 1_000_000, rps: 4 },
   63: { maxRange: 1_000_000, rps: 4 },

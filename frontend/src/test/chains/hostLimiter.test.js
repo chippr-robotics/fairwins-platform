@@ -18,9 +18,8 @@ async function countWithin(ms, url, n) {
 }
 
 describe('hostLimiter', () => {
-  it('holds a declared host to its pace (Base public endpoint: 2/s)', async () => {
-    expect(await countWithin(0, 'https://mainnet.base.org', 10)).toBe(2)
-    expect(await countWithin(1000, 'https://mainnet.base.org', 0)).toBe(0)
+  it('holds a declared host to its pace (OP Labs public endpoint: 4/s)', async () => {
+    expect(await countWithin(0, 'https://mainnet.optimism.io', 10)).toBe(4)
   })
 
   it('allows a one-second burst at the default pace on an undeclared host', async () => {

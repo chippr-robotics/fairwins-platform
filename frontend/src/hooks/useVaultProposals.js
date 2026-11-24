@@ -118,7 +118,7 @@ export function useVaultProposals(vault, { signer: signerOverride = null } = {})
 
       // Execution outcomes from the Safe itself.
       const { executed: executedHashes, failed: failedHashes, complete: execComplete } =
-        await readExecutionOutcomes({ safe, chainId, fromBlock })
+        await readExecutionOutcomes({ safe, chainId, fromBlock, nonce: Number(currentNonce) })
       const historyComplete = hubComplete && execComplete
 
       // Approvals per proposal (one on-chain read per owner per proposal).

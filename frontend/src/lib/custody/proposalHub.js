@@ -129,6 +129,9 @@ export async function readVerifiedProposals({ hubAddress, safeAddress, chainId, 
     fromBlock,
     chainId,
     maxChunks,
+    // The hub has no per-safe state to bound this by, so its history is read once per device and
+    // kept: a reload then reads only the blocks added since (logScan rule 8).
+    persist: true,
   })
 
   const cancelled = new Set(

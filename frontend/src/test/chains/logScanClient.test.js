@@ -20,13 +20,16 @@ describe('getLogScanClient', () => {
     const s = getLogScanClient(42161)
     expect(s.source).toBe('logs')
     expect(s.client.transport.url).toBe('https://arb1.arbitrum.io/rpc')
-    expect(s.maxRange).toBe(5_000_000)
+    expect(s.maxRange).toBe(100_000)
   })
 
-  it('Optimism and Base use their own public endpoints at the 10k cap', () => {
+  it('Optimism uses the OP Labs public endpoint at its 10k cap', () => {
     expect(getLogScanClient(10).client.transport.url).toBe('https://mainnet.optimism.io')
-    expect(getLogScanClient(8453).client.transport.url).toBe('https://mainnet.base.org')
-    expect(getLogScanClient(8453).maxRange).toBe(10_000)
+    expect(getLogScanClient(10).maxRange).toBe(10_000)
+  })
+
+  it('Base has NO public history endpoint (none was verified) — it keeps the normal route', () => {
+    expect(getLogScanClient(8453).client).toBeNull()
   })
 
   it('the dedicated log client makes ONE attempt per request (429 pacing is the limiter\'s job)', () => {

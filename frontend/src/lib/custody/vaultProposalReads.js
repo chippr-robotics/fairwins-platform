@@ -12,7 +12,7 @@ import { getAddress } from 'viem'
 import { SAFE_ABI } from '../../abis/Safe'
 import { eventScanHandle } from '../chains/eventScan'
 import { readContract, NoRpcEndpointError } from '../chains/readContract'
-import { scanLogs } from '../chain/logScan'
+import { scanLogs, scanLogsUntil } from '../chain/logScan'
 import { readVerifiedProposals } from './proposalHub'
 import { deriveProposalStatus } from './proposalStatus'
 
@@ -51,6 +51,7 @@ export async function readVaultProposalState({ safeAddress, hubAddress, chainId,
     chainId,
     fromBlock,
     maxChunks,
+    nonce: currentNonce,
   })
 
   const proposals = await Promise.all(
@@ -81,16 +82,23 @@ export async function readVaultProposalState({ safeAddress, hubAddress, chainId,
 /**
  * The Safe's own record of what executed and what reverted — one combined bounded scan of
  * ExecutionSuccess + ExecutionFailure (neither indexes its txHash, so they share an empty topic tail).
+ *
+ * Pass the Safe's current `nonce` whenever it is known. In Safe v1.3/v1.4.1 every `execTransaction`
+ * that does not revert increments the nonce exactly once and emits exactly ONE of these two events
+ * (module executions emit neither and leave the nonce alone), so the stream holds exactly `nonce`
+ * events. With it, the scan reads newest-first and stops at that count (logScan `scanLogsUntil`):
+ * a vault that has never executed costs ZERO requests, and one that has costs the span since its
+ * oldest execution instead of the chain's whole age since the hub deployed. Without it, the old
+ * forward scan from `fromBlock` runs.
+ *
  * @returns {Promise<{executed:Set<string>, failed:Set<string>, complete:boolean}>}
  */
-export async function readExecutionOutcomes({ safe, chainId, fromBlock, maxChunks }) {
-  const { logs, complete } = await scanLogs({
-    contract: safe,
-    filters: [safe.filters.ExecutionSuccess(), safe.filters.ExecutionFailure()],
-    fromBlock,
-    chainId,
-    maxChunks,
-  })
+export async function readExecutionOutcomes({ safe, chainId, fromBlock, maxChunks, nonce }) {
+  const filters = [safe.filters.ExecutionSuccess(), safe.filters.ExecutionFailure()]
+  const { logs, complete } =
+    nonce != null && Number.isFinite(Number(nonce))
+      ? await scanLogsUntil({ contract: safe, filters, fromBlock, chainId, target: Number(nonce), maxChunks })
+      : await scanLogs({ contract: safe, filters, fromBlock, chainId, maxChunks })
   const executed = new Set()
   const failed = new Set()
   for (const l of logs) {

@@ -37,27 +37,34 @@ import { DEFAULT_LOG_RANGE } from '../../config/logScanEndpoints'
  * range). A sub-chunk that still fails THROWS: a silently skipped range is a hole in history that
  * looks exactly like "nothing happened".
  *
- * REQUEST VOLUME (the 429 fix). Four more rules keep a scan from becoming a storm:
+ * REQUEST VOLUME (the 429 fix). Measured on a cold Protect-queue load of a real vault through a
+ * member's QuickNode Polygon endpoint, the old path made 468 HTTP requests (≈1,900 RPC calls,
+ * unpaced, tripping "50/second request limit reached") and repeated ALL of it on every reload; with
+ * the rules below it is 209 requests cold and 5 on reload. More rules keep a scan from being a storm:
  *
  *  5. **Width follows the endpoint.** History is read through the chain's log client
  *     (`config/logScanEndpoints.js`), whose handle reports `maxLogRange` — Arbitrum's public
- *     endpoint takes millions of blocks per request, so its whole history is a handful of calls
- *     instead of ~3,900. A refusal that STATES a cap ("limited to a 10,000 range") shrinks the width
+ *     endpoint takes 100,000 blocks per request, ten times the old fixed chunk. A refusal that STATES a cap ("limited to a 10,000 range") shrinks the width
  *     to it and the width is remembered for that endpoint, so the next chunk is not refused too.
- *  6. **An endpoint that cannot serve history fails FAST.** "Archive requests require a personal
- *     token", or a cap so small that the history would take thousands of requests, throws
- *     `LogHistoryUnavailableError` at once — no ten-way sub-chunk retry of a refusal that narrowing
- *     cannot fix. The caller renders it as unreadable, which is what it is.
+ *  6. **An endpoint that cannot serve history fails FAST, and says so.** "Archive requests require a
+ *     personal token", or a cap so small that the history would take thousands of requests, throws
+ *     `LogHistoryUnavailableError` at once — never a sub-chunk retry of a refusal that narrowing
+ *     cannot fix, and never a 100-block crawl. The caller renders it as unreadable, which is what it is.
  *  7. **One scan per key at a time.** Several surfaces read the same contract history (the vault
  *     queue, the cross-chain queue, the notification source); concurrent callers now queue behind
  *     one scan and then read its cache, instead of each issuing the same backfill.
- *  8. **A finished scan survives a reload.** The watermark and raw logs are kept per device
- *     (localStorage), so a reload reads only new blocks. The reason this used to be session-only —
+ *  8. **A finished scan can survive a reload** — opt-in per caller (`persist: true`; the custody
+ *     streams use it). The watermark and raw logs are kept per device (localStorage, a bounded number
+ *     of entries), so a reload reads only new blocks. The reason this used to be session-only —
  *     "a stale watermark across releases would silently skip history" — is answered by what the key
  *     holds and what is restored: the key is chain + address + topics + fromBlock (a changed filter
  *     or deploy block is a different key), raw logs are re-DECODED with the current ABI on restore,
- *     the version prefix is bumped on any change to this format, and the last `REORG_MARGIN` blocks
- *     are always re-read. Logs are public chain data; nothing member-specific is stored.
+ *     the version prefix is bumped on any change to this format, a record written through a different
+ *     endpoint is discarded, and roughly the last ten minutes of blocks are always re-read. Logs are
+ *     public chain data; nothing member-specific is stored.
+ *  9. **A count the chain already knows bounds the scan.** `scanLogsUntil` reads NEWEST-FIRST and
+ *     stops once it holds the number of events the caller knows exist (a Safe's execution outcomes
+ *     number exactly its `nonce()`), so its cost follows recent activity, not chain age.
  */
 
 /** Widest range asked for in one request when the endpoint reports nothing better. */
@@ -69,14 +76,32 @@ export const LOG_SCAN_FALLBACK_CHUNK = 1_000
  * plan) one Arbitrum history is ~390,000 requests. Refusing is the honest answer; trying is the storm.
  */
 export const MIN_USABLE_LOG_RANGE = 1_000
-/** Blocks re-read after a restore from storage, so a reorg near the old head cannot leave a ghost. */
+/** Blocks re-read after a restore from storage (default), so a reorg near the old head cannot leave a ghost. */
 export const REORG_MARGIN = 64
+/** ~10 minutes of blocks per chain — a block-count margin is 16 seconds on Arbitrum. */
+const REORG_MARGIN_BY_CHAIN = { 1: 64, 10: 300, 8453: 300, 137: 300, 80002: 300, 42161: 2_400, 61: 64, 63: 64 }
+export function reorgMarginFor(chainId) {
+  return REORG_MARGIN_BY_CHAIN[Number(chainId)] ?? REORG_MARGIN
+}
+/** At most this many persisted scans per device; the least recently written is evicted first. */
+const MAX_PERSISTED_ENTRIES = 40
+/** Rate-limit refusals delivered in the response BODY (status 200): back off and retry the chunk. */
+const RATE_LIMITED = /request limit reached|rate limit|too many requests|exceeded .*capacity|\b429\b/i
+const RATE_LIMIT_RETRIES = 3
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 /** In-flight chunks per scan. Pacing per host is the limiter's job (lib/chains/hostLimiter.js). */
 const CONCURRENCY = 4
 /** Storage prefix — bump the version on ANY change to what is stored. */
 const STORE_PREFIX = 'fw_logscan_v1:'
 /** Above this many logs a history is not persisted (it is still cached for the session). */
 const MAX_PERSISTED_LOGS = 2_000
+
+/**
+ * What a member reads when the endpoint cannot serve history. The provider's own words stay on
+ * `cause` (logs, support) — they name a vendor's signup page, which is not this app's advice.
+ */
+export const HISTORY_UNAVAILABLE =
+  "This network's endpoint does not serve transaction history. Add your own endpoint for this network in Network settings to read it."
 
 /** The endpoint cannot serve this history at all — retrying narrower will not help. */
 export class LogHistoryUnavailableError extends Error {
@@ -105,6 +130,7 @@ function storage() {
 /** Drop all cached scans — memory AND device storage (tests, and any reset path). */
 export function clearLogScanCache() {
   cache.clear()
+  untilCache.clear()
   inflight.clear()
   learnedWidth.clear()
   const ls = storage()
@@ -122,6 +148,7 @@ export function clearLogScanCache() {
 /** Tests only: forget the in-memory cache but keep device storage — i.e. simulate a page reload. */
 export function __simulateReloadForTests() {
   cache.clear()
+  untilCache.clear()
   inflight.clear()
   learnedWidth.clear()
 }
@@ -137,7 +164,16 @@ const rawOf = (log) => ({
   index: log.index ?? log.logIndex,
 })
 
-function persist(key, entry) {
+function persistedKeys(ls) {
+  const keys = []
+  for (let i = 0; i < ls.length; i += 1) {
+    const k = ls.key(i)
+    if (k && k.startsWith(STORE_PREFIX)) keys.push(k)
+  }
+  return keys
+}
+
+function persist(key, entry, endpoint) {
   const ls = storage()
   if (!ls) return
   try {
@@ -145,22 +181,42 @@ function persist(key, entry) {
       ls.removeItem(STORE_PREFIX + key)
       return
     }
-    ls.setItem(STORE_PREFIX + key, JSON.stringify({ scannedTo: entry.scannedTo, raw: entry.raw }))
+    ls.setItem(STORE_PREFIX + key, JSON.stringify({ endpoint, at: Date.now(), scannedTo: entry.scannedTo, raw: entry.raw }))
+    const keys = persistedKeys(ls)
+    if (keys.length > MAX_PERSISTED_ENTRIES) {
+      const aged = keys
+        .map((k) => {
+          try {
+            return [k, JSON.parse(ls.getItem(k))?.at ?? 0]
+          } catch {
+            return [k, 0]
+          }
+        })
+        .sort((a, b) => a[1] - b[1])
+      for (const [k] of aged.slice(0, keys.length - MAX_PERSISTED_ENTRIES)) ls.removeItem(k)
+    }
   } catch {
     /* quota / private mode: the session cache still works */
   }
 }
 
-/** Restore a persisted scan, re-decoded with the CURRENT interface and wound back REORG_MARGIN. */
-function restore(key, contract, fromBlock) {
+/**
+ * Restore a persisted scan, re-decoded with the CURRENT interface and wound back by the chain's
+ * reorg margin. A record written through a different endpoint is discarded: a reload must still
+ * heal a watermark that a bad endpoint produced.
+ */
+function restore(key, contract, fromBlock, chainId, endpoint) {
   const ls = storage()
   if (!ls) return null
   try {
     const text = ls.getItem(STORE_PREFIX + key)
     if (!text) return null
     const stored = JSON.parse(text)
-    if (!Number.isFinite(stored?.scannedTo) || !Array.isArray(stored.raw)) return null
-    const scannedTo = Math.max(Number(fromBlock) - 1, stored.scannedTo - REORG_MARGIN)
+    if (!Number.isFinite(stored?.scannedTo) || !Array.isArray(stored.raw) || stored.endpoint !== endpoint) {
+      ls.removeItem(STORE_PREFIX + key)
+      return null
+    }
+    const scannedTo = Math.max(Number(fromBlock) - 1, stored.scannedTo - reorgMarginFor(chainId))
     const raw = stored.raw.filter((l) => l.blockNumber <= scannedTo)
     const logs = []
     for (const r of raw) {
@@ -250,6 +306,7 @@ export function statedRangeCap(text) {
     /maximum block range:? ?([\d,]+)/i, // publicnode/polygon: "exceed maximum block range: 50000"
     /ranges over ([\d,]+) blocks/i, // drpc: "ranges over 100 blocks are not supported"
     /block range (?:greater|larger) than ([\d,]+)/i, // flashbots: "block range greater than 2000 max"
+    /but only ([\d,]+) are allowed/i, // arb1: "query spans 5000000 blocks …, but only 100000 are allowed"
     /(?:up to|max(?:imum)?(?: of)?) ([\d,]+) blocks?/i, // "query up to 10000 blocks"
   ]
   for (const re of patterns) {
@@ -266,32 +323,40 @@ export function statedRangeCap(text) {
  * One range, adapting to what the endpoint says. Throws when the range cannot be read — a
  * `LogHistoryUnavailableError` when no narrower request could succeed either.
  */
-async function getLogsRange(provider, base, from, to) {
+async function getLogsRange(provider, base, from, to, attempt = 0) {
   try {
     return await provider.getLogs({ ...base, fromBlock: from, toBlock: to })
   } catch (err) {
     const text = errorText(err)
     if (UNSERVABLE.test(text)) {
-      throw new LogHistoryUnavailableError(`This network's endpoint does not serve event history (${text.slice(0, 120)})`, { cause: err })
+      throw new LogHistoryUnavailableError(HISTORY_UNAVAILABLE, { cause: err })
+    }
+    // A rate-limit refusal is not a width problem: narrowing would multiply the very requests that
+    // tripped it. Wait (doubling) and ask for the SAME range again; give up loudly after a few.
+    if (RATE_LIMITED.test(text)) {
+      if (attempt >= RATE_LIMIT_RETRIES) throw err
+      await sleep(1000 * 2 ** attempt)
+      return getLogsRange(provider, base, from, to, attempt + 1)
     }
     const span = to - from + 1
     const cap = statedRangeCap(text)
     if (cap != null) {
       if (cap < MIN_USABLE_LOG_RANGE) {
-        throw new LogHistoryUnavailableError(`This network's endpoint only serves ${cap}-block log ranges — too narrow to read history`, { cause: err })
+        throw new LogHistoryUnavailableError(HISTORY_UNAVAILABLE, { cause: err })
       }
       if (provider?.logEndpointKey) learnedWidth.set(provider.logEndpointKey, Math.min(cap, learnedWidth.get(provider.logEndpointKey) ?? Infinity))
       if (cap >= span) throw err // it refused a range already inside its own cap: not a width problem
       const out = []
-      for (const c of planChunks(from, to, Infinity, cap)) out.push(...(await provider.getLogs({ ...base, fromBlock: c.from, toBlock: c.to })))
+      for (const c of planChunks(from, to, Infinity, cap)) out.push(...(await getLogsRange(provider, base, c.from, c.to)))
       return out
     }
-    // No stated cap (some endpoints cap by RESULT size): one narrower pass, then give up loudly.
+    // No stated cap (some endpoints cap by RESULT size): BISECT down to the floor, then give up
+    // loudly. Halving keeps a 5M-block refusal from becoming ten 500k requests that all fail too.
     if (span <= LOG_SCAN_FALLBACK_CHUNK) throw err
-    const sub = Math.max(LOG_SCAN_FALLBACK_CHUNK, Math.ceil(span / 10))
-    const out = []
-    for (const c of planChunks(from, to, Infinity, sub)) out.push(...(await provider.getLogs({ ...base, fromBlock: c.from, toBlock: c.to })))
-    return out
+    const mid = from + Math.floor(span / 2) - 1
+    const left = await getLogsRange(provider, base, from, mid)
+    const right = await getLogsRange(provider, base, mid + 1, to)
+    return [...left, ...right]
   }
 }
 
@@ -329,6 +394,7 @@ function decode(contract, log) {
  * @param {number} [args.toBlock] - inclusive ceiling on BOTH the scan and the answer; defaults to the head
  * @param {number} [args.maxChunks] - chunks this invocation may spend; omit for "as many as it takes"
  * @param {string} [args.cacheKey] - override the derived key (tests)
+ * @param {boolean} [args.persist] - keep the finished scan on this device across reloads (rule 8)
  * @returns {Promise<{logs: object[], scannedTo: number, complete: boolean}>} `logs` is every log
  *   found from `fromBlock` up to `scannedTo`, accumulated across calls. `complete` is false when
  *   the budget ran out before the head — the caller MUST disclose that rather than treat the
@@ -353,12 +419,13 @@ export async function scanLogs(args) {
   }
 }
 
-async function scanOnce({ contract, provider, topics, key, fromBlock, toBlock, maxChunks = Infinity }) {
+async function scanOnce({ contract, provider, topics, key, fromBlock, chainId, toBlock, maxChunks = Infinity, persist: keep = false }) {
   const address = contract.target
+  const endpoint = provider.logEndpointKey ?? null
   const head = toBlock ?? (await provider.getBlockNumber())
   let entry = cache.get(key)
   if (!entry) {
-    entry = restore(key, contract, fromBlock) || { scannedTo: Number(fromBlock) - 1, logs: [], raw: [] }
+    entry = (keep && restore(key, contract, fromBlock, chainId, endpoint)) || { scannedTo: Number(fromBlock) - 1, logs: [], raw: [] }
     cache.set(key, entry)
   }
 
@@ -400,10 +467,86 @@ async function scanOnce({ contract, provider, topics, key, fromBlock, toBlock, m
       }
     }
     entry.scannedTo = wave[wave.length - 1].to
-    persist(key, entry)
+    if (keep) persist(key, entry, endpoint)
   }
 
   return answer()
+}
+
+/** key -> { highTo, lowFrom, logs } for count-bounded scans (memory only; they are cheap to redo). */
+const untilCache = new Map()
+
+/**
+ * Newest-first history read that STOPS once it holds `target` events (rule 9).
+ *
+ * For a stream whose total the chain already states — a Safe's ExecutionSuccess + ExecutionFailure
+ * events number exactly its `nonce()`, because every executed Safe transaction increments the nonce
+ * once and emits exactly one of the two — reading from the deploy block forward pays for the chain's
+ * whole age to find a handful of events. Reading backwards from the head and stopping at the count
+ * pays only for the span since the oldest of them; at `target === 0` it costs nothing at all.
+ *
+ * `complete` is true when the count is met or the scan reached `fromBlock`. A later call first
+ * reads the blocks added since (forward), then continues downward only if the count grew past what
+ * it holds. Fewer than `target` events after reaching `fromBlock` is still `complete` — the caller
+ * asked for history from there, and it is all read — but `found < target` tells the caller the
+ * count and the history disagree (e.g. events before `fromBlock`), which it may disclose.
+ *
+ * @returns {Promise<{logs: object[], complete: boolean, found: number}>}
+ */
+export async function scanLogsUntil({ contract, filters, fromBlock, chainId, target, maxChunks = Infinity }) {
+  const provider = contract.runner?.provider ?? contract.runner
+  if (!provider?.getLogs) throw new Error('logScan: contract has no provider')
+  const list = Array.isArray(filters) ? filters : [filters]
+  const topics = mergeTopics(await Promise.all(list.map(topicsOf)))
+  const key = JSON.stringify(['until', String(chainId), String(contract.target), topics, fromBlock])
+  const want = Math.max(0, Number(target) || 0)
+  const floor = Number(fromBlock)
+
+  const prior = inflight.get(key)
+  const run = (prior ? prior.catch(() => {}) : Promise.resolve()).then(async () => {
+    let entry = untilCache.get(key)
+    if (want === 0 && !entry) return { logs: [], complete: true, found: 0 }
+    const head = await provider.getBlockNumber()
+    if (!entry) {
+      entry = { highTo: head, lowFrom: head + 1, logs: [] }
+      untilCache.set(key, entry)
+    }
+    const base = { address: contract.target, topics }
+    const take = (raws) => {
+      for (const raw of raws) {
+        const d = decode(contract, raw)
+        if (d) entry.logs.push(d)
+      }
+    }
+    // New blocks since the last call first: events land at the head.
+    if (head > entry.highTo) {
+      take(await scanLogRange({ provider, address: base.address, topics, fromBlock: entry.highTo + 1, toBlock: head }))
+      entry.highTo = head
+    }
+    let spent = 0
+    while (entry.logs.length < want && entry.lowFrom > floor && spent < maxChunks) {
+      const width = widthFor(provider)
+      const waves = []
+      let hi = entry.lowFrom - 1
+      for (let i = 0; i < CONCURRENCY && hi >= floor && spent + waves.length < maxChunks; i += 1) {
+        const lo = Math.max(floor, hi - width + 1)
+        waves.push({ from: lo, to: hi })
+        hi = lo - 1
+      }
+      spent += waves.length
+      const results = await Promise.all(waves.map((w) => getLogsRange(provider, base, w.from, w.to)))
+      take(results.flat())
+      entry.lowFrom = waves[waves.length - 1].from
+    }
+    const found = entry.logs.length
+    return { logs: entry.logs, complete: found >= want || entry.lowFrom <= floor, found }
+  })
+  inflight.set(key, run)
+  try {
+    return await run
+  } finally {
+    if (inflight.get(key) === run) inflight.delete(key)
+  }
 }
 
 /**
