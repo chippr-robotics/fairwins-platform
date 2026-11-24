@@ -1,6 +1,6 @@
 ### Artifacts
 
-Range: `v1.20.0..v1.21.0`
+Range: `v1.21.0..v1.21.1`
 
 | Artifact | Status | Identity |
 |---|---|---|
@@ -10,9 +10,9 @@ Range: `v1.20.0..v1.21.0`
 | Mini-app packages | unchanged | — |
 | Subgraph endpoint | moved | `v0.3.0` |
 
-### Native channel artifacts (v1.21.0)
+### Native channel artifacts (v1.21.1)
 
 | Channel | Artifact | SHA-256 | Signed |
 |---|---|---|---|
-| android | `FairWins-v1.21.0.aab` | `da775c29db1a0e7d3aa0ca61023a5854f7393be2023ded9cd8180bc6ce5c6975` | yes |
-| ios | `FairWins-v1.21.0-ios.xcarchive.zip` | `9246b6b4c69e05ab5f65aa555a18e46a110a16c87b8f44dd078bb9d43219fdc0` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+| android | `FairWins-v1.21.1.aab` | `dce16ec66183d447f8bc311a975efa10bca6eb348c1d4782bec5a2b140b30fc3` | yes |
+| ios | `FairWins-v1.21.1-ios.xcarchive.zip` | `3945faa8b267d86b93c5a93d1ac7d1ddb2ae3919a9febf0731c7ff6bc98274f4` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
