@@ -88,16 +88,21 @@ The correct response is a QuickNode endpoint whose *own* settings restrict it to
 which is safe to publish. **Never pass an archive URL to the SPA build**: moving a credential into
 `VITE_` does not hide it, it publishes it.
 
-Neither is committed. `cloudbuild.yaml` and `cloudbuild.staging.yaml` declare four substitutions —
-`_RPC_URL_MAINNET`, `_RPC_URL_OPTIMISM`, `_RPC_URL_BASE`, `_RPC_URL_ARBITRUM` — that **default to
-empty** and are set on the trigger. Empty falls through to the committed `publicnode.com` primary
+Neither is committed. `cloudbuild.yaml` and `cloudbuild.staging.yaml` declare five substitutions —
+`_RPC_URL_MAINNET`, `_RPC_URL_OPTIMISM`, `_RPC_URL_BASE`, `_RPC_URL_ARBITRUM`, `_RPC_URL_POLYGON` —
+that **default to empty** and are set on the trigger. Empty falls through to the committed `publicnode.com` primary
 (`'' || 'https://…'`), so an unset trigger reproduces the previous bundle exactly. They ride the
 **mainnet-cohort image only**; the `staging-testnet` build deliberately gets none of them, because
-chains 1/10/8453/42161 are mainnet and constitution III forbids a testnet build carrying a route to
-mainnet state.
+chains 1/10/8453/42161/137 are mainnet and constitution III forbids a testnet build carrying a route
+to mainnet state.
 
-Polygon 137 is not in that set — it is the app's own chain and rides the existing global
-`VITE_RPC_URL` build arg.
+**Polygon 137 needs its own substitution like every other chain.** It was once left out on the belief
+that it "rides the global `VITE_RPC_URL` build arg" — but `config/networks.js` reads
+`VITE_RPC_URL_POLYGON` for 137, and `VITE_RPC_URL` reaches neither the read path (`resolveRpcEndpoints`)
+nor the wallet transport (whose per-chain URL always outranks it). Until `_RPC_URL_POLYGON` existed the
+production bundle could not give Polygon anything but the publicnode default, which refuses historical
+`eth_getLogs` without a personal token — so the admin Safe queue (and any other hub/event scan) was
+unreadable on Polygon.
 
 Provisioning and rotating the archive side is documented in
 `docs/developer-guide/workstation-secrets.md` §"QuickNode endpoints are PER-CHAIN".

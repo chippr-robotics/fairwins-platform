@@ -34,8 +34,11 @@ steps:
       # ⚠ ONLY a DOMAIN-RESTRICTED QuickNode endpoint belongs here. VITE_ values compile into the
       # public bundle (spec 097 rule 5), so whatever is set is readable by every visitor — the fix
       # is an endpoint scoped to the app's origins, never a hiding place for the archive credential
-      # the workstation reads (fairwins-quicknode-<chain>-url). Polygon 137 is deliberately absent:
-      # it is the app's own chain and rides VITE_RPC_URL above.
+      # the workstation reads (fairwins-quicknode-<chain>-url). Polygon 137 is included: it USED to
+      # be left out on the belief that it "rides VITE_RPC_URL above", but config/networks.js reads
+      # VITE_RPC_URL_POLYGON for chain 137 and VITE_RPC_URL never reaches the read path or the wallet
+      # transport — so Polygon had no way off the publicnode default, whose historical eth_getLogs
+      # refusal ("Archive requests require a personal token") left the admin Safe queue unreadable.
       - '--build-arg'
       - 'VITE_RPC_URL_MAINNET=${_RPC_URL_MAINNET}'
       - '--build-arg'
@@ -44,6 +47,8 @@ steps:
       - 'VITE_RPC_URL_BASE=${_RPC_URL_BASE}'
       - '--build-arg'
       - 'VITE_RPC_URL_ARBITRUM=${_RPC_URL_ARBITRUM}'
+      - '--build-arg'
+      - 'VITE_RPC_URL_POLYGON=${_RPC_URL_POLYGON}'
       - '--build-arg'
       - 'VITE_IPFS_GATEWAY=https://gateway.pinata.cloud'
       # v2 WagerRegistry subgraph (Spec 017 / #707). Build-time only: Vite inlines
@@ -166,6 +171,7 @@ substitutions:
   _RPC_URL_OPTIMISM: ''
   _RPC_URL_BASE: ''
   _RPC_URL_ARBITRUM: ''
+  _RPC_URL_POLYGON: ''
 
 # STATED rather than inherited. Cloud Build's implicit default is 600s; production builds one image
 # and lands in ~3 minutes, so the default has never bitten here — but an implicit ceiling is one
