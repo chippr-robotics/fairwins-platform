@@ -19,7 +19,7 @@
  *   positional `args[0]` access are converted per-site — grep before swapping a caller).
  */
 import { decodeEventLog, encodeEventTopics } from 'viem'
-import { getPublicClient } from './publicClient'
+import { getLogScanClient, getPublicClient } from './publicClient'
 import { normalizeAbi } from './readContract'
 
 function normalizeLog(log) {
@@ -37,11 +37,21 @@ function normalizeLog(log) {
  *   (the same "null means no route" contract the provider factories keep).
  */
 export function eventScanHandle(chainId, { address, abi }) {
-  const client = getPublicClient(chainId)
+  // History goes through the chain's LOG client (lib/chains/publicClient#getLogScanClient): the
+  // build-default read rail refuses historical eth_getLogs on most public providers. The scan head
+  // comes from the SAME client — a head read from a different node can be ahead of the one serving
+  // the logs, and a range scanned past what that node has seen comes back empty and is recorded as
+  // scanned: a silent hole.
+  const scan = getLogScanClient(chainId)
+  const client = scan.client ?? getPublicClient(chainId)
   if (!client) return null
   const normalizedAbi = normalizeAbi(abi)
 
   const provider = {
+    /** Widest span to ask for first; logScan shrinks it on a range refusal and remembers that. */
+    maxLogRange: scan.maxRange,
+    /** Identifies the endpoint for logScan's learned-width memory (no credentials: a source tag). */
+    logEndpointKey: `${Number(chainId)}:${scan.source}`,
     async getLogs({ address: a, topics, fromBlock, toBlock }) {
       const logs = await client.request({
         method: 'eth_getLogs',

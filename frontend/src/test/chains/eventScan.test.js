@@ -9,7 +9,12 @@ const client = vi.hoisted(() => ({ current: null }))
 
 vi.mock('../../lib/chains/publicClient', async (orig) => {
   const actual = await orig()
-  return { ...actual, getPublicClient: () => client.current }
+  // The handle reads history through the chain's LOG client (getLogScanClient), not the default one.
+  return {
+    ...actual,
+    getPublicClient: () => client.current,
+    getLogScanClient: () => ({ client: null, maxRange: 10_000, source: 'test' }),
+  }
 })
 
 const { eventScanHandle } = await import('../../lib/chains/eventScan')

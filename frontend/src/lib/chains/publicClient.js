@@ -19,6 +19,8 @@
 import { createPublicClient, fallback, http } from 'viem'
 import { resolveRpcEndpoints } from '../network/rpcEndpoints'
 import { ensureIssuedAccess, currentTokenFor } from '../network/issuedAccess'
+import { acquire, penalize } from './hostLimiter'
+import { logScanEndpointFor, DEFAULT_LOG_RANGE } from '../../config/logScanEndpoints'
 
 /**
  * DIVERGENCE 24 — the transport RETRIED where ethers made one request, and it is not a latency
@@ -44,8 +46,6 @@ import { ensureIssuedAccess, currentTokenFor } from '../network/issuedAccess'
 const THROTTLE_SLOT_INTERVAL_MS = 250 // ethers' FetchRequest SLOT_INTERVAL
 const THROTTLE_MAX_ATTEMPTS = 12 // ethers' FetchRequest MAX_ATTEMPTS
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
-
 /**
  * `fetch`, retrying ONLY a 429 — ethers' throttle rule, and nothing else.
  *
@@ -54,13 +54,17 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 export async function throttledFetch(input, init) {
   for (let attempt = 0; ; attempt += 1) {
+    // Paced PER HOST (lib/chains/hostLimiter.js): a burst from every surface at once stays inside
+    // the rate the host accepts, and a back-off one request earned holds every request to that host.
+    await acquire(input)
     const response = await fetch(input, init)
     if (response.status !== 429 || attempt + 1 >= THROTTLE_MAX_ATTEMPTS) return response
     const retryAfter = response.headers?.get?.('retry-after')
     const delay = /^[1-9][0-9]*$/.test(retryAfter ?? '')
       ? Number(retryAfter) * 1000
       : THROTTLE_SLOT_INTERVAL_MS * Math.trunc(Math.random() * 2 ** attempt)
-    if (delay > 0) await sleep(delay)
+    // Host-wide, so the other in-flight requests stop hammering it too; `acquire` above waits it out.
+    if (delay > 0) penalize(input, delay)
   }
 }
 
@@ -154,9 +158,43 @@ export function getPublicClient(chainId) {
   return client
 }
 
+const logClientCache = new Map() // chainId -> { key, client }
+
+/**
+ * Where event HISTORY is read from, and the widest `eth_getLogs` span to start with.
+ *
+ * Returns `{ client, maxRange, source }`. `client` is a DEDICATED log client only when the chain's
+ * public log endpoint applies (config/logScanEndpoints.js names one and the member has not set
+ * their own); otherwise it is null and the caller reads history through `getPublicClient(chainId)`
+ * as before. Precedence: a MEMBER endpoint (spec 069) wins outright — they chose where their reads
+ * go, and it is usually a keyed node; its width is unknown, so the scanner starts at the common
+ * default and adapts. Then the chain's public log endpoint, because the build-default rail on most
+ * public providers refuses historical `eth_getLogs`. Then the normal route.
+ *
+ * The dedicated client is unbatched: a JSON-RPC batch of wide `eth_getLogs` is one HTTP request the
+ * host counts as many, and one oversized member fails the whole batch.
+ *
+ * @returns {{ client: import('viem').PublicClient|null, maxRange: number, source: string }}
+ */
+export function getLogScanClient(chainId) {
+  const route = chainId != null ? resolveRpcEndpoints(chainId) : null
+  const endpoint = logScanEndpointFor(chainId)
+  if (route?.source === 'member' && route.primary) return { client: null, maxRange: DEFAULT_LOG_RANGE, source: 'member' }
+  if (!endpoint.url) return { client: null, maxRange: endpoint.maxRange, source: route?.source ?? 'default' }
+  const existing = logClientCache.get(chainId)
+  if (existing && existing.key === endpoint.url) return { client: existing.client, maxRange: endpoint.maxRange, source: 'logs' }
+  const client = createPublicClient({
+    chain: chainDescriptor(chainId),
+    transport: http(endpoint.url, { batch: false, ...SINGLE_ATTEMPT }),
+  })
+  logClientCache.set(chainId, { key: endpoint.url, client })
+  return { client, maxRange: endpoint.maxRange, source: 'logs' }
+}
+
 /** Exported for tests — clears cached clients so route changes can be exercised. */
 export function __resetPublicClientCache() {
   clientCache.clear()
+  logClientCache.clear()
 }
 
 /** The batching decision, mirrored from the legacy seam for callers/tests that need it. */
