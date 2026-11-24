@@ -14,6 +14,43 @@ production releases are.
 
 <!-- RELEASES:START -->
 
+## v1.21.0 — 2026-11-23
+
+Promoted from: v1.21.0-rc.3
+Previous release: v1.20.0 · Range: `v1.20.0..v1.21.0` (10 commits)
+
+### 🚀 Features
+
+- feat(admin): act as the admin Safe from the console, signed by a Ledger/Trezor
+
+### 🐛 Bug Fixes
+
+- fix(admin): nonce allocation ignores unendorsed hub spam; owner preflight; close device on exit (#1727)
+- fix(admin): no nonce gap on a rejected prompt; no audit record for a mere proposal
+
+### 🧹 Maintenance
+
+- chore(native): sync shells to v1.20.0 so check:native-versions passes
+
+### Artifacts
+
+Range: `v1.20.0..v1.21.0`
+
+| Artifact | Status | Identity |
+|---|---|---|
+| SPA image | moved | — |
+| Relay gateway image | moved | — |
+| Contract implementations | unchanged | — |
+| Mini-app packages | unchanged | — |
+| Subgraph endpoint | moved | `v0.3.0` |
+
+### Native channel artifacts (v1.21.0)
+
+| Channel | Artifact | SHA-256 | Signed |
+|---|---|---|---|
+| android | `FairWins-v1.21.0.aab` | `da775c29db1a0e7d3aa0ca61023a5854f7393be2023ded9cd8180bc6ce5c6975` | yes |
+| ios | `FairWins-v1.21.0-ios.xcarchive.zip` | `9246b6b4c69e05ab5f65aa555a18e46a110a16c87b8f44dd078bb9d43219fdc0` | no — operator signing ceremony (see docs/runbooks/native-release-operations.md) |
+
 ## v1.20.0 — 2026-11-19
 
 Promoted from: v1.20.0-rc.29
