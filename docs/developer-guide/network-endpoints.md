@@ -107,6 +107,49 @@ unreadable on Polygon.
 Provisioning and rotating the archive side is documented in
 `docs/developer-guide/workstation-secrets.md` §"QuickNode endpoints are PER-CHAIN".
 
+## Event history has its own endpoint (log scans)
+
+Ordinary reads and event HISTORY are different workloads, and on most public providers the build
+default can only do the first. Measured 2026-11-24 with an address-filtered `eth_getLogs` against the
+SafeProposalHub from its deploy block:
+
+| Provider | Answer to historical `eth_getLogs` |
+|---|---|
+| publicnode (default on 1/10/137/8453/42161) | "Archive requests require a personal token" (Arbitrum: even the latest 10k blocks) |
+| drpc (build failover) | "ranges over 100 blocks are not supported on free plan" |
+| 1rpc / flashbots | 50 / 2,000 blocks |
+| `arb1.arbitrum.io/rpc` | 100,000 per request inside a scan ("…but only 100000 are allowed") |
+| `mainnet.optimism.io` | exactly 10,000 |
+| `mainnet.base.org` | HTTP 429 "request limit reached" on the FIRST `eth_getLogs` (`x-ratelimit-remaining: 0`) — not usable; Base history needs a member endpoint |
+| ETC / Mordor defaults | 10,000,000-block ranges accepted |
+
+So `config/logScanEndpoints.js` names, per chain, the PUBLIC keyless endpoint that serves history and
+the width it accepts, and `lib/chains/publicClient.js#getLogScanClient` routes every log scan
+(`eventScanHandle` → `lib/chain/logScan`) through it. Precedence: **member endpoint → public log
+endpoint → normal route**. Chains with a row: Optimism, Arbitrum, ETC, Mordor. A member who set their own node keeps it for history too (its width is
+unknown, so the scanner starts at 10k and adapts). Chains with no row keep the normal route —
+Polygon/Amoy read history through spec-107 issued access; no free Ethereum or Base endpoint was found, so
+there the scan fails fast with a message pointing the member at Network settings.
+
+`logScan` rules that keep a scan from becoming a request storm (see its header for the full list):
+
+- **Width follows the endpoint** and shrinks to a cap the refusal states, remembered per endpoint.
+- **Refusals narrowing cannot fix are not narrowed**: an archive/token refusal or a cap under 1,000
+  blocks throws `LogHistoryUnavailableError` at once (the caller renders unreadable); a rate-limit
+  refusal in the body waits and re-asks the same range; a result-size refusal bisects.
+- **One scan per key at a time** — concurrent surfaces share it.
+- **Opt-in persistence** (`persist: true`, used by the Protect hub scan): the watermark + raw logs are
+  kept per device, re-decoded on restore, discarded if written through a different endpoint, with
+  ~10 minutes of blocks re-read.
+- **A count the chain states bounds the scan** (`scanLogsUntil`): a Safe's execution outcomes number
+  exactly its `nonce()`, so they are read newest-first and the read stops at that count — zero
+  requests for a vault that has never executed.
+
+Every HTTP read through the viem seam is also paced **per host** (`lib/chains/hostLimiter.js`): a
+token bucket (declared rate for the log endpoints, 20/s otherwise, loopback exempt), and a 429 backs
+the WHOLE host off instead of each request running its own retry loop. The legacy ethers seam
+(`utils/rpcProvider.js`) and the wagmi wallet transports do not go through it yet.
+
 ## Rules that are not negotiable
 
 - **Credentials never enter a URL that could be logged.** Header/bearer keys ride on an

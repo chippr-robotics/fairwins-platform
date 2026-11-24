@@ -232,7 +232,8 @@ vi.mock('../lib/chains/publicClient', async () => {
       return { data: `0x${(1000n * 10n ** 18n).toString(16).padStart(64, '0')}` }
     },
   }
-  return { ...actual, getPublicClient: () => fakeClient }
+  // History reads go through the same fake: no suite may reach a real public log endpoint.
+  return { ...actual, getPublicClient: () => fakeClient, getLogScanClient: () => ({ client: null, maxRange: 10_000, source: 'test' }) }
 })
 
 // Mock wagmi hooks for WalletProvider

@@ -140,7 +140,7 @@ export function useVaultQueueAcrossChains(group) {
           cid,
         )
         const { executed, failed, complete: execComplete } = await withReadTimeout(
-          readExecutionOutcomes({ safe, chainId: cid, fromBlock }),
+          readExecutionOutcomes({ safe, chainId: cid, fromBlock, nonce: currentNonce }),
           cid,
         )
 
