@@ -36,8 +36,9 @@ services:
     environment:
       ALTO_ENTRYPOINTS: "0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789"   # EntryPoint v0.6
       # ⚠ ALTO_RPC_URL IS DELIBERATELY ABSENT FROM THIS BLOCK. It arrives in alto.env from
-      # QUICKNODE_POLYGON_API (fetch-secrets.sh), because the keyed QuickNode URL carries its token
-      # in the path and cannot be written into a file in git.
+      # fairwins-bundler-rpc-url-137 (fetch-secrets.sh), because a keyed archive URL carries its
+      # token in the path and cannot be written into a file in git. (Until 2026-11-30 that secret
+      # was QUICKNODE_POLYGON_API; the account closed and the bundler moved to a free-tier key.)
       #
       # docker-compose `environment:` OVERRIDES `env_file:`. Re-adding ALTO_RPC_URL here — even
       # "temporarily", even to the old public value — silently takes the bundler back off the keyed
@@ -59,17 +60,17 @@ services:
       # support, wire it the same way — keyed primary via Secret Manager, public failover written
       # in the clear here — and update this comment.
       #
-      # ⚠ 50 req/s, SHARED. The endpoint's rate limit is per ENDPOINT, not per consumer, and three
-      # processes now sit behind it: alto (here), the gateway and the FinOps exporter. alto is both
-      # the heaviest — a continuous block-poll plus receipt polling, independent of UserOp volume —
-      # and the only one with NOTHING behind it: the other two list public endpoints as failover, so
-      # a 429 storm costs them latency and costs alto its whole service.
+      # ⚠ alto IS NOW THE ONLY CONSUMER of its endpoint (the gateway and the FinOps exporter read
+      # public lists), so the endpoint's whole free-tier rate is alto's. alto is still the heaviest
+      # caller on the estate — a continuous block-poll plus receipt polling, independent of UserOp
+      # volume — and the only one with NOTHING behind it, so a 429 storm costs it its whole service.
+      # Pick the provider with the headroom: dRPC's free tier allows far more per second than
+      # Alchemy's (about 15 req/s).
       #
       # No client-side limiter is added here, deliberately. alto v1.2.7 exposes no request-rate
       # knob, so limiting would mean a proxy in front of it — new machinery, on the write path, to
-      # solve a problem not yet observed. The instrument already exists instead: the FinOps exporter
-      # reads QuickNode credit usage (collectors/quicknode.js). Watch that series after this change;
-      # build a limiter if it shows a ceiling being approached, not before.
+      # solve a problem not yet observed. Watch alto's logs and the provider dashboard for 429s and
+      # build a limiter if one shows a ceiling being approached, not before.
       ALTO_SAFE_MODE: "false"
       ALTO_PORT: "3000"
       ALTO_API_VERSION: "v1,v2"

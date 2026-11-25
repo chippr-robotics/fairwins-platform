@@ -96,9 +96,13 @@ spec:
             # is a secret reference rather than a literal — the same thing the VM does by reading
             # QUICKNODE_POLYGON_API into alto.env. alto takes ONE endpoint and has no failover, so
             # if the secret cannot be read the container must not start.
+            #
+            # 2026-11-30: QuickNode retired; the keyed URL now lives in fairwins-bundler-rpc-url-137
+            # (provider-neutral). This Cloud Run manifest stays decommissioned (single-alto-gate.sh);
+            # the reference is updated only so nobody re-arms it with a dead secret.
             - name: ALTO_RPC_URL
               valueFrom:
-                secretKeyRef: { name: QUICKNODE_POLYGON_API, key: latest }
+                secretKeyRef: { name: fairwins-bundler-rpc-url-137, key: latest }
             - name: ALTO_SAFE_MODE
               value: "false"
             - name: ALTO_PORT

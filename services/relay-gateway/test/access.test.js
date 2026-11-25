@@ -157,6 +157,20 @@ describe('issuance — honest absence and honest bounds', () => {
     expect(res.body.error.code).toBe('access_unconfigured')
   })
 
+  it('answers 404 chain_unavailable when issuance is retired — off with no endpoints, so the SPA stays silent', async () => {
+    // The production shape after the QuickNode account closed: RPC_ACCESS_ENABLED false and no
+    // RPC_ACCESS_ENDPOINT_* pairs. A 503 here would make the SPA disclose degraded reads on every
+    // chain; 404 tells it the truth, that public capacity is the normal path.
+    const { app } = build({
+      env: { RPC_ACCESS_ENABLED: 'false', RPC_ACCESS_ENDPOINT_URL_137: '', RPC_ACCESS_ENDPOINT_ID_137: '' },
+    })
+    for (const chainId of [1, 10, 137, 8453, 42161]) {
+      const res = await mint(app, { chainId })
+      expect(res.status).toBe(404)
+      expect(res.body.error.code).toBe('chain_unavailable')
+    }
+  })
+
   it('answers 404 chain_unavailable for a chain with no issuance endpoint — normal, not degraded', async () => {
     // The provider serves neither ETC nor Mordor at all; public capacity is the permanent and
     // correct path there, and the client renders it as normal.
