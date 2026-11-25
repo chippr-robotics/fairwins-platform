@@ -23,10 +23,11 @@
  *
  * ── DORMANT BY DEFAULT, HONESTLY (FR-015 discipline) ─────────────────────────────────────────
  *
- * The module mounts unconditionally and answers 503 `access_unconfigured` until an endpoint, a
- * signing key and the admin credential are all configured — the platform's standard
- * optional-module pattern, so the answer is always honest and turning it on is config, not a
- * deploy.
+ * The module mounts unconditionally. A chain with no configured endpoint answers 404
+ * `chain_unavailable` (read public, normally); a chain that HAS an endpoint answers 503
+ * `access_unconfigured` until the signing key and the admin credential are also configured — the
+ * platform's standard optional-module pattern, so the answer is always honest and turning it on
+ * is config, not a deploy. With no endpoints at all (issuance retired) every chain answers 404.
  */
 import express from 'express'
 import { GatewayError } from '../errors.js'
@@ -48,16 +49,21 @@ export function createAccessRouter(config, { signingKey, enforcement, mintQuotas
 
   router.post('/v1/access/rpc', async (req, res) => {
     try {
-      requireLive()
-
+      // The chain check comes BEFORE requireLive. "No keyed endpoint for this chain" is true
+      // whether or not the module is switched on, and it is the answer that tells the client the
+      // truth: this chain reads public, and that is normal. A deployment with issuance retired
+      // (no endpoints at all, as after the QuickNode account closed) therefore answers 404 rather
+      // than 503, so the SPA stays silent instead of disclosing a degradation on every chain.
       const chainId = Number(req.body?.chainId)
-      const endpoint = access.endpoints[chainId]
+      const endpoint = access?.endpoints?.[chainId]
       if (!endpoint) {
         // Not an outage: this chain has no issuance endpoint (the provider serves neither ETC nor
         // Mordor at all). Public capacity is the permanent, correct path there — the client treats
         // 404 as "this chain reads public, and that is normal".
         throw new GatewayError(404, 'chain_unavailable', `no keyed read endpoint is configured for chain ${chainId}`)
       }
+
+      requireLive()
 
       // Metering BEFORE the enforcement check: the check spends an admin-API call on a cache miss,
       // and an unmetered caller must not be able to make this route amplify into the provider's

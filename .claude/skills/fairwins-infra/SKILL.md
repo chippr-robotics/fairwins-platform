@@ -69,7 +69,7 @@ Scaling changes **do not** alter env vars, so `up`/`down` are safe and reversibl
 **automated deploy** (the compute service account applying the repo `service.yaml`)
 has silently reverted the working config mid-session. The correct live config is:
 
-- `ALTO_RPC_URL` → a QuickNode endpoint (NOT `publicnode` — that 403s archive reads and breaks receipts)
+- `ALTO_RPC_URL` → a keyed, archive-capable Polygon endpoint from Secret Manager `fairwins-bundler-rpc-url-137` (NOT `publicnode` — that 403s archive reads and breaks receipts). QuickNode was retired 2026-11-30.
 - `ALTO_DEPLOY_SIMULATIONS_CONTRACT` → `true` (else bundle-build fails before broadcast; executor nonce freezes)
 - `ALTO_GAS_PRICE_MULTIPLIERS` → set, e.g. `400,500,600` (public RPCs report a stale ~30 gwei priority; Polygon congestion needs 100+ gwei)
 

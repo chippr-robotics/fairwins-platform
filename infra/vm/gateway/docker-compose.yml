@@ -63,9 +63,10 @@ services:
       RPC_URLS_63: "https://rpc.mordor.etccooperative.org,https://geth-mordor.etc-network.info"
       ENGINE_RELAYER_ID_137: "polygon-137"
       GAS_WALLET_137: "0x3BB28b184b8a748dE22aBD076634F85adADA82db"
-      # PUBLIC FAILOVER ONLY. The primary is the keyed QuickNode archive endpoint, delivered as
-      # RPC_URL_PRIMARY_137 in gateway.env and PREPENDED to this list by config/index.js — it is a
-      # URL with the token in its path and must never be written here, where it would be in git.
+      # PUBLIC ENDPOINTS, and since the QuickNode account closed (2026-11-30) the ONLY ones: no
+      # RPC_URL_PRIMARY_137 is delivered, so the gateway reads this list as written. A keyed primary
+      # can come back as RPC_URL_PRIMARY_137 in gateway.env (config/index.js PREPENDS it here); it is
+      # a URL with the token in its path and must never be written in this file, which is in git.
       #
       # polygon.llamarpc.com was REMOVED, not replaced in place: measured 2026-08-23 it does not
       # resolve at all (`fetch failed`), so this had been a one-entry list wearing a failover's
@@ -145,28 +146,13 @@ services:
       # says otherwise. Both reload via SIGHUP (RELOAD_ENV_FILE below), no container replacement.
       IDENTITY_ENABLED: "true"
       # IDENTITY_ENFORCE: "true"
-      # ---- Keyed RPC issuance (spec 107, #1469) ----
-      # POST /v1/access/rpc mints short-lived READ-ONLY ES256 JWTs for the dedicated issuance
-      # endpoint (657013 — provisioned and live-fire verified on #1468: one token spans all five
-      # EVM mainnets, bare URL answers 401, eth_sendRawTransaction answers -32611 WITH a valid
-      # token, expiry enforced). Credentials arrive via fetch-secrets (RPC_ACCESS_SIGNING_KEY +
-      # RPC_ACCESS_ADMIN_KEY in gateway.env); with either absent this whole block is inert and the
-      # route answers 503 access_unconfigured. The URLs below are PUBLIC information by design —
-      # stand-alone mode means the URL carries no credential and only a valid JWT is served.
-      # One endpoint id everywhere => the FR-026 enforcement verdict is checked once and its cache
-      # serves all five chains.
-      RPC_ACCESS_ENABLED: "true"
-      RPC_ACCESS_SIGNING_KID: "k1"
-      RPC_ACCESS_ENDPOINT_ID_1: "657013"
-      RPC_ACCESS_ENDPOINT_URL_1: "https://small-white-general.quiknode.pro/"
-      RPC_ACCESS_ENDPOINT_ID_10: "657013"
-      RPC_ACCESS_ENDPOINT_URL_10: "https://small-white-general.optimism.quiknode.pro/"
-      RPC_ACCESS_ENDPOINT_ID_137: "657013"
-      RPC_ACCESS_ENDPOINT_URL_137: "https://small-white-general.matic.quiknode.pro/"
-      RPC_ACCESS_ENDPOINT_ID_8453: "657013"
-      RPC_ACCESS_ENDPOINT_URL_8453: "https://small-white-general.base-mainnet.quiknode.pro/"
-      RPC_ACCESS_ENDPOINT_ID_42161: "657013"
-      RPC_ACCESS_ENDPOINT_URL_42161: "https://small-white-general.arbitrum-mainnet.quiknode.pro/"
+      # ---- Keyed RPC issuance (spec 107, #1469) — RETIRED ----
+      # POST /v1/access/rpc minted short-lived read-only JWTs for QuickNode issuance endpoint 657013,
+      # which closed with the QuickNode account (2026-11-30). Switched off and no endpoints listed:
+      # the route answers 404 chain_unavailable, which the SPA reads as "declined" and stays silent,
+      # reading its public endpoints. Turning it back on needs a provider's issuance endpoint, its
+      # RPC_ACCESS_ENDPOINT_URL_<id>/_ID_<id> pairs here, and the two keys in fetch-secrets.sh.
+      RPC_ACCESS_ENABLED: "false"
       # ---- Operability (specs 106/107) ----
       # SIGHUP re-reads the allowlisted operational switches from this file — which is the SAME
       # file env_file: reads at container create, mounted read-only below so the running process
@@ -297,8 +283,8 @@ services:
       #
       # ⚠ THE ENGINE HAS ITS OWN `rpc_urls`, and they are NOT this file's RPC_URLS_137. The engine
       # is the WRITE path — it broadcasts every relayed transaction — and it reads that list from
-      # config.json, which is a plain file in git. It therefore stays on PUBLIC endpoints: the keyed
-      # QuickNode URL carries its token in the path, and putting it here would commit a credential.
+      # config.json, which is a plain file in git. It therefore stays on PUBLIC endpoints: a keyed
+      # URL carries its token in the path, and putting it here would commit a credential.
       # Its dead polygon.llamarpc.com entry was replaced 2026-08-23 (see the note on RPC_URLS_137
       # above); giving the write path the keyed endpoint needs a templated config rendered at boot
       # from Secret Manager, which is a separate change.

@@ -13,10 +13,11 @@
 #        bundler VM: nginx.env (ORIGIN_LOCK_SECRET only)   alto.env (the executor key + alto's
 #                    own keyed RPC endpoint)
 #
-#      The QuickNode RPC credential is delivered to THREE containers (gateway, finops, alto) and
-#      that is not a widening: it is the SAME credential each of them needs to read the SAME chain,
-#      and each gets it in its own file. It is not shared with the engine, which has its own
-#      rpc_urls in config.json.
+#      Exactly ONE container holds a keyed RPC credential: alto (fairwins-bundler-rpc-url-137).
+#      The gateway and the FinOps exporter read chain 137 from the public RPC_URLS_137 list in the
+#      compose file, and the engine has its own rpc_urls in config.json. (Until the QuickNode
+#      account closed on 2026-11-30, QUICKNODE_POLYGON_API was delivered to gateway, finops and
+#      alto alike.)
 #
 #   2. tmpfs ONLY. Refuses to run if the destination is not tmpfs, so key material never reaches the
 #      boot disk by this path. (See README for the docker config.v2.json delta that we accept.)
@@ -42,7 +43,7 @@
 #        - ALTO_RPC_URL (alto) is REQUIRED. alto takes exactly ONE endpoint, has no failover, and
 #          has no default: unset, it cannot serve at all. Optional would turn an IAM or rotation
 #          mistake into a crash-loop with an opaque upstream error, when the accurate diagnosis
-#          ("this VM's service account cannot read QUICKNODE_POLYGON_API") is available right here.
+#          ("this VM's service account cannot read fairwins-bundler-rpc-url-137") is available here.
 #          The bundler is down either way; only one of the two says why.
 #
 #   6. VERSION PINS mirror the live Cloud Run manifest EXACTLY. relay-webhook-secret and
@@ -133,34 +134,18 @@ case "$ROLE" in
     # spec 095: member-assistant model credential. OPTIONAL — absent leaves the assistant route
     # failing closed with 503 assistant_unconfigured; the member API and relay path keep serving.
     emit "$GW" ANTHROPIC_API_KEY         anthropic-api-key           latest optional
-    # Keyed Polygon archive endpoint. The gateway PREPENDS this to RPC_URLS_137, so the compose file
-    # keeps stating the public failover list in the clear and the credential never appears in git.
-    # OPTIONAL: unset ⇒ RPC_URLS_137 is used as written and the relay path keeps serving.
+    # NO RPC_URL_PRIMARY_137. The QuickNode account closes 2026-11-30, so the gateway reads chain
+    # 137 from the public RPC_URLS_137 list in the compose file. That costs archive depth and rate
+    # headroom, not availability (invariant 5). The config surface is unchanged: to put a keyed
+    # primary back, add a provider-neutral secret to gateway_secret_ids and emit it here as
+    # RPC_URL_PRIMARY_137. It is a URL with the token in its path, so it must never be echoed; the
+    # gateway redacts it to https://<host>/<redacted> at every log and status boundary.
     #
-    # ⚠ THIS IS A URL WITH THE TOKEN IN ITS PATH, not a header credential. It must never be echoed:
-    # the gateway redacts it to https://<host>/<redacted> at every log and status boundary, and
-    # /status has only ever exposed per-chain rpc up/down.
-    emit "$GW" RPC_URL_PRIMARY_137       QUICKNODE_POLYGON_API       latest optional \
-      "chain 137 reads fall back to the public endpoints in RPC_URLS_137"
-
-    # ── Keyed RPC issuance (spec 107, #1469) ─────────────────────────────────────────────────
-    # Both OPTIONAL by the never-stranded rule: either absent => POST /v1/access/rpc answers 503
-    # access_unconfigured and the SPA keeps reading public capacity exactly as it does today.
-    #
-    # RPC_ACCESS_SIGNING_KEY is KEY MATERIAL (an ES256 private key, PEM). It signs the short-lived
-    # read-only JWTs browsers present at the provider; its public twin lives on issuance endpoint
-    # 657013 under kid k1. Never echoed, never in a URL, never logged — the gateway loads it at
-    # boot and fails the deploy loudly if it is present but unusable.
-    emit "$GW" RPC_ACCESS_SIGNING_KEY    fairwins-rpc-access-signing-key latest optional \
-      "keyed RPC issuance answers 503 access_unconfigured; the SPA reads public capacity"
-    # The FR-026 enforcement check (is the endpoint ACTUALLY demanding the credential, with the
-    # read-only whitelist switched ON?) reads the provider's admin API. Delivered from
-    # finops-quicknode-key — ALREADY granted to this node for the exporter, and verified live to
-    # read per-endpoint security state — rather than granting the account-wide QUICKNODE_ADMIN_API
-    # to the public-facing container for nothing. Note this response carries live endpoint tokens
-    # in plaintext; the gateway's verifier destructures the flags it needs and drops the body.
-    emit "$GW" RPC_ACCESS_ADMIN_KEY      finops-quicknode-key        latest optional \
-      "enforcement reads become unverifiable, which REFUSES issuance; SPA falls back to public capacity"
+    # NO keyed RPC issuance (spec 107, #1469). It minted JWTs for QuickNode endpoint 657013, which
+    # goes with the account; RPC_ACCESS_ENABLED is "false" in the compose file and neither
+    # RPC_ACCESS_SIGNING_KEY nor RPC_ACCESS_ADMIN_KEY is delivered. With no keyed endpoints the
+    # gateway answers POST /v1/access/rpc with 404 chain_unavailable, which the SPA reads as
+    # "declined" and stays silent on public capacity.
 
     log "engine container:"
     emit "$EN" API_KEY                   relay-engine-api-key        2      required
@@ -232,14 +217,9 @@ case "$ROLE" in
 
     log "finops exporter container (all optional — an absent credential is 'not-configured', not an outage):"
     emit "$FO" CLOUDFLARE_ANALYTICS_TOKEN finops-cloudflare-token   latest optional
-    # NOTE the two different QuickNode credentials, which are NOT interchangeable:
-    #   finops-quicknode-key   = the ADMIN API key, for reading credit usage (collectors/quicknode.js)
-    #   QUICKNODE_POLYGON_API  = an RPC ENDPOINT URL, for reading chain 137 (chain/providers.js)
-    # Swapping them fails in opposite directions: the admin key against the RPC host 401s, and the
-    # RPC URL against the admin host is not even a key.
-    emit "$FO" QUICKNODE_API_KEY          finops-quicknode-key      latest optional
-    emit "$FO" RPC_URL_PRIMARY_137        QUICKNODE_POLYGON_API     latest optional \
-      "chain 137 reads fall back to the public endpoints in RPC_URLS_137"
+    # No QUICKNODE_API_KEY and no RPC_URL_PRIMARY_137: the QuickNode account closes 2026-11-30.
+    # The quicknode cost source reads not-configured, and chain 137 balance reads use the public
+    # RPC_URLS_137 list in the compose file, paced as before.
     emit "$FO" POLYMARKET_API_KEY         POLYMARKET_API_KEY        latest optional
     # A THIRD Pinata credential, and the distinction is the point. `fairwins-pinata-jwt` (workstation,
     # `publish` profile) and the SPA's VITE_PINATA_JWT both authorise pinJSONToIPFS/pinFileToIPFS —
@@ -279,18 +259,24 @@ case "$ROLE" in
     emit "$AL" ALTO_EXECUTOR_PRIVATE_KEYS alto-executor-key-137 latest required
     emit "$AL" ALTO_UTILITY_PRIVATE_KEY   alto-executor-key-137 latest required
     # alto's ONLY RPC endpoint, and therefore REQUIRED (invariant 5): alto accepts one URL, has no
-    # failover and no default. This replaces https://rpc-mainnet.matic.quiknode.pro — QuickNode's
-    # TOKENLESS shared free tier — with the keyed endpoint, which is what makes the archive
-    # eth_getLogs the ERC-4337 receipt path depends on a supported call rather than a courtesy.
+    # failover and no default. It must be a KEYED, ARCHIVE-CAPABLE Polygon URL: the ERC-4337
+    # receipt path depends on historical eth_getLogs for UserOperationEvent, which the public
+    # endpoints refuse or truncate (the 2026-07-12 failure). Provider-neutral by name so a provider
+    # swap is a new secret version, not a release. Store it WITHOUT a trailing newline: emit writes
+    # the payload verbatim (invariant 3), and a newline inside the quotes is a malformed URL.
     #
     # ⚠ docker-compose `environment:` OVERRIDES `env_file:`. ALTO_RPC_URL must therefore NOT appear
     # in infra/vm/bundler/docker-compose.yml; putting it back there silently returns the bundler to
     # whatever is written in the file, and it would still look healthy.
-    emit "$AL" ALTO_RPC_URL               QUICKNODE_POLYGON_API latest required
+    emit "$AL" ALTO_RPC_URL               fairwins-bundler-rpc-url-137 latest required
     ;;
 esac
 
-# ---- the three QuickNode secrets that are deliberately NOT delivered ----
+# ---- the QuickNode secrets that are deliberately NOT delivered ----
+#
+# ⚠ THE QUICKNODE ACCOUNT CLOSES 2026-11-30. Every QUICKNODE_* and fairwins-quicknode-* secret
+# below stops working then, and none is delivered to any node any more. The notes are kept until
+# those secrets are deleted, because they explain why the containers exist at all.
 #
 # QUICKNODE_POLYGON_WSS, QUICKNODE_AMOY_API and QUICKNODE_AMOY_WSS exist in Secret Manager and work.
 # They are not emitted because NOTHING ON THESE VMs READS THEM, and an env var nothing reads is a

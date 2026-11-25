@@ -148,11 +148,11 @@ bundler_config() {  # warn if the critical env vars have been clobbered (see the
        'sudo systemctl restart fairwins-stack@bundler'. To check it for real:
          gcloud compute ssh fairwins-bundler --zone $VM_ZONE --tunnel-through-iap \\
            --command 'sudo docker inspect fairwins-bundler-alto --format "{{json .Config.Env}}" \\
-             | sed -E "s#(quiknode\\.pro)/[A-Za-z0-9_/-]+#\\1/<redacted>#g"'
-       ⚠ THE SED IS NOT OPTIONAL. ALTO_RPC_URL is now a KEYED QuickNode URL delivered from
-       Secret Manager (QUICKNODE_POLYGON_API), and its token is in the path — a raw dump of
-       .Config.Env prints the credential to your terminal and your shell history.
-       Watch for: ALTO_RPC_URL must be the quiknode.pro host and must NOT be publicnode
+             | sed -E "s#(https://[^/\\",]+)[/?][^\\",]*#\\1/<redacted>#g"'
+       ⚠ THE SED IS NOT OPTIONAL. ALTO_RPC_URL is a KEYED archive URL delivered from Secret
+       Manager (fairwins-bundler-rpc-url-137), and its key is in the path or query — a raw dump
+       of .Config.Env prints the credential to your terminal and your shell history.
+       Watch for: ALTO_RPC_URL must be the keyed provider host and must NOT be publicnode
        (archive-403 breaks receipts), ALTO_DEPLOY_SIMULATIONS_CONTRACT=true, and
        ALTO_GAS_PRICE_MULTIPLIERS set.
 EOF
@@ -176,7 +176,7 @@ if warn:
     print("     ⚠ CONFIG DRIFT — likely clobbered by the auto-deploy; merge/redeploy PR #895:")
     for w in warn: print("        -",w)
 else:
-    print("     ✓ config looks correct (QuickNode RPC, sim=true, multiplier set)")
+    print("     ✓ config looks correct (keyed RPC, sim=true, multiplier set)")
 ' 2>/dev/null || echo "     (config read failed)"
 }
 
