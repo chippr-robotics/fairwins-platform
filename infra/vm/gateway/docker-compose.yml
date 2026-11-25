@@ -26,6 +26,19 @@ services:
   # ---- namespace owner: the policy gateway (the only public surface) ----
   gateway:
     container_name: fairwins-gateway-gateway
+    # v1.21.2-dc1b6ab2 (QuickNode retirement, #1738): built from main at dc1b6ab2. The pin that
+    # matters is the access route: with keyed browser RPC retired (RPC_ACCESS_ENABLED "false", no
+    # endpoints) POST /v1/access/rpc answers 404 `chain_unavailable`, which the SPA treats as "this
+    # chain reads public" and says nothing. The previous pin checked `requireLive()` first and
+    # answered 503 `access_unconfigured`, which the SPA discloses as degraded reads on every chain.
+    # Verify on the built image before push: that POST returns 404 chain_unavailable for 137.
+    # Digest: <record after push>
+    #
+    # Everything else it adds over spec109-7110b663 is small: the ETC default RPC list drops the
+    # dead etc.rivet.link (#1562), the counters port gains a per-chain `sponsoredOps` demand signal
+    # (#1539), the base image is pinned to node:22.23.3-alpine3.24 (#1648), and the root lockfile's
+    # dependency bumps since September. It carries everything the previous pin did (below).
+    #
     # spec109-7110b663 (#1544, spec-109 go-live): the first image carrying the token-news read
     # proxy (services/relay-gateway/src/news/). Verified before push, on the built image itself:
     # /status returns a `news` block ({enabled, killed, cacheTtlMs: 300000}) that the previous pin
@@ -41,7 +54,7 @@ services:
     # the spec-089 FinOps catalogue work and the member-API quota/spend bounds from #1311; the
     # spec-107 keyed-RPC issuance; and the spec 082/083 perps proxy. ASSISTANT_ENABLED is still
     # off; see the flag block below for why that one is not a flag flip.
-    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-relay-gateway:spec109-7110b663
+    image: us-central1-docker.pkg.dev/chippr-bots-site-wp/cloud-run-source-deploy/prediction-dao-research/fairwins-relay-gateway:v1.21.2-dc1b6ab2
     restart: unless-stopped
     pull_policy: missing
     ports:
