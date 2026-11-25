@@ -207,6 +207,19 @@ import {
   id = "projects/chippr-bots-site-wp/secrets/QUICKNODE_RPC_005_API"
 }
 
+# ── the bundler's provider-neutral RPC secret (2026-11-25) ────────────────────────────────────
+#
+# `fairwins-bundler-rpc-url-137` replaced QuickNode as alto's ALTO_RPC_URL (PR #1738) and was
+# hand-created at the console on 2026-11-25, so like the containers above it is adopted by
+# importing the CONTAINER ONLY. Without this block the first apply tries to create it and fails
+# ALREADY_EXISTS. The same replication caveat holds: a REPLACEMENT in the plan means it was created
+# user-managed — STOP and fix the secret, not the plan. Its one accessor grant (the bundler SA) is
+# declared in main.tf and is additive, so an existing hand-made binding is not disturbed.
+import {
+  to = google_secret_manager_secret.managed["fairwins-bundler-rpc-url-137"]
+  id = "projects/chippr-bots-site-wp/secrets/fairwins-bundler-rpc-url-137"
+}
+
 # ── the PER-CHAIN QuickNode endpoints — CREATES, deliberately not imports ─────────────────────
 #
 # `fairwins-quicknode-{ethereum,optimism,base,arbitrum}-url` (chains 1 / 10 / 8453 / 42161) have
