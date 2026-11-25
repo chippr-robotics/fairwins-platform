@@ -33,36 +33,16 @@ gateway_secret_ids = [
   # FinOps exporter + Alloy (spec 089). All OPTIONAL: an absent vendor credential makes that source
   # `not-configured`, which is a first-class honest state, never a fabricated zero (FR-006).
   "finops-cloudflare-token",
-  "finops-quicknode-key",
   "finops-grafana-cloud-token",
   # spec 095. OPTIONAL: absent ⇒ the assistant route answers 503 assistant_unconfigured while the
   # rest of the member API (and the gasless relay path) keeps serving — the never-stranded rule.
   "anthropic-api-key",
-  # The keyed Polygon archive endpoint, delivered as RPC_URL_PRIMARY_137 to BOTH containers on this
-  # node that read chain 137 (the gateway and the FinOps exporter). OPTIONAL: absent ⇒ both fall back
-  # to the public endpoints already listed in RPC_URLS_137, so the gasless relay path keeps serving.
-  #
-  # ONLY the Polygon HTTP credential is granted here, and the other three QuickNode secrets are
-  # deliberately NOT in this list. QUICKNODE_POLYGON_WSS has no consumer (nothing in this estate
-  # opens a WebSocket RPC), and the two AMOY secrets have no reader either — there is no Amoy-cohort
-  # node. Handing a node a credential nothing on it reads is the opposite of least privilege, and
-  # the AMOY pair is the same token behind a `matic-amoy` infix, so a node holding it could be
-  # pointed at the wrong chain by a four-character typo that returns 200 rather than 401.
-  #
-  # The four per-chain endpoints added for Ethereum 1 / Optimism 10 / Base 8453 / Arbitrum 42161
-  # (fairwins-quicknode-<chain>-url) are NOT granted here either, for the plainer reason that the
-  # gateway does not define those chains at all — CHAIN_DEFS covers 61, 63, 137 and 80002, and
-  # ENABLED_CHAIN_IDS is "63,137". They are workstation-only until a node actually reads one.
-  "QUICKNODE_POLYGON_API",
-  # Keyed RPC issuance signing key (spec 107, #1469). KEY MATERIAL: the ES256 private half whose
-  # public twin is registered at the provider (endpoint 657013, kid k1 — the #1468 ceremony).
-  # OPTIONAL by the same never-stranded rule as everything above: absent => POST /v1/access/rpc
-  # answers 503 access_unconfigured and the SPA reads public capacity exactly as it does today.
-  # The ONLY new grant this feature needs: RPC_ACCESS_ADMIN_KEY deliberately delivers from
-  # finops-quicknode-key, which this node already holds for the exporter — verified live to read
-  # per-endpoint security state, so granting QUICKNODE_ADMIN_API to the public-facing gateway
-  # would widen its blast radius for nothing.
-  "fairwins-rpc-access-signing-key",
+  # No RPC credential is granted to this node. The QuickNode account closes 2026-11-30, so the
+  # gateway and the FinOps exporter read chain 137 from the public RPC_URLS_137 list, and keyed RPC
+  # issuance (spec 107) is switched off. That retired three grants: QUICKNODE_POLYGON_API (the
+  # RPC_URL_PRIMARY_137 primary), finops-quicknode-key (the exporter's credit reads and the
+  # issuance enforcement check) and fairwins-rpc-access-signing-key (the issuance JWT key). The
+  # containers stay declared in managed_secret_ids below until they are deleted.
 ]
 
 # Secret CONTAINERS under management. Versions and payloads are never declared (guardrail G-04).
@@ -83,8 +63,14 @@ managed_secret_ids = [
   # spec 095. Container only — the payload (the Anthropic API key for the member assistant) is
   # created out of band (guardrail G-04) and read solely by the gateway container.
   "anthropic-api-key",
-  # QuickNode Multi-Chain RPC. Only QUICKNODE_POLYGON_API is granted to anything (see
-  # gateway_secret_ids above and the bundler module in main.tf) and only it still exists — all
+  # The bundler's ONLY RPC endpoint (ALTO_RPC_URL), read by the bundler node alone (main.tf). A
+  # keyed, archive-capable Polygon URL from whichever provider holds the free key; the name is
+  # provider-neutral so a swap is a new version, not a release. Container only (guardrail G-04):
+  # the payload is added out of band, with no trailing newline.
+  "fairwins-bundler-rpc-url-137",
+  # QuickNode Multi-Chain RPC. ⚠ The account closes 2026-11-30 and NOTHING is granted any of these
+  # any more; they stay declared only until they are deleted. QUICKNODE_POLYGON_API was the one
+  # granted to the nodes, and only it still exists — all
   # four were hand-created on 2026-08-21, and the operator deleted the other three on 2026-08-24
   # (Cloud Audit Log, cody.w.burns@gmail.com), leaving only the one this estate reads. The three
   # absent ones stay DECLARED anyway (not busywork: it's what makes a stray future hand-create at
@@ -167,8 +153,8 @@ managed_secret_ids = [
   # generated and piped straight into Secret Manager, never on disk — and adopted here via an
   # import block (imports.tf, spec-107 stanza), the audit-visible path spec 087 prescribes for
   # resources that already exist. Container only, as everything here is (G-04); prevent_destroy
-  # protects the one credential in this feature that cannot be re-derived. Granted to the gateway
-  # node alone (gateway_secret_ids above).
+  # protects the one credential in this feature that cannot be re-derived. No longer granted to
+  # any node: issuance is switched off with the QuickNode account (gateway_secret_ids above).
   "fairwins-rpc-access-signing-key",
 
 

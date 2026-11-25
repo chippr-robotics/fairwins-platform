@@ -59,16 +59,11 @@ spec:
             - name: GAS_WALLET_137
               value: "0x3BB28b184b8a748dE22aBD076634F85adADA82db"
             # PUBLIC FAILOVER ONLY — polygon.llamarpc.com removed 2026-08-23 (it no longer
-            # resolves at all, so this was a one-entry list). The keyed QuickNode archive endpoint
-            # is prepended at runtime from RPC_URL_PRIMARY_137 below; never write it here.
+            # resolves at all, so this was a one-entry list). Since the QuickNode account closed
+            # (2026-11-30) these public endpoints are the whole list: RPC_URL_PRIMARY_137 is no
+            # longer injected. A keyed primary would be prepended at runtime; never write it here.
             - name: RPC_URLS_137
               value: "https://polygon-bor-rpc.publicnode.com,https://polygon.drpc.org"
-            # Keyed Polygon archive RPC. The payload is a URL with the token IN ITS PATH, so it is
-            # injected as a secret, not an env value. Optional in effect: absent, the gateway uses
-            # RPC_URLS_137 as written.
-            - name: RPC_URL_PRIMARY_137
-              valueFrom:
-                secretKeyRef: { name: QUICKNODE_POLYGON_API, key: latest }
             - name: ORIGIN_AUTH_SECRET
               valueFrom:
                 secretKeyRef: { name: origin-lock-secret, key: latest }
