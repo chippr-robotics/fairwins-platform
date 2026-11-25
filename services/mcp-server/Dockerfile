@@ -14,7 +14,7 @@
 # API it talks to has no write route. The member's own capability token arrives per request as an
 # Authorization header (or, for a single-member deployment, in FAIRWINS_API_TOKEN at runtime) and is
 # never baked in.
-FROM node:22.23.3-alpine3.24 AS runtime
+FROM node:22.23.5-alpine3.24 AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 
