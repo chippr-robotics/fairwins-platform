@@ -1,11 +1,11 @@
-previous: v1.21.1
+previous: v1.21.2
 commits:  6
-  [unclassified] Merge pull request #1739 from chippr-robotics/staging
-  [unclassified] Merge pull request #1738 from chippr-robotics/chore/retire-quicknode
-  [chore -> patch] retire QuickNode before the account closes on Nov 30
-  [unclassified] Merge pull request #1735 from chippr-robotics/chore/backmerge-v1.21.1
-  [unclassified] Merge pull request #1734 from chippr-robotics/release/v1.21.1-changelog
-  [skipped] chore(release): v1.21.1 [skip release]
+  [unclassified] Merge pull request #1744 from chippr-robotics/staging
+  [unclassified] Merge pull request #1740 from chippr-robotics/chore/import-bundler-rpc-secret
+  [unclassified] Merge pull request #1742 from chippr-robotics/chore/backmerge-v1.21.2
+  [unclassified] Merge pull request #1741 from chippr-robotics/release/v1.21.2-changelog
+  [skipped] chore(release): v1.21.2 [skip release]
+  [chore -> patch] import the hand-made bundler RPC secret container
 bump:     patch
 reason:   computed
-next:     v1.21.2
+next:     v1.21.3
