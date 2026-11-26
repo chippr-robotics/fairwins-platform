@@ -566,6 +566,8 @@ describe('spec 114 normalize: event rows', () => {
         { name: 'Yes', tokenId: T_YES, price: '0.935' },
         { name: 'No', tokenId: T_NO, price: '0.065' },
       ],
+      volume: null, // the fixture row carries no per-market volume: null, never "0"
+      volume24h: null,
       bestBid: '0.93',
       bestAsk: '0.94',
       lastTradePrice: '0.93',
