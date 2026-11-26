@@ -83,8 +83,9 @@ What is active at the venue now, for the quick filters under search. No paramete
 }
 ```
 
-- `topics` holds at most eight, chosen by marginal trading over the last day so that no two name
-  the same events (research R16). `events` and `volume24h` are what the topic **added**, not its
+- `topics` holds at most eight, chosen by marginal trading over the last day divided by the
+  square root of the events it is spread over, so that no two name the same events and a narrow
+  subject outranks a wide category (research R16). `events` and `volume24h` are what the topic **added**, not its
   total. `volume24h` is a decimal string with at most six decimals, truncated. `label` is the
   venue's text, capped at 40 characters, or the slug when the venue gives none.
 - Excluded before counting: the fixed categories' own tags, the mechanics denylist, and events

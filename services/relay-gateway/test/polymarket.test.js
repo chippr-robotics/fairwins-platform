@@ -1028,11 +1028,31 @@ describe('spec 114 selectTopics', () => {
     expect(selectTopics(events, { minShare: 0 }).map((t) => t.slug)).toEqual(['big', 'tiny'])
   })
 
-  it('breaks ties by more events then slug ascending, identically on every run', () => {
+  it('ranks by focus: the same volume over fewer events comes first; ties go to the slug, identically on every run', () => {
     const events = [ev('a', 10, ['zed']), ev('b', 5, ['zed']), ev('c', 15, ['alpha']), ev('d', 15, ['beta'])]
     const first = selectTopics(events, { minShare: 0 }).map((t) => t.slug)
-    expect(first).toEqual(['zed', 'alpha', 'beta']) // zed: 15 over 2 events beats the single-event ties
+    expect(first).toEqual(['alpha', 'beta', 'zed']) // 15 in one event outranks 15 spread over two
     expect(selectTopics([...events].reverse(), { minShare: 0 }).map((t) => t.slug)).toEqual(first)
+  })
+
+  it('a narrow tag carrying nearly as much outranks the wide tag that contains it', () => {
+    // "fed": 3 events, 57 in all. "finance": those 3 plus 14 small ones, 97 in all.
+    // By raw volume finance wins (97 > 57). By volume / sqrt(events): fed 57/1.73 = 32.9, finance 97/4.12 = 23.5.
+    const fed = [ev('f1', 30, ['fed', 'finance']), ev('f2', 20, ['fed', 'finance']), ev('f3', 7, ['fed', 'finance'])]
+    const rest = Array.from({ length: 14 }, (_, i) => ev(`x${i}`, i < 12 ? 3 : 2, ['finance']))
+    const topics = selectTopics([...fed, ...rest], { minShare: 0 })
+    expect(topics.map((t) => t.slug)).toEqual(['fed', 'finance'])
+    expect(topics[0]).toMatchObject({ events: 3, volume24h: '57' })
+    expect(topics[1]).toMatchObject({ events: 14, volume24h: '40' }) // what finance ADDS once fed is taken
+  })
+
+  it('the floor filters candidates rather than ending the search', () => {
+    // total 29, floor at 40% = 11.6. By focus "spark" (9 in one event: 9/1 = 9) outranks "wide"
+    // (20 over ten events: 20/3.16 = 6.3), but spark carries less than the floor. wide clears it
+    // and must still be offered; stopping at the first under-floor candidate would return nothing.
+    const events = [ev('s', 9, ['spark']), ...Array.from({ length: 10 }, (_, i) => ev('w' + i, 2, ['wide']))]
+    expect(selectTopics(events, { minShare: 0 }).map((t) => t.slug)).toEqual(['spark', 'wide'])
+    expect(selectTopics(events, { minShare: 0.4 }).map((t) => t.slug)).toEqual(['wide'])
   })
 
   it('respects max', () => {
