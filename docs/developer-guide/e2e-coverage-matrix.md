@@ -28,10 +28,10 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 |---|---|
 | Spec directories | 118 |
 | With a member-facing flow | 93 |
-| Member-facing flows | 222 |
+| Member-facing flows | 223 |
 | 🟢 covered | 198 |
 | 🟡 partial | 5 |
-| 🔴 absent | 10 |
+| 🔴 absent | 11 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -634,7 +634,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Information — read-only surfaces
 
-56 flows — 🟢 54 · 🟡 0 · 🔴 2 · ⚪ 0 · covered-but-not-proven 12
+57 flows — 🟢 54 · 🟡 0 · 🔴 3 · ⚪ 0 · covered-but-not-proven 12
 
 ### `005-multi-recipient-encryption` — Multi-recipient encryption
 
@@ -881,6 +881,7 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `predict.game-scoreboard` | A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
 | `predict.game-field-and-plays` | A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
+| `predict.fight-view` | A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
 
 ## No member consequence
 

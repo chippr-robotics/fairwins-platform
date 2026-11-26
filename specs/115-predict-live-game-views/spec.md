@@ -17,6 +17,10 @@ no funding for licensed data yet; that can be added at scale." (issue #1756)
 - Q: Which sources may be used? → A: **Public ones only, for now.** The venue's own public sports
   feed for score, clock, period and possession; public scoreboard endpoints for play-level detail.
   A provider with a service agreement is added later, at scale, behind the same seam (FR-014).
+- Q: Is mixed martial arts in scope? → A: **Yes, in this spec.** A fight has no field or score, so
+  it gets its own view: the card, the round and clock, a per-round strike comparison and the
+  official result. It is built after football and is switched on only once a live card has
+  confirmed how the source behaves during a fight (FR-020).
 - Q: May the game view influence an order? → A: **No.** It is information beside the market. It
   never feeds a figure on the ticket, never enables or disables a control, and never prompts a
   trade (FR-010, FR-011).
@@ -92,7 +96,42 @@ order, newest first. It never shows a play the source did not report.
 3. **Given** play-level detail is unavailable, **When** the page is open, **Then** the list is
    absent and the page says so once.
 
+---
+
+### User Story 4 - Follow a fight (Priority: P3)
+
+For a mixed-martial-arts market, the member sees the fight card, which fight is in progress with
+its round and clock, how the two fighters compare round by round, and the official result once
+it is announced.
+
+**Why this priority**: A fight has no scoreboard, so the first three stories give it nothing. It
+depends on a source whose behaviour during a live fight has not been observed.
+
+**Independent Test**: With a completed card, the view shows each fight's result with its method,
+ending round and time, and the judges' scores where there were any. With a fight in progress, it
+shows the round and clock and the per-round figures the source reports. With the source
+unavailable, no fight view is drawn and a sentence says so.
+
+**Acceptance Scenarios**:
+
+1. **Given** a card with a fight in progress, **When** the page is open, **Then** the view shows
+   both fighters, the scheduled rounds, the current round and the clock, with their age.
+2. **Given** round figures have been reported, **When** the view is open, **Then** it shows them
+   for each fighter side by side, as numbers, for each completed and current round.
+3. **Given** a fight has ended, **When** its result is reported, **Then** the view shows the
+   winner, the method, the ending round and time, and each judge's scores where the fight went to
+   a decision — and does not say the market has resolved unless the venue says so.
+4. **Given** a figure the source has not reported, **When** the view is open, **Then** that figure
+   is absent or shown as a dash, never as zero.
+5. **Given** a market about a fighter or a title with no single fight attached, **When** its page
+   is open, **Then** no fight view is drawn.
+
 ### Edge Cases
+
+- A fight is cancelled, moved on the card, or changed to a different opponent: the view shows what
+  the source reports for that fight, in the source's words, and nothing for a fight it no longer
+  lists.
+- A result is announced and later overturned: the view shows the source's current result.
 
 - A market's event has no game attached: no game view is drawn and nothing is said about it.
 - The game cannot be matched between the two sources: the scoreboard is drawn from the venue's
@@ -140,6 +179,19 @@ order, newest first. It never shows a play the source did not report.
   device, cached so that the number of upstream requests does not grow with the number of members.
 - **FR-016**: The gateway MUST read only games that a member is looking at or that the venue
   reports as in progress, and MUST stop reading a game that has ended.
+- **FR-017**: For a mixed-martial-arts market whose event names a fight, the page MUST show both
+  fighters, the scheduled rounds, and, while the fight is in progress, the current round and the
+  clock.
+- **FR-018**: The fight view MUST show, per fighter and per round, the figures the source reports
+  (strikes attempted and landed, knockdowns, takedowns and the like) as numbers side by side. A
+  figure that was not reported MUST be absent or a dash, never zero. The view MUST NOT derive a
+  score, a lead or a likely winner from those figures.
+- **FR-019**: Once a result is reported, the fight view MUST show the winner, the method, the
+  ending round and time, and each judge's scores where there were any, and MUST NOT describe the
+  result as the market's resolution.
+- **FR-020**: The fight view MUST stay switched off, separately from the rest of this feature,
+  until its source has been observed during a live card, and MUST be switchable off again without
+  affecting the scoreboard, the field or the plays.
 
 ### Key Entities
 
@@ -148,6 +200,10 @@ order, newest first. It never shows a play the source did not report.
   possession — with when it was confirmed and by which source.
 - **Situation** (football): yard line, down, distance, line to gain, team in possession.
 - **Play**: one reported play — period, clock, text, whether it scored.
+- **Fight**: one bout on a card — the two fighters, weight class, scheduled rounds, status, the
+  current round and clock.
+- **Round figures**: what the source reports for one fighter in one round.
+- **Fight result**: winner, method, ending round and time, judges' scores.
 
 ## Success Criteria *(mandatory)*
 
@@ -171,4 +227,8 @@ order, newest first. It never shows a play the source did not report.
   on when one stops answering.
 - Play-level detail is football first. Other sports get the scoreboard, and their plays as text
   where the source reports them.
+- The fight view's source has been read for completed cards only. What it reports during a fight,
+  and how quickly, is not known until a live card is observed; FR-020 exists for that reason.
+- The venue does not always list a market for a single fight. Where it lists none, there is
+  nothing for the fight view to attach to.
 - Polygon only, as Predict is.

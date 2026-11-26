@@ -3601,6 +3601,17 @@
           "risk": "information",
           "tests": [],
           "issue": "#1756"
+        },
+        {
+          "id": "predict.fight-view",
+          "name": "A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1756"
         }
       ]
     }
