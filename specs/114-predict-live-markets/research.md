@@ -228,6 +228,12 @@ venue's own labels for the Nvidia chief-executive markets and the Fed decision).
 as the venue gives them. If that proves confusing, the remedy is a floor on events per topic or a
 short table of preferred names, not a return to raw volume.
 
+**How fresh it has to be**: not as fresh as a price. The gateway caches the answer for a minute
+and the client asks once a minute, so a healthy answer is routinely one to two minutes old. The
+first build judged it by the 30 s price bound and hid the row for most of every cycle, which no
+test saw because every test served a fresh answer. Quick filters have their own bound (five
+minutes), and tests now serve a two-minute-old answer and expect the row.
+
 **What it is not**: a recommendation. The row ranks by what the venue's traders did, never by
 fee, and FairWins' own members' activity is not an input (that would need a record of who looked
 at what, which this feature does not keep).

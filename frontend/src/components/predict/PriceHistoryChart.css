@@ -1,0 +1,109 @@
+/* PriceHistoryChart (spec 114) — tokens only. Series colour is `color` from a chart-series token; strokes are
+   `currentColor`. Dash patterns (set in the component) carry the identity that colour alone must not. */
+
+.event-chart-sa {
+  color: var(--chart-series-a);
+}
+.event-chart-sb {
+  color: var(--chart-series-b);
+}
+.event-chart-sc {
+  color: var(--chart-series-c);
+}
+.event-chart-sd {
+  color: var(--chart-series-d);
+}
+
+.event-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.event-chart .event-chart-ranges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.event-chart .event-chart-range {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.3rem 0.8rem;
+}
+.event-chart .event-chart-range[aria-pressed='true'] {
+  background: var(--primary-button);
+  border-color: var(--primary-button);
+  color: var(--primary-button-text);
+}
+.event-chart .event-chart-range:focus-visible,
+.event-chart .event-chart-retry:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+.event-chart .event-chart-plot {
+  min-height: 220px;
+  width: 100%;
+}
+.event-chart .event-chart-plot .recharts-cartesian-axis-tick-value {
+  fill: var(--text-secondary);
+  font-size: 0.7rem;
+}
+.event-chart .event-chart-plot .recharts-cartesian-axis-line,
+.event-chart .event-chart-plot .recharts-cartesian-axis-tick-line {
+  stroke: var(--border-color);
+}
+.event-chart .event-chart-note {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+.event-chart .event-chart-retry {
+  background: transparent;
+  border: 0;
+  color: var(--accent-color);
+  cursor: pointer;
+  min-height: 44px;
+  padding: 0 0.4rem;
+  text-decoration: underline;
+}
+.event-chart .event-chart-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.event-chart .event-chart-legend-item {
+  align-items: center;
+  color: var(--text-primary);
+  display: grid;
+  font-size: 0.9rem;
+  gap: 0.1rem 0.6rem;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+}
+.event-chart .event-chart-legend-item.is-selected .event-chart-legend-label {
+  font-weight: 700;
+}
+.event-chart .event-chart-legend-label {
+  overflow-wrap: anywhere;
+}
+.event-chart .event-chart-legend-value {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+}
+.event-chart .event-chart-legend-state {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  grid-column: 2 / -1;
+}
+.event-chart .event-chart-more {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
+}

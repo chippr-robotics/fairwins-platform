@@ -112,6 +112,10 @@ const asEvent = (m) => ({
 /** Answer the Predict half of the gateway. `q` filters, mirroring the proxy. */
 function predictGateway() {
   cy.intercept({ method: 'GET', url: GATEWAY_URL }, (req) => {
+    // The quick-filter row is optional: a gateway without `/discover` answers 404 and the row is simply absent.
+    if (/\/discover(\?|$)/.test(req.url)) {
+      return req.reply({ statusCode: 404, body: { error: { code: 'not_found', reason: 'no such route' } } })
+    }
     if (!/\/events(\?|$)/.test(req.url)) return req.continue()
     const q = (new URL(req.url).searchParams.get('q') || '').toLowerCase()
     const found = q ? MARKETS.filter((m) => m.question.toLowerCase().includes(q)) : MARKETS
@@ -194,7 +198,8 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
     cy.visit('/wallet?tab=predict')
     waitForAccount()
 
-    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-title').click()
+    // A row's Yes/No opens the sheet (the title opens the event page since spec 114 slice 4).
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
     cy.get('.market-detail', { timeout: 20000 }).should('exist')
     cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
 
@@ -229,7 +234,8 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
     cy.visit('/wallet?tab=predict')
     waitForAccount()
 
-    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-title').click()
+    // A row's Yes/No opens the sheet (the title opens the event page since spec 114 slice 4).
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
     cy.get('.market-detail', { timeout: 20000 }).should('exist')
     cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
 

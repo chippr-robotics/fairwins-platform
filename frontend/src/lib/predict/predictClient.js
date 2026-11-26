@@ -101,15 +101,30 @@ export function fetchPositions(chainId, address) {
 
 /* ── Spec 114 — live markets reads. Every success body ends with { confirmedAt, serverNow, stale }. ── */
 
-/** Events list → { events, next, confirmedAt, serverNow, stale }. `q` ignores category/sort (gateway rule). */
-export function fetchEvents(chainId, { category = '', sort = '', q = '', next = '' } = {}) {
+/**
+ * Events list → { events, next, confirmedAt, serverNow, stale }. `q` ignores category/sort/topic/live (gateway
+ * rule); `category`, `topic` and `live` are mutually exclusive (the gateway answers 400 `invalid_filter`
+ * otherwise), so the caller sends at most one. `live` is sent as `1` only when true.
+ */
+export function fetchEvents(chainId, { category = '', sort = '', q = '', next = '', topic = '', live = false } = {}) {
   const qs = new URLSearchParams()
   if (q) qs.set('q', q)
   if (category) qs.set('category', category)
+  if (topic) qs.set('topic', topic)
+  if (live === true) qs.set('live', '1')
   if (sort) qs.set('sort', sort)
   if (next) qs.set('next', next)
   const suffix = qs.toString() ? `?${qs}` : ''
   return request(`/v1/polymarket/${chainId}/events${suffix}`)
+}
+
+/**
+ * What is active at the venue now, for the quick filters →
+ * { live: { count, more?, events } | null, topics: [{ slug, label, events, volume24h }] | null,
+ *   confirmedAt, serverNow, stale }. Either half may be null (unreadable) on its own.
+ */
+export function fetchDiscover(chainId) {
+  return request(`/v1/polymarket/${chainId}/discover`)
 }
 
 /** One event with all its markets → EventDetail + envelope. */

@@ -11,6 +11,7 @@ import {
   fetchFeeRate,
   fetchEvents,
   fetchEvent,
+  fetchDiscover,
   fetchBooks,
   fetchHistory,
   PredictUnavailable,
@@ -73,6 +74,31 @@ describe('spec 114 reads', () => {
     fetch.mockResolvedValueOnce(jsonRes({ events: [] }))
     await fetchEvents(137)
     expect(fetch.mock.calls[2][0]).toBe(`${BASE}/v1/polymarket/137/events`)
+  })
+
+  it('fetchEvents passes topic, and live=1 only when true', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ events: [] }))
+    await fetchEvents(137, { topic: 'NBA-finals', sort: 'newest' })
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE}/v1/polymarket/137/events?topic=NBA-finals&sort=newest`)
+    fetch.mockResolvedValueOnce(jsonRes({ events: [] }))
+    await fetchEvents(137, { live: true })
+    expect(fetch.mock.calls[1][0]).toBe(`${BASE}/v1/polymarket/137/events?live=1`)
+    fetch.mockResolvedValueOnce(jsonRes({ events: [] }))
+    await fetchEvents(137, { live: false, topic: '' })
+    expect(fetch.mock.calls[2][0]).toBe(`${BASE}/v1/polymarket/137/events`)
+  })
+
+  it('fetchDiscover reads /discover and keeps a null half null', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ live: null, topics: [{ slug: 'nfl', label: 'NFL', events: 3, volume24h: '1' }] }))
+    const r = await fetchDiscover(137)
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE}/v1/polymarket/137/discover`)
+    expect(r.live).toBeNull()
+    expect(r.topics).toHaveLength(1)
+  })
+
+  it('fetchDiscover carries the status of a missing route', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ error: { code: 'not_found', reason: 'nope' } }, 404))
+    await expect(fetchDiscover(137)).rejects.toMatchObject({ status: 404 })
   })
 
   it('fetchEvent encodes the slug', async () => {
