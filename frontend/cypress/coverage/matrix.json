@@ -3552,13 +3552,15 @@
         {
           "id": "predict.order-progress",
           "name": "Follow an order from signed to settled without refreshing, with unconfirmed distinct from failed, surviving a reload",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
-          "issue": "#1747"
+          "tests": [
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-13",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-14",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-15"
+          ]
         },
         {
           "id": "predict.self-limit",

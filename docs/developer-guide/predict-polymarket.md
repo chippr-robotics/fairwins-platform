@@ -267,7 +267,73 @@ follows it; `submit` is now one caller of it) — region check, fee gate, signer
 is the pure plan/re-check; `lib/predict/ticketStatements.js` the shared sentences. The ticket reads only its own
 outcome's two tokens through `useMarketReadings`; opened from an event page, the page selects that row first (its
 two tokens are already among its ten), and while a ticket for a *position* is open the page stands down, so the
-poll never holds more than ten tokens. `done` returns what the venue answered; order tracking is a later slice.
+poll never holds more than ten tokens. `done` returns what the venue answered and hands the order to the progress
+tracker (next section).
+
+## Order progress (spec 114, slice 6)
+
+After a signature the member sees where the order is, on the Predict panel, without refreshing — and the order is
+still there after a reload. Pieces: `lib/predict/orderProgress.js` (reducer + device store), `usePredictOrders` (the
+poll), `OrderProgress` (the words), `lib/predict/orderWords.js` (the sentences, pure).
+
+**The reducer** knows the diagram of data-model.md and nothing else: `signed → sent → resting → partial →
+matched → settled`, `sent → matched`, `resting/partial → cancelled | expired`, `signed → unconfirmed → sent |
+not-delivered`, `signed → rejected`, `matched → failed`. An event that is not a legal move hands back the SAME
+record. A venue observation may skip a state it did not see (a poll that never caught `partial`) but never goes
+backwards or leaves an ending; fills only grow; amounts are decimal strings compared in micro-units. `unconfirmed`
+is never terminal. Terminal records, and a `matched` the app can never advance, are pruned seven days after they
+last moved.
+
+**Matched is the venue's word, settled is the chain's.** The app reads the venue, not the chain, for a matched
+order, so nothing in the app emits `settled` or `failed`: the reducer accepts them (a chain read or the market feed
+can drive them later) and the tracker stops at matched and says settlement happens on chain. A venue status string
+can never produce either.
+
+**The device store** is `predict_orders_v1` in `localStorage`, scoped by wallet (`userStorage`), so an order
+survives closing the app. It is **device-only and deliberately absent from `lib/backup/syncedObjects.js`** (a test
+asserts it). A record holds the order id and the public facts of the order — token, side, size and its unit, the
+limit, a label — never a signature or a credential.
+
+**The id before the post.** A post whose answer never arrives gives the app no venue id, so the two submit
+functions in `clobSession.js` now BUILD and POST as separate calls (what `createAndPost…` does in one) and compute
+the order's EIP-712 hash from the signed order in between, with the SDK's own exported `ExchangeOrderBuilder` and
+`getContractConfig`. What is signed is unchanged — same call, same tick, same order type (FAK for a marketable
+order, GTC for a named price), and `negRisk` resolved exactly as the SDK would (a stated flag, else the venue's
+answer for that token, never a guessed `false`). The hash rides on the thrown error (`orderHash`) and on the
+answer. `test/predict/orderHash.test.js` runs the real SDK: the split path signs the same order as the one-call
+path (only the random salt and signature differ), the hash equals an independent `hashTypedData` over the
+exchange's published domain, and the signature recovers to the signer over exactly that digest.
+
+**What that does not prove** is that the venue uses this hash as its `orderID`. Hence the store's `idScheme`:
+`unknown` until a successful post returns an id equal to the computed one (`verified`), or `mismatch` if it
+differs (sticky; then a computed id is never used for a lookup).
+
+**`usePredictOrders`** reads the venue with the member's own cached CLOB session and a read-only signer (it can
+name an address and refuses to sign); no cached session means `locked` — "sign in to trading" — never a prompt.
+It takes no submit function and the source is tested to contain no post call: `unconfirmed` is resolved by LOOKUP
+(`lookupOrder`: `getOrder`, then the member's trades if the order is not found) and never by sending again.
+A lookup that fails is not an event.
+
+**The app never concludes "not delivered".** The reducer has the state, and nothing emits the event that leads
+to it. "Not found, and no trade names it" also describes an order that *filled* and that this lookup cannot see:
+whether the venue keeps a fill-and-kill order after it matched, whether its trades name the order they came from,
+and what `after` means on the trades read have not been checked against a real account. Being wrong in that
+direction tells a member an order was not placed when it was, and they place it again. So an unconfirmed order
+resolves only positively — the venue has it, or a trade names it — and otherwise stays unconfirmed, says how to
+check, and ends when the member presses "I have checked on Polymarket — stop tracking this". A first version did
+conclude it (three clean reads over two minutes on a verified id); review found it could fire for a filled order,
+because the trades window started when the post's answer *failed* rather than when the order was signed. The
+window now starts an hour before `signedAt`, a time taken before the post, so a slow failure or a wrong device
+clock does not leave the order's own fill out of the read. Turning the conclusion on is a decision for after
+those three behaviours have been seen on a funded account.
+
+**Cadence.** Tracker: only while the tab is visible and something the venue can still report is tracked; first look
+at once, then every 6 s backing off ×1.5 to 30 s while nothing changes, back to 6 s on a change; at most 8 orders a
+round, one request at a time. These reads go to the venue directly with the member's session, so they cost the
+gateway's 60/min Predict quota nothing. Positions (through the gateway, sharing that quota with the 30/min price
+feed) refresh every 30 s backing off to 120 s, and immediately when a tracked order changes; open orders (venue
+direct) every 15 s backing off to 60 s. A background refresh that fails keeps the last list and says so (`stale`),
+it never empties it. The Refresh buttons are gone.
 
 ## Configuration
 

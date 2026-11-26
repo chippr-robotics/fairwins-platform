@@ -358,7 +358,7 @@ describe('usePredictPlanTrade — review, then sign', () => {
     await act(async () => {
       out = await result.current.confirm()
     })
-    expect(out).toEqual({ outcomeUnknown: true })
+    expect(out).toMatchObject({ outcomeUnknown: true })
     expect(result.current.state).toBe('unknown')
     expect(result.current.reason).toMatch(/may have been placed/)
     expect(result.current.reason).toMatch(/before you send anything again/)
@@ -526,5 +526,56 @@ describe('usePredictPlanTrade — the order types and the signer rails', () => {
     rerender(base(deps, { tokenId: 'other-token' }))
     expect(result.current.state).toBe('planning')
     expect(result.current.reviewed).toBeNull()
+  })
+})
+
+describe('usePredictPlanTrade — handing the order to the progress tracker (slice 6)', () => {
+  const trackerDeps = (over = {}) => makeDeps({ trackSignedOrder: vi.fn(), ...over })
+  const sign = async (deps, props) => {
+    const { result } = await ready(deps, props)
+    act(() => result.current.review())
+    await act(async () => {
+      await result.current.confirm()
+    })
+    return result
+  }
+
+  it('an order the venue took is tracked with its public facts, the venue\'s id and the id computed before the post', async () => {
+    const deps = trackerDeps({
+      submitMarketOrder: vi.fn().mockResolvedValue({ orderId: '0xvenue', status: 'matched', orderHash: '0xhash' }),
+    })
+    await sign(deps, { label: 'Buy Yes — Will it rain?' })
+    expect(deps.trackSignedOrder).toHaveBeenCalledTimes(1)
+    const [account, facts, outcome] = deps.trackSignedOrder.mock.calls[0]
+    expect(account).toBe(TRADER)
+    expect(facts).toMatchObject({ tokenId: TOKEN, side: 'BUY', kind: 'marketable', size: '50', sizeUnit: 'USDC', label: 'Buy Yes — Will it rain?' })
+    expect(outcome).toEqual({ posted: { orderId: '0xvenue', status: 'matched', computedId: '0xhash' } })
+  })
+
+  it('an answer that never arrived is tracked as UNCONFIRMED under the id computed before the post — and nothing is sent again', async () => {
+    const lost = Object.assign(new Error('Polymarket did not confirm whether it received this order.'), { outcomeUnknown: true, orderHash: '0xhash' })
+    const deps = trackerDeps({ submitMarketOrder: vi.fn().mockRejectedValue(lost) })
+    await sign(deps)
+    expect(deps.trackSignedOrder).toHaveBeenCalledTimes(1)
+    expect(deps.trackSignedOrder.mock.calls[0][2]).toMatchObject({ unconfirmed: true, posted: { computedId: '0xhash' } })
+    expect(deps.submitMarketOrder).toHaveBeenCalledTimes(1)
+  })
+
+  it('a resting order is tracked in shares, with its named price', async () => {
+    const deps = trackerDeps({ submitRestingOrder: vi.fn().mockResolvedValue({ orderId: '0xrest', status: 'live', orderHash: '0xh' }) })
+    await sign(deps, { ownPrice: '0.4' })
+    const [, facts] = deps.trackSignedOrder.mock.calls[0]
+    expect(facts).toMatchObject({ kind: 'resting', sizeUnit: 'shares', limitPrice: '0.4' })
+  })
+
+  it('a refusal (nothing placed), a funds shortfall and a market move are NOT tracked', async () => {
+    for (const err of [
+      Object.assign(new Error('invalid signature'), { status: 400, outcomeUnknown: false }),
+      Object.assign(new Error('not enough balance / allowance'), { status: 400, outcomeUnknown: false }),
+    ]) {
+      const deps = trackerDeps({ submitMarketOrder: vi.fn().mockRejectedValue(err) })
+      await sign(deps)
+      expect(deps.trackSignedOrder).not.toHaveBeenCalled()
+    }
   })
 })

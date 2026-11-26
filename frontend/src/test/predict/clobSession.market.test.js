@@ -8,34 +8,46 @@ import { submitMarketOrder, submitRestingOrder, submitOrder, toSdkNumber, Side, 
 
 const TOKEN = '71321045679252212594626385532706912750332728571942532289631379312455583992563'
 
+const SIGNED = { salt: '1', maker: '0x1', signer: '0x1', taker: '0x0', tokenId: TOKEN, makerAmount: '1', takerAmount: '2', expiration: '0', nonce: '0', feeRateBps: '0', side: 0, signatureType: 0, signature: '0xsig' }
+
+// The ticket's two submit functions BUILD then POST (so the order's id is known before the post); the old
+// one-call methods stay on the fake only to assert they are never used by them.
 function client(resp = { success: true, orderID: '0xabc', status: 'matched' }) {
   return {
+    getNegRisk: vi.fn().mockResolvedValue(false),
+    createMarketOrder: vi.fn().mockResolvedValue(SIGNED),
+    createOrder: vi.fn().mockResolvedValue(SIGNED),
+    postOrder: vi.fn().mockResolvedValue(resp),
     createAndPostMarketOrder: vi.fn().mockResolvedValue(resp),
     createAndPostOrder: vi.fn().mockResolvedValue(resp),
   }
 }
+const HASH = /^0x[0-9a-f]{64}$/i
 
 describe('submitMarketOrder', () => {
-  it('calls createAndPostMarketOrder, fill-and-kill, with NUMBER amount/price and the plan\'s tick + negRisk', async () => {
+  it('builds with createMarketOrder, then posts the SAME order fill-and-kill — NUMBER amount/price, the plan\'s tick + negRisk', async () => {
     const c = client()
     const out = await submitMarketOrder(c, { tokenId: TOKEN, side: 'BUY', amount: '50', limitPrice: '0.95', negRisk: true, tickSize: '0.01' })
-    expect(c.createAndPostMarketOrder).toHaveBeenCalledTimes(1)
+    expect(c.createMarketOrder).toHaveBeenCalledTimes(1)
+    expect(c.postOrder).toHaveBeenCalledTimes(1)
+    expect(c.createAndPostMarketOrder).not.toHaveBeenCalled()
     expect(c.createAndPostOrder).not.toHaveBeenCalled()
-    expect(c.createAndPostMarketOrder).toHaveBeenCalledWith(
+    expect(c.createMarketOrder).toHaveBeenCalledWith(
       { tokenID: TOKEN, side: Side.BUY, amount: 50, price: 0.95, orderType: OrderType.FAK },
       { tickSize: '0.01', negRisk: true },
-      OrderType.FAK,
     )
-    const [order] = c.createAndPostMarketOrder.mock.calls[0]
+    expect(c.postOrder).toHaveBeenCalledWith(SIGNED, OrderType.FAK)
+    const [order] = c.createMarketOrder.mock.calls[0]
     expect(typeof order.amount).toBe('number')
     expect(typeof order.price).toBe('number')
-    expect(out).toEqual({ orderId: '0xabc', status: 'matched', raw: { success: true, orderID: '0xabc', status: 'matched' } })
+    expect(out).toEqual({ orderId: '0xabc', status: 'matched', orderHash: expect.stringMatching(HASH), raw: { success: true, orderID: '0xabc', status: 'matched' } })
   })
 
   it('never uses fill-or-kill', async () => {
     const c = client()
     await submitMarketOrder(c, { tokenId: TOKEN, side: 'SELL', amount: '87.71', limitPrice: '0.57', negRisk: false, tickSize: '0.001' })
-    const [order, , type] = c.createAndPostMarketOrder.mock.calls[0]
+    const [order] = c.createMarketOrder.mock.calls[0]
+    const [, type] = c.postOrder.mock.calls[0]
     expect(order.orderType).toBe('FAK')
     expect(type).toBe('FAK')
     expect(order.side).toBe(Side.SELL)
@@ -50,7 +62,8 @@ describe('submitMarketOrder', () => {
     await expect(
       submitMarketOrder(c, { tokenId: TOKEN, side: 'BUY', amount: '10', limitPrice: 'abc', negRisk: false, tickSize: '0.01' }),
     ).rejects.toThrow()
-    expect(c.createAndPostMarketOrder).not.toHaveBeenCalled()
+    expect(c.createMarketOrder).not.toHaveBeenCalled()
+    expect(c.postOrder).not.toHaveBeenCalled()
   })
 
   it('throws a venue refusal (with raw + status kept) instead of returning it as an order sent', async () => {
@@ -123,47 +136,79 @@ describe('what the venue\'s answer means — refused, unknown, or taken', () => 
   it('`success: false` on a 200 is the venue\'s own no; a taken order is returned', async () => {
     expect(await outcome({ success: false, errorMsg: 'not enough balance', orderID: '' })).toMatchObject({ message: 'not enough balance', outcomeUnknown: false })
     expect(await outcome({ success: false })).toMatchObject({ message: 'The venue did not accept the order.', outcomeUnknown: false })
-    expect(await outcome({ success: true, orderID: '0x1', status: 'matched' })).toEqual({ ok: { orderId: '0x1', status: 'matched', raw: { success: true, orderID: '0x1', status: 'matched' } } })
+    expect(await outcome({ success: true, orderID: '0x1', status: 'matched' })).toEqual({ ok: { orderId: '0x1', status: 'matched', orderHash: expect.stringMatching(HASH), raw: { success: true, orderID: '0x1', status: 'matched' } } })
   })
 
   it('a THROW out of the SDK (the order could not be built, or the member declined to sign) is passed on untouched: nothing was sent', async () => {
     const c = client()
-    c.createAndPostMarketOrder.mockRejectedValue(new Error('User rejected the request'))
+    c.createMarketOrder.mockRejectedValue(new Error('User rejected the request'))
     const err = await submitMarketOrder(c, ORDER).catch((e) => e)
     expect(err.message).toBe('User rejected the request')
     expect(err.outcomeUnknown).toBeUndefined()
+    expect(c.postOrder).not.toHaveBeenCalled()
+  })
+
+  it('an answer that never arrived carries the order\'s id, computed before the post, so it can be looked up', async () => {
+    const err = await submitMarketOrder(client({ error: 'Network Error' }), ORDER).catch((e) => e)
+    expect(err.outcomeUnknown).toBe(true)
+    expect(err.orderHash).toMatch(HASH)
   })
 })
 
 describe('negRisk — which exchange the signature is for', () => {
-  it('is passed when stated and LEFT OUT when not, so the SDK asks the venue instead of signing a guessed false', async () => {
-    for (const [given, options] of [
-      [true, { tickSize: '0.01', negRisk: true }],
-      [false, { tickSize: '0.01', negRisk: false }],
-      [undefined, { tickSize: '0.01' }],
-      [null, { tickSize: '0.01' }],
-    ]) {
+  it('is passed when stated; when NOT stated the venue is asked for that token and its answer is passed — never a guessed false', async () => {
+    for (const given of [true, false]) {
       const c = client()
       await submitMarketOrder(c, { ...ORDER, negRisk: given })
-      expect(c.createAndPostMarketOrder.mock.calls[0][1]).toStrictEqual(options)
+      expect(c.getNegRisk).not.toHaveBeenCalled()
+      expect(c.createMarketOrder.mock.calls[0][1]).toStrictEqual({ tickSize: '0.01', negRisk: given })
+    }
+    for (const unstated of [undefined, null]) {
+      const c = client()
+      c.getNegRisk.mockResolvedValue(true)
+      await submitMarketOrder(c, { ...ORDER, negRisk: unstated })
+      expect(c.getNegRisk).toHaveBeenCalledWith(TOKEN)
+      expect(c.createMarketOrder.mock.calls[0][1]).toStrictEqual({ tickSize: '0.01', negRisk: true })
       const r = client()
-      await submitRestingOrder(r, { tokenId: TOKEN, side: 'BUY', price: '0.57', size: '87.71', negRisk: given, tickSize: '0.01' })
-      expect(r.createAndPostOrder.mock.calls[0][1]).toStrictEqual(options)
+      r.getNegRisk.mockResolvedValue(true)
+      await submitRestingOrder(r, { tokenId: TOKEN, side: 'BUY', price: '0.57', size: '87.71', negRisk: unstated, tickSize: '0.01' })
+      expect(r.createOrder.mock.calls[0][1]).toStrictEqual({ tickSize: '0.01', negRisk: true })
+    }
+  })
+
+  it('a venue that cannot say which exchange stops the order before anything is signed or sent', async () => {
+    const c = client()
+    c.getNegRisk.mockRejectedValue(new Error('neg risk lookup failed'))
+    await expect(submitMarketOrder(c, { ...ORDER, negRisk: undefined })).rejects.toThrow(/neg risk/)
+    expect(c.createMarketOrder).not.toHaveBeenCalled()
+    expect(c.postOrder).not.toHaveBeenCalled()
+  })
+
+  it('an exchange answer that is not a boolean REFUSES the order: nothing is built, signed or posted (never a guessed false)', async () => {
+    for (const answer of [undefined, null, 'false', 0]) {
+      const c = client()
+      c.getNegRisk.mockResolvedValue(answer)
+      await expect(submitMarketOrder(c, { ...ORDER, negRisk: undefined })).rejects.toThrow(/Nothing was signed/)
+      await expect(
+        submitRestingOrder(c, { tokenId: TOKEN, side: 'BUY', price: '0.57', size: '10', negRisk: undefined, tickSize: '0.01' }),
+      ).rejects.toThrow(/Nothing was signed/)
+      for (const fn of Object.values(c)) if (fn !== c.getNegRisk) expect(fn).not.toHaveBeenCalled()
     }
   })
 })
 
 describe('submitRestingOrder — a price the member named', () => {
-  it('posts GTC through createAndPostOrder with NUMBER price/size and the REVIEWED tick', async () => {
+  it('builds with createOrder then posts GTC — NUMBER price/size and the REVIEWED tick', async () => {
     const c = client({ success: true, orderID: '0xrest', status: 'live' })
     const out = await submitRestingOrder(c, { tokenId: TOKEN, side: 'SELL', price: '0.575', size: '20.5', negRisk: true, tickSize: '0.001' })
-    expect(c.createAndPostOrder).toHaveBeenCalledWith(
+    expect(c.createOrder).toHaveBeenCalledWith(
       { tokenID: TOKEN, price: 0.575, side: Side.SELL, size: 20.5 },
       { tickSize: '0.001', negRisk: true },
-      OrderType.GTC,
     )
+    expect(c.postOrder).toHaveBeenCalledWith(SIGNED, OrderType.GTC)
     expect(c.createAndPostMarketOrder).not.toHaveBeenCalled()
-    expect(out).toEqual({ orderId: '0xrest', status: 'live', raw: { success: true, orderID: '0xrest', status: 'live' } })
+    expect(c.createAndPostOrder).not.toHaveBeenCalled()
+    expect(out).toEqual({ orderId: '0xrest', status: 'live', orderHash: expect.stringMatching(HASH), raw: { success: true, orderID: '0xrest', status: 'live' } })
   })
 
   it('a refusal or an unread answer is thrown, never reported as an order placed', async () => {
@@ -176,7 +221,7 @@ describe('submitRestingOrder — a price the member named', () => {
   it('refuses a price or size that does not survive the number conversion — nothing is sent', async () => {
     const c = client()
     await expect(submitRestingOrder(c, { tokenId: TOKEN, side: 'BUY', price: 'unusable', size: '10', tickSize: '0.01' })).rejects.toThrow()
-    expect(c.createAndPostOrder).not.toHaveBeenCalled()
+    expect(c.createOrder).not.toHaveBeenCalled()
   })
 })
 

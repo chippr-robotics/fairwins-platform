@@ -1,13 +1,14 @@
 /**
  * OpenOrdersList (spec 057 US3) — the connected wallet's open (unfilled) CLOB orders, each cancellable
- * via a gas-free cancel through usePredictTrade. On cancel the list refreshes.
+ * via a gas-free cancel through usePredictTrade. On cancel the list refreshes. The list refreshes on its own while
+ * the tab is visible (no Refresh button); a failed background refresh keeps the last list and says so.
  */
 import { usePredictOpenOrders } from '../../hooks/usePredictPortfolio'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
 import './OpenOrdersList.css'
 
 export default function OpenOrdersList() {
-  const { status, orders, refresh } = usePredictOpenOrders()
+  const { status, orders, refresh, stale } = usePredictOpenOrders()
   const trade = usePredictTrade()
   const busy = trade.status === 'submitting'
 
@@ -25,10 +26,12 @@ export default function OpenOrdersList() {
     <section className="predict-orders" aria-label="Open orders">
       <div className="predict-orders-header">
         <h4>Open orders</h4>
-        <button type="button" className="predict-orders-refresh" onClick={refresh}>
-          Refresh
-        </button>
       </div>
+      {stale && (
+        <p className="predict-orders-status" role="status">
+          Couldn&apos;t refresh your open orders just now. This is the last list we read.
+        </p>
+      )}
 
       {status === 'degraded' ? (
         <p className="predict-orders-status" role="status">

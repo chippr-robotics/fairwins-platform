@@ -3,6 +3,10 @@
  * SELL order through TradeConfirm (same builder-code path, honest fees) — or, when the panel passes `onSell`
  * (a gateway with live readings), through the amount-first ticket in sell mode. A position with no live bid
  * shows an explicit "no bid" state rather than a Sell affordance that would fail (illiquid edge case).
+ *
+ * The list refreshes ON ITS OWN (usePredictPositions polls while the tab is visible; the panel also bumps
+ * `refreshSignal` when an order of the member's changes state) — there is no Refresh button. A background
+ * refresh that fails keeps the last good list and says it could not be refreshed; it never empties it.
  */
 import { useEffect, useRef, useState } from 'react'
 import { usePredictPositions } from '../../hooks/usePredictPortfolio'
@@ -10,7 +14,7 @@ import TradeConfirm from './TradeConfirm'
 import './PositionsList.css'
 
 export default function PositionsList({ onSell, refreshSignal = 0 } = {}) {
-  const { status, positions, refresh } = usePredictPositions()
+  const { status, positions, refresh, stale } = usePredictPositions()
   const [selling, setSelling] = useState(null) // { market, outcome }
 
   // The panel bumps `refreshSignal` when the amount-first ticket it opened for a position closes, so the list
@@ -30,12 +34,13 @@ export default function PositionsList({ onSell, refreshSignal = 0 } = {}) {
     <section className="predict-positions" aria-label="Your positions">
       <div className="predict-positions-header">
         <h4>Your positions</h4>
-        {(status === 'ready' || status === 'empty') && (
-          <button type="button" className="predict-positions-refresh" onClick={refresh}>
-            Refresh
-          </button>
-        )}
       </div>
+      {stale && (
+        <p className="predict-positions-status" role="status">
+          Couldn&apos;t refresh your positions just now. This is the last list we read; it updates itself when the
+          connection returns.
+        </p>
+      )}
 
       {status === 'loading' ? (
         <p className="predict-positions-status" role="status">

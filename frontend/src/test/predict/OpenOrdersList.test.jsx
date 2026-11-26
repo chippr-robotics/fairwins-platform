@@ -44,4 +44,12 @@ describe('OpenOrdersList', () => {
     const { container } = render(<OpenOrdersList />)
     expect(container).toBeEmptyDOMElement()
   })
+
+  it('has no Refresh button, and names a failed background refresh', () => {
+    render(<OpenOrdersList />)
+    expect(screen.queryByRole('button', { name: /refresh/i })).toBeNull()
+    ordersState.current = make({ stale: true })
+    render(<OpenOrdersList />)
+    expect(screen.getByText(/Couldn.t refresh your open orders just now/)).toBeInTheDocument()
+  })
 })

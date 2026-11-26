@@ -288,7 +288,10 @@ export function usePredictTrade(options = {}) {
           })
           setStatus('submitting')
           const submitted = await send(client)
-          if (req !== reqRef.current) return null
+          // Superseded while the post was in flight (a fee reload, a reset): the SCREEN has moved on, so no state
+          // is set — but the order went out, and the caller must still be told, or an accepted order is neither
+          // shown nor tracked.
+          if (req !== reqRef.current) return submitted
           if (isRegionError(submitted)) {
             setGeoInfo(null)
             setStatus('geoblocked')
@@ -303,7 +306,8 @@ export function usePredictTrade(options = {}) {
           if (e?.outcomeUnknown && !isRegionError(e)) {
             setStatus('unknown')
             setReason(UNKNOWN_REASON)
-            return { outcomeUnknown: true }
+            // `orderHash`: the order's id, computed before the post, so the tracker can look it up (never re-post).
+            return { outcomeUnknown: true, orderHash: e.orderHash ?? null, reason: UNKNOWN_REASON }
           }
           if (req !== reqRef.current) return null
           if (isRegionError(e)) {

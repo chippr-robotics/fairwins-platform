@@ -181,17 +181,27 @@ the seam they plug into is right from the start.
 
 ## Phase 7: Slice 6 — order progress (US5)
 
-- [ ] T033 [US5] `frontend/src/lib/predict/orderProgress.js`: the reducer of data-model.md and
+- [X] T033 [US5] `frontend/src/lib/predict/orderProgress.js`: the reducer of data-model.md and
       the `predict_orders_v1` device store; add a test asserting the key is absent from
       `lib/backup/syncedObjects.js`. Tests cover every transition and that `unconfirmed` is never
       terminal.
-- [ ] T034 [US5] `frontend/src/hooks/usePredictOrders.js`: polls the venue for tracked orders
+- [X] T034 [US5] `frontend/src/hooks/usePredictOrders.js`: polls the venue for tracked orders
       with the member's on-device session, resolves `unconfirmed` by lookup, never re-posts.
-- [ ] T035 [US5] `frontend/src/components/predict/OrderProgress.jsx`; make `PositionsList` and
+- [X] T035 [US5] `frontend/src/components/predict/OrderProgress.jsx`; make `PositionsList` and
       `OpenOrdersList` refresh on their own and drop their Refresh buttons.
-- [ ] T036 [US5] Vitest for reducer, hook and component; Cypress PL-13 progress advances without
+- [X] T036 [US5] Vitest for reducer, hook and component; Cypress PL-13 progress advances without
       refresh, PL-14 survives a reload, PL-15 a timed-out post shows unconfirmed and offers no
       resubmit. Flip `predict.order-progress`. Open the slice PR.
+
+- [ ] T036a Against a funded account, record what the venue answers for: `getOrder` on a
+      fill-and-kill order after it matched and after it was killed; `getOrder` on an id it never
+      received; whether a trade names its taker and maker order ids; what `after` means on the
+      trades read; and whether the venue's order id equals the EIP-712 hash for a passkey
+      (signature type 3) order. Until then the tracker never concludes "not delivered".
+- [ ] T036b The tracker's store is read, changed and written whole, so two tabs can overwrite
+      each other's record; and its poller picks the client shape from the login method rather
+      than the resolved signer. Neither loses funds; the first can lose an "unconfirmed" notice.
+- [ ] T036c An "Open orders" list for passkey sessions (the tracker already works for them).
 
 ## Phase 8: Slice 7 — the stream source (blocked on the feed backend)
 

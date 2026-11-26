@@ -17,8 +17,9 @@
  * reaches the depth ⇒ `moved`; (2) first-time setup if needed (one gasless signature; passkey: approvals);
  * (3) re-plan again right before the order is built — the ceremonies can take minutes; (4) sign with the
  * REVIEWED limit and amount, never a newer one. A marketable order is fill-and-kill at that limit; a price the
- * member named rests (GTC) on the tick it was reviewed on. `done` returns what the venue answered; order
- * tracking is a later slice.
+ * member named rests (GTC) on the tick it was reviewed on. `done` returns what the venue answered, and the
+ * order is handed to the progress tracker (`lib/predict/orderProgress`, slice 6) — an answer that never arrived
+ * is handed over as `unconfirmed`, with the id computed before the post.
  *
  * `unknown` (passed through from usePredictTrade): the order was sent and the venue's answer never arrived.
  * It is terminal for this ticket — there is no way back to Sign from it, because the same fill-and-kill order
@@ -29,8 +30,10 @@
  * the two is larger, because the book can move between review and arrival — `ceiling.contingent` says the
  * ceiling's fee is not the one expected to apply.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { usePredictTrade } from './usePredictTrade'
+import { WalletContext } from '../contexts/WalletContext.js'
+import { trackSignedOrder as defaultTrackSignedOrder } from '../lib/predict/orderProgress'
 import { computeCostForPlan } from '../lib/predict/clobOrder'
 import { planForTicket, checkStillSignable } from '../lib/predict/ticketPlan'
 import { reclassify } from '../lib/markets/priceReading'
@@ -52,10 +55,14 @@ export function usePredictPlanTrade({
   minOrderSize,
   // true | false when the listing states it; anything else and the SDK asks the venue (never a guessed false).
   negRisk,
+  // A public description of the order for the progress tracker ("Yes — Will X happen?"). Optional.
+  label = null,
   walletClient,
   deps,
 } = {}) {
   const trade = usePredictTrade({ deps, walletClient })
+  const account = useContext(WalletContext)?.address ?? null
+  const trackOrder = deps?.trackSignedOrder ?? defaultTrackSignedOrder
   const sendMarket = deps?.submitMarketOrder ?? defaultSubmitMarketOrder
   const sendResting = deps?.submitRestingOrder ?? defaultSubmitRestingOrder
 
@@ -189,6 +196,9 @@ export function usePredictPlanTrade({
         if (!enabled) return null
       }
       let late = null
+      // Taken BEFORE the post. A post can take minutes to fail, and a time taken after it would put the order's
+      // own fill outside the window the tracker later reads trades from.
+      const signedAt = Date.now()
       const res = await trade.signAndPost((client) => send(client, reviewed), {
         beforeSign: async () => {
           const check = recheck()
@@ -201,6 +211,27 @@ export function usePredictPlanTrade({
         moveTo(late)
         return { moved: true }
       }
+      // Hand the order to the tracker (slice 6). Only an order that was actually posted: an answer, or an answer
+      // that never arrived (`outcomeUnknown` — tracked as unconfirmed and looked up, never re-sent).
+      if (res?.outcomeUnknown || (res && !res.aborted && !res.priceChanged && (res.orderId || res.orderHash))) {
+        const r = reviewed
+        trackOrder(
+          account,
+          {
+            tokenId,
+            side: r.signed.side,
+            kind: r.kind,
+            size: r.kind === 'resting' ? r.signed.size : r.signed.amount,
+            sizeUnit: r.kind === 'resting' || r.signed.side === 'SELL' ? 'shares' : 'USDC',
+            limitPrice: r.signed.limitPrice,
+            label,
+            signedAt,
+          },
+          res.outcomeUnknown
+            ? { unconfirmed: true, reason: res.reason ?? null, posted: { computedId: res.orderHash ?? null } }
+            : { posted: { orderId: res.orderId ?? null, status: res.status ?? null, computedId: res.orderHash ?? null } },
+        )
+      }
       if (res?.priceChanged) {
         // The venue could not match at the reviewed limit: the market moved. Back to a fresh review.
         trade.reset()
@@ -212,7 +243,7 @@ export function usePredictPlanTrade({
       confirmingRef.current = false
       setConfirming(false)
     }
-  }, [phase, reviewed, confirming, trade, send])
+  }, [phase, reviewed, confirming, trade, send, trackOrder, account, tokenId, label])
 
   const reset = useCallback(() => {
     setPhase('editing')

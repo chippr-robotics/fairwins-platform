@@ -25,7 +25,7 @@
  *     account's ERC-1271 WebAuthn envelope. The API key mints against the ACCOUNT address (the L1
  *     ClobAuth attestation is signed the same way), satisfying CLOB V2's signer-binding rule.
  */
-import { ClobClient, Side, OrderType } from '@polymarket/clob-client'
+import { ClobClient, Side, OrderType, ExchangeOrderBuilder, getContractConfig } from '@polymarket/clob-client'
 
 export const CLOB_HOST = 'https://clob.polymarket.com'
 export const POLYGON = 137
@@ -245,24 +245,57 @@ function readPostFailure(resp) {
   return null
 }
 
-function readPosted(resp) {
+function readPosted(resp, orderHash = null) {
   const failure = readPostFailure(resp)
   if (failure) {
-    throw Object.assign(new Error(failure.message), { raw: resp, status: resp?.status, outcomeUnknown: failure.outcomeUnknown })
+    throw Object.assign(new Error(failure.message), {
+      raw: resp,
+      status: resp?.status,
+      outcomeUnknown: failure.outcomeUnknown,
+      // The id this order has on the venue, computed BEFORE the post: what lets an answer that never arrived be
+      // looked up afterwards (orderProgress). Null when it could not be computed.
+      orderHash,
+    })
   }
   return {
     orderId: resp?.orderID ?? resp?.orderId ?? resp?.id ?? null,
     status: resp?.status ?? (resp?.success ? 'accepted' : null),
+    orderHash,
     raw: resp,
   }
 }
 
 /**
- * Which exchange contract the order is signed for. A boolean is passed through; anything else is LEFT OUT so
- * the SDK asks the venue for that exact token (`getNegRisk`). A missing flag is never signed as `false`: that
- * would be a guess about which contract verifies the signature.
+ * The order's EIP-712 hash — the id the exchange contract and the venue know the order by — computed from the
+ * SIGNED order the SDK built, before anything is posted. It uses only what the package exports
+ * (`ExchangeOrderBuilder.buildOrderTypedData/buildOrderHash`, `getContractConfig`): the exchange the order is
+ * signed for is the neg-risk one or not exactly as `createOrder` picks it. Pinned to the SDK's own output by
+ * test/predict/orderHash.test.js. Null when it cannot be computed — never a guess; the order is still posted.
  */
-const negRiskOption = (negRisk) => (typeof negRisk === 'boolean' ? { negRisk } : {})
+export function signedOrderHash(order, negRisk) {
+  try {
+    const cfg = getContractConfig(POLYGON)
+    const builder = new ExchangeOrderBuilder(negRisk ? cfg.negRiskExchange : cfg.exchange, POLYGON, undefined)
+    const hash = builder.buildOrderHash(builder.buildOrderTypedData(order))
+    return /^0x[0-9a-fA-F]{64}$/.test(hash) ? hash : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Which exchange contract the order is signed for: the stated flag, else the venue's own answer for this exact
+ * token. Anything that is not a boolean REFUSES the order before it is built. The SDK's lookup throws on an
+ * error answer but returns (and caches) `undefined` for an answer that simply lacks the field, and the order
+ * builder then treats that as "not neg-risk" — a guessed `false` about which contract verifies the signature.
+ */
+async function resolveNegRisk(client, tokenId, negRisk) {
+  const resolved = typeof negRisk === 'boolean' ? negRisk : await client.getNegRisk(String(tokenId))
+  if (typeof resolved !== 'boolean') {
+    throw new Error('Polymarket did not say which of its exchanges this market settles on, so the order was not built. Nothing was signed.')
+  }
+  return resolved
+}
 
 /**
  * Submit a MARKETABLE order: fill-and-kill at a price LIMIT. `limitPrice` is the worst price the member
@@ -281,7 +314,12 @@ const negRiskOption = (negRisk) => (typeof negRisk === 'boolean' ? { negRisk } :
  */
 export async function submitMarketOrder(client, { tokenId, side, amount, limitPrice, negRisk, tickSize }) {
   const sdkSide = side === 'SELL' ? Side.SELL : Side.BUY
-  const resp = await client.createAndPostMarketOrder(
+  // Build and post are SEPARATE calls (what `createAndPostMarketOrder` does in one) so the order's id is known
+  // before the post. The exchange is resolved here exactly as the SDK would resolve it (a stated flag, else the
+  // venue's answer for this token — a missing flag is never signed as `false`) and handed back to it, so the
+  // same order is signed.
+  const resolvedNegRisk = await resolveNegRisk(client, tokenId, negRisk)
+  const order = await client.createMarketOrder(
     {
       tokenID: String(tokenId),
       side: sdkSide,
@@ -289,10 +327,10 @@ export async function submitMarketOrder(client, { tokenId, side, amount, limitPr
       price: toSdkNumber(limitPrice),
       orderType: OrderType.FAK,
     },
-    { tickSize: String(tickSize), ...negRiskOption(negRisk) },
-    OrderType.FAK,
+    { tickSize: String(tickSize), negRisk: resolvedNegRisk },
   )
-  return readPosted(resp)
+  const orderHash = signedOrderHash(order, resolvedNegRisk)
+  return readPosted(await client.postOrder(order, OrderType.FAK), orderHash)
 }
 
 /**
@@ -307,12 +345,13 @@ export async function submitMarketOrder(client, { tokenId, side, amount, limitPr
  * @param {{ tokenId:string, side:'BUY'|'SELL', price:string, size:string, negRisk?:boolean, tickSize:string }} order
  */
 export async function submitRestingOrder(client, { tokenId, side, price, size, negRisk, tickSize }) {
-  const resp = await client.createAndPostOrder(
+  const resolvedNegRisk = await resolveNegRisk(client, tokenId, negRisk)
+  const order = await client.createOrder(
     { tokenID: String(tokenId), price: toSdkNumber(price), side: side === 'SELL' ? Side.SELL : Side.BUY, size: toSdkNumber(size) },
-    { tickSize: String(tickSize), ...negRiskOption(negRisk) },
-    OrderType.GTC,
+    { tickSize: String(tickSize), negRisk: resolvedNegRisk },
   )
-  return readPosted(resp)
+  const orderHash = signedOrderHash(order, resolvedNegRisk)
+  return readPosted(await client.postOrder(order, OrderType.GTC), orderHash)
 }
 
 /**
@@ -419,6 +458,56 @@ export function restingOrderSignedAmounts({ side, shares, limitPrice, tickSize }
     takerUnits: buy ? sharesUnits : usdcUnits,
     price: microToDecimal(price),
   }
+}
+
+export const TRADES_SLACK_SECONDS = 3600
+
+/**
+ * Look ONE order up by id with the member's own session (spec 114 slice 6). Never posts, never signs. Three
+ * outcomes, because they mean three different things to the tracker:
+ *   - `found`: the venue returned the order — `order` is its record, `trades` is not read;
+ *   - `absent`: the venue answered "no such order" (a 404 or an empty answer) AND the member's trades for that
+ *     token were read and none refers to this id. NOT proof it was never received — a fill-and-kill order that
+ *     found nothing to match may simply not be kept — which is why the caller decides what absence means;
+ *   - `unreadable`: anything else (transport failure, a throw, an answer in a shape this does not recognise).
+ *     Not a fact about the order.
+ * The order returned is checked against what was signed (token and side) so an answer about a DIFFERENT order is
+ * `unreadable`, never adopted.
+ *
+ * @param {object} client  makeClobClient result
+ * @param {{ orderId:string, tokenId:string, side:'BUY'|'SELL', since:number }} ref  `since` is ms epoch
+ */
+export async function lookupOrder(client, { orderId, tokenId, side, since }) {
+  let answer
+  try {
+    answer = await client.getOrder(String(orderId))
+  } catch {
+    return { kind: 'unreadable' }
+  }
+  const notFound = answer == null || (typeof answer === 'object' && 'error' in answer && answer.status === 404) ||
+    (typeof answer === 'object' && !('error' in answer) && Object.keys(answer).length === 0)
+  if (!notFound) {
+    if (typeof answer !== 'object' || 'error' in answer || typeof answer.status !== 'string') return { kind: 'unreadable' }
+    const sameId = answer.id == null || String(answer.id).toLowerCase() === String(orderId).toLowerCase()
+    const sameToken = answer.asset_id == null || String(answer.asset_id) === String(tokenId)
+    const sameSide = answer.side == null || String(answer.side).toUpperCase() === side
+    return sameId && sameToken && sameSide ? { kind: 'found', order: answer } : { kind: 'unreadable' }
+  }
+  // Not found as an order: did it match? The member's own trades name the order they came from.
+  let trades
+  try {
+    // An hour of slack before the time the order was signed: the device's clock may be wrong, and a trade left
+    // out of the window is a fill this lookup would never see.
+    trades = await client.getTrades({ asset_id: String(tokenId), after: String(Math.max(0, Math.floor(since / 1000) - TRADES_SLACK_SECONDS)) })
+  } catch {
+    return { kind: 'unreadable' }
+  }
+  if (!Array.isArray(trades)) return { kind: 'unreadable' }
+  const id = String(orderId).toLowerCase()
+  const mine = trades.filter(
+    (t) => String(t?.taker_order_id ?? '').toLowerCase() === id || (Array.isArray(t?.maker_orders) && t.maker_orders.some((m) => String(m?.order_id ?? '').toLowerCase() === id)),
+  )
+  return { kind: 'absent', trades: mine }
 }
 
 /** Cancel one open order by id. Returns { cancelled, raw }. */
