@@ -92,10 +92,20 @@ the price limit, and the share of visible depth consumed.
 **Rationale**: FR-016 to FR-018. The limit is the only number the venue enforces on the member's
 behalf, so it is computed in one tested place and shown verbatim.
 
-**Verify in slice 5, first task**: that the installed `@polymarket/clob-client` (^5.8.1) places a
-fill-and-kill market order with an explicit price, for both the wallet signer and the passkey
-(ERC-1271) signer path. If it cannot, the fallback is a resting limit order at the limit price
-with a short expiry, and the review step says the order rests.
+**Verified for slice 5 (T026), at the SDK's declarations, 2026-11-26**: the installed
+`@polymarket/clob-client` is 5.8.1 and declares
+`createAndPostMarketOrder(userMarketOrder, options, orderType = FOK, deferExec)` taking
+`{ tokenID, price?, amount, side, orderType?: FOK | FAK }`, where `amount` is USDC for a buy and
+shares for a sell and `price` is the price the order is created at. So a fill-and-kill order with
+an explicit price exists, and both signer paths use it, because the passkey path hands the same
+client a different signer rather than building orders itself. Two things follow for the ticket:
+
+- The SDK takes `price` and `amount` as JavaScript numbers and rounds them by its own per-tick
+  table before signing. What the review shows must be **what is signed**, so the pay amount shown
+  is checked in a test against the maker amount of an order the SDK actually builds.
+- This is verified against the SDK, **not against the venue**: placing a real fill-and-kill order
+  needs a funded account. The fallback stays named: a resting limit order at the limit price with
+  a short expiry, with the review saying the order rests.
 
 ## R8 — The chart
 

@@ -1,16 +1,27 @@
 /**
  * PositionsList (spec 057 US2) — the connected wallet's Polymarket positions, each closable via a
- * SELL order through TradeConfirm (same builder-code path, honest fees). A position with no live bid
+ * SELL order through TradeConfirm (same builder-code path, honest fees) — or, when the panel passes `onSell`
+ * (a gateway with live readings), through the amount-first ticket in sell mode. A position with no live bid
  * shows an explicit "no bid" state rather than a Sell affordance that would fail (illiquid edge case).
  */
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePredictPositions } from '../../hooks/usePredictPortfolio'
 import TradeConfirm from './TradeConfirm'
 import './PositionsList.css'
 
-export default function PositionsList() {
+export default function PositionsList({ onSell, refreshSignal = 0 } = {}) {
   const { status, positions, refresh } = usePredictPositions()
   const [selling, setSelling] = useState(null) // { market, outcome }
+
+  // The panel bumps `refreshSignal` when the amount-first ticket it opened for a position closes, so the list
+  // reflects what was sold — the same refresh the fixed-price confirm triggers on close.
+  const lastSignal = useRef(refreshSignal)
+  useEffect(() => {
+    if (lastSignal.current !== refreshSignal) {
+      lastSignal.current = refreshSignal
+      refresh()
+    }
+  }, [refreshSignal, refresh])
 
   // Hidden entirely when unsupported/disconnected — the parent panel handles those states.
   if (status === 'unsupported' || status === 'disconnected') return null
@@ -52,10 +63,12 @@ export default function PositionsList() {
                   className="predict-position-sell"
                   disabled={!hasBid}
                   onClick={() =>
-                    setSelling({
-                      market: { question: `${p.outcome || 'Outcome'} position`, polymarketUrl: 'https://polymarket.com' },
-                      outcome: { name: p.outcome || 'Outcome', tokenId: p.tokenId, price: p.bestBid.amount },
-                    })
+                    onSell
+                      ? onSell(p)
+                      : setSelling({
+                          market: { question: `${p.outcome || 'Outcome'} position`, polymarketUrl: 'https://polymarket.com' },
+                          outcome: { name: p.outcome || 'Outcome', tokenId: p.tokenId, price: p.bestBid.amount },
+                        })
                   }
                 >
                   Sell

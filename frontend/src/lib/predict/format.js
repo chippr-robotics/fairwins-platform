@@ -73,3 +73,70 @@ export function formatInPlay(live) {
   if (!live || typeof live !== 'object') return null
   return ['In play', live.score, live.period].filter((part) => typeof part === 'string' && part.trim() !== '').join(' · ')
 }
+
+/* ── Order-ticket money (spec 114 slice 5) ───────────────────────────────────────────────────────────
+ * Exact BigInt formatting from decimal strings / micro-units, and every figure rounds AGAINST the member:
+ * what they pay, risk or are charged rounds UP to the cent, what they receive rounds DOWN, so the page is
+ * never kinder than what executes. An unreadable value is "—", never $0.00. */
+
+const MICRO_UNITS = 1_000_000n
+const DECIMAL = /^\d+(\.\d+)?$/
+
+function toMicroUnits(value) {
+  if (typeof value === 'bigint') return value
+  if (typeof value !== 'string' || !DECIMAL.test(value)) return null
+  const [whole, frac = ''] = value.split('.')
+  return BigInt(whole) * MICRO_UNITS + BigInt(frac.slice(0, 6).padEnd(6, '0'))
+}
+
+const withCommas = (digits) => digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+
+/** "$50.25". `rounding`: 'up' (costs, fees, losses) or 'down' (proceeds, payouts). */
+export function formatUsd(value, rounding = 'up') {
+  const micro = toMicroUnits(value)
+  if (micro == null) return '—'
+  const step = 10_000n // one cent
+  let cents = micro / step
+  if (rounding === 'up' && micro % step !== 0n) cents += 1n
+  const whole = cents / 100n
+  const frac = String(cents % 100n).padStart(2, '0')
+  return '$' + withCommas(String(whole)) + '.' + frac
+}
+
+/** A share count rounded DOWN to 0.01 with trailing zeros trimmed: "55.32", "12". Unknown → "—". */
+export function formatShareCount(value) {
+  const micro = toMicroUnits(value)
+  if (micro == null) return '—'
+  const hundredths = micro / 10_000n
+  const whole = hundredths / 100n
+  const frac = String(hundredths % 100n).padStart(2, '0').replace(/0+$/, '')
+  return frac ? withCommas(String(whole)) + '.' + frac : withCommas(String(whole))
+}
+
+/** An exact dollar figure for amounts that are signed to the hundredth of a cent: "$49.9947", "$50.00". */
+export function formatUsdExact(value) {
+  const micro = toMicroUnits(value)
+  if (micro == null) return '—'
+  const whole = micro / MICRO_UNITS
+  const frac = String(micro % MICRO_UNITS).padStart(6, '0').replace(/0+$/, '').padEnd(2, '0')
+  return '$' + withCommas(String(whole)) + '.' + frac
+}
+
+/**
+ * A price (0–1) in cents to at most two decimals, rounded against the member: "93.81¢", "57¢".
+ * `rounding`: 'up' for what a buyer pays, 'down' for what a seller receives, 'nearest' for an informational
+ * average (a plan that fills entirely at 94¢ must read "94¢", not "94.01¢"). Unknown → "—".
+ */
+export function formatPriceCents(value, rounding = 'up') {
+  const micro = toMicroUnits(value)
+  if (micro == null) return '—'
+  let hundredths = micro / 100n // hundredths of a cent
+  if (rounding === 'up' && micro % 100n !== 0n) hundredths += 1n
+  if (rounding === 'nearest' && micro % 100n >= 50n) hundredths += 1n
+  const whole = hundredths / 100n
+  const frac = String(hundredths % 100n).padStart(2, '0').replace(/0+$/, '')
+  return (frac ? whole + '.' + frac : String(whole)) + '¢'
+}
+
+/** A decimal string (or bigint) → micro-units (6 dp), or null when it is not a plain decimal. */
+export const decimalToMicro = toMicroUnits

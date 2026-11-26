@@ -14,7 +14,8 @@
  *  - a closed or resolved event says so, names the winner when the venue gave one, and offers NO order
  *    control (FR-009);
  *  - titles, descriptions and resolution sources are TEXT; a source is a link only when it is `https:`.
- * Trading is not built here: Yes/No hands (event, row) to `onOpenRow`, which opens the existing sheet.
+ * Trading is not built here: Yes/No hands (event, row) to `onOpenRow` (the fixed-price sheet) — or, when the
+ * caller has the amount-first ticket (`onOpenTicket`), (event, row, the outcome pressed) to that.
  */
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { usePredictEvent } from '../../hooks/usePredictEvent'
@@ -50,7 +51,7 @@ function BackButton({ onBack }) {
   )
 }
 
-export default function EventPage({ slug, onBack, onOpenRow }) {
+export default function EventPage({ slug, onBack, onOpenRow, onOpenTicket, paused = false }) {
   const { status, event, stamp, stale, retry } = usePredictEvent(slug)
   const articleRef = useRef(null)
   useEffect(() => {
@@ -73,7 +74,9 @@ export default function EventPage({ slug, onBack, onOpenRow }) {
 
   // One subscription list, ≤ 10 keys by construction (see subscriptionKeys). Nothing is read for an event
   // the venue has closed: there is no book to confirm.
-  const keys = useMemo(() => (open ? subscriptionKeys(rows, selectedRow) : []), [open, rows, selectedRow])
+  // While a ticket for a position (a token this page may not hold) is open the page stands down, so the
+  // ticket's one key is the only read: the ten-key budget holds in total, not just for the page.
+  const keys = useMemo(() => (open && !paused ? subscriptionKeys(rows, selectedRow) : []), [open, paused, rows, selectedRow])
   const readings = useMarketReadings(keys)
 
   if (status === 'loading') {
@@ -260,7 +263,13 @@ export default function EventPage({ slug, onBack, onOpenRow }) {
                           disabled={o.price == null}
                           aria-haspopup="dialog"
                           aria-label={o.name + ' ' + formatCents(o.price) + (o.price == null ? ' (price unavailable)' : '') + ', ' + label}
-                          onClick={() => onOpenRow(event, row)}
+                          onClick={() => {
+                            if (!onOpenTicket) return onOpenRow(event, row)
+                            // Select the row first: its two tokens are then among the page's ten, and the ticket
+                            // subscribes to exactly those — so opening a ticket adds no key to the poll.
+                            setSelection({ id: row.conditionId, side: 'primary' })
+                            return onOpenTicket(event, row, o)
+                          }}
                         >
                           {o.name} {formatCents(o.price)}
                         </button>

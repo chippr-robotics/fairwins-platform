@@ -1556,7 +1556,10 @@
           "risk": "disclosure",
           "tests": [
             "frontend/cypress/e2e/fast/37-predict-and-collect.cy.js::PR-02",
-            "frontend/cypress/e2e/fast/37-predict-and-collect.cy.js::PR-04"
+            "frontend/cypress/e2e/fast/37-predict-and-collect.cy.js::PR-02b",
+            "frontend/cypress/e2e/fast/37-predict-and-collect.cy.js::PR-04",
+            "frontend/cypress/e2e/fast/37-predict-and-collect.cy.js::PR-04b",
+            "frontend/cypress/e2e/fast/37-predict-and-collect.cy.js::PR-05"
           ]
         },
         {
@@ -3535,13 +3538,16 @@
         {
           "id": "predict.amount-first-ticket",
           "name": "Enter an amount and see average price, shares, payout, maximum loss and every fee before signing; a non-live price yields no figures",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "disclosure",
-          "tests": [],
-          "issue": "#1747"
+          "tests": [
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-09",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-10",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-11",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-12"
+          ]
         },
         {
           "id": "predict.order-progress",

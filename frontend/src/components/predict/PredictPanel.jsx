@@ -6,7 +6,8 @@
  * Soft-fail + honest state: hidden entirely on unsupported networks (the tab never renders this panel
  * off Polygon, FR-018); a degraded upstream shows an explicit unavailable state with the Polymarket link
  * still offered (never stranded, FR-017). Trading lives in the market detail sheet → TradeConfirm, where
- * the builder fee is disclosed honestly; this slice only changes how a market is FOUND.
+ * the builder fee is disclosed honestly. Since spec 114 slice 5 a Yes/No (or Sell on a position) opens the
+ * amount-first `OrderTicket` when live readings are available, and the fixed-price sheet otherwise.
  *
  * Category, quick filter (`topic` / `live`), sort and search live in the address (`cat`, `topic`, `live`,
  * `sort`, `q`; FR-003) so a view can be returned to or shared. Category, topic and live are MUTUALLY
@@ -15,7 +16,7 @@
  * are DELAYED BY CONSTRUCTION: the list reading is classified from the gateway's server clock and held
  * out of `live` (`demoted`), so the chip reads "Delayed · N s" and ages to "Last known" if refreshes stop.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import EmptyState from '../account/EmptyState'
 import { usePredictEvents } from '../../hooks/usePredictEvents'
@@ -23,6 +24,7 @@ import { useAddressText } from '../../hooks/useAddressText'
 import { usePredictDiscover } from '../../hooks/usePredictDiscover'
 import { classify } from '../../lib/markets/priceReading'
 import { ageMs, monotonicNow } from '../../lib/markets/serverClock'
+import { booksRouteMissing, subscribeBooksRoute } from '../../lib/markets/routeSupport'
 import {
   PREDICT_CATEGORIES,
   PREDICT_SORTS,
@@ -35,6 +37,7 @@ import EventCard from './EventCard'
 import EventPage from './EventPage'
 import TrustChip from './TrustChip'
 import MarketDetailSheet from './MarketDetailSheet'
+import OrderTicket from './OrderTicket'
 import PositionsList from './PositionsList'
 import OpenOrdersList from './OpenOrdersList'
 import './PredictPanel.css'
@@ -138,7 +141,7 @@ function QuickFilters({ discover, topic, live, searching, onTopic, onLive }) {
  * that opening an event page UNMOUNTS it — a cold open of `?event=<slug>` must not wait on, or pay for,
  * the list's requests, and a page the member is not looking at does not poll.
  */
-function PredictList({ params, update, openRow, openEvent }) {
+function PredictList({ params, update, openRow, openEvent, openTicket, onLegacy }) {
   const urlCat = params.get('cat') || ''
   const urlSort = params.get('sort') || ''
   const urlQ = params.get('q') || ''
@@ -163,6 +166,10 @@ function PredictList({ params, update, openRow, openEvent }) {
     live,
   })
   const discover = usePredictDiscover()
+  // The panel needs to know whether this gateway has the spec-114 routes (it decides which order surface opens).
+  useEffect(() => {
+    onLegacy?.(legacy)
+  }, [legacy, onLegacy])
 
   const onSearch = (value) => {
     const q = value.trim() === '' ? '' : value
@@ -318,6 +325,8 @@ function PredictList({ params, update, openRow, openEvent }) {
                 onOpen={openRow}
                 // A gateway with no event route has no event page to open: the title keeps opening the sheet.
                 onOpenEvent={legacy ? undefined : openEvent}
+                // A gateway with no event route has no live readings either: Yes/No keeps opening the sheet.
+                onOpenTicket={legacy ? undefined : openTicket}
               />
             ))}
           </ul>
@@ -340,6 +349,15 @@ export default function PredictPanel() {
   const urlEvent = params.get('event') || ''
   const eventSlug = EVENT_RE.test(urlEvent) ? urlEvent : ''
   const [openMarket, setOpenMarket] = useState(null)
+  // The amount-first ticket (spec 114 slice 5) — ONE mount for every way in: a row's Yes/No, an event page's
+  // Yes/No, or Sell on a position. `listLegacy` is what the list learned about the gateway; `booksMissing` is
+  // what the market-data seam learned. Either one means no reading can ever be live, so the fixed-price sheet
+  // and confirm stay the way in (FR-029: a member can always trade).
+  const [ticket, setTicket] = useState(null)
+  const [listLegacy, setListLegacy] = useState(false)
+  const [positionsSignal, setPositionsSignal] = useState(0)
+  const booksMissing = useSyncExternalStore(subscribeBooksRoute, booksRouteMissing, booksRouteMissing)
+  const liveTicket = !listLegacy && !booksMissing
 
   // Write one or more of our params, omitting any at its default and preserving every other param.
   const update = useCallback(
@@ -360,6 +378,44 @@ export default function PredictPanel() {
   )
 
   const openRow = useCallback((event, row) => setOpenMarket(marketFromRow(event, row)), [])
+  const openTicket = useCallback(
+    (event, row, outcome) => {
+      const market = marketFromRow(event, row)
+      // Not tradable (closed, or no negRisk flag): the sheet says why in words; the ticket has nothing to quote.
+      if (!liveTicket || !market?.tradable) return openRow(event, row)
+      setTicket({
+        source: 'row',
+        market,
+        outcomes: market.outcomes.slice(0, 2),
+        initialTokenId: outcome?.tokenId ?? market.outcomes[0]?.tokenId,
+        mode: 'buy',
+        position: null,
+        tickSize: row.tickSize ?? null,
+        minOrderSize: row.minOrderSize ?? null,
+      })
+    },
+    [liveTicket, openRow],
+  )
+  const sellPosition = useCallback((p) => {
+    const name = p.outcome || 'Outcome'
+    setTicket({
+      source: 'position',
+      // A position's `false` may only mean the venue's answer did not carry the flag, so only `true` is taken as
+      // stated; otherwise it is left out and the order SDK asks the venue for this exact token before signing.
+      market: { question: `${name} position`, polymarketUrl: 'https://polymarket.com', negRisk: p.negRisk === true ? true : undefined },
+      outcomes: [{ name, tokenId: p.tokenId, price: p.bestBid?.amount ?? null }],
+      initialTokenId: p.tokenId,
+      mode: 'sell',
+      position: { size: p.size },
+      tickSize: null,
+      minOrderSize: null,
+    })
+  }, [])
+  const closeTicket = useCallback(() => {
+    // A sale from a position may have changed it: tell the list to reload, as the fixed-price confirm does.
+    if (ticket?.source === 'position') setPositionsSignal((n) => n + 1)
+    setTicket(null)
+  }, [ticket])
   // Opening PUSHES (so the browser's Back returns to the list, filters intact — every list param is kept),
   // and marks the entry so the page's own Back control can pop rather than push a second list entry.
   const openEvent = useCallback((event) => update({ event: event.slug }, { state: { predictBack: true } }), [update])
@@ -371,14 +427,42 @@ export default function PredictPanel() {
   return (
     <section className="predict-panel" aria-label="Predict">
       {eventSlug ? (
-        <EventPage key={eventSlug} slug={eventSlug} onBack={closeEvent} onOpenRow={openRow} />
+        <EventPage
+          key={eventSlug}
+          slug={eventSlug}
+          onBack={closeEvent}
+          onOpenRow={openRow}
+          onOpenTicket={openTicket}
+          paused={ticket?.source === 'position'}
+        />
       ) : (
-        <PredictList params={params} update={update} openRow={openRow} openEvent={openEvent} />
+        <PredictList
+          params={params}
+          update={update}
+          openRow={openRow}
+          openEvent={openEvent}
+          openTicket={openTicket}
+          onLegacy={setListLegacy}
+        />
       )}
 
       {/* Your positions (US2) + open orders (US3) — each self-hides when disconnected/unsupported/empty. */}
-      <PositionsList />
+      <PositionsList onSell={liveTicket ? sellPosition : undefined} refreshSignal={positionsSignal} />
       <OpenOrdersList />
+
+      {ticket && (
+        <OrderTicket
+          key={`${ticket.source}:${ticket.initialTokenId}:${ticket.mode}`}
+          market={ticket.market}
+          outcomes={ticket.outcomes}
+          initialTokenId={ticket.initialTokenId}
+          mode={ticket.mode}
+          position={ticket.position}
+          tickSize={ticket.tickSize}
+          minOrderSize={ticket.minOrderSize}
+          onClose={closeTicket}
+        />
+      )}
 
       <MarketDetailSheet
         key={openMarket ? openMarket.conditionId : 'closed'}

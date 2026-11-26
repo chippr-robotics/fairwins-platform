@@ -10,7 +10,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatUnits } from '../../lib/evm/units'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
-import { bpsToPct } from '../../lib/predict/builderFee'
+import { feeDisclosureText, firstTradeText, WRONG_NETWORK_TEXT } from '../../lib/predict/disclosures'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'
 import './TradeConfirm.css'
 
@@ -92,7 +92,7 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
           <>
             {trade.onWrongNetwork && (
               <p className="trade-confirm-warn" role="status">
-                You&apos;ll be asked to switch your wallet to Polygon before signing.
+                {WRONG_NETWORK_TEXT}
               </p>
             )}
 
@@ -144,17 +144,10 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
 
             {/* Honest disclosure — the builder fee IS a cost (the divergence from Collect), and
                 Polymarket's own taker fee is separate and charged at execution (not fabricated here). */}
-            <p className="trade-confirm-fee-note">
-              FairWins charges a {bpsToPct(builderBps)} builder fee on this trade, included above.
-              Polymarket also charges its own taker fee, set by the market and applied at execution.
-            </p>
+            <p className="trade-confirm-fee-note">{feeDisclosureText(builderBps)}</p>
 
             {!trade.tradingEnabled && !busy && (
-              <p className="trade-confirm-fee-note">
-                {trade.signerKind === 'passkey'
-                  ? 'First trade only: you’ll confirm one transaction letting Polymarket’s exchange settle your trades (network fee applies unless sponsored), then sign once (no gas) to enable trading on this device.'
-                  : 'First trade only: you’ll sign once (no gas) to enable trading on this device, then confirm the order.'}
-              </p>
+              <p className="trade-confirm-fee-note">{firstTradeText(trade.signerKind)}</p>
             )}
 
             <div className="trade-confirm-actions">

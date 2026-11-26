@@ -11,6 +11,7 @@
  */
 import { parseUnits } from '../evm/units'
 import { USDC_DECIMALS, feeUnits, feeLine } from './builderFee'
+import { planNotional } from './orderPlan'
 
 const ZERO_BYTES32 = '0x' + '0'.repeat(64)
 
@@ -27,6 +28,21 @@ export function computeCost({ price, size, side, isMaker = false }, feeBreakdown
   // notional = price × size, both 6-dec → divide out one scale factor.
   const notionalUnits = (priceUnits * sizeUnits) / 10n ** BigInt(USDC_DECIMALS)
 
+  return costFromNotional(notionalUnits, { side, isMaker }, feeBreakdown)
+}
+
+/**
+ * The same honest breakdown, from a PLAN's notional (spec 114): the cost `planOrder` walked out of the depth
+ * on offer, exactly — not an average price times shares, which would differ by rounding. Returns null for a
+ * refused plan (there is nothing to charge a fee on). `isMaker` defaults false: a marketable order is a taker.
+ */
+export function computeCostForPlan(plan, side, feeBreakdown, { isMaker = false } = {}) {
+  const notionalUnits = planNotional(plan)
+  if (notionalUnits == null) return null
+  return costFromNotional(notionalUnits, { side, isMaker }, feeBreakdown)
+}
+
+function costFromNotional(notionalUnits, { side, isMaker }, feeBreakdown) {
   // Makers pay no builder fee (Polymarket keeps makers whole).
   const builderBps = isMaker ? Number(feeBreakdown?.builderMakerFeeBps ?? 0) : Number(feeBreakdown?.builderTakerFeeBps ?? 0)
   const builderFeeUnits = feeUnits(notionalUnits, builderBps)

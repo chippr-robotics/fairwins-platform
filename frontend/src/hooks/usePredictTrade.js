@@ -32,6 +32,7 @@ import {
   makeClobClient as defaultMakeClient,
   makeBuilderConfig as defaultMakeBuilderConfig,
   submitOrder as defaultSubmitOrder,
+  submitMarketOrder as defaultSubmitMarketOrder,
   cancelOrder as defaultCancelOrder,
   loadCachedCreds as defaultLoadCachedCreds,
   SIG_TYPE_POLY_1271,
@@ -40,7 +41,14 @@ import {
 const POLYGON = 137
 const isRegionError = (e) =>
   e?.raw?.status === 403 || e?.status === 403 || /geoblock|restricted in your region|region/i.test(String(e?.message ?? e?.raw?.error ?? ''))
+// A balance or allowance shortfall is checked FIRST: "not enough balance" is not a price move, and treating it
+// as one sent the member round a review they could sign for ever without it once succeeding.
+const isFundsError = (e) => /balance|allowance|insufficient/i.test(String(e?.message ?? e?.raw?.error ?? ''))
 const isPriceMove = (e) => /price|tick|marketable|not enough|match/i.test(String(e?.message ?? e?.raw?.error ?? ''))
+const FUNDS_REASON =
+  'Polymarket refused the order: this account does not have enough of what the order spends, or has not allowed Polymarket’s exchange to move it. Nothing was placed.'
+const UNKNOWN_REASON =
+  'Polymarket did not confirm whether it received this order. It may have been placed. Check your positions and open orders before you send anything again.'
 
 export function usePredictTrade(options = {}) {
   const optionDeps = options.deps
@@ -52,6 +60,7 @@ export function usePredictTrade(options = {}) {
       makeClient: defaultMakeClient,
       makeBuilderConfig: defaultMakeBuilderConfig,
       submitOrder: defaultSubmitOrder,
+      submitMarketOrder: defaultSubmitMarketOrder,
       cancelOrder: defaultCancelOrder,
       computeCost: defaultComputeCost,
       resolveTradeSigner: defaultResolveTradeSigner,
@@ -70,12 +79,21 @@ export function usePredictTrade(options = {}) {
   const walletClient = options.walletClient ?? hookWalletClient
   const activeChainId = useWalletChainId()
 
-  const [status, setStatus] = useState('idle') // idle|checking|geoblocked|blocked|ready|enabling|signing|submitting|done|error
+  // idle|checking|geoblocked|blocked|ready|enabling|signing|submitting|done|error|unknown
+  // `unknown`: an order was sent and the venue's answer never arrived or could not be read. It is neither
+  // `done` nor `error`, and no surface may offer the same order again from it.
+  const [status, setStatus] = useState('idle')
   const [reason, setReason] = useState(null)
   const [geoInfo, setGeoInfo] = useState(null)
   const [fee, setFee] = useState(null)
   const [result, setResult] = useState(null)
   const reqRef = useRef(0)
+  // One order at a time, held in a ref: two calls from the same render both see the same `status`, so state
+  // alone cannot stop the second from posting.
+  const postingRef = useRef(false)
+  // Bumped when credentials are derived, so `tradingEnabled` re-reads the cache instead of staying false
+  // for the rest of the session (which re-ran the whole enabling step on every order).
+  const [credsEpoch, setCredsEpoch] = useState(0)
 
   const onWrongNetwork = Number(activeChainId) !== POLYGON
 
@@ -97,7 +115,8 @@ export function usePredictTrade(options = {}) {
 
   const tradingEnabled = useMemo(
     () => Boolean(wallet.address && deps.loadCachedCreds(wallet.address)),
-    [wallet.address, deps]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- credsEpoch is the "cache changed" signal
+    [wallet.address, deps, credsEpoch]
   )
 
   /** Ensure the wallet is on Polygon before an order bound to it is signed (FR-021). */
@@ -180,10 +199,14 @@ export function usePredictTrade(options = {}) {
   }, [signer, wallet, deps])
 
   /** Derive (or reuse) the member's own CLOB creds — one gasless signature, cached per session. */
-  const ensureCreds = useCallback(async () => {
-    const sdkSigner = await buildSdkSigner()
-    return deps.ensureCreds(sdkSigner, { address: wallet.address })
-  }, [deps, buildSdkSigner, wallet.address])
+  const ensureCreds = useCallback(
+    async (sdkSigner) => {
+      const creds = await deps.ensureCreds(sdkSigner ?? (await buildSdkSigner()), { address: wallet.address })
+      setCredsEpoch((n) => n + 1)
+      return creds
+    },
+    [deps, buildSdkSigner, wallet.address]
+  )
 
   /** Explicit "enable trading" step (approvals + creds up front). Optional — submit() does it lazily too. */
   const enableTrading = useCallback(async () => {
@@ -213,68 +236,114 @@ export function usePredictTrade(options = {}) {
     }
   }, [signer, ensureNetwork, ensureApprovals, ensureCreds])
 
-  /** Build + sign + submit an order (the SDK does all three; attribution rides on the builder config). */
-  const submit = useCallback(
-    async (params, { negRisk = false } = {}) => {
+  /**
+   * The shared body of every order submission: gates (fee confirmed, signer able), Polygon, approvals, creds,
+   * then the SDK client is built and `send(client)` posts the order. `submit` (the fixed-price order) and the
+   * plan-first ticket (usePredictPlanTrade) differ ONLY in what `send` calls — signer, rail, credentials and
+   * attribution are this one path.
+   *
+   * `beforeSign` (optional) runs after approvals and creds are ready and immediately before the order is
+   * built and signed: return false to abort with nothing signed (status returns to 'ready', result
+   * `{ aborted: true }`). The ticket uses it to re-plan against the CURRENT reading at the last moment
+   * (FR-021) — the ceremonies above can take a member minutes.
+   */
+  const signAndPost = useCallback(
+    async (send, { beforeSign } = {}) => {
+      if (postingRef.current) return null
       if (!fee || !signer.canSign) {
         setStatus('blocked')
         setReason(signer.reason || "Couldn't confirm the fees.")
         return null
       }
-      if (!(await ensureNetwork())) {
-        setStatus('error')
-        setReason('Switch your wallet to Polygon to trade on Polymarket.')
-        return null
-      }
-      const req = ++reqRef.current
-      setStatus('signing')
-      setReason(null)
+      postingRef.current = true
       try {
-        await ensureApprovals()
-        const creds = await ensureCreds()
-        if (req !== reqRef.current) return null
-        const builderConfig = deps.makeBuilderConfig(deps.gatewayUrl(), POLYGON)
-        const sdkSigner = await buildSdkSigner()
-        const client = deps.makeClient(sdkSigner, creds, {
-          builderConfig,
-          ...(signer.kind === 'passkey'
-            ? { signatureType: SIG_TYPE_POLY_1271, funderAddress: wallet.address }
-            : {}),
-        })
-        setStatus('submitting')
-        const submitted = await deps.submitOrder(client, {
+        if (!(await ensureNetwork())) {
+          setStatus('error')
+          setReason('Switch your wallet to Polygon to trade on Polymarket.')
+          return null
+        }
+        const req = ++reqRef.current
+        setStatus('signing')
+        setReason(null)
+        try {
+          await ensureApprovals()
+          // Everything the order needs that involves a wait is done BEFORE the last freshness check, so nothing
+          // but the SDK's own build-and-sign stands between `beforeSign` and the signature: the signer (a chain
+          // read for a passkey account), the credentials and the attribution config.
+          const sdkSigner = await buildSdkSigner()
+          const creds = await ensureCreds(sdkSigner)
+          const builderConfig = deps.makeBuilderConfig(deps.gatewayUrl(), POLYGON)
+          if (req !== reqRef.current) return null
+          if (beforeSign && (await beforeSign()) === false) {
+            if (req === reqRef.current) setStatus('ready')
+            return { aborted: true }
+          }
+          if (req !== reqRef.current) return null
+          // Constructing the client is synchronous: no wait is added after the check.
+          const client = deps.makeClient(sdkSigner, creds, {
+            builderConfig,
+            ...(signer.kind === 'passkey'
+              ? { signatureType: SIG_TYPE_POLY_1271, funderAddress: wallet.address }
+              : {}),
+          })
+          setStatus('submitting')
+          const submitted = await send(client)
+          if (req !== reqRef.current) return null
+          if (isRegionError(submitted)) {
+            setGeoInfo(null)
+            setStatus('geoblocked')
+            return null
+          }
+          setResult({ kind: 'submitted', ...submitted })
+          setStatus('done')
+          return submitted
+        } catch (e) {
+          // An order whose fate is unknown is reported even if this request was superseded: it is the one
+          // outcome a member must hear about, whatever else the screen has moved on to.
+          if (e?.outcomeUnknown && !isRegionError(e)) {
+            setStatus('unknown')
+            setReason(UNKNOWN_REASON)
+            return { outcomeUnknown: true }
+          }
+          if (req !== reqRef.current) return null
+          if (isRegionError(e)) {
+            setStatus('geoblocked')
+            return null
+          }
+          if (isFundsError(e)) {
+            setStatus('error')
+            setReason(FUNDS_REASON)
+            return null
+          }
+          if (isPriceMove(e)) {
+            setStatus('error')
+            setReason('The market moved — review the current price before trading.')
+            return { priceChanged: true }
+          }
+          setStatus('error')
+          setReason(e?.message || 'The order could not be submitted. You can still trade on Polymarket directly.')
+          return null
+        }
+      } finally {
+        postingRef.current = false
+      }
+    },
+    [fee, signer, ensureNetwork, ensureApprovals, ensureCreds, buildSdkSigner, wallet.address, deps]
+  )
+
+  /** Build + sign + submit a fixed-price order (the SDK does all three; attribution rides on the builder config). */
+  const submit = useCallback(
+    (params, { negRisk = false } = {}) =>
+      signAndPost((client) =>
+        deps.submitOrder(client, {
           tokenId: params.tokenId,
           side: params.side,
           price: params.price,
           size: params.size,
           negRisk,
         })
-        if (req !== reqRef.current) return null
-        if (isRegionError(submitted)) {
-          setGeoInfo(null)
-          setStatus('geoblocked')
-          return null
-        }
-        setResult({ kind: 'submitted', ...submitted })
-        setStatus('done')
-        return submitted
-      } catch (e) {
-        if (req !== reqRef.current) return null
-        if (isRegionError(e)) {
-          setStatus('geoblocked')
-          return null
-        }
-        if (isPriceMove(e)) {
-          setStatus('error')
-          setReason('The market moved — review the current price before trading.')
-          return { priceChanged: true }
-        }
-        setStatus('error')
-        setReason(e?.message || 'The order could not be submitted. You can still trade on Polymarket directly.')
-        return null
-      }
-    },
-    [fee, signer, ensureNetwork, ensureApprovals, ensureCreds, buildSdkSigner, wallet.address, deps]
+      ),
+    [signAndPost, deps]
   )
 
   /** Cancel an open order (gas-free CLOB cancel) with the member's own creds. */
@@ -335,6 +404,7 @@ export function usePredictTrade(options = {}) {
     preview,
     enableTrading,
     submit,
+    signAndPost,
     cancel,
     reset,
   }

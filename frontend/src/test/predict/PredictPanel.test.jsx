@@ -11,6 +11,7 @@ import { axe } from 'vitest-axe'
 import { setWalletChain } from '../helpers/walletChain'
 import PredictPanel from '../../components/predict/PredictPanel'
 import * as client from '../../lib/predict/predictClient'
+import { setBooksRouteMissing, __resetRouteSupportForTests } from '../../lib/markets/routeSupport'
 import { FED, RAIN, envelope, detailBody, mkRows } from '../fixtures/predictEvents'
 
 vi.mock('../../lib/predict/predictClient', () => ({
@@ -68,6 +69,7 @@ const chipText = () => document.querySelector('.predict-trust-chip')?.textConten
 
 beforeEach(() => {
   vi.clearAllMocks()
+  __resetRouteSupportForTests()
   setWalletChain(137)
   client.predictAvailable.mockReturnValue(true)
   client.fetchEvents.mockResolvedValue(page([FED, RAIN]))
@@ -159,13 +161,54 @@ describe('PredictPanel — browse by event', () => {
     expect(client.fetchEvents).toHaveBeenCalledTimes(1)
   })
 
-  it('opens the existing detail sheet with the adapted market from a Yes button', async () => {
+  it('a Yes/No button opens the amount-first TICKET for the outcome pressed (live readings available)', async () => {
     renderAt()
     await screen.findByText('Fed Decision in December?')
     fireEvent.click(screen.getAllByRole('button', { name: /^Yes 94¢, 25 bps increase/ })[0])
+    const dialog = screen.getByRole('dialog', { name: 'Buy Yes — Fed Decision in December? — 25 bps increase' })
+    expect(dialog).toHaveClass('order-ticket')
+    expect(document.querySelector('.market-detail')).toBeNull() // not the fixed-price sheet
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }))
+    expect(screen.queryByRole('dialog')).toBeNull()
+    fireEvent.click(screen.getAllByRole('button', { name: /^No 6¢?, 25 bps increase|^No \d+¢, 25 bps increase/ })[0])
+    expect(screen.getByRole('dialog', { name: /^Buy No — Fed Decision in December\? — 25 bps increase/ })).toBeInTheDocument()
+  })
+
+  it('LEGACY: on a gateway with no event route a Yes button still opens the existing detail sheet (FR-029)', async () => {
+    client.fetchEvents.mockRejectedValue(Object.assign(new Error('not found'), { status: 404, code: 'http_404' }))
+    client.fetchMarkets.mockResolvedValue({
+      markets: [{ conditionId: '0xold', question: 'An older market?', slug: 'an-older-market', outcomes: [{ name: 'Yes', tokenId: '1', price: '0.4' }, { name: 'No', tokenId: '2', price: '0.6' }], volume: null, endDate: null, negRisk: false, tradable: true }],
+      next: null,
+      fetchedAt: envelope().confirmedAt,
+      stale: false,
+    })
+    renderAt()
+    fireEvent.click(await screen.findByRole('button', { name: /^Yes 40¢/ }))
     const dialog = screen.getByRole('dialog')
-    expect(within(dialog).getByText('Fed Decision in December? — 25 bps increase')).toBeInTheDocument()
+    expect(dialog).toHaveClass('market-detail')
+    expect(within(dialog).getByText('An older market?')).toBeInTheDocument()
     expect(within(dialog).getAllByRole('button', { name: 'Buy' }).length).toBeGreaterThan(0)
+  })
+
+  it('NO BOOKS ROUTE: when the market-data seam has learned the gateway cannot serve books, Yes opens the existing sheet', async () => {
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    act(() => setBooksRouteMissing(true))
+    fireEvent.click(screen.getAllByRole('button', { name: /^Yes 94¢, 25 bps increase/ })[0])
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toHaveClass('market-detail')
+    expect(within(dialog).getByText('Fed Decision in December? — 25 bps increase')).toBeInTheDocument()
+  })
+
+  it('a market that is not open for orders still opens the sheet, which says why in words', async () => {
+    client.fetchEvents.mockResolvedValue(page([{ ...RAIN, markets: [{ ...RAIN.markets[0], tradable: false }] }]))
+    renderAt()
+    await screen.findByText('Will it rain in London tomorrow?')
+    // A closed row's buttons still render; the sheet is what explains.
+    const yes = screen.getAllByRole('button', { name: /^Yes / })[0]
+    fireEvent.click(yes)
+    expect(screen.getByRole('dialog')).toHaveClass('market-detail')
+    expect(screen.getByText(/isn't open for trading/)).toBeInTheDocument()
   })
 
   it('opens the EVENT PAGE from the title (not the sheet), and a legacy gateway keeps the old behaviour', async () => {
@@ -527,14 +570,29 @@ describe('PredictPanel — the event page (spec 114 slice 4)', () => {
     expect(where()).toContain('cat=economy')
   })
 
-  it('a Yes button on the page opens the ONE existing sheet for the adapted market', async () => {
+  it('a Yes button on the page opens the ONE ticket for the adapted market, and the page selects that row', async () => {
     renderAt(`/wallet?tab=predict&event=${SLUG}`)
     await heading()
     fireEvent.click(screen.getAllByRole('button', { name: /^Yes 75¢, Row 2/ })[0])
     const dialogs = screen.getAllByRole('dialog')
     expect(dialogs).toHaveLength(1)
-    expect(within(dialogs[0]).getByText('Fed Decision in December? — Row 2')).toBeInTheDocument()
+    expect(dialogs[0]).toHaveClass('order-ticket')
+    expect(within(dialogs[0]).getByText('Buy Yes — Fed Decision in December? — Row 2')).toBeInTheDocument()
     expect(where()).toContain(`event=${SLUG}`)
+    // The page selected the pressed row, so its tokens are already among the page's ten.
+    expect(document.querySelectorAll('.event-page-row.is-selected')).toHaveLength(1)
+    expect(document.querySelector('.event-page-row.is-selected')).toHaveTextContent('Row 2')
+  })
+
+  it('LEGACY counterpart: with no books route a Yes button on the page opens the ONE existing sheet', async () => {
+    setBooksRouteMissing(true)
+    renderAt(`/wallet?tab=predict&event=${SLUG}`)
+    await heading()
+    fireEvent.click(screen.getAllByRole('button', { name: /^Yes 75¢, Row 2/ })[0])
+    const dialogs = screen.getAllByRole('dialog')
+    expect(dialogs).toHaveLength(1)
+    expect(dialogs[0]).toHaveClass('market-detail')
+    expect(within(dialogs[0]).getByText('Fed Decision in December? — Row 2')).toBeInTheDocument()
   })
 
   it('an event page with a not-found event offers the way back to the list', async () => {

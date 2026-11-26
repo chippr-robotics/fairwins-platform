@@ -14,7 +14,15 @@
 // `/prices-history`, and how FRESH its books are is a knob (`world.books`) a test turns while the page is
 // open — that is how PL-08 watches a price lose its trust state without waiting out the clock.
 //
-// Trading is untouched by this slice and stays covered by 37 (PR-02 / PR-04).
+// Slice 5 adds the amount-first ticket (PL-09..PL-12, and the ticket half of PL-08). Everything up to and
+// including the review step is answerable at the gateway boundary, so it lives here. The signature itself is
+// the one thing this tier cannot reach: the order goes client-direct to the venue's CLOB, which has no local
+// stand-in (the matrix names that gap on `predict.place-order`). What the spec CAN prove is the half that
+// protects the member: no signature is requested until Sign is pressed — and to keep "none was requested"
+// from being vacuous, the same spy is shown to SEE the signature once Sign is pressed.
+//
+// The legacy half (a gateway with no books route / no event route → the fixed-price sheet and confirm) is
+// covered in 37-predict-and-collect (PR-02b, PR-04b, PR-05).
 // =============================================================================
 
 const ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
@@ -78,7 +86,7 @@ const TOPICS = [
 ]
 const TOPIC_EVENTS = { bitcoin: ['bitcoin-above-200k'], elections: ['next-election'] }
 const IN_PLAY = { score: '91-101', period: 'Q4', elapsed: '06:47' }
-const world = { liveSlugs: [], books: 'fresh' }
+const world = { liveSlugs: [], books: 'fresh', depth: 'deep' }
 
 // How old the gateway says its books are (ms behind `serverNow`), or 'fail' for an outage. The app derives
 // a price's state from THIS age on the gateway's clock plus time since receipt — never the device clock.
@@ -135,8 +143,10 @@ const bookFor = (tokenId, venueTime) => {
   const mid = PRICE_BY_TOKEN[tokenId] ?? 0.5
   const half = Math.min(0.005, mid / 2, (1 - mid) / 2)
   const level = (price, size) => [price.toFixed(3), size]
-  const bids = [level(mid - half, '284698.76'), level(mid - half - 0.01, '5120.00'), level(mid - half - 0.02, '40')].filter((l) => Number(l[0]) > 0)
-  const asks = [level(mid + half, '220072.89'), level(mid + half + 0.01, '1200'), level(mid + half + 0.02, '12.5')].filter((l) => Number(l[0]) < 1)
+  // 'thin' makes the whole ask side worth about $85 at the Fed row's 94¢ — an order of $200 outruns it.
+  const thin = world.depth === 'thin'
+  const bids = [level(mid - half, thin ? '40' : '284698.76'), level(mid - half - 0.01, thin ? '30' : '5120.00'), level(mid - half - 0.02, thin ? '20' : '40')].filter((l) => Number(l[0]) > 0)
+  const asks = [level(mid + half, thin ? '40' : '220072.89'), level(mid + half + 0.01, thin ? '30' : '1200'), level(mid + half + 0.02, thin ? '20' : '12.5')].filter((l) => Number(l[0]) < 1)
   return {
     tokenId,
     bids,
@@ -165,6 +175,14 @@ function predictGateway() {
           serverNow: now,
           stale: false,
         },
+      })
+    }
+    // The builder-fee schedule the ticket must confirm before it will quote: 50 bps taker / 0 maker (spec 057).
+    if (/\/fee-rate(\?|$)/.test(req.url)) {
+      req.alias = 'feeRate'
+      return req.reply({
+        statusCode: 200,
+        body: { builderTakerFeeBps: 50, builderMakerFeeBps: 0, polymarketTakerFeeBps: 0, fetchedAt: Date.now() },
       })
     }
     const detail = /\/events\/([a-z0-9-]+)(\?|$)/.exec(req.url)
@@ -245,14 +263,64 @@ function connect() {
   cy.mockWeb3Provider({ account: ACCOUNT, preAuthorized: true, networkId: 137, rpcUrl: 'https://polygon-bor-rpc.publicnode.com' })
 }
 
-function openPredict(search = '', { liveSlugs = [], books = 'fresh' } = {}) {
+/** Polymarket's own geoblock endpoint (a direct browser call): an allowed region unless a test says otherwise. */
+function geoblock(blocked = false) {
+  cy.intercept({ method: 'GET', url: /polymarket\.com\/api\/geoblock/ }, { statusCode: 200, body: blocked ? { blocked: true, country: 'US', region: 'US' } : { blocked: false } })
+}
+
+/** The venue's CLOB has no stand-in here: anything that reaches it fails at once and offline. */
+function clobDown() {
+  cy.intercept({ url: /clob\.polymarket\.com/ }, { statusCode: 503, body: { error: 'the venue is not reachable from the no-chain tier' } })
+}
+
+const SIGNING = ['personal_sign', 'eth_sign', 'eth_signTypedData', 'eth_signTypedData_v4', 'eth_signTransaction', 'eth_sendTransaction', 'eth_sendRawTransaction']
+/**
+ * Record every method the page asks the wallet for. It must wrap `request` BEFORE the app's scripts run: wagmi's
+ * transport binds `provider.request` once, when it connects, so a wrap installed after load would see nothing and
+ * every "no signature was requested" below would pass without measuring anything. A `window:before:load` handler
+ * registered AFTER the mock provider's own (hence inside a `cy.then`, once `connect()` has run) runs after it, on
+ * the same window, and before any app code.
+ */
+function spyOnWallet() {
+  cy.then(() => {
+    cy.on('window:before:load', (win) => {
+      const eth = win.ethereum
+      if (!eth || eth.__plSpy) return
+      const original = eth.request
+      eth.__plSpy = []
+      eth.request = function request(args) {
+        eth.__plSpy.push(args?.method)
+        return original.call(this, args)
+      }
+    })
+  })
+}
+/** Start counting from here: signatures asked since the ticket opened (the page's own load-time calls are not the point). */
+const markWallet = () =>
+  cy.window({ log: false }).then((win) => {
+    expect(win.ethereum.__plSpy, 'the wallet spy is installed (else "no signature" would be vacuous)').to.be.an('array')
+    win.ethereum.__plMark = win.ethereum.__plSpy.length
+  })
+/** Retries until the assertion holds, so a late request is still seen. */
+const signaturesSinceMark = (check) =>
+  cy.window({ log: false }).should((win) => {
+    const asked = win.ethereum.__plSpy.slice(win.ethereum.__plMark || 0).filter((m) => SIGNING.includes(m))
+    check(asked.length)
+  })
+const noSignature = () => signaturesSinceMark((n) => expect(n, 'the wallet has been asked for no signature').to.equal(0))
+
+function openPredict(search = '', { liveSlugs = [], books = 'fresh', depth = 'deep' } = {}) {
   cy.then(() => {
     world.liveSlugs = liveSlugs
     world.books = books
+    world.depth = depth
   })
   chainWorld()
   predictGateway()
+  geoblock(false)
+  clobDown()
   connect()
+  spyOnWallet()
   cy.visit('/wallet?tab=predict' + search)
   cy.get('[aria-label="Wallet Account"]', { timeout: 40000 }).should('exist')
   cy.get('[aria-label="Predict"]', { timeout: 40000 }).should('exist')
@@ -512,5 +580,187 @@ describe('Predict — the event page (spec 114, slice 4)', () => {
     })
     // The probabilities are still there, marked — not blanked, and not zero.
     cy.get('.event-page-select').first().should('contain.text', '94%').and('contain.text', 'Delayed')
+  })
+})
+
+describe('Predict — the ticket on a price that is not live (spec 114, T025b)', () => {
+  const FED = 'fed-decision-in-december'
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.clearCookies()
+  })
+
+  it('[PL-08] predict.price-trust-state — the ticket refuses to quote on a price that is not live: it waits, shows no figure, closes a review, and recovers without a reload', () => {
+    openPredict(`&event=${FED}`, { books: 'fresh' })
+    cy.get('.event-page .predict-trust-chip', { timeout: 30000 }).should(($c) => expect($c.text()).to.match(/Live/))
+    markWallet()
+    cy.get('.event-page-row').first().find('.event-page-side--yes').click()
+    cy.get('.order-ticket', { timeout: 20000 }).contains('label', /Amount to spend/).find('input').type('50')
+    cy.get('.order-ticket [data-testid="figure-average"]', { timeout: 20000 }).should('exist')
+
+    // The gateway keeps answering, but its copy was last confirmed 12 s ago: the ticket WAITS and draws nothing.
+    cy.then(() => {
+      world.books = 'aged-12'
+    })
+    cy.get('.order-ticket', { timeout: 20000 }).should('contain.text', 'Waiting for a current price…')
+    cy.get('.order-ticket [data-testid="figure-average"]').should('not.exist')
+    cy.get('.order-ticket [data-testid="figure-shares"]').should('not.exist')
+    cy.get('.order-ticket [data-testid="figure-payout"]').should('not.exist')
+    cy.get('.order-ticket [data-testid="figure-max-loss"]').should('not.exist')
+    cy.get('.order-ticket').contains('button', 'Review order').should('be.disabled')
+    // Never stranded: the venue itself is one tap away while the price is not current.
+    cy.get('.order-ticket a[href^="https://polymarket.com"]').should('exist')
+
+    // Confirmed again: figures return with no reload.
+    cy.then(() => {
+      world.books = 'fresh'
+    })
+    cy.get('.order-ticket [data-testid="figure-average"]', { timeout: 20000 }).should('exist')
+    cy.get('.order-ticket').contains('button', 'Review order').should('be.enabled').click()
+    cy.get('.order-ticket').contains('h4', 'Review your order').should('be.visible')
+
+    // The price stops being current WHILE the member is reviewing: the review is closed by the app itself,
+    // with a sentence, and nothing was signed.
+    cy.then(() => {
+      world.books = 'aged-12'
+    })
+    cy.get('.order-ticket', { timeout: 20000 }).should('contain.text', 'The price stopped being current, so the review was closed and nothing was signed.')
+    cy.get('.order-ticket h4').filter(':contains("Review your order")').should('not.exist')
+    cy.get('.order-ticket [data-testid="review-pay"]').should('not.exist')
+    noSignature()
+  })
+})
+
+describe('Predict — the amount-first order ticket (spec 114, slice 5)', () => {
+  const FED = 'fed-decision-in-december'
+  const ticket = () => cy.get('.order-ticket', { timeout: 20000 })
+  const amount = () => ticket().contains('label', /Amount to spend/).find('input')
+  const figure = (id) => cy.get(`.order-ticket [data-testid="${id}"]`)
+  const reviewButton = () => ticket().contains('button', 'Review order')
+
+  /** Open the event page, wait until its price is LIVE, and press Yes on the most likely row. */
+  function openYes(opts) {
+    openPredict(`&event=${FED}`, opts)
+    cy.get('.event-page h2', { timeout: 20000 }).should('have.text', 'Fed Decision in December?')
+    cy.get('.event-page .predict-trust-chip', { timeout: 30000 }).should(($c) => expect($c.text()).to.match(/Live/))
+    markWallet()
+    cy.get('.event-page-row').first().find('.event-page-side--yes').click()
+    ticket().should('be.visible')
+  }
+
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.clearCookies()
+  })
+
+  it('[PL-09] predict.amount-first-ticket — the ticket opens EMPTY, and typing an amount shows average price, shares, payout and the most you can lose, which follow the amount', () => {
+    openYes()
+    ticket().contains('h3', 'Buy Yes — Fed Decision in December? — 25 bps increase').should('exist')
+    // Responsible-use defaults: nothing typed, no quick amount chosen, no figure drawn from nothing.
+    amount().should('have.value', '')
+    cy.get('.order-ticket [role="group"][aria-label="Quick amounts"] button[aria-pressed="true"]').should('not.exist')
+    figure('figure-average').should('not.exist')
+    reviewButton().should('be.disabled')
+
+    amount().type('50')
+    figure('figure-average').should('have.text', '94¢')
+    figure('figure-shares').should('contain.text', '53.19')
+    figure('figure-payout').should('have.text', '$53.19 USDC')
+    figure('figure-max-loss').should('have.text', '$50.25 USDC')
+    // 94¢ is near certainty: dollars at risk beside dollars to gain, in plain currency.
+    ticket().should('contain.text', 'You put $50.25 USDC at risk to gain $2.94 USDC.')
+    reviewButton().should('be.enabled')
+
+    // The figures FOLLOW the amount.
+    amount().clear().type('25')
+    figure('figure-payout').should('have.text', '$26.59 USDC')
+    figure('figure-max-loss').should('have.text', '$25.13 USDC')
+    // A quick amount is a deliberate press, and it is the same arithmetic.
+    ticket().contains('button', '$100').click()
+    amount().should('have.value', '100')
+    figure('figure-payout').should('have.text', '$106.38 USDC')
+  })
+
+  it('[PL-10] predict.amount-first-ticket — an amount beyond the visible depth says how much can be filled, and an amount below the minimum says so at entry', () => {
+    openYes({ depth: 'thin' })
+    amount().type('200')
+    ticket().should('contain.text', 'Only $85.30 USDC of this can be filled at the prices shown.')
+    ticket().should('contain.text', 'This takes about 100% of what is on offer at these prices.')
+    reviewButton().should('be.enabled')
+    // The order that would be signed is for what can be filled, and the review says it is smaller than what was typed.
+    reviewButton().click()
+    ticket().contains('h4', 'Review your order').should('be.visible')
+    ticket().should('contain.text', 'This order is for $85.30')
+    figure('review-pay').should('have.text', '$85.30 USDC')
+    ticket().contains('button', 'Edit').click()
+
+    // Below the venue's minimum (5 shares): stated at entry, with the sentence a member can act on, never a code.
+    amount().clear().type('1')
+    ticket().should('contain.text', 'The smallest order here is 5 shares (about $4.70 USDC).')
+    figure('figure-average').should('not.exist')
+    reviewButton().should('be.disabled')
+    ticket().should('not.contain.text', 'below-minimum')
+  })
+
+  it('[PL-11] predict.amount-first-ticket — every fee is its own line, the review names the price limit, and NO signature is requested until Sign', () => {
+    openYes()
+    amount().type('50')
+    // The builder fee is its OWN line, a real cost, disclosed before anything is signed.
+    ticket().find('.order-ticket-fee-line').should('have.length', 1).and('contain.text', 'FairWins builder fee').and('contain.text', '+$0.25 USDC')
+    // The column adds up, in USDC: what is paid at most, plus the fee line, is the most that can be lost.
+    figure('figure-pay').should('have.text', '$50.00 USDC')
+    figure('figure-max-loss').should('have.text', '$50.25 USDC')
+    ticket().should(($t) => {
+      const text = $t.text()
+      expect(text, 'the rate').to.match(/0\.50% builder fee/)
+      expect(text, 'where the fee sits').to.match(/included above/i)
+      expect(text, 'the venue fee is a separate charge').to.match(/Polymarket also charges its own taker fee/)
+      expect(text, 'the order itself is gasless').to.match(/Signing this order costs no network fee\./)
+      expect(text, 'an additive cost is never "free"').to.not.match(/builder[^.]{0,40}\bfree\b/i)
+    })
+    noSignature()
+
+    // Review: the limit the signature will carry, in cents, and what it guarantees.
+    reviewButton().click()
+    ticket().contains('h4', 'Review your order').should('be.visible')
+    ticket().should('contain.text', 'Nothing has been signed yet.')
+    figure('review-pay').should('have.text', '$50.00 USDC')
+    figure('review-max-loss').should('have.text', '$50.25 USDC')
+    ticket().find('.order-ticket-fee-line').should('contain.text', 'FairWins builder fee')
+    ticket().should('contain.text', 'Price limit: 94.1¢.')
+    ticket().should('contain.text', 'cannot fill above 94.1¢ a share')
+    ticket().should('contain.text', 'Whatever is not filled is cancelled and not charged.')
+    ticket().should('contain.text', 'FairWins never holds your funds or your key. The order goes to Polymarket; the outcome is decided there.')
+    ticket().should('contain.text', 'If you are wrong').and('contain.text', '$0.00')
+    // Up to and including the review step the wallet has been asked for NO signature.
+    noSignature()
+    // Edit goes back with the amount kept, and still nothing is signed.
+    ticket().contains('button', 'Edit').click()
+    amount().should('have.value', '50')
+    noSignature()
+
+    // The spy is not blind: pressing Sign is what finally asks the wallet (the first prompt is the one-time,
+    // gasless credential signature). The venue is unreachable in this tier, so the order itself fails — honestly.
+    reviewButton().click()
+    ticket().contains('button', 'Sign buy (no gas)').click()
+    signaturesSinceMark((n) => expect(n, 'Sign is what asks the wallet').to.be.at.least(1))
+  })
+
+  it('[PL-12] predict.amount-first-ticket — the open ticket and its review have no serious or critical accessibility violations', () => {
+    openYes()
+    amount().type('50')
+    figure('figure-average').should('exist')
+    cy.a11yScan({ context: '.order-ticket', label: 'predict order ticket' })
+    reviewButton().click()
+    ticket().contains('h4', 'Review your order').should('be.visible')
+    cy.a11yScan({ context: '.order-ticket', label: 'predict order review' })
+  })
+
+  it('[PL-12] predict.amount-first-ticket — the ticket is a modal dialog: named, focused on open, closed by Escape', () => {
+    openYes()
+    cy.get('.order-ticket[role="dialog"][aria-modal="true"]').should('have.attr', 'aria-labelledby')
+    cy.focused().should('have.class', 'order-ticket')
+    cy.get('body').type('{esc}')
+    cy.get('.order-ticket').should('not.exist')
   })
 })

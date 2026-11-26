@@ -455,3 +455,36 @@ describe('EventPage — accessibility', () => {
     expect(document.activeElement).toBe(document.querySelector('.event-page'))
   })
 })
+
+describe('EventPage — the amount-first ticket entry (spec 114 slice 5)', () => {
+  it('with onOpenTicket, Yes/No hands the pressed OUTCOME and selects that row (its two tokens are then among the ten)', async () => {
+    const onOpenTicket = vi.fn()
+    const { onOpenRow } = renderPage({ markets: mkRows(12) }, { onOpenTicket })
+    await ready()
+    const last = [...document.querySelectorAll('.event-page-row')].at(-1)
+    fireEvent.click(within(last).getAllByRole('button', { name: /^No / })[0])
+    expect(onOpenRow).not.toHaveBeenCalled()
+    expect(onOpenTicket).toHaveBeenCalledTimes(1)
+    const [event, row, outcome] = onOpenTicket.mock.calls[0]
+    expect(event.slug).toBe('fed-decision-in-december')
+    expect(outcome.name).toBe('No')
+    expect(row.outcomes[1]).toBe(outcome)
+    await waitFor(() => expect(last).toHaveClass('is-selected'))
+    // The page's own subscription now holds this row's two tokens, within the ten-key budget.
+    await waitFor(() => expect(heldKeys().has(`polymarket:${row.outcomes[0].tokenId}`)).toBe(true))
+    expect(heldKeys().has(`polymarket:${outcome.tokenId}`)).toBe(true)
+    expect(heldKeys().size).toBeLessThanOrEqual(10)
+    expect(feed.peak).toBeLessThanOrEqual(10)
+  })
+
+  it('paused: the page reads NOTHING (a ticket elsewhere is the only subscriber), and resumes when unpaused', async () => {
+    client.fetchEvent.mockResolvedValue(detailBody({ markets: mkRows(3) }))
+    const { rerender } = render(<EventPage slug="fed-decision-in-december" onBack={vi.fn()} onOpenRow={vi.fn()} />)
+    await ready()
+    await waitFor(() => expect(heldKeys().size).toBeGreaterThan(0))
+    rerender(<EventPage slug="fed-decision-in-december" onBack={vi.fn()} onOpenRow={vi.fn()} paused />)
+    await waitFor(() => expect(heldKeys().size).toBe(0))
+    rerender(<EventPage slug="fed-decision-in-december" onBack={vi.fn()} onOpenRow={vi.fn()} />)
+    await waitFor(() => expect(heldKeys().size).toBeGreaterThan(0))
+  })
+})

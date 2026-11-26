@@ -15,6 +15,15 @@
 // The divergence worth remembering: Collect's OpenSea referral costs the member
 // NOTHING, while Predict's builder fee is ADDITIVE — a real taker cost — and must
 // be disclosed as its own line, never hidden and never called free.
+//
+// Spec 114 slice 5 gave Predict TWO order surfaces, and this spec covers BOTH on purpose:
+//   · a gateway with live readings  → the amount-first ticket           (PR-02, PR-04)
+//   · a gateway with no books route → the fixed-price confirm, reached by the ticket's own fallback
+//                                                                       (PR-02b, PR-04b)
+//   · a gateway that predates /events → the market sheet, then the fixed-price confirm (PR-05)
+// The same two assertions hold on every one: the builder fee is its OWN line before any signature, and a
+// restricted region is refused before any fee or signature. `gw` below is what the stub answers for books and
+// events; each test sets it before it visits.
 // =============================================================================
 
 const ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
@@ -109,17 +118,49 @@ const asEvent = (m) => ({
   ],
 })
 
+/** What the stubbed gateway has rolled out. 'missing' answers 404 — the route does not exist on that gateway. */
+const gw = { events: 'served', books: 'live' }
+
+/** A liquid book for any token: the market's own Yes price is 0.62, so bids 0.61 / asks 0.63. */
+const bookFor = (tokenId, confirmedAt) => ({
+  tokenId,
+  bids: [['0.61', '5000'], ['0.60', '5000']],
+  asks: [['0.63', '5000'], ['0.64', '5000']],
+  tickSize: '0.01',
+  minOrderSize: '5',
+  lastTradePrice: '0.62',
+  venueTime: confirmedAt,
+  venueHash: `hash-${tokenId.slice(-4)}`,
+})
+
+const NOT_FOUND = { statusCode: 404, body: { error: { code: 'not_found', reason: 'no such route' } } }
+
 /** Answer the Predict half of the gateway. `q` filters, mirroring the proxy. */
-function predictGateway() {
+function predictGateway({ events = 'served', books = 'live' } = {}) {
+  cy.then(() => {
+    gw.events = events
+    gw.books = books
+  })
   cy.intercept({ method: 'GET', url: GATEWAY_URL }, (req) => {
     // The quick-filter row is optional: a gateway without `/discover` answers 404 and the row is simply absent.
-    if (/\/discover(\?|$)/.test(req.url)) {
-      return req.reply({ statusCode: 404, body: { error: { code: 'not_found', reason: 'no such route' } } })
+    if (/\/discover(\?|$)/.test(req.url)) return req.reply(NOT_FOUND)
+    const now = new Date().toISOString()
+    // The books route (spec 114): the ticket's only source of a price. A gateway that predates it answers 404.
+    if (/\/books(\?|$)/.test(req.url)) {
+      if (gw.books === 'missing') return req.reply(NOT_FOUND)
+      const ids = (new URL(req.url).searchParams.get('token_ids') || '').split(',').filter(Boolean)
+      return req.reply({ statusCode: 200, body: { books: ids.map((id) => bookFor(id, now)), unreadable: [], confirmedAt: now, serverNow: now, stale: false } })
+    }
+    // The older spec-057 list route, which a gateway that predates /events still serves.
+    if (/\/markets(\?|$)/.test(req.url)) {
+      const q = (new URL(req.url).searchParams.get('q') || '').toLowerCase()
+      const found = q ? MARKETS.filter((m) => m.question.toLowerCase().includes(q)) : MARKETS
+      return req.reply({ statusCode: 200, body: { markets: found, next: null, fetchedAt: now, stale: false } })
     }
     if (!/\/events(\?|$)/.test(req.url)) return req.continue()
+    if (gw.events === 'missing') return req.reply(NOT_FOUND)
     const q = (new URL(req.url).searchParams.get('q') || '').toLowerCase()
     const found = q ? MARKETS.filter((m) => m.question.toLowerCase().includes(q)) : MARKETS
-    const now = new Date().toISOString()
     req.reply({
       statusCode: 200,
       body: { events: found.map(asEvent), next: null, confirmedAt: now, serverNow: now, stale: false },
@@ -132,6 +173,35 @@ function predictGateway() {
     body: { builderTakerFeeBps: 50, builderMakerFeeBps: 0, polymarketTakerFeeBps: 0, fetchedAt: Date.now() },
   }).as('feeRate')
 }
+
+const SIGNING = ['personal_sign', 'eth_sign', 'eth_signTypedData', 'eth_signTypedData_v4', 'eth_signTransaction', 'eth_sendTransaction', 'eth_sendRawTransaction']
+/**
+ * Record every method the page asks the wallet for, from before the app's scripts run: wagmi binds
+ * `provider.request` once when it connects, so a wrap installed after load would measure nothing and every
+ * "before any signature" below would pass vacuously. The handler is registered AFTER the mock provider's own
+ * (inside a `cy.then`, once `connect()` has executed) so it runs after it on the same window.
+ */
+function spyOnWallet() {
+  cy.then(() => {
+    cy.on('window:before:load', (win) => {
+      const eth = win.ethereum
+      if (!eth || eth.__prSpy) return
+      const original = eth.request
+      eth.__prSpy = []
+      eth.request = function request(args) {
+        eth.__prSpy.push(args?.method)
+        return original.call(this, args)
+      }
+    })
+  })
+}
+/** Retries until true; fails if the spy was never installed (which would make "no signature" vacuous). */
+const noSignatureYet = () =>
+  cy.window({ log: false }).should((win) => {
+    expect(win.ethereum.__prSpy, 'the wallet spy is installed').to.be.an('array')
+    const asked = win.ethereum.__prSpy.filter((m) => SIGNING.includes(m))
+    expect(asked, 'the wallet has been asked for no signature').to.have.length(0)
+  })
 
 /**
  * Polymarket's OWN geoblock endpoint, called directly from the browser (not through our gateway).
@@ -184,27 +254,9 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
     cy.contains(/No markets match your search/i).should('exist')
   })
 
-  it('[PR-02] predict.builder-fee-disclosed — the builder fee is its OWN line before any signature', () => {
-    /*
-     * THE DIVERGENCE FROM COLLECT (spec 057). Collect's OpenSea referral costs the member
-     * nothing; this fee is ADDITIVE — a real taker cost — so it must appear as its own labelled
-     * line in the confirm UI before the member signs, never folded into a total and never
-     * described as free.
-     */
-    chainWorld()
-    predictGateway()
-    geoblock(false) // an allowed region, so the fee schedule is actually reached
-    connect()
-    cy.visit('/wallet?tab=predict')
-    waitForAccount()
-
-    // A row's Yes/No opens the sheet (the title opens the event page since spec 114 slice 4).
-    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
-    cy.get('.market-detail', { timeout: 20000 }).should('exist')
-    cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
-
-    cy.get('[class*="trade-confirm"]', { timeout: 20000 }).should('exist')
-    cy.get('[class*="trade-confirm"]', { timeout: 20000 }).should(($c) => {
+  // The two assertions every order surface must satisfy. `scope` is the surface's own root.
+  const assertFeeDisclosed = (scope) =>
+    cy.get(scope, { timeout: 20000 }).should(($c) => {
       const text = $c.text()
       expect(text, 'the builder fee is named, as its own line').to.match(/builder/i)
       // 50 bps rendered as a percentage — "0.50%", trailing zero and all.
@@ -217,35 +269,122 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
         /builder[^.]{0,40}\bfree\b/i,
       )
     })
-  })
-
-  it('[PR-04] predict.builder-fee-disclosed — a restricted region is refused before any fee or signature', () => {
-    /*
-     * The other side of the same gate, and the reason it is worth a test of its own: Polymarket
-     * blocks order placement in some regions as a matter of THEIR policy. FairWins respects it and
-     * never tries to bypass it — so the member gets an honest notice naming who sets the
-     * restriction, and a link OUT to trade under Polymarket's own rules, instead of a dead Buy
-     * button or a submit that fails after they have committed to it.
-     */
-    chainWorld()
-    predictGateway()
-    geoblock(true)
-    connect()
-    cy.visit('/wallet?tab=predict')
-    waitForAccount()
-
-    // A row's Yes/No opens the sheet (the title opens the event page since spec 114 slice 4).
-    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
-    cy.get('.market-detail', { timeout: 20000 }).should('exist')
-    cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
-
-    cy.get('[class*="trade-confirm"]', { timeout: 20000 }).should('exist')
-    cy.get('[class*="trade-confirm"]').should(($c) => {
+  const assertRegionRefused = (scope) =>
+    cy.get(scope, { timeout: 20000 }).should(($c) => {
       const text = $c.text()
       expect(text, 'the refusal names whose restriction it is').to.match(/Polymarket sets this restriction/i)
       expect(text, 'and offers the way to trade it anyway, on the venue').to.match(/Trade on Polymarket/i)
       expect(text, 'no fee is quoted to someone who cannot trade').to.not.match(/builder/i)
     })
+
+  it('[PR-02] predict.builder-fee-disclosed — the builder fee is its OWN line before any signature (amount-first ticket)', () => {
+    /*
+     * THE DIVERGENCE FROM COLLECT (spec 057). Collect's OpenSea referral costs the member
+     * nothing; this fee is ADDITIVE — a real taker cost — so it must appear as its own labelled
+     * line in the order UI before the member signs, never folded into a total and never
+     * described as free. Since spec 114 slice 5 that UI is the amount-first ticket whenever the
+     * gateway can serve live readings; PR-02b and PR-05 hold the same line on the older surfaces.
+     */
+    chainWorld()
+    predictGateway()
+    geoblock(false) // an allowed region, so the fee schedule is actually reached
+    connect()
+    spyOnWallet()
+    cy.visit('/wallet?tab=predict')
+    waitForAccount()
+
+    // A row's Yes/No opens the ticket (the title opens the event page since spec 114 slice 4).
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
+    cy.get('.order-ticket', { timeout: 20000 }).should('exist')
+    assertFeeDisclosed('.order-ticket')
+
+    // With an amount, the fee is a line of its own with a number on it — and nothing has been signed.
+    cy.get('.order-ticket').contains('label', /Amount to spend/).find('input').type('50')
+    cy.get('.order-ticket .order-ticket-fee-line', { timeout: 20000 })
+      .should('have.length', 1)
+      .and('contain.text', 'FairWins builder fee')
+      .and('contain.text', '+$0.25')
+    noSignatureYet()
+  })
+
+  it('[PR-02b] predict.builder-fee-disclosed — on a gateway with NO books route the fixed-price confirm discloses the same fee as its own line', () => {
+    /*
+     * A gateway that has /events but not /books can never make a price live, so the ticket would wait
+     * forever. The ticket learns that from the first books answer (404) and hands the member the
+     * fixed-price confirm for the same outcome — the old surface, unchanged. A member can always trade.
+     */
+    chainWorld()
+    predictGateway({ books: 'missing' })
+    geoblock(false)
+    connect()
+    spyOnWallet()
+    cy.visit('/wallet?tab=predict')
+    waitForAccount()
+
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
+    cy.get('.trade-confirm', { timeout: 20000 }).should('exist')
+    cy.get('.order-ticket').should('not.exist')
+    assertFeeDisclosed('.trade-confirm')
+    noSignatureYet()
+  })
+
+  it('[PR-05] predict.builder-fee-disclosed — on a gateway that predates /events the market sheet and then the fixed-price confirm disclose the fee', () => {
+    chainWorld()
+    predictGateway({ events: 'missing', books: 'missing' })
+    geoblock(false)
+    connect()
+    spyOnWallet()
+    cy.visit('/wallet?tab=predict')
+    waitForAccount()
+
+    // The list still renders (from the older /markets route) and a row's Yes/No opens the SHEET, as it always did.
+    cy.get('.event-card', { timeout: 40000 }).should('have.length', MARKETS.length)
+    cy.get('.event-card').first().find('.event-card-side:not(:disabled)').first().click()
+    cy.get('.market-detail', { timeout: 20000 }).should('exist')
+    cy.get('.order-ticket').should('not.exist')
+    cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
+    cy.get('.trade-confirm', { timeout: 20000 }).should('exist')
+    assertFeeDisclosed('.trade-confirm')
+    noSignatureYet()
+  })
+
+  it('[PR-04] predict.builder-fee-disclosed — a restricted region is refused before any fee or signature (amount-first ticket)', () => {
+    /*
+     * The other side of the same gate, and the reason it is worth a test of its own: Polymarket
+     * blocks order placement in some regions as a matter of THEIR policy. FairWins respects it and
+     * never tries to bypass it — so the member gets an honest notice naming who sets the
+     * restriction, and a link OUT to trade under Polymarket's own rules, instead of a dead button
+     * or a submit that fails after they have committed to it.
+     */
+    chainWorld()
+    predictGateway()
+    geoblock(true)
+    connect()
+    spyOnWallet()
+    cy.visit('/wallet?tab=predict')
+    waitForAccount()
+
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
+    cy.get('.order-ticket', { timeout: 20000 }).should('exist')
+    assertRegionRefused('.order-ticket')
+    cy.get('.order-ticket').find('input').should('not.exist') // nothing to type an amount into
+    cy.get('@feeRate.all').should('have.length', 0) // the fee schedule was never even asked for
+    noSignatureYet()
+  })
+
+  it('[PR-04b] predict.builder-fee-disclosed — a restricted region is refused on the fixed-price confirm too', () => {
+    chainWorld()
+    predictGateway({ books: 'missing' })
+    geoblock(true)
+    connect()
+    spyOnWallet()
+    cy.visit('/wallet?tab=predict')
+    waitForAccount()
+
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-side:not(:disabled)').first().click()
+    cy.get('.trade-confirm', { timeout: 20000 }).should('exist')
+    assertRegionRefused('.trade-confirm')
+    noSignatureYet()
   })
 
   it('[PR-03] predict.hidden-off-polygon — the tab does not exist on a chain Polymarket does not serve', () => {
