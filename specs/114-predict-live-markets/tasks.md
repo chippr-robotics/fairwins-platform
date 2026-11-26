@@ -130,7 +130,7 @@ the seam they plug into is right from the start.
 - [ ] T025a [US2] Per-outcome traded volume (FR-005): the gateway's market row carries no
       volume, so the event page shows the event's volume only. Add `volume` to `MarketRow` from the
       venue's per-market figure and show it on each outcome row.
-- [ ] T025b [US3] The ticket's refusal on a non-live price (the last clause of PL-08) lands with
+- [X] T025b [US3] The ticket's refusal on a non-live price (the last clause of PL-08) lands with
       the ticket itself in slice 5; PL-08 covers the chip and the depth ladder today.
 
 ## Phase 6: Slice 5 — the amount-first ticket (US4)
@@ -138,25 +138,32 @@ the seam they plug into is right from the start.
 - [X] T026 [US4] **Verify first** (research R7): `@polymarket/clob-client` places a fill-and-kill
       order with an explicit price for the wallet signer and the passkey (ERC-1271) signer.
       Record the result in research.md; if it cannot, implement the named fallback.
-- [ ] T027 [US4] Extend `frontend/src/lib/predict/clobSession.js` with the marketable order call
+- [X] T027 [US4] Extend `frontend/src/lib/predict/clobSession.js` with the marketable order call
       carrying `limitPrice`; keep `createAndPostOrder` for resting orders. Tests beside the
       existing session tests.
-- [ ] T028 [US4] Rework `frontend/src/hooks/usePredictTrade.js` to plan-first: reading → plan →
+- [X] T028 [US4] Rework `frontend/src/hooks/usePredictTrade.js` to plan-first: reading → plan →
       fees → review → sign, re-planning at sign time and returning to review when the plan moved
       beyond tolerance (FR-021). Geoblock, network and fee-unconfirmed gates unchanged.
-- [ ] T029 [P] [US4] `frontend/src/components/predict/OrderTicket.jsx` (+ `.css`): amount input,
+- [X] T029 [P] [US4] `frontend/src/components/predict/OrderTicket.jsx` (+ `.css`): amount input,
       quick amounts, Yes/No, the figures of FR-017, the near-certainty statement, the waiting
       state when the reading is not live, optional "set a price" for a resting order.
-- [ ] T030 [P] [US4] `frontend/src/components/predict/OrderReview.jsx`: repeats the figures,
+- [X] T030 [P] [US4] `frontend/src/components/predict/OrderReview.jsx`: repeats the figures,
       names the price limit, states what happens to an unfilled remainder.
-- [ ] T031 [US4] Vitest: `OrderTicket.test.jsx`, `OrderReview.test.jsx`, reworked
+- [X] T031 [US4] Vitest: `OrderTicket.test.jsx`, `OrderReview.test.jsx`, reworked
       `usePredictTrade.test.jsx` (no signature requested before review; non-live reading yields
       no figures; plan moved ⇒ back to review). Retire `TradeConfirm` and its test once nothing
       imports it.
-- [ ] T032 [US4] Cypress PL-09 amount drives the figures, PL-10 amount beyond depth, PL-11 fee
+- [X] T032 [US4] Cypress PL-09 amount drives the figures, PL-10 amount beyond depth, PL-11 fee
       lines present and the builder fee its own line, PL-12 a11y on the open sheet. Flip
       `predict.amount-first-ticket`. `teller` reviews the disclosure; `latch` reviews the passkey
       path. Open the slice PR.
+
+- [ ] T032a [US4] A member-adjustable price tolerance (research R7 allows up to 2¢). The ticket
+      ships with it fixed at one tick.
+- [ ] T032b The spec-057 ticket, kept as the fallback for a gateway without the new routes, passes
+      `negRisk: false` for a sell opened from a position. On a neg-risk market that order is
+      signed for the wrong exchange and the venue rejects it. The new ticket takes the flag from
+      the position; fix the old path or retire it once every gateway serves the new routes.
 
 ## Phase 7: Slice 6 — order progress (US5)
 

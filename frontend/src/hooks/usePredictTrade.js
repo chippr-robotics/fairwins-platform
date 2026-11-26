@@ -32,6 +32,7 @@ import {
   makeClobClient as defaultMakeClient,
   makeBuilderConfig as defaultMakeBuilderConfig,
   submitOrder as defaultSubmitOrder,
+  submitMarketOrder as defaultSubmitMarketOrder,
   cancelOrder as defaultCancelOrder,
   loadCachedCreds as defaultLoadCachedCreds,
   SIG_TYPE_POLY_1271,
@@ -52,6 +53,7 @@ export function usePredictTrade(options = {}) {
       makeClient: defaultMakeClient,
       makeBuilderConfig: defaultMakeBuilderConfig,
       submitOrder: defaultSubmitOrder,
+      submitMarketOrder: defaultSubmitMarketOrder,
       cancelOrder: defaultCancelOrder,
       computeCost: defaultComputeCost,
       resolveTradeSigner: defaultResolveTradeSigner,
@@ -213,9 +215,19 @@ export function usePredictTrade(options = {}) {
     }
   }, [signer, ensureNetwork, ensureApprovals, ensureCreds])
 
-  /** Build + sign + submit an order (the SDK does all three; attribution rides on the builder config). */
-  const submit = useCallback(
-    async (params, { negRisk = false } = {}) => {
+  /**
+   * The shared body of every order submission: gates (fee confirmed, signer able), Polygon, approvals, creds,
+   * then the SDK client is built and `send(client)` posts the order. `submit` (the fixed-price order) and the
+   * plan-first ticket (usePredictPlanTrade) differ ONLY in what `send` calls — signer, rail, credentials and
+   * attribution are this one path.
+   *
+   * `beforeSign` (optional) runs after approvals and creds are ready and immediately before the order is
+   * built and signed: return false to abort with nothing signed (status returns to 'ready', result
+   * `{ aborted: true }`). The ticket uses it to re-plan against the CURRENT reading at the last moment
+   * (FR-021) — the ceremonies above can take a member minutes.
+   */
+  const signAndPost = useCallback(
+    async (send, { beforeSign } = {}) => {
       if (!fee || !signer.canSign) {
         setStatus('blocked')
         setReason(signer.reason || "Couldn't confirm the fees.")
@@ -233,6 +245,11 @@ export function usePredictTrade(options = {}) {
         await ensureApprovals()
         const creds = await ensureCreds()
         if (req !== reqRef.current) return null
+        if (beforeSign && (await beforeSign()) === false) {
+          if (req === reqRef.current) setStatus('ready')
+          return { aborted: true }
+        }
+        if (req !== reqRef.current) return null
         const builderConfig = deps.makeBuilderConfig(deps.gatewayUrl(), POLYGON)
         const sdkSigner = await buildSdkSigner()
         const client = deps.makeClient(sdkSigner, creds, {
@@ -242,13 +259,7 @@ export function usePredictTrade(options = {}) {
             : {}),
         })
         setStatus('submitting')
-        const submitted = await deps.submitOrder(client, {
-          tokenId: params.tokenId,
-          side: params.side,
-          price: params.price,
-          size: params.size,
-          negRisk,
-        })
+        const submitted = await send(client)
         if (req !== reqRef.current) return null
         if (isRegionError(submitted)) {
           setGeoInfo(null)
@@ -275,6 +286,21 @@ export function usePredictTrade(options = {}) {
       }
     },
     [fee, signer, ensureNetwork, ensureApprovals, ensureCreds, buildSdkSigner, wallet.address, deps]
+  )
+
+  /** Build + sign + submit a fixed-price order (the SDK does all three; attribution rides on the builder config). */
+  const submit = useCallback(
+    (params, { negRisk = false } = {}) =>
+      signAndPost((client) =>
+        deps.submitOrder(client, {
+          tokenId: params.tokenId,
+          side: params.side,
+          price: params.price,
+          size: params.size,
+          negRisk,
+        })
+      ),
+    [signAndPost, deps]
   )
 
   /** Cancel an open order (gas-free CLOB cancel) with the member's own creds. */
@@ -335,6 +361,7 @@ export function usePredictTrade(options = {}) {
     preview,
     enableTrading,
     submit,
+    signAndPost,
     cancel,
     reset,
   }

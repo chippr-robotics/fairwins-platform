@@ -1,0 +1,316 @@
+/* OrderTicket + OrderReview (spec 114 slice 5) — tokens only. Button classes are scoped under .order-ticket
+   because src/index.css carries a global `button { padding }` rule. Yes = brand fill, No = neutral (No is not an
+   error); amber is the signal pair only (--warning-bg / --warning-text). Nothing here animates, so
+   prefers-reduced-motion has nothing to undo — the media query below makes that explicit. */
+
+.order-ticket-backdrop {
+  align-items: center;
+  background: rgba(0, 0, 0, 0.6);
+  display: flex;
+  inset: 0;
+  justify-content: center;
+  padding: 1rem;
+  position: fixed;
+  z-index: 2000;
+}
+.order-ticket-scrim {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  inset: 0;
+  position: absolute;
+}
+.order-ticket {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 14px;
+  color: var(--text-primary);
+  display: flex;
+  flex-direction: column;
+  gap: 0.8rem;
+  max-height: calc(100dvh - 2rem);
+  max-width: 30rem;
+  overflow-y: auto;
+  padding: 1rem 1.1rem 1.2rem;
+  position: relative;
+  width: 100%;
+}
+.order-ticket:focus {
+  outline: none;
+}
+.order-ticket:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: -2px;
+}
+.order-ticket .order-ticket-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+.order-ticket .order-ticket-header h3 {
+  font-size: 1.02rem;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.order-ticket .order-ticket-step {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.order-ticket .order-ticket-step-title {
+  font-size: 0.95rem;
+  margin: 0;
+}
+.order-ticket .order-ticket-step-title:focus {
+  outline: none;
+}
+.order-ticket .order-ticket-step-title:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+.order-ticket .order-ticket-lede {
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+/* Buttons: 44px targets, labels paired with their fills. */
+.order-ticket .order-ticket-close,
+.order-ticket .order-ticket-secondary,
+.order-ticket .order-ticket-primary,
+.order-ticket .order-ticket-chip,
+.order-ticket .order-ticket-outcome,
+.order-ticket .order-ticket-link-button {
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  font-weight: 600;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.4rem 0.9rem;
+}
+.order-ticket .order-ticket-close,
+.order-ticket .order-ticket-secondary,
+.order-ticket .order-ticket-chip,
+.order-ticket .order-ticket-outcome {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+.order-ticket .order-ticket-close:hover:not(:disabled),
+.order-ticket .order-ticket-secondary:hover:not(:disabled),
+.order-ticket .order-ticket-chip:hover:not(:disabled),
+.order-ticket .order-ticket-outcome:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+.order-ticket .order-ticket-primary {
+  background: var(--primary-button);
+  border: 1px solid var(--primary-button);
+  color: var(--primary-button-text);
+}
+.order-ticket .order-ticket-primary:hover:not(:disabled) {
+  background: var(--primary-button-hover);
+}
+.order-ticket .order-ticket-primary:disabled {
+  background: var(--disabled-bg);
+  border-color: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: default;
+}
+.order-ticket .order-ticket-close:disabled,
+.order-ticket .order-ticket-secondary:disabled {
+  color: var(--disabled-text);
+  cursor: default;
+}
+.order-ticket .order-ticket-link-button {
+  background: transparent;
+  border: 0;
+  color: var(--accent-color);
+  padding-left: 0;
+  text-align: left;
+  text-decoration: underline;
+}
+.order-ticket .order-ticket-link {
+  align-items: center;
+  color: var(--accent-color);
+  display: inline-flex;
+  min-height: 44px;
+}
+.order-ticket .order-ticket-close:focus-visible,
+.order-ticket .order-ticket-secondary:focus-visible,
+.order-ticket .order-ticket-primary:focus-visible,
+.order-ticket .order-ticket-chip:focus-visible,
+.order-ticket .order-ticket-outcome:focus-visible,
+.order-ticket .order-ticket-link-button:focus-visible,
+.order-ticket .order-ticket-link:focus-visible,
+.order-ticket .order-ticket-input-row input:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* Outcome toggle: Yes = brand fill, No = neutral with a heavier edge. Selection is also a ✓ glyph. */
+.order-ticket .order-ticket-outcomes {
+  display: flex;
+  gap: 0.5rem;
+}
+.order-ticket .order-ticket-outcome {
+  flex: 1;
+  font-variant-numeric: tabular-nums;
+}
+.order-ticket .order-ticket-outcome--yes[aria-pressed='true'] {
+  background: var(--primary-button);
+  border-color: var(--primary-button);
+  color: var(--primary-button-text);
+}
+.order-ticket .order-ticket-outcome--no[aria-pressed='true'] {
+  background: var(--bg-tertiary);
+  border: 2px solid var(--text-primary);
+  color: var(--text-primary);
+}
+.order-ticket .order-ticket-outcome-state {
+  font-size: 0.75rem;
+  font-weight: 500;
+}
+.order-ticket .order-ticket-chip[aria-pressed='true'] {
+  background: var(--bg-tertiary);
+  border: 2px solid var(--text-primary);
+}
+.order-ticket .order-ticket-chips {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* Fields */
+.order-ticket .order-ticket-field {
+  display: flex;
+  flex-direction: column;
+  font-weight: 600;
+  gap: 0.35rem;
+}
+.order-ticket .order-ticket-input-row {
+  align-items: center;
+  display: flex;
+  gap: 0.4rem;
+}
+.order-ticket .order-ticket-input-row input {
+  background: var(--input-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  flex: 1;
+  font-size: 1.1rem;
+  font-variant-numeric: tabular-nums;
+  min-height: 44px;
+  padding: 0.4rem 0.6rem;
+  width: 100%;
+}
+
+/* Figures */
+.order-ticket .order-ticket-figures {
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding-top: 0.6rem;
+}
+.order-ticket .order-ticket-figures > div {
+  color: var(--text-secondary);
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+}
+.order-ticket .order-ticket-figures dt,
+.order-ticket .order-ticket-figures dd {
+  margin: 0;
+}
+.order-ticket .order-ticket-figures dd {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+/* The FairWins builder fee is a real cost: emphasised, never buried. */
+.order-ticket .order-ticket-fee-line {
+  color: var(--text-primary) !important;
+  font-weight: 600;
+}
+.order-ticket .order-ticket-total {
+  border-top: 1px solid var(--border-color);
+  color: var(--text-primary) !important;
+  font-weight: 700;
+  margin-top: 0.2rem;
+  padding-top: 0.4rem;
+}
+
+/* Words */
+.order-ticket .order-ticket-note {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
+}
+.order-ticket .order-ticket-risk,
+.order-ticket .order-ticket-refusal {
+  color: var(--text-primary);
+}
+.order-ticket .order-ticket-limit {
+  background: var(--bg-tertiary);
+  border-radius: 8px;
+  color: var(--text-primary);
+  padding: 0.6rem 0.75rem;
+}
+.order-ticket .order-ticket-limit p {
+  margin: 0;
+}
+.order-ticket .order-ticket-limit p + p {
+  margin-top: 0.4rem;
+}
+.order-ticket .order-ticket-alert,
+.order-ticket .order-ticket-warn {
+  background: var(--warning-bg);
+  border-radius: 8px;
+  color: var(--warning-text);
+  font-size: 0.9rem;
+  margin: 0;
+  padding: 0.5rem 0.7rem;
+}
+.order-ticket div.order-ticket-alert > p {
+  margin: 0 0 0.5rem;
+}
+.order-ticket .order-ticket-own {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.order-ticket .order-ticket-own-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.order-ticket .order-ticket-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: flex-end;
+}
+
+@media (max-width: 480px) {
+  .order-ticket-backdrop {
+    align-items: flex-end;
+    padding: 0;
+  }
+  .order-ticket {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+    max-height: 92dvh;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .order-ticket,
+  .order-ticket * {
+    animation: none !important;
+    transition: none !important;
+  }
+}

@@ -29,9 +29,9 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 | Spec directories | 117 |
 | With a member-facing flow | 92 |
 | Member-facing flows | 220 |
-| 🟢 covered | 196 |
+| 🟢 covered | 197 |
 | 🟡 partial | 5 |
-| 🔴 absent | 10 |
+| 🔴 absent | 9 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -353,7 +353,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Disclosure — a member consents to a cost
 
-21 flows — 🟢 19 · 🟡 0 · 🔴 1 · ⚪ 1 · covered-but-not-proven 0
+21 flows — 🟢 20 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -377,7 +377,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `predict.builder-fee-disclosed` | See the additive builder fee as its own line before signing an order | 🟢 covered | settled | `no-chain` | `37-predict-and-collect.cy.js` (PR-02, PR-04) |  |
+| `predict.builder-fee-disclosed` | See the additive builder fee as its own line before signing an order | 🟢 covered | settled | `no-chain` | `37-predict-and-collect.cy.js` (PR-02, PR-02b, PR-04, PR-04b, PR-05) |  |
 
 ### `058-send-request-home` — Send and request from home
 
@@ -439,7 +439,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `predict.amount-first-ticket` | Enter an amount and see average price, shares, payout, maximum loss and every fee before signing; a non-live price yields no figures | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+| `predict.amount-first-ticket` | Enter an amount and see average price, shares, payout, maximum loss and every fee before signing; a non-live price yields no figures | 🟢 covered | flow | `no-chain` | `52-predict-live.cy.js` (PL-09, PL-10, PL-11, PL-12) |  |
 
 ## Access — gating, identity and permission
 

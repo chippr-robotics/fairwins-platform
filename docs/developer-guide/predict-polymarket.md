@@ -46,7 +46,7 @@ in the confirm UI, never hidden and never described as free (`TradeConfirm.jsx`)
 | Signer capability | `frontend/src/lib/predict/tradeSigner.js` — EOA signs via walletClient; passkey signs via the ERC-1271 rail (`PASSKEY_PREDICT_ENABLED = true`, kill seam) |
 | **Passkey ERC-1271 signer** | `frontend/src/lib/predict/passkeyClobSigner.js` — clob-client signer shim over `lib/passkey/intentSigner` (replaySafeHash → WebAuthn → SignatureWrapper) |
 | **Passkey first-trade approvals** | `frontend/src/lib/predict/passkeyApprovals.js` — missing USDC/CTF approvals for the three settlement contracts, batched through `sendCalls` (one ceremony; deploys a counterfactual account) |
-| State machine | `frontend/src/hooks/usePredictTrade.js` (region → fee → [passkey: approvals] → derive creds → submit) |
+| State machine | `frontend/src/hooks/usePredictTrade.js` (region → fee → [passkey: approvals] → derive creds → submit); the plan-first ticket flow is `usePredictPlanTrade.js` on top of it (spec 114) |
 | Browse / positions / orders | `usePredictEvents.js` (spec 114; replaced `usePredictMarkets`), `usePredictPortfolio.js` + `components/predict/*` |
 
 ### Upstream hosts
@@ -164,6 +164,63 @@ list for the life of the hook, each market shown as a one-market event, with the
 controls hidden because that route has neither. Nothing is invented for the fields the older route
 lacks. Remove the fallback (`eventFromMarket`, `fetchPage`'s second branch) once every deployed
 gateway serves `/events`.
+
+## The amount-first order ticket (spec 114, slice 5)
+
+A member says **how much**, sees what that means from the depth actually on offer, reviews it, and only
+then is a signature requested. Custody, the signer rails, credential derivation and the builder-sign call
+are the ones above, unchanged; this is what sits in front of them.
+
+**What the ticket shows** (`components/predict/OrderTicket.jsx`): the amount field starts empty with no quick
+amount chosen; from a *live* reading it derives the average price, shares, what the member receives if right,
+the most they can lose, the share of visible depth the order takes (from 10%), and every fee as its own line
+(`computeCostForPlan` over the plan's own notional — never average price × shares). Near certainty (average
+price ≥ 90¢) states the dollars at risk beside the dollars to gain; an amount beyond the visible depth says how
+much can be filled; a refusal is always a sentence ("The smallest order here is 5 shares (about $4.70)."), never
+a reason code. A reading that is **not live** shows "Waiting for a current price…" with its age, **no figure**,
+and Review disabled — `planForTicket` returns only `{ status: 'not-live' }`, and `planOrder` refuses first.
+"Set my own price" (collapsed, unmounted until opened) turns the order into a resting GTC order through the
+existing `submitOrder`, and the review says it rests and may never fill.
+
+**The limit is the guarantee.** A marketable order is sent **fill-and-kill** (`OrderType.FAK`, never FOK) with
+`price` = the plan's `limitPrice`: the worst price the member accepts (worst level touched, plus one tick). The
+review names it in cents — *"This order cannot fill above 95¢ a share. Whatever is not filled is cancelled and not
+charged."* — and Sign re-plans against the **current** reading (`checkStillSignable`): not live ⇒ nothing is
+signed and the ticket goes back to waiting; the reviewed limit no longer reaching the depth ⇒ nothing is signed,
+the new figures are shown, and Sign needs another press; otherwise the order is signed with the **reviewed** limit,
+never a newer one. The re-check runs twice (on the press, and again after any first-trade ceremonies, right
+before the order is built — a passkey prompt can take minutes).
+
+**What is shown is what is signed.** The SDK takes `price` and `amount` as JavaScript **numbers** and rounds
+them by its own per-tick table. Everything upstream of it is exact decimal-string / BigInt arithmetic, so there is
+exactly one string → number boundary: `toSdkNumber` in `lib/predict/clobSession.js`, which refuses a value that
+does not print back as the same decimal. `marketOrderSignedAmounts` / `restingOrderSignedAmounts` (same file) are
+BigInt twins of the SDK's rounding — the package exports neither its `ROUNDING_CONFIG` nor `getMarketOrderRawAmounts`,
+and a deep import is not a contract — so `test/predict/signedAmounts.test.js` builds **real** orders with the
+installed `@polymarket/clob-client` (throwaway key, no network) and requires the twin, and the ticket's own
+"You pay at most" and limit, to equal what the SDK built. In particular a buy's USDC is rounded **down to cents**,
+a sell's shares down to hundredths; the plan is built from the rounded amount, so the review shows the rounded
+figure and says it differs from what was typed. If part of an order has no offer at any shown price, only the
+fillable part is signed, so the ceiling shown is the ceiling of the signature.
+
+**Fees and disclosure are unchanged in substance** (spec 057 FR-003/FR-010–FR-012): the builder fee is its own line,
+the venue's own taker fee is disclosed in words, a zero fee draws no line, and signing stays blocked when the fee
+schedule cannot be confirmed. The sentences live once, in `lib/predict/disclosures.js`, used by both order
+surfaces. The order itself is gasless ("Network fee: none — you sign, no gas"); a passkey member's first-trade
+approvals note is unchanged.
+
+**Never stranded.** The ticket needs live readings, which come from the gateway's `/books` route. A gateway without
+it (404 — remembered by `lib/markets/routeSupport.js`; a 5xx is an outage, not an absent route) or without
+`/events` (the legacy list) keeps the fixed-price flow: `MarketDetailSheet` → `TradeConfirm` still work and are what
+opens. While the price source is merely unreachable the ticket stays in its waiting state with a link to the venue.
+
+**Moving parts.** `usePredictPlanTrade` composes `usePredictTrade` (which gained `signAndPost`, the shared
+body of every submission: gates → Polygon → approvals → creds → build client → `send(client)`; `submit` is now one
+caller of it) — region check, fee gate, signer rail and attribution are one implementation. `lib/predict/ticketPlan.js`
+is the pure plan/re-check; `lib/predict/ticketStatements.js` the shared sentences. The ticket reads only its own
+outcome's two tokens through `useMarketReadings`; opened from an event page, the page selects that row first (its
+two tokens are already among its ten), and while a ticket for a *position* is open the page stands down, so the
+poll never holds more than ten tokens. `done` returns what the venue answered; order tracking is a later slice.
 
 ## Configuration
 

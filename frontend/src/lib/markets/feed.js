@@ -16,6 +16,7 @@ import { fetchBooks } from '../predict/predictClient'
 import { getNetwork, listSupportedChainIds } from '../../config/networks'
 import { stamp as makeStamp, monotonicNow } from './serverClock'
 import { classify, reclassify, unknown, displayPrice } from './priceReading'
+import { setBooksRouteMissing } from './routeSupport'
 
 export const POLL_MS = 2000
 export const BACKOFF_MS = 10000
@@ -93,6 +94,7 @@ function createProxyPollSource() {
           try {
             const res = await fetchBooks(chainId, batch.map(tokenOf))
             if (!res || !Array.isArray(res.books)) throw new Error('malformed books response')
+            setBooksRouteMissing(false)
             const receivedAt = monotonicNow()
             const unreadable = new Set((res.unreadable || []).map(String))
             const byToken = new Map(res.books.map((b) => [String(b.tokenId), b]))
@@ -104,8 +106,11 @@ function createProxyPollSource() {
               else out.set(key, unknown(unreadable.has(token) ? 'unreadable' : 'missing'))
             }
             if (running) deliver(out)
-          } catch {
+          } catch (err) {
             failed = true // keep the last readings; they age on the tick
+            // A gateway that has no books route (404) can never make a reading live: say so, so the order
+            // surface can fall back to the fixed-price form. Any other failure is an outage, not an absence.
+            if (err?.status === 404) setBooksRouteMissing(true)
           }
         }),
       )
