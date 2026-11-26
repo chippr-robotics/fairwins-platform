@@ -29,9 +29,9 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 | Spec directories | 117 |
 | With a member-facing flow | 92 |
 | Member-facing flows | 220 |
-| 🟢 covered | 193 |
+| 🟢 covered | 194 |
 | 🟡 partial | 5 |
-| 🔴 absent | 13 |
+| 🔴 absent | 12 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -634,7 +634,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Information — read-only surfaces
 
-54 flows — 🟢 50 · 🟡 0 · 🔴 4 · ⚪ 0 · covered-but-not-proven 12
+54 flows — 🟢 51 · 🟡 0 · 🔴 3 · ⚪ 0 · covered-but-not-proven 12
 
 ### `005-multi-recipient-encryption` — Multi-recipient encryption
 
@@ -870,7 +870,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `predict.browse-by-event` | Find a market by category, search or sort, with the markets of one event on one card | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+| `predict.browse-by-event` | Find a market by category, search or sort, with the markets of one event on one card | 🟢 covered | flow | `no-chain` | `52-predict-live.cy.js` (PL-01, PL-02, PL-03, PL-04) |  |
 | `predict.market-page` | Open an event by its address and see every outcome, its history, depth, volume, closing time and resolution source | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
 | `predict.price-trust-state` | A price that stops being confirmed is marked delayed with its age, then last known, and is never drawn as live | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
 | `predict.order-progress` | Follow an order from signed to settled without refreshing, with unconfirmed distinct from failed, surviving a reload | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |

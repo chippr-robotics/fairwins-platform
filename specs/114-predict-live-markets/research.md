@@ -213,6 +213,14 @@ saturated at exactly 7× for every event younger than a week, so it ranks newnes
 has its own sort. *Biggest price moves* was led entirely by matches that had just finished and
 gone to 0.999; it measures resolution, not news.
 
+**What it produced on the day it was built** (2026-11-26, real venue data through the gateway's
+own client): Basketball, Finance, NFL, Trump, Soccer, Bitcoin, Global Elections, Hockey, with
+fifty or more events in play. Sensible, and broader than the venue's own chips: summing volume
+favours a wide tag (`finance`, seventeen events) over a narrow hot one (`fed`, three events
+carrying nearly as much). Ranking by marginal volume divided by the square root of the events
+added would put NFL, Fed and Jensen Huang ahead of Finance. That is a tuning choice left open; the
+selection is one pure function, so its ranking can change without the route or the client changing.
+
 **What it is not**: a recommendation. The row ranks by what the venue's traders did, never by
 fee, and FairWins' own members' activity is not an input (that would need a record of who looked
 at what, which this feature does not keep).

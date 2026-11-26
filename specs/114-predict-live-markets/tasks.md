@@ -77,26 +77,26 @@ the seam they plug into is right from the start.
 
 ## Phase 4: Slice 3 — browse by event (US1) 🎯 first member-visible change
 
-- [ ] T015 [US1] `frontend/src/hooks/usePredictEvents.js`: category, sort, search and paging
+- [X] T015 [US1] `frontend/src/hooks/usePredictEvents.js`: category, sort, search and paging
       against `/events`, race-safe as `usePredictMarkets` is, refreshed every 15 s while visible.
-- [ ] T016 [P] [US1] `frontend/src/components/predict/EventCard.jsx` (+ `.css`): title, category,
+- [X] T016 [P] [US1] `frontend/src/components/predict/EventCard.jsx` (+ `.css`): title, category,
       leading rows with probability, Yes/No prices, movement glyph that is not colour alone, "N
       more", volume, closing date, and a trust label when not live. Targets ≥ 44 px.
-- [ ] T017 [US1] Rework `frontend/src/components/predict/PredictPanel.jsx`: category chips
+- [X] T017 [US1] Rework `frontend/src/components/predict/PredictPanel.jsx`: category chips
       (`aria-pressed`), sort control, search, event cards, address state via `useSearchParams`
       (`cat`, `sort`, `q`), honest empty and degraded states kept. Remove the manual Refresh.
-- [ ] T018 [US1] Vitest: `frontend/src/test/predict/PredictPanel.test.jsx` (reworked),
+- [X] T018 [US1] Vitest: `frontend/src/test/predict/PredictPanel.test.jsx` (reworked),
       `EventCard.test.jsx`, `usePredictEvents.test.jsx`.
-- [ ] T019 [US1] `frontend/cypress/e2e/fast/52-predict-live.cy.js`: PL-01 category narrows the
+- [X] T019 [US1] `frontend/cypress/e2e/fast/52-predict-live.cy.js`: PL-01 category narrows the
       list and sets the address; PL-02 search finds an event outside the first page; PL-03 a
       multi-market event is one card; PL-04 `cy.a11yScan`. Flip `predict.browse-by-event` to
       `covered` in `frontend/cypress/coverage/matrix.json`; `npm run e2e:matrix`.
-- [ ] T020 [US1] Update `frontend/src/config/navSearchIndex.js` synonyms for Predict if category
+- [X] T020 [US1] Update `frontend/src/config/navSearchIndex.js` synonyms for Predict if category
       names warrant; run `src/test/nav/navSearchIndex.test.jsx`. Open the slice PR.
 
 ## Phase 4b: Slice 3b — quick filters (US1, FR-002a–c)
 
-- [ ] T020a [US1] Gateway `GET /v1/polymarket/:chainId/discover` and the `topic` / `live`
+- [X] T020a [US1] Gateway `GET /v1/polymarket/:chainId/discover` and the `topic` / `live`
       parameters on `/events` per contracts/gateway-predict-api.md: topic selection by marginal
       day volume (research R16) as a pure, separately tested function; the mechanics denylist and
       the one-hour floor as configuration; `live` on `EventSummary`. Tests assert the upstream

@@ -47,7 +47,7 @@ in the confirm UI, never hidden and never described as free (`TradeConfirm.jsx`)
 | **Passkey ERC-1271 signer** | `frontend/src/lib/predict/passkeyClobSigner.js` — clob-client signer shim over `lib/passkey/intentSigner` (replaySafeHash → WebAuthn → SignatureWrapper) |
 | **Passkey first-trade approvals** | `frontend/src/lib/predict/passkeyApprovals.js` — missing USDC/CTF approvals for the three settlement contracts, batched through `sendCalls` (one ceremony; deploys a counterfactual account) |
 | State machine | `frontend/src/hooks/usePredictTrade.js` (region → fee → [passkey: approvals] → derive creds → submit) |
-| Browse / positions / orders | `usePredictMarkets.js`, `usePredictPortfolio.js` + `components/predict/*` |
+| Browse / positions / orders | `usePredictEvents.js` (spec 114; replaced `usePredictMarkets`), `usePredictPortfolio.js` + `components/predict/*` |
 
 ### Upstream hosts
 
@@ -154,6 +154,16 @@ Things that are deliberate:
   characters.
 - **`sort=closing` adds `end_date_min=<now>`** upstream. Without it an ascending end-date list
   opens with events whose date passed long ago and never settled.
+
+### The app and the gateway deploy separately
+
+The gateway image is built and re-pinned by hand; the app ships on the release train. The browse
+view therefore tolerates a gateway that does not have these routes yet: a 404 from `/events`
+(other than `unsupported_chain`) makes `usePredictEvents` fall back to the spec-057 `/markets`
+list for the life of the hook, each market shown as a one-market event, with the category and sort
+controls hidden because that route has neither. Nothing is invented for the fields the older route
+lacks. Remove the fallback (`eventFromMarket`, `fetchPage`'s second branch) once every deployed
+gateway serves `/events`.
 
 ## Configuration
 

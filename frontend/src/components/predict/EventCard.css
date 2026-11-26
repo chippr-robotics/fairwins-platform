@@ -1,0 +1,142 @@
+/* EventCard (spec 114) — tokens only. Yes = brand fill, No = neutral outline (No is not an error). */
+
+.predict-panel .event-card {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.8rem 0.9rem;
+}
+.predict-panel .event-card-category {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.predict-panel .event-card-title {
+  background: transparent;
+  border: 0;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.3;
+  min-height: 44px;
+  padding: 0.25rem 0;
+  text-align: left;
+  width: 100%;
+}
+.predict-panel .event-card-title--static {
+  cursor: default;
+  display: block;
+}
+.predict-panel .event-card-title:not(.event-card-title--static):hover {
+  color: var(--accent-color);
+  text-decoration: underline;
+}
+.predict-panel .event-card-title:focus-visible,
+.predict-panel .event-card-side:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+.predict-panel .event-card-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.predict-panel .event-card-row {
+  align-items: center;
+  display: grid;
+  gap: 0.4rem 0.6rem;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+.predict-panel .event-card-row-label {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+.predict-panel .event-card-row-prob {
+  align-items: center;
+  color: var(--text-primary);
+  display: inline-flex;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  gap: 0.25rem;
+  justify-content: flex-end;
+  min-width: 3.6rem;
+}
+.predict-panel .event-card-move {
+  font-size: 0.7rem;
+}
+.predict-panel .event-card-move {
+  color: var(--text-secondary);
+}
+.predict-panel .event-card-actions {
+  display: inline-flex;
+  gap: 0.35rem;
+}
+.predict-panel .event-card-side {
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.3rem 0.6rem;
+  white-space: nowrap;
+}
+.predict-panel .event-card-side--yes {
+  background: var(--primary-button);
+  border: 1px solid var(--primary-button);
+  color: var(--primary-button-text);
+}
+.predict-panel .event-card-side--yes:hover:not(:disabled) {
+  background: var(--primary-button-hover);
+}
+.predict-panel .event-card-side--no {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+}
+.predict-panel .event-card-side--no:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+.predict-panel .event-card-side:disabled {
+  background: var(--disabled-bg);
+  border-color: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: default;
+}
+.predict-panel .event-card-more {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+.predict-panel .event-card-footer {
+  color: var(--text-secondary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 0.8rem;
+  gap: 0.25rem 0.9rem;
+}
+
+/* Narrow: the buttons drop under the label + probability so nothing is squeezed below 44 px. */
+@media (max-width: 480px) {
+  .predict-panel .event-card-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .predict-panel .event-card-actions {
+    grid-column: 1 / -1;
+  }
+  .predict-panel .event-card-side {
+    flex: 1;
+  }
+}
+
+/* Nothing here transitions or animates, so prefers-reduced-motion has nothing to undo. */

@@ -36,7 +36,7 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
     "mutuallyExclusive": true,
     "marketCount": 5,
     "markets": [{
-      "conditionId": "0x…", "label": "25 bps increase", "tradable": true,
+      "conditionId": "0x…", "label": "25 bps increase", "tradable": true, "negRisk": true,
       "outcomes": [{ "name": "Yes", "tokenId": "1116…", "price": "0.935" }, { "name": "No", "tokenId": "9448…", "price": "0.065" }],
       "bestBid": "0.93", "bestAsk": "0.94", "lastTradePrice": "0.93", "displayPrice": "0.935",
       "tickSize": "0.01", "minOrderSize": "5"
@@ -48,6 +48,8 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
 ```
 
 - `markets` holds at most four rows, most likely first. Closed events are not listed.
+- A row's `negRisk` is the **market's own** flag. It decides which exchange contract an order for
+  that market is signed against, so it is never inferred from the event.
 - A number the venue did not give is `null`, never `"0"`.
 - `sort=closing` lists only events whose closing time is still ahead.
 - TTL: `POLYMARKET_CACHE_TTL_MS` (15 s). Errors: 400 `invalid_category` / `invalid_sort` /
@@ -58,8 +60,10 @@ Two further filters, each exclusive with `category` and ignored when `q` is pres
 
 | Query | Values | Effect |
 |---|---|---|
-| `topic` | a venue tag slug, `^[a-z0-9-]{1,64}$` (400 `invalid_topic`) | events carrying that tag |
-| `live` | `1` | events in play only; `sort` is ignored and the order is trading in the last day |
+| `topic` | a venue tag slug, `^[A-Za-z0-9-]{1,64}$`, spelled as the venue spells it — some are mixed case (400 `invalid_topic`) | events carrying that tag |
+| `live` | `1` (anything else is 400 `invalid_filter`) | events in play only; `sort` is ignored and the order is trading in the last day |
+
+Giving more than one of `category`, `topic` and `live` is 400 `invalid_filter`.
 
 An event in play carries `"live": { "score": "91-101", "period": "Q4", "elapsed": "06:47" }`
 (each a string or null, as the venue gives them); every other event carries `"live": null`.
@@ -72,8 +76,8 @@ What is active at the venue now, for the quick filters under search. No paramete
 {
   "live": { "count": 14, "events": [ /* up to 6 EventSummary, most traded first */ ] },
   "topics": [
-    { "slug": "nba", "label": "NBA", "events": 9, "volume24h": "10200000.00" },
-    { "slug": "nvidia", "label": "Nvidia", "events": 13, "volume24h": "9200000.00" }
+    { "slug": "basketball", "label": "Basketball", "events": 11, "volume24h": "10546858.023131" },
+    { "slug": "nfl", "label": "NFL", "events": 3, "volume24h": "8402870.585419" }
   ],
   "confirmedAt": "…", "serverNow": "…", "stale": false
 }
@@ -81,10 +85,12 @@ What is active at the venue now, for the quick filters under search. No paramete
 
 - `topics` holds at most eight, chosen by marginal trading over the last day so that no two name
   the same events (research R16). `events` and `volume24h` are what the topic **added**, not its
-  total. `label` is the venue's text, capped at 40 characters.
+  total. `volume24h` is a decimal string with at most six decimals, truncated. `label` is the
+  venue's text, capped at 40 characters, or the slug when the venue gives none.
 - Excluded before counting: the fixed categories' own tags, the mechanics denylist, and events
   that open and close within an hour.
-- `live.count` is the number of events in play that the venue returned in one page of fifty.
+- `live.count` is the number of events the venue marks in play and not ended, out of one page of
+  fifty.
   When that page was full the object also carries `"more": true`, and the count is shown as
   "50+", never as an exact figure.
 - Either half may be unreadable on its own: `"live": null` or `"topics": null`, never an empty

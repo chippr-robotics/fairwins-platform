@@ -3495,13 +3495,16 @@
         {
           "id": "predict.browse-by-event",
           "name": "Find a market by category, search or sort, with the markets of one event on one card",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
-          "issue": "#1747"
+          "tests": [
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-01",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-02",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-03",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-04"
+          ]
         },
         {
           "id": "predict.market-page",

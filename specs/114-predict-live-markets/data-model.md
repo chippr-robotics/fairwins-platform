@@ -32,6 +32,7 @@ A sequence gap from the stream source demotes the key to `delayed` until the nex
 | `endDate` | ISO string \| null | when trading closes |
 | `mutuallyExclusive` | boolean | only then may rows be read as one distribution (FR-008) |
 | `marketCount` | number | |
+| `live` | `{ score, period, elapsed } \| null` | the venue's own words for an event in play; `null` otherwise |
 | `markets` | `MarketRow[]` | summary: the four most likely; detail: all |
 | `description` | string | detail only; text, capped at 4,000 characters |
 | `resolutionSource` | string \| null | detail only; text, or a link if it is an `https` URL |
@@ -44,6 +45,7 @@ A sequence gap from the stream source demotes the key to `delayed` until the nex
 | `conditionId` | string | |
 | `label` | string | the row's short label inside its event, else the question |
 | `tradable` | boolean | |
+| `negRisk` | boolean | the market's own flag; selects the exchange contract an order is signed for. A row without it is not tradable from the app |
 | `outcomes` | `{ name, tokenId, price }[]` | `tokenId` a string, never a number |
 | `bestBid`, `bestAsk`, `lastTradePrice` | string \| null | |
 | `displayPrice` | string \| null | midpoint while spread ≤ 0.10, else last trade (FR-015) |
