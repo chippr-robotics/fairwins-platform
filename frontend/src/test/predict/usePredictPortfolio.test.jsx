@@ -4,7 +4,8 @@
  * Soft-fail off Polygon (no fetch), load on connect, degrade on error.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
+import { POSITIONS_POLL, OPEN_ORDERS_POLL } from '../../hooks/usePredictPortfolio'
 import { setWalletChain } from '../helpers/walletChain'
 import { WalletContext } from '../../contexts/WalletContext.js'
 import { usePredictPositions, usePredictOpenOrders } from '../../hooks/usePredictPortfolio'
@@ -79,5 +80,52 @@ describe('usePredictOpenOrders', () => {
       wrapper: wrapperFor({ address: TRADER, isConnected: true, loginMethod: 'passkey' }),
     })
     expect(result.current.status).toBe('unsupported')
+  })
+})
+
+describe('self-refresh (spec 114 slice 6, FR-025)', () => {
+  const wrapper = wrapperFor({ address: TRADER, isConnected: true })
+  const advance = (ms) => act(async () => { await vi.advanceTimersByTimeAsync(ms) })
+  const withTimers = async (fn) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    try { await fn() } finally { vi.useRealTimers() }
+  }
+
+  it('positions refresh on their own, without a loading flash, and pick up a change', async () => {
+    await withTimers(async () => {
+      client.fetchPositions.mockResolvedValueOnce({ positions: [{ tokenId: '1', size: '10' }] }).mockResolvedValue({ positions: [{ tokenId: '1', size: '25' }] })
+      const { result } = renderHook(() => usePredictPositions(), { wrapper })
+      await advance(0)
+      expect(result.current.positions[0].size).toBe('10')
+      await advance(POSITIONS_POLL.baseMs)
+      expect(client.fetchPositions).toHaveBeenCalledTimes(2)
+      expect(result.current.status).toBe('ready')
+      expect(result.current.positions[0].size).toBe('25')
+    })
+  })
+
+  it('a failed background refresh keeps the last list, marks it stale, and never empties it', async () => {
+    await withTimers(async () => {
+      client.fetchPositions.mockResolvedValueOnce({ positions: [{ tokenId: '1', size: '10' }] }).mockRejectedValue(new Error('down'))
+      const { result } = renderHook(() => usePredictPositions(), { wrapper })
+      await advance(0)
+      await advance(POSITIONS_POLL.baseMs)
+      expect(result.current.stale).toBe(true)
+      expect(result.current.status).toBe('ready')
+      expect(result.current.positions).toHaveLength(1)
+    })
+  })
+
+  it('open orders refresh on their own at their own cadence', async () => {
+    await withTimers(async () => {
+      const fetchOpenOrders = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([{ id: '0xo1', side: 'BUY' }])
+      const deps = { loadCachedCreds: () => ({ key: 'k' }), makeClient: () => ({}), fetchOpenOrders }
+      const { result } = renderHook(() => usePredictOpenOrders({ deps, walletClient: {} }), { wrapper })
+      await advance(0)
+      expect(result.current.status).toBe('empty')
+      await advance(OPEN_ORDERS_POLL.baseMs)
+      expect(fetchOpenOrders).toHaveBeenCalledTimes(2)
+      expect(result.current.status).toBe('ready')
+    })
   })
 })

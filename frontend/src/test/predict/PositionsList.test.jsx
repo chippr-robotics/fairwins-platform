@@ -53,4 +53,12 @@ describe('PositionsList', () => {
     render(<PositionsList />)
     expect(screen.getByText(/don't hold any/i)).toBeInTheDocument()
   })
+
+  it('has no Refresh button — the list refreshes itself — and says so when a refresh failed', () => {
+    render(<PositionsList />)
+    expect(screen.queryByRole('button', { name: /refresh/i })).toBeNull()
+    positionsState.current = make({ stale: true })
+    render(<PositionsList />)
+    expect(screen.getByText(/Couldn.t refresh your positions just now/)).toBeInTheDocument()
+  })
 })
