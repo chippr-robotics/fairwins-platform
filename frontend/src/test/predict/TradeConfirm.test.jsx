@@ -62,6 +62,45 @@ describe('TradeConfirm', () => {
     expect(screen.getByTestId('trade-total')).toHaveTextContent('50.25 USDC')
   })
 
+  it('prints a price in cents and money as $x.xx USDC — never a raw decimal — while the sentences stay as they were', () => {
+    render(<TradeConfirm market={MARKET} outcome={{ ...OUTCOME, price: '0.935' }} side="BUY" onClose={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/shares to buy/i), { target: { value: '100' } })
+    expect(screen.getByLabelText('Price per share')).toHaveTextContent('@ 93.5¢')
+    expect(screen.getByText('Cost before fees').nextSibling).toHaveTextContent('$50.00 USDC')
+    expect(screen.getByText('FairWins builder fee').nextSibling).toHaveTextContent('+$0.25 USDC')
+    expect(screen.getByText('Subtotal (incl. builder fee)')).toBeInTheDocument()
+    expect(screen.getByTestId('trade-total')).toHaveTextContent('$50.25 USDC')
+    expect(document.body.textContent).not.toMatch(/0\.935|50\.250000/)
+  })
+
+  it('an unrounded float from the gateway is shown rounded, and still SIGNED exactly as given', () => {
+    hookState.current = makeHook({ preview: vi.fn(() => ({ ...QUOTE, notionalUnits: 9_350001n, totalCostUnits: 9_396751n, feeLines: [{ label: 'FairWins builder fee', amount: '0.04675', currency: 'USDC' }] })) })
+    const outcome = { ...OUTCOME, price: '0.06499999999999995' }
+    render(<TradeConfirm market={MARKET} outcome={outcome} side="BUY" onClose={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/shares to buy/i), { target: { value: '10' } })
+    expect(screen.getByLabelText('Price per share')).toHaveTextContent('@ 6.5¢')
+    // costs round UP, so the page is never kinder than what executes
+    expect(screen.getByText('Cost before fees').nextSibling).toHaveTextContent('$9.36 USDC')
+    expect(screen.getByText('FairWins builder fee').nextSibling).toHaveTextContent('+$0.05 USDC')
+    expect(screen.getByTestId('trade-total')).toHaveTextContent('$9.40 USDC')
+    fireEvent.click(screen.getByRole('button', { name: /sign buy/i }))
+    // the order signed is built from the raw price and size, byte for byte what it was before the formatting
+    expect(hookState.current.submit).toHaveBeenCalledWith(
+      { tokenId: '123456789', side: 'BUY', price: '0.06499999999999995', size: '10', isMaker: false },
+      expect.objectContaining({ label: expect.stringContaining('Buy Yes') }),
+    )
+  })
+
+  it('a SELL rounds proceeds DOWN and fees up', () => {
+    hookState.current = makeHook({ preview: vi.fn(() => ({ ...QUOTE, notionalUnits: 9_359999n, netProceedsUnits: 9_313249n, feeLines: [{ label: 'FairWins builder fee', amount: '0.046799', currency: 'USDC' }] })) })
+    render(<TradeConfirm market={MARKET} outcome={{ ...OUTCOME, price: '0.935' }} side="SELL" onClose={() => {}} />)
+    fireEvent.change(screen.getByLabelText(/shares to sell/i), { target: { value: '10' } })
+    expect(screen.getByText('Proceeds before fees').nextSibling).toHaveTextContent('$9.35 USDC')
+    expect(screen.getByText('FairWins builder fee').nextSibling).toHaveTextContent('−$0.05 USDC')
+    expect(screen.getByTestId('trade-total')).toHaveTextContent('$9.31 USDC')
+    expect(screen.getByText('You receive (before Polymarket fee)')).toBeInTheDocument()
+  })
+
   it('discloses the builder fee as a real cost and Polymarket fee as separate — not free', () => {
     render(<TradeConfirm market={MARKET} outcome={OUTCOME} side="BUY" onClose={() => {}} />)
     const note = screen.getByText(/builder fee/i)

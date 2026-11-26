@@ -164,6 +164,25 @@ describe('no session, no prompt', () => {
   })
 })
 
+describe('the client shape follows the RESOLVED signer kind, as usePredictTrade resolves it (T036b)', () => {
+  it('a session the resolver calls passkey reads with the smart-wallet shape whatever the raw login string says', async () => {
+    seed('resting')
+    const resolveTradeSigner = vi.fn(() => ({ canSign: false, kind: 'passkey' }))
+    const deps = { loadCachedCreds: vi.fn(() => CREDS), makeClient: vi.fn(() => ({})), lookupOrder: vi.fn(async () => live()), resolveTradeSigner }
+    renderHook(() => usePredictOrders({ deps }), { wrapper: ({ children }) => <WalletContext.Provider value={{ address: ME, loginMethod: 'wallet' }}>{children}</WalletContext.Provider> })
+    await tick(0)
+    expect(resolveTradeSigner).toHaveBeenCalledWith(expect.objectContaining({ address: ME, loginMethod: 'wallet' }))
+    expect(deps.makeClient.mock.calls[0][2]).toEqual({ signatureType: 3, funderAddress: ME })
+  })
+
+  it('and a wallet session keeps the plain shape', async () => {
+    seed('resting')
+    const { deps } = setup({ loginMethod: 'wallet' })
+    await tick(0)
+    expect(deps.makeClient.mock.calls[0][2]).toEqual({})
+  })
+})
+
 describe('a failed lookup is not a state change', () => {
   it('unreadable leaves the record exactly as it was, flags it, and tries again', async () => {
     const r = seed('resting')

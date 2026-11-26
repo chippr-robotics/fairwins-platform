@@ -81,6 +81,19 @@
   gap: 0.6rem 1rem;
   justify-content: space-between;
 }
+.predict-panel .predict-chip-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.predict-panel .predict-chip-label {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  margin: 0;
+  text-transform: uppercase;
+}
 .predict-panel .predict-chips {
   display: flex;
   flex-wrap: wrap;

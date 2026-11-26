@@ -75,11 +75,43 @@ describe('usePredictOpenOrders', () => {
     expect(result.current.status).toBe('disconnected')
   })
 
-  it('does NOT fetch when passkey (trading deferred)', () => {
-    const { result } = renderHook(() => usePredictOpenOrders({ deps: ooDeps() }), {
+  it('a PASSKEY session reads open orders too — with a read-only signer and the ERC-1271 client shape, never a prompt (T036c)', async () => {
+    const deps = ooDeps()
+    const { result } = renderHook(() => usePredictOpenOrders({ deps }), {
       wrapper: wrapperFor({ address: TRADER, isConnected: true, loginMethod: 'passkey' }),
     })
-    expect(result.current.status).toBe('unsupported')
+    await waitFor(() => expect(result.current.status).toBe('ready'))
+    const [signer, creds, opts] = deps.makeClient.mock.calls[0]
+    expect(opts).toEqual({ signatureType: 3, funderAddress: TRADER })
+    expect(creds).toEqual({ key: 'k', secret: 's', passphrase: 'p' })
+    await expect(signer.getAddress()).resolves.toBe(TRADER)
+    await expect(signer._signTypedData()).rejects.toThrow(/never signs/)
+  })
+
+  it('a passkey session with no cached session is locked — nothing is derived, nothing is fetched', async () => {
+    const deps = ooDeps({ loadCachedCreds: vi.fn(() => null) })
+    const { result } = renderHook(() => usePredictOpenOrders({ deps }), {
+      wrapper: wrapperFor({ address: TRADER, isConnected: true, loginMethod: 'passkey' }),
+    })
+    await waitFor(() => expect(result.current.status).toBe('locked'))
+    expect(deps.makeClient).not.toHaveBeenCalled()
+    expect(deps.fetchOpenOrders).not.toHaveBeenCalled()
+  })
+
+  it('a wallet session keeps the plain client shape (no signature type, no funder)', async () => {
+    const deps = ooDeps()
+    renderHook(() => usePredictOpenOrders({ deps }), { wrapper: wrapperFor({ address: TRADER, isConnected: true }) })
+    await waitFor(() => expect(deps.makeClient).toHaveBeenCalled())
+    expect(deps.makeClient.mock.calls[0][2]).toEqual({})
+  })
+
+  it('the client shape follows the RESOLVED signer kind, not the raw login string', async () => {
+    const resolveTradeSigner = vi.fn(() => ({ canSign: false, kind: 'passkey' }))
+    const deps = ooDeps({ resolveTradeSigner })
+    renderHook(() => usePredictOpenOrders({ deps }), { wrapper: wrapperFor({ address: TRADER, isConnected: true, loginMethod: 'wallet' }) })
+    await waitFor(() => expect(deps.makeClient).toHaveBeenCalled())
+    expect(resolveTradeSigner).toHaveBeenCalled()
+    expect(deps.makeClient.mock.calls[0][2]).toEqual({ signatureType: 3, funderAddress: TRADER })
   })
 })
 

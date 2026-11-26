@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import {
   reduce, newRecord, prune, isTerminal, isVenueWatched, venueStateOf, STATES, STORE_KEY, PRUNE_AFTER_MS,
-  loadStore, putRecord, applyToStore, patchRecord, removeRecord, trackSignedOrder, subscribe, toMicro, asDecimal,
+  loadStore, commitToStore, putRecord, applyToStore, patchRecord, removeRecord, trackSignedOrder, subscribe, toMicro, asDecimal,
 } from '../../lib/predict/orderProgress'
 
 const A = '0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed'
@@ -277,5 +277,69 @@ describe('trackSignedOrder — the hand-off from the ticket', () => {
 
   it('never throws, and does nothing without a wallet', () => {
     expect(trackSignedOrder(null, facts, { posted: {} })).toBeNull()
+  })
+})
+
+describe('two tabs writing the same store (T036b) — a write is a merge against what is on disk NOW', () => {
+  beforeEach(() => localStorage.clear())
+  const rec = (id, state, updatedAt, over = {}) => ({ ...newRecord({ ...facts, orderId: id }, updatedAt), state, updatedAt, ...over })
+  const ids = () => loadStore(A, T0 + 10).orders.map((r) => r.orderId).sort()
+
+  it('a record the other tab added in between is never dropped (an unconfirmed one keeps its notice)', () => {
+    putRecord(A, rec('0xo1', 'resting', T0))
+    // Tab 1 reads the store and starts working on 0xo1 ...
+    const snapshot = loadStore(A, T0 + 1)
+    // ... meanwhile tab 2 places an order whose answer never arrived ...
+    putRecord(A, rec('0xo2', 'unconfirmed', T0 + 2, { reason: 'no answer', idKnown: true }))
+    // ... and tab 1 now writes the result of its work from the OLD snapshot.
+    const advanced = reduce(snapshot.orders[0], { type: 'venue', status: 'live', filledSize: '4' }, T0 + 3)
+    commitToStore(A, { upserts: [advanced] })
+    expect(ids()).toEqual(['0xo1', '0xo2'])
+    const kept = loadStore(A, T0 + 10).orders.find((r) => r.orderId === '0xo2')
+    expect(kept.state).toBe('unconfirmed')
+    expect(loadStore(A, T0 + 10).orders.find((r) => r.orderId === '0xo1')).toMatchObject({ state: 'partial', filledSize: '4' })
+  })
+
+  it('for the same id the NEWER updatedAt stays, whichever tab wrote last', () => {
+    putRecord(A, rec('0xo1', 'resting', T0))
+    const stale = loadStore(A, T0).orders[0] // tab 1 holds this
+    applyToStore(A, '0xo1', { type: 'venue', status: 'matched', filledSize: '10' }, T0 + 5) // tab 2 moves it on
+    commitToStore(A, { upserts: [{ ...stale, absentReads: 3 }] }) // tab 1 writes its older picture
+    const now = loadStore(A, T0 + 10).orders[0]
+    expect(now).toMatchObject({ state: 'matched', filledSize: '10', updatedAt: T0 + 5 })
+  })
+
+  it('a tie goes to the writer (a bookkeeping patch does not touch updatedAt)', () => {
+    putRecord(A, rec('0xo1', 'unconfirmed', T0))
+    patchRecord(A, '0xo1', { absentReads: 2 })
+    expect(loadStore(A, T0 + 10).orders[0].absentReads).toBe(2)
+  })
+
+  it('a dismissal removes only the id it names, and two interleaved dismissals and adds all land', () => {
+    putRecord(A, rec('0xo1', 'cancelled', T0))
+    putRecord(A, rec('0xo2', 'cancelled', T0 + 1))
+    const view1 = loadStore(A, T0 + 2) // tab 1 is showing both
+    putRecord(A, rec('0xo3', 'unconfirmed', T0 + 3)) // tab 2 adds
+    removeRecord(A, '0xo1') // tab 1 dismisses 0xo1 (it had read the older list)
+    expect(view1.orders).toHaveLength(2)
+    expect(ids()).toEqual(['0xo2', '0xo3'])
+  })
+
+  it('the id scheme is a union: mismatch is sticky across writers, verified is not forgotten', () => {
+    putRecord(A, rec('0xo1', 'sent', T0), { idScheme: 'verified' })
+    putRecord(A, rec('0xo2', 'sent', T0 + 1), { idScheme: 'mismatch' })
+    putRecord(A, rec('0xo3', 'sent', T0 + 2), { idScheme: 'verified' })
+    expect(loadStore(A, T0 + 10).idScheme).toBe('mismatch')
+    localStorage.clear()
+    putRecord(A, rec('0xo1', 'sent', T0), { idScheme: 'verified' })
+    putRecord(A, rec('0xo2', 'sent', T0 + 1))
+    expect(loadStore(A, T0 + 10).idScheme).toBe('verified')
+  })
+
+  it('other wallets are untouched', () => {
+    putRecord(A, rec('0xo1', 'resting', T0))
+    putRecord(B, rec('0xo9', 'resting', T0))
+    removeRecord(A, '0xo1')
+    expect(loadStore(B, T0 + 10).orders.map((r) => r.orderId)).toEqual(['0xo9'])
   })
 })

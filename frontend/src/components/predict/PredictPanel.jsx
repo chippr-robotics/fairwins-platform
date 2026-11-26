@@ -16,7 +16,7 @@
  * are DELAYED BY CONSTRUCTION: the list reading is classified from the gateway's server clock and held
  * out of `live` (`demoted`), so the chip reads "Delayed · N s" and ages to "Last known" if refreshes stop.
  */
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useCallback, useEffect, useId, useMemo, useState, useSyncExternalStore } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import EmptyState from '../account/EmptyState'
 import { usePredictEvents } from '../../hooks/usePredictEvents'
@@ -82,6 +82,11 @@ function ListTrustChip({ stamp, stale }) {
  * narrowing the list. Navigation, not recommendation: chips come in the gateway's order, never reordered.
  */
 function QuickFilters({ discover, topic, live, searching, onTopic, onLive }) {
+  // The row is labelled "Popular now" in words (and the group is named by that text). That is true only while the
+  // topics are the venue's by 24-HOUR TRADING VOLUME — `usePredictDiscover` / the gateway's `selectTopics` rank
+  // tags by the day's volume and are the only source — and "In play" is what is being played at this moment. If the
+  // topics ever come from somewhere else (curated, personalised, trending by another measure), this label must change.
+  const labelId = useId()
   const [now, setNow] = useState(() => monotonicNow())
   useEffect(() => {
     const id = setInterval(() => setNow(monotonicNow()), 1000)
@@ -108,7 +113,11 @@ function QuickFilters({ discover, topic, live, searching, onTopic, onLive }) {
   const liveLabel =
     liveInfo && liveInfo.count > 0 ? `In play · ${liveInfo.count}${liveInfo.more ? '+' : ''}` : 'In play'
   return (
-    <div className="predict-chips predict-quick" role="group" aria-label="Active now">
+    <div className="predict-chip-row">
+    <p className="predict-chip-label" id={labelId}>
+      Popular now
+    </p>
+    <div className="predict-chips predict-quick" role="group" aria-labelledby={labelId}>
       {showLive && (
         <button
           type="button"
@@ -135,6 +144,7 @@ function QuickFilters({ discover, topic, live, searching, onTopic, onLive }) {
         </button>
       ))}
     </div>
+    </div>
   )
 }
 
@@ -144,6 +154,7 @@ function QuickFilters({ discover, topic, live, searching, onTopic, onLive }) {
  * the list's requests, and a page the member is not looking at does not poll.
  */
 function PredictList({ params, update, openRow, openEvent, openTicket, onLegacy }) {
+  const categoryLabelId = useId()
   const urlCat = params.get('cat') || ''
   const urlSort = params.get('sort') || ''
   const urlQ = params.get('q') || ''
@@ -223,7 +234,11 @@ function PredictList({ params, update, openRow, openEvent, openTicket, onLegacy 
 
       {!legacy && (
       <div className="predict-controls">
-        <div className="predict-chips" role="group" aria-label="Category">
+        <div className="predict-chip-row">
+        <p className="predict-chip-label" id={categoryLabelId}>
+          Categories
+        </p>
+        <div className="predict-chips" role="group" aria-labelledby={categoryLabelId}>
           <button
             type="button"
             className="predict-chip"
@@ -247,6 +262,7 @@ function PredictList({ params, update, openRow, openEvent, openTicket, onLegacy 
               {c.label}
             </button>
           ))}
+        </div>
         </div>
         <label className="predict-sort">
           <span>Sort by</span>

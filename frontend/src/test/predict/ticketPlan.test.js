@@ -185,3 +185,25 @@ describe('checkStillSignable — FR-021, the reviewed limit is never silently re
     expect(crossed).toMatchObject({ ok: false, reason: 'crossing-changed' })
   })
 })
+
+describe('checkStillSignable — the chosen tolerance is the one re-checked at Sign (T032a)', () => {
+  const book = (asks) => bookReading({ asks, bids: [['0.930', '300']], tickSize: '0.001', price: '0.935' })
+  const reading = book([['0.940', '500']])
+  const moved = book([['0.945', '500']]) // the ask moved up half a cent after the review
+  const review = (toleranceTicks) => planForTicket({ reading, side: 'buy', typed: '50', toleranceTicks })
+
+  it('a review at one tick (0.941) cannot be signed once the ask is 0.945', () => {
+    const reviewed = review(1)
+    expect(reviewed.limitPrice).toBe('0.941')
+    const r = checkStillSignable({ reviewed, reading: moved, side: 'buy', typed: '50', toleranceTicks: 1 })
+    expect(r).toMatchObject({ ok: false, reason: 'beyond-limit' })
+  })
+
+  it('a review at 2¢ (20 ticks, limit 0.96) still can, and the limit signed is the reviewed one', () => {
+    const reviewed = review(20)
+    expect(reviewed.limitPrice).toBe('0.96')
+    expect(checkStillSignable({ reviewed, reading: moved, side: 'buy', typed: '50', toleranceTicks: 20 })).toEqual({ ok: true })
+    expect(reviewed.signed.limitPrice).toBe('0.96')
+  })
+})
+

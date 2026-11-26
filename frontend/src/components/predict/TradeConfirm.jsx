@@ -8,11 +8,11 @@
  * SellConfirm.
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatUnits } from '../../lib/evm/units'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
 import { feeDisclosureText, firstTradeText, WRONG_NETWORK_TEXT } from '../../lib/predict/disclosures'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'
-import { unknownOutcomeText, orderSentText } from '../../lib/predict/ticketStatements'
+import { unknownOutcomeText, orderSentText, usdc } from '../../lib/predict/ticketStatements'
+import { formatUsd, formatPriceCents } from '../../lib/predict/format'
 import './TradeConfirm.css'
 
 const POLYMARKET_URL = 'https://polymarket.com'
@@ -111,7 +111,7 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
                   disabled={busy}
                 />
                 <span className="trade-confirm-price" aria-label="Price per share">
-                  @ {outcome?.price} USDC
+                  @ {formatPriceCents(outcome?.price, isBuy ? 'up' : 'down')}
                 </span>
               </span>
             </label>
@@ -120,7 +120,7 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
               <dl className="trade-confirm-breakdown">
                 <div>
                   <dt>{isBuy ? 'Cost' : 'Proceeds'} before fees</dt>
-                  <dd>{formatUnits(quote.notionalUnits, 6)} USDC</dd>
+                  <dd>{usdc(formatUsd(quote.notionalUnits, isBuy ? 'up' : 'down'))}</dd>
                 </div>
                 {quote.feeLines.map((f) => (
                   <div key={f.label} className={f.label.includes('builder') ? 'trade-confirm-builder-line' : undefined}>
@@ -130,14 +130,14 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
                     </dt>
                     <dd>
                       {isBuy ? '+' : '−'}
-                      {f.amount} {f.currency}
+                      {formatUsd(f.amount, 'up')} {f.currency}
                     </dd>
                   </div>
                 ))}
                 <div className="trade-confirm-total">
                   <dt>{isBuy ? 'Subtotal (incl. builder fee)' : 'You receive (before Polymarket fee)'}</dt>
                   <dd data-testid="trade-total">
-                    {formatUnits(isBuy ? quote.totalCostUnits : quote.netProceedsUnits, 6)} USDC
+                    {usdc(isBuy ? formatUsd(quote.totalCostUnits, 'up') : formatUsd(quote.netProceedsUnits, 'down'))}
                   </dd>
                 </div>
               </dl>

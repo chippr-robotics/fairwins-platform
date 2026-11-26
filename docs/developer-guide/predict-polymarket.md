@@ -186,13 +186,30 @@ with that order: if the venue's tick has since become coarser, the SDK **refuses
 would round the member's price to the nearest step of the new grid and place an order at a price nobody reviewed.
 
 **The limit is the guarantee.** A marketable order is sent **fill-and-kill** (`OrderType.FAK`, never FOK) with
-`price` = the plan's `limitPrice`: the worst price the member accepts (worst level touched, plus one tick). The
+`price` = the plan's `limitPrice`: the worst price the member accepts (worst level touched, plus the **price
+tolerance** — one tick unless the member chose otherwise, below). The
 review names it in cents — *"This order cannot fill above 95¢ a share. Whatever is not filled is cancelled and not
 charged."* — and Sign re-plans against the **current** reading (`checkStillSignable`): not live ⇒ nothing is
 signed and the ticket goes back to waiting; the reviewed limit no longer reaching the depth ⇒ nothing is signed,
 the new figures are shown, and Sign needs another press; otherwise the order is signed with the **reviewed** limit,
 never a newer one. The re-check runs twice (on the press, and again after any first-trade ceremonies, right
 before the order is built — a passkey prompt can take minutes).
+
+**Price tolerance** (T032a, `lib/predict/tolerance.js`, collapsed "Price tolerance" control, unmounted until
+opened). Three choices: **one tick** (the default and the tightest), **1¢** and **2¢** — never wider (research R7).
+Each is converted to `toleranceTicks` from the READING's own tick (`1¢ ÷ tick`), and a choice is *offered* only when
+it is honest on the market: never finer than the tick, a whole number of ticks (so on a 1¢ market "1¢" *is* one
+tick and appears once, and a 2¢-or-coarser market offers only the default), and the limit it would produce stays
+inside (0, 1) (`worst + offset ≤ 1 − tick` for a buy, `worst − offset ≥ tick` for a sell — `planOrder` would
+otherwise clamp it and silently give less than was chosen). It does nothing for a price the member names (that
+order rests). The choice lives in the ticket component's own state only — **never in storage, never carried to the
+next ticket, reset when the outcome changes** — so nobody carries a loosened limit forward by accident (a test
+unmounts the ticket and opens another). `toleranceTicks` flows through `usePredictPlanTrade` into `planForTicket`,
+the review's "Price limit" and `checkStillSignable`, so the figures, the limit signed and the at-Sign re-check use
+one tolerance. What it changes: the *limit* — the worst price the order may fill at — and so how many shares a buy
+may get back at worst. What it does **not** change for a buy: "You pay at most" and "The most you can lose" are the
+amount typed (the signed maker amount) plus the fee, whatever the limit, so those figures do not move with the
+tolerance; the sentence says the extra cost is per share.
 
 **What is shown is what is signed.** The SDK takes `price` and `amount` as JavaScript **numbers** and rounds
 them by its own per-tick table. Everything upstream of it is exact decimal-string / BigInt arithmetic, so there is
@@ -319,8 +336,23 @@ exchange's published domain, and the signature recovers to the signer over exact
 `unknown` until a successful post returns an id equal to the computed one (`verified`), or `mismatch` if it
 differs (sticky; then a computed id is never used for a lookup).
 
+**The device store is shared by every tab, so a write is a delta, not a snapshot** (T036b,
+`commitToStore`). Each write re-reads what is on disk *at that moment* and applies only what it means to change:
+upserts merge by `orderId` and the record with the newer `updatedAt` stays (a tie goes to the writer), removals
+drop only the ids they name, and a record the writer never mentions can never be dropped — an `unconfirmed` record
+another tab added loses nothing, including its "do not send it again" notice. `idScheme` merges as a union
+(`mismatch` is sticky). `test/predict/orderProgress.test.js` interleaves two writers.
+
 **`usePredictOrders`** reads the venue with the member's own cached CLOB session and a read-only signer (it can
 name an address and refuses to sign); no cached session means `locked` — "sign in to trading" — never a prompt.
+Its client shape (smart-wallet signature type and funder, or plain) follows the **resolved signer kind**
+(`resolveTradeSigner`, as `usePredictTrade` signs with) through `lib/predict/readClient.js`, not the raw
+`loginMethod`. The open-orders list reads the same way, so **passkey sessions see their open orders** (T036c): same
+read-only signer, same cached session, no derivation and no prompt — no cached session is `locked` and the list says
+"Sign in to trading to see your open orders". Cancelling goes through the existing `trade.cancel`, which asks for no
+ceremony when the session is cached (`ensureClobCreds` returns the cache before any client exists, and a cancel is an
+L2-authenticated request, not an order signature); only a session that lost its cache between listing and tap would
+be asked to derive credentials once, which is the same gasless signature enabling trading needs.
 It takes no submit function and the source is tested to contain no post call: `unconfirmed` is resolved by LOOKUP
 (`lookupOrder`: `getOrder`, then the member's trades if the order is not found) and never by sending again.
 A lookup that fails is not an event.
@@ -345,6 +377,21 @@ gateway's 60/min Predict quota nothing. Positions (through the gateway, sharing 
 feed) refresh every 30 s backing off to 120 s, and immediately when a tracked order changes; open orders (venue
 direct) every 15 s backing off to 60 s. A background refresh that fails keeps the last list and says so (`stale`),
 it never empties it. The Refresh buttons are gone.
+
+## The fixed-price ticket's figures
+
+`TradeConfirm`, the market sheet and the positions list print a price in cents (`formatPriceCents`: a buy rounds up,
+a sale down) and money as `$x.xx USDC` (`formatUsd`: costs, fees and totals up, proceeds and net down), the same
+functions the amount-first ticket uses — never a raw decimal from the gateway. Formatting only: the order signed is
+built from the raw `price` and `size` exactly as before (`TradeConfirm.test.jsx` asserts the `submit` arguments for a
+price that is an unrounded float).
+
+## Browse chip rows
+
+The two chip rows have visible labels that name their groups (`aria-labelledby`, one accessible name each):
+**Popular now** over the topics and "In play", **Categories** over the category chips. "Popular now" is honest only
+while the gateway's topics are ranked by 24-hour volume (`selectTopics`, which `usePredictDiscover` carries); a
+comment at the row says the label must change if that source does.
 
 ## Configuration
 
