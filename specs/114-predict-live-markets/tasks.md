@@ -43,7 +43,7 @@ the seam they plug into is right from the start.
       `null`; a worst-first venue book comes back best-first; one unreadable token in a batch
       leaves the others intact; a stale copy is flagged; the request the gateway **sends**
       upstream is asserted (tag slug, order, interval and fidelity), not only what it returns.
-- [ ] T007 Run `npm test --workspace services/relay-gateway`; update
+- [ ] T007 Run `npx vitest run` in `services/relay-gateway`; update
       `docs/developer-guide/predict-polymarket.md` with the four routes. Open the slice PR.
 
 ## Phase 3: Slice 2 — client foundation (US3: trust state)

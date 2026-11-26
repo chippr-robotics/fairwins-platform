@@ -13,7 +13,7 @@ How to check each story. Shapes are in [data-model.md](data-model.md) and
 
 ```bash
 # gateway (slices 1, 7)
-npm test --workspace services/relay-gateway -- --test-name-pattern "polymarket|markets"
+(cd services/relay-gateway && npx vitest run test/polymarket.test.js test/markets.test.js)
 
 # frontend units (scope the run; the full suite is CI-only)
 cd frontend && npx vitest run src/test/markets src/test/predict

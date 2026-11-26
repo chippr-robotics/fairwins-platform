@@ -37,7 +37,7 @@ history chart; `@polymarket/clob-client` (already present) places orders; the ga
 `userStorage` (`predict_orders_v1`, deliberately absent from `syncedObjects.js`) so they survive a
 reload (FR-025). Self-limits are server-held and out of the slices that ship first.
 
-**Testing**: gateway `node:test` (`services/relay-gateway/test/polymarket.test.js`, fixture-driven);
+**Testing**: gateway Vitest (`services/relay-gateway/test/polymarket.test.js`, fixture-driven);
 frontend Vitest for the reading type, the plan arithmetic, the feed seam and each component;
 Cypress no-chain tier, both viewport profiles, for the six matrix rows; `cy.a11yScan` on the new
 surfaces.
