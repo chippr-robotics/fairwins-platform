@@ -328,6 +328,17 @@ vi.mock('@polymarket/clob-client', () => ({
   },
   Side: { BUY: 0, SELL: 1 },
   OrderType: { GTC: 'GTC', GTD: 'GTD', FOK: 'FOK', FAK: 'FAK' },
+  // Not the EIP-712 hash (the real one is pinned in test/predict/orderHash.test.js): a stable 32-byte stand-in
+  // so code that asks for an order's id can run against the stub.
+  ExchangeOrderBuilder: class {
+    constructor(exchange) { this.exchange = exchange }
+    buildOrderTypedData(order) { return { message: order, exchange: this.exchange } }
+    buildOrderHash(typed) {
+      let h = 0
+      for (const ch of JSON.stringify(typed)) h = (Math.imul(h, 31) + ch.charCodeAt(0)) >>> 0
+      return `0x${h.toString(16).padStart(8, '0').repeat(8)}`
+    }
+  },
   // Mirrors the real SDK's Polygon contract config (dist/config.js) — passkeyApprovals derives the
   // settlement spenders from it.
   getContractConfig: (chainId) => {

@@ -1,0 +1,100 @@
+/* OrderProgress (spec 114 slice 6) — the member's orders after signing. Tokens only; buttons and links are
+   written `.order-progress .<class>` because src/index.css carries a global `button { padding }` rule. */
+
+.order-progress {
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-top: 0.4rem;
+  padding-top: 0.8rem;
+}
+.order-progress h4 {
+  margin: 0;
+}
+.order-progress .order-progress-note {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+.order-progress .order-progress-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.order-progress .order-progress-order {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.6rem 0.75rem;
+}
+.order-progress .order-progress-title {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin: 0;
+}
+.order-progress .order-progress-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.9rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.order-progress .order-progress-step {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+.order-progress .order-progress-step[data-here] {
+  color: var(--text-primary);
+  font-weight: 700;
+}
+.order-progress .order-progress-step[data-done] {
+  color: var(--text-primary);
+}
+.order-progress .order-progress-ending {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 700;
+  margin: 0;
+}
+.order-progress .order-progress-sentence {
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  margin: 0;
+}
+/* An ending that needs attention: the opaque warning surface with its own text token (never a tint). */
+.order-progress .order-progress-order[data-state='rejected'] .order-progress-sentence,
+.order-progress .order-progress-order[data-state='not-delivered'] .order-progress-sentence,
+.order-progress .order-progress-order[data-state='failed'] .order-progress-sentence {
+  background: var(--warning-bg);
+  border-radius: 8px;
+  color: var(--warning-text);
+  padding: 0.5rem 0.7rem;
+}
+.order-progress .order-progress-link {
+  color: var(--accent-color);
+  font-size: 0.9rem;
+}
+.order-progress .order-progress-link:focus-visible,
+.order-progress .order-progress-dismiss:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+.order-progress .order-progress-dismiss {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  min-height: 36px;
+  padding: 0.3rem 0.8rem;
+}

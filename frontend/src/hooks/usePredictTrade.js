@@ -303,7 +303,8 @@ export function usePredictTrade(options = {}) {
           if (e?.outcomeUnknown && !isRegionError(e)) {
             setStatus('unknown')
             setReason(UNKNOWN_REASON)
-            return { outcomeUnknown: true }
+            // `orderHash`: the order's id, computed before the post, so the tracker can look it up (never re-post).
+            return { outcomeUnknown: true, orderHash: e.orderHash ?? null, reason: UNKNOWN_REASON }
           }
           if (req !== reqRef.current) return null
           if (isRegionError(e)) {

@@ -91,6 +91,8 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
     minOrderSize: minOrderSize ?? undefined,
     // Stated by the listing, or left out so the SDK asks the venue for this token — never a guessed `false`.
     negRisk: typeof market?.negRisk === 'boolean' ? market.negRisk : undefined,
+    // A public description for the progress tracker; never anything signed.
+    label: `${buy ? 'Buy' : 'Sell'} ${outcome.name} — ${market?.question ?? ''}`.trim(),
   })
   const { state, view, quote } = plan
 
@@ -227,8 +229,9 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
           <div className="order-ticket-alert" role="alert">
             <p>{plan.reason}</p>
             <p>
-              Sending it again from here could {buy ? 'buy' : 'sell'} twice, so this ticket will not offer that. Your
-              positions and open orders, here or on Polymarket, show whether it went through.
+              Sending it again from here could {buy ? 'buy' : 'sell'} twice, so this ticket will not offer that. It is
+              listed under “Your orders in progress” as not confirmed, and this app looks it up on Polymarket for you.
+              Your positions and open orders, here or on Polymarket, also show whether it went through.
             </p>
             <div className="order-ticket-actions">
               <a className="order-ticket-link" href={POLYMARKET_URL} target="_blank" rel="noopener noreferrer">
@@ -245,7 +248,8 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
           <div className="order-ticket-step">
             <p className="order-ticket-note" role="status">
               Order sent to Polymarket{plan.result?.status ? ` — the venue answered “${plan.result.status}”` : ''}. Matching and
-              settlement happen there, so your position updates once they complete. Do not send it again.
+              settlement happen there, so your position updates once they complete. Follow it under “Your orders in
+              progress”. Do not send it again.
             </p>
             <div className="order-ticket-actions">
               <button type="button" className="order-ticket-primary" onClick={onClose}>

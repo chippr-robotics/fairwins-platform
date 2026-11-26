@@ -17,15 +17,6 @@
 .predict-positions-header h4 {
   margin: 0;
 }
-.predict-positions-refresh {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-primary);
-  cursor: pointer;
-  font-size: 0.8rem;
-  padding: 0.25rem 0.6rem;
-}
 .predict-positions-status {
   color: var(--text-secondary);
   margin: 0;

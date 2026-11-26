@@ -40,6 +40,8 @@ import MarketDetailSheet from './MarketDetailSheet'
 import OrderTicket from './OrderTicket'
 import PositionsList from './PositionsList'
 import OpenOrdersList from './OpenOrdersList'
+import OrderProgress from './OrderProgress'
+import { usePredictOrders } from '../../hooks/usePredictOrders'
 import './PredictPanel.css'
 
 const POLYMARKET_URL = 'https://polymarket.com'
@@ -356,6 +358,9 @@ export default function PredictPanel() {
   const [ticket, setTicket] = useState(null)
   const [listLegacy, setListLegacy] = useState(false)
   const [positionsSignal, setPositionsSignal] = useState(0)
+  // Orders the member has signed, followed on this device (slice 6). Lives on the PANEL, not the ticket, so
+  // closing the ticket — or reloading the app — does not lose track of an order.
+  const orderTracker = usePredictOrders()
   const booksMissing = useSyncExternalStore(subscribeBooksRoute, booksRouteMissing, booksRouteMissing)
   const liveTicket = !listLegacy && !booksMissing
 
@@ -447,7 +452,8 @@ export default function PredictPanel() {
       )}
 
       {/* Your positions (US2) + open orders (US3) — each self-hides when disconnected/unsupported/empty. */}
-      <PositionsList onSell={liveTicket ? sellPosition : undefined} refreshSignal={positionsSignal} />
+      <OrderProgress orders={orderTracker.orders} locked={orderTracker.locked} unreadable={orderTracker.unreadable} onDismiss={orderTracker.dismiss} />
+      <PositionsList onSell={liveTicket ? sellPosition : undefined} refreshSignal={positionsSignal + orderTracker.changes} />
       <OpenOrdersList />
 
       {ticket && (
