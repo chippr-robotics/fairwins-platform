@@ -1204,6 +1204,52 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
   `docs/developer-guide/token-news.md` + `specs/109-token-news/` (research.md carries the probe
   evidence).
 
+- **Predict's live surface (spec 114) is built on ONE price type, and the order path NEVER sends twice.**
+  Browse (events, quick filters), the event page, the amount-first ticket and order progress sit in
+  front of the spec-057 signing path, which is unchanged in what it signs. Seven rules, each of which
+  was got wrong once here:
+  (1) **Every price is a `PriceReading`** (`lib/markets/priceReading.js`): `live` (confirmed ≤ 5 s
+  ago), `delayed` (≤ 30 s), `last-known`, `unknown`. Only `live` is `plannable`. Age is measured on
+  the SERVER's clock (`lib/markets/serverClock.js`, monotonic) — never the device's, which a member
+  can set. A reading that is not live draws NO figure: `planForTicket` returns `{ status: 'not-live' }`
+  and nothing else, and Review is disabled.
+  (2) **One poller, ten keys.** `lib/markets/feed.js` is the single seam every reading comes through
+  (≤ 10 tokens a request, 2 s, inside the gateway's 60/min Predict quota). A surface subscribes; it
+  never fetches books itself. An optional FairWins-operated market feed can replace the poll behind
+  that seam later; nothing above it changes.
+  (3) **What is shown is what is signed.** Money is decimal strings and BigInt up to ONE boundary,
+  `toSdkNumber` in `lib/predict/clobSession.js`, which refuses a value that does not print back the
+  same. The amount the member GIVES is exact; the derived minimum they receive is exact below 100,000
+  units and shown as "about" — that bound is measured in `signedAmounts.test.js` against the real SDK.
+  A fuzz there once "proved" exactness over 240 orders that were all sells on one tick: assert that
+  every branch of a fuzz ran.
+  (4) **The limit is the guarantee.** A marketable order is fill-and-kill (`FAK`, never `FOK`) at the
+  REVIEWED limit; Sign re-plans against the current reading twice and signs the reviewed limit or
+  nothing. A named price rests (`GTC`) on the tick it was reviewed on.
+  (5) **An answer that never arrived is not a failure.** `readPostFailure` is the one reading of the
+  venue's answer: a 4xx or `success: false` is a refusal; a 5xx, a 408 or no HTTP status is
+  `outcomeUnknown` — a terminal state with NO way back to Sign, on both tickets. Never route it to an
+  error with a retry: the same fill-and-kill order sent twice can fill twice. `signAndPost` and
+  `confirm` hold ref locks because state cannot stop two calls made in one render.
+  (6) **The exchange is stated or asked, never guessed.** `negRisk` picks the contract that verifies
+  the signature. A boolean from the listing is used; anything else is asked of the venue
+  (`resolveNegRisk`), and an answer that is not a boolean signs nothing. A position's `false` is not
+  a statement.
+  (7) **The tracker reads, and concludes only what the venue said.** Build → hash → post makes the
+  order's id known before the post, so an unconfirmed order is LOOKED UP (`lookupOrder`) and never
+  re-sent; `usePredictOrders` takes no submit function, holds a signer that refuses to sign, and
+  never prompts. It never says "filled" or "settled" beyond the venue's "matched", and it NEVER
+  concludes "not delivered" from absence — "not found, no trade names it" also describes an order
+  that filled, and that has not been checked against a funded account (T036a). `predict_orders_v1`
+  is device-only, public facts only, and **deliberately absent from `lib/backup/syncedObjects.js`**.
+  Fees follow spec 057: the builder fee is its own line; a buy's fee lines and total come from ONE
+  quote so the column adds up; every figure names USDC; Polymarket's own fee is in no figure and is
+  named beside each figure it would change unless its rate was READ as zero (an unread rate is not a
+  zero). The gateway routes (`/events`, `/books`, `/prices-history`, `/discover`) deploy separately
+  from the app, so every surface falls back to the spec-057 list and fixed-price ticket on a 404 —
+  and that fallback follows rules (5)–(7) too. See `docs/developer-guide/predict-polymarket.md` +
+  `specs/114-predict-live-markets/`.
+
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
 at specs/114-predict-live-markets/plan.md
