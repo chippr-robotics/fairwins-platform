@@ -98,6 +98,18 @@ export function selectTopics(events, { max = 8, minShare = 0.01, excludeSlugs = 
   const covered = new Set()
   const picked = []
   const remaining = new Set(byTag.keys())
+  // Ranking is by FOCUS, not by raw volume: marginal day volume divided by the square root of the
+  // events it is spread over (owner's decision, 2026-11-26). Raw volume favours a wide tag
+  // ("finance", seventeen events) over a narrow one carrying nearly as much ("fed", three), and a
+  // quick filter is most useful when it narrows to one subject. vol/sqrt(n) orders the same as
+  // vol^2/n, which is compared by cross-multiplying in BigInt so no float enters the choice.
+  const outranks = (a, b) => {
+    const left = a.vol * a.vol * BigInt(b.count)
+    const right = b.vol * b.vol * BigInt(a.count)
+    if (left !== right) return left > right
+    if (a.vol !== b.vol) return a.vol > b.vol
+    return a.slug < b.slug
+  }
   while (picked.length < max && remaining.size > 0) {
     let best = null
     for (const slug of remaining) {
@@ -108,15 +120,14 @@ export function selectTopics(events, { max = 8, minShare = 0.01, excludeSlugs = 
         vol += considered[idx].micro
         count += 1
       }
-      if (
-        best == null ||
-        vol > best.vol ||
-        (vol === best.vol && (count > best.count || (count === best.count && slug < best.slug)))
-      ) {
-        best = { slug, vol, count }
-      }
+      // The floor is on what a topic CARRIES, and it filters candidates rather than ending the
+      // search: under focus ranking a tiny single-event tag can outscore a wide tag that clears
+      // the floor, and stopping at the first would hide the second.
+      if (vol <= 0n || vol < floor) continue
+      const candidate = { slug, vol, count }
+      if (best == null || outranks(candidate, best)) best = candidate
     }
-    if (best == null || best.vol <= 0n || best.vol < floor) break
+    if (best == null) break
     for (const idx of byTag.get(best.slug).members) covered.add(idx)
     remaining.delete(best.slug)
     picked.push({

@@ -7,8 +7,9 @@
  *  - the FIRST page refreshes every 15 s while the document is visible (paused when hidden, refreshed
  *    on return). A background refresh never flashes `loading`, never drops later pages, and a failed
  *    one keeps what is on screen — its age simply keeps growing, which the trust chip says;
- *  - `q` is debounced 300 ms; while a search is set the gateway ignores category and sort, so the hook
- *    does not send them (and does not re-query when they change);
+ *  - `q` is debounced 300 ms; while a search is set the gateway ignores category, sort, topic and live, so
+ *    the hook does not send them (and does not re-query when they change). In `legacy` mode (a gateway
+ *    with no event route) topic and live are never sent — the older market list has neither;
  *  - the list's server-clock `stamp` + `stale` are exposed so the panel can state the list's trust;
  *  - `directions` maps conditionId → 'up' | 'down' | null: the move since the previous refresh.
  */
@@ -50,7 +51,7 @@ const toLegacyPage = (body) => ({
 // 404 only for a chain it does not serve, which carries its own code.)
 const isMissingRoute = (err) => err?.status === 404 && err?.code !== 'unsupported_chain'
 
-export function usePredictEvents({ category = '', sort = '', q = '' } = {}) {
+export function usePredictEvents({ category = '', sort = '', q = '', topic = '', live = false } = {}) {
   const chainId = useWalletChainId()
   const supported = predictAvailable(chainId)
 
@@ -65,6 +66,10 @@ export function usePredictEvents({ category = '', sort = '', q = '' } = {}) {
   const searching = debouncedQ !== ''
   const effCategory = searching ? '' : category
   const effSort = searching ? '' : sort
+  // Quick filters (FR-002a) are navigation like category: a search wins over all of them, and the
+  // gateway answers 400 when more than one of category/topic/live is sent, so the caller sends one.
+  const effTopic = searching ? '' : topic
+  const effLive = searching ? false : live === true
 
   const [pages, setPages] = useState([]) // [{ events, next, stale, stamp }]
   const [phase, setPhase] = useState('idle') // idle | loading | ready | degraded
@@ -93,7 +98,7 @@ export function usePredictEvents({ category = '', sort = '', q = '' } = {}) {
   }, [])
   // Kept current in an effect (declared BEFORE the reset effect below, so `load` sees it).
   useEffect(() => {
-    paramsRef.current = { chainId, category: effCategory, sort: effSort, q: debouncedQ }
+    paramsRef.current = { chainId, category: effCategory, sort: effSort, q: debouncedQ, topic: effTopic, live: effLive }
   })
 
   const observe = useCallback((events, { reset = false } = {}) => {
@@ -172,7 +177,7 @@ export function usePredictEvents({ category = '', sort = '', q = '' } = {}) {
     priceRef.current = new Map()
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chainId, supported, effCategory, effSort, debouncedQ])
+  }, [chainId, supported, effCategory, effSort, debouncedQ, effTopic, effLive])
 
   // 15 s refresh while visible; refresh on return to visible.
   useEffect(() => {

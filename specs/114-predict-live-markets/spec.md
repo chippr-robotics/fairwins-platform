@@ -242,12 +242,14 @@ still applies until the waiting period ends.
 - **FR-002**: Members MUST be able to filter by category, search by text across categories, and
   sort by at least trading volume, newest and closing soonest.
 - **FR-002a**: Beneath search the list MUST offer quick filters drawn from what is active at the
-  venue now: events in play (with their count), and the topics carrying the most trading over the
-  last day. Topics MUST be distinct from one another (two names for the same set of events are
+  venue now: events in play (with their count), and the topics where trading over the last day is
+  most concentrated. Topics MUST be distinct from one another (two names for the same set of events are
   one filter) and MUST NOT repeat the fixed categories.
 - **FR-002b**: A quick filter MUST be absent when it has nothing behind it (no event in play, no
-  topic readable) and MUST NOT be shown from a reading older than the bound in FR-011; the list
-  remains usable without them.
+  topic readable) and MUST NOT be shown from an answer older than its own bound, or one whose age
+  cannot be known; the list remains usable without them. That bound is longer than the price
+  bounds of FR-011 because a quick filter summarises a day of trading, not a price (five minutes
+  to start). A filter already in the address stays visible and clearable regardless.
 - **FR-002c**: Quick filters are navigation, never a recommendation: the surface MUST NOT rank
   them by what earns FairWins more, MUST NOT promote markets that open and close within an hour,
   and MUST label an in-play event as in play with the venue's own score and period, nothing more

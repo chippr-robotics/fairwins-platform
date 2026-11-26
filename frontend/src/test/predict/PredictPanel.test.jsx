@@ -5,20 +5,36 @@
  * detail sheet for the adapted market.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router-dom'
+import { render, screen, fireEvent, waitFor, within, act } from '@testing-library/react'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router-dom'
 import { axe } from 'vitest-axe'
 import { setWalletChain } from '../helpers/walletChain'
 import PredictPanel from '../../components/predict/PredictPanel'
 import * as client from '../../lib/predict/predictClient'
-import { FED, RAIN, envelope } from '../fixtures/predictEvents'
+import { FED, RAIN, envelope, detailBody, mkRows } from '../fixtures/predictEvents'
 
 vi.mock('../../lib/predict/predictClient', () => ({
   predictAvailable: vi.fn(() => true),
   fetchEvents: vi.fn(),
+  fetchDiscover: vi.fn(),
+  fetchEvent: vi.fn(),
+  fetchHistory: vi.fn(),
   fetchMarkets: vi.fn(),
   fetchPositions: vi.fn().mockResolvedValue({ positions: [] }),
 }))
+// The event page reads books through the market-data seam; here it is a no-op (EventPage.test.jsx drives it).
+const feed = vi.hoisted(() => ({ calls: [] }))
+vi.mock('../../lib/markets/feed', () => ({
+  subscribe: (keys) => {
+    feed.calls.push([...keys])
+    return () => {}
+  },
+}))
+// recharts has no layout in jsdom; the page's chart is covered in PriceHistoryChart.test.jsx and Cypress.
+vi.mock('recharts', async () => {
+  const React = await import('react')
+  return { ResponsiveContainer: ({ children }) => React.createElement('div', null, children), LineChart: ({ children }) => React.createElement('div', null, children), XAxis: () => null, YAxis: () => null, Line: () => null }
+})
 // TradeConfirm (rendered inside the detail sheet) pulls the trade hook — stub it out.
 vi.mock('../../hooks/usePredictTrade', () => ({
   usePredictTrade: () => ({ status: 'idle', loadFee: vi.fn(), preview: vi.fn(), submit: vi.fn(), fee: null, onWrongNetwork: false, canTrade: true }),
@@ -28,7 +44,15 @@ const page = (events, over = {}) => ({ events, next: null, ...envelope(), ...ove
 
 function Where() {
   const { search } = useLocation()
-  return <output data-testid="where">{search}</output>
+  const navigate = useNavigate()
+  return (
+    <>
+      <output data-testid="where">{search}</output>
+      <button type="button" onClick={() => navigate(-1)}>
+        browser back
+      </button>
+    </>
+  )
 }
 const renderAt = (url = '/wallet?tab=predict') =>
   render(
@@ -38,6 +62,8 @@ const renderAt = (url = '/wallet?tab=predict') =>
     </MemoryRouter>,
   )
 const where = () => screen.getByTestId('where').textContent
+// Let a resolved discover promise land before asserting that something is ABSENT (else it passes vacuously).
+const settled = () => act(async () => { await new Promise((r) => setTimeout(r, 25)) })
 const chipText = () => document.querySelector('.predict-trust-chip')?.textContent ?? ''
 
 beforeEach(() => {
@@ -45,6 +71,11 @@ beforeEach(() => {
   setWalletChain(137)
   client.predictAvailable.mockReturnValue(true)
   client.fetchEvents.mockResolvedValue(page([FED, RAIN]))
+  // By default no quick filters: the row is optional and absent unless a test supplies discover.
+  client.fetchDiscover.mockRejectedValue(Object.assign(new Error('not found'), { status: 404, code: 'http_404' }))
+  client.fetchEvent.mockResolvedValue(detailBody({ markets: mkRows(3) }))
+  client.fetchHistory.mockResolvedValue({ points: [], confirmedAt: envelope().confirmedAt, serverNow: envelope().serverNow, stale: false })
+  feed.calls.length = 0
 })
 
 describe('PredictPanel — browse by event', () => {
@@ -137,10 +168,27 @@ describe('PredictPanel — browse by event', () => {
     expect(within(dialog).getAllByRole('button', { name: 'Buy' }).length).toBeGreaterThan(0)
   })
 
-  it('opens the first tradable row from the title', async () => {
+  it('opens the EVENT PAGE from the title (not the sheet), and a legacy gateway keeps the old behaviour', async () => {
     renderAt()
     fireEvent.click(await screen.findByRole('button', { name: 'Will it rain in London tomorrow?' }))
-    expect(within(screen.getByRole('dialog')).getByText('Will it rain in London tomorrow?')).toBeInTheDocument()
+    expect(screen.queryByRole('dialog')).toBeNull()
+    expect(where()).toContain('event=rain-london')
+    expect(await screen.findByRole('heading', { level: 2, name: 'Fed Decision in December?' })).toBeInTheDocument()
+    expect(client.fetchEvent).toHaveBeenCalledWith(137, 'rain-london')
+  })
+
+  it('on a gateway with no event route, the title still opens the first tradable row in the sheet', async () => {
+    client.fetchEvents.mockRejectedValue(Object.assign(new Error('not found'), { status: 404, code: 'http_404' }))
+    client.fetchMarkets.mockResolvedValue({
+      markets: [{ conditionId: '0xold', question: 'An older market?', slug: 'an-older-market', outcomes: [{ name: 'Yes', tokenId: '1', price: '0.4' }, { name: 'No', tokenId: '2', price: '0.6' }], volume: null, endDate: null, negRisk: false, tradable: true }],
+      next: null,
+      fetchedAt: envelope().confirmedAt,
+      stale: false,
+    })
+    renderAt()
+    fireEvent.click(await screen.findByRole('button', { name: 'An older market?' }))
+    expect(within(screen.getByRole('dialog')).getByText('An older market?')).toBeInTheDocument()
+    expect(where()).not.toContain('event=')
   })
 
   it('keeps a never-stranded Polymarket path and a retry when degraded', async () => {
@@ -207,5 +255,305 @@ describe('PredictPanel — browse by event', () => {
     expect(screen.queryByLabelText(/sort by/i)).toBeNull()
     expect(screen.getByLabelText(/search markets/i)).toBeInTheDocument()
     expect(chipText()).not.toMatch(/live/i)
+  })
+
+  it('shows the quick-filter row only when discover has something to say', async () => {
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    await settled()
+    expect(client.fetchDiscover).toHaveBeenCalled()
+    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+  })
+})
+
+describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
+  const TOPICS = [
+    { slug: 'basketball', label: 'Basketball', events: 11, volume24h: '10546858.02' },
+    { slug: 'NFL-playoffs', label: 'NFL', events: 3, volume24h: '8402870.58' },
+  ]
+  const discoverBody = (over = {}) => ({ live: { count: 14, events: [] }, topics: TOPICS, ...envelope(), ...over })
+  const row = () => screen.findByRole('group', { name: 'Active now' })
+
+  beforeEach(() => {
+    client.fetchDiscover.mockResolvedValue(discoverBody())
+  })
+
+  it('draws "In play · 14" then one chip per topic, directly under search and above the categories', async () => {
+    renderAt()
+    const group = await row()
+    const buttons = within(group).getAllByRole('button')
+    expect(buttons.map((b) => b.textContent)).toEqual(['In play · 14', 'Basketball', 'NFL'])
+    buttons.forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'false'))
+    const search = screen.getByLabelText('Search markets')
+    const category = screen.getByRole('group', { name: 'Category' })
+    expect(search.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(group.compareDocumentPosition(category) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('says "50+" when the gateway says there are more', async () => {
+    client.fetchDiscover.mockResolvedValue(discoverBody({ live: { count: 50, more: true, events: [] } }))
+    renderAt()
+    expect(within(await row()).getByRole('button', { name: 'In play · 50+' })).toBeInTheDocument()
+  })
+
+  it('omits the In play chip when nothing is in play, or its half is unreadable, and keeps the topics', async () => {
+    client.fetchDiscover.mockResolvedValue(discoverBody({ live: { count: 0, events: [] } }))
+    const { unmount } = renderAt()
+    const group = await row()
+    expect(within(group).queryByRole('button', { name: /In play/ })).toBeNull()
+    expect(within(group).getByRole('button', { name: 'Basketball' })).toBeInTheDocument()
+    unmount()
+    client.fetchDiscover.mockResolvedValue(discoverBody({ live: null }))
+    renderAt()
+    expect(within(await row()).queryByRole('button', { name: /In play/ })).toBeNull()
+  })
+
+  it('omits the whole row when both halves are empty or unreadable', async () => {
+    client.fetchDiscover.mockResolvedValue(discoverBody({ live: { count: 0, events: [] }, topics: [] }))
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    await settled()
+    expect(client.fetchDiscover).toHaveBeenCalled()
+    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+  })
+
+  it('a topic chip sends topic, writes topic= and clears cat= in the same update', async () => {
+    renderAt('/wallet?tab=predict&cat=crypto')
+    const group = await row()
+    fireEvent.click(within(group).getByRole('button', { name: 'NFL' }))
+    await waitFor(() => expect(client.fetchEvents).toHaveBeenLastCalledWith(137, expect.objectContaining({ topic: 'NFL-playoffs', category: '', live: false })))
+    expect(where()).toContain('topic=NFL-playoffs')
+    expect(where()).not.toContain('cat=')
+    expect(within(group).getByRole('button', { name: 'NFL' })).toHaveAttribute('aria-pressed', 'true')
+    expect(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  it('In play, a topic and a category are mutually exclusive in the address', async () => {
+    renderAt('/wallet?tab=predict')
+    const group = await row()
+    fireEvent.click(within(group).getByRole('button', { name: 'In play · 14' }))
+    await waitFor(() => expect(where()).toContain('live=1'))
+    await waitFor(() => expect(client.fetchEvents).toHaveBeenLastCalledWith(137, expect.objectContaining({ live: true, topic: '', category: '' })))
+
+    fireEvent.click(within(group).getByRole('button', { name: 'Basketball' }))
+    await waitFor(() => expect(where()).toContain('topic=basketball'))
+    expect(where()).not.toContain('live=')
+
+    fireEvent.click(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: 'Sports' }))
+    await waitFor(() => expect(where()).toContain('cat=sports'))
+    expect(where()).not.toContain('topic=')
+    expect(where()).not.toContain('live=')
+  })
+
+  it('pressing an active quick filter again clears it', async () => {
+    renderAt('/wallet?tab=predict&topic=basketball')
+    const group = await row()
+    const chip = within(group).getByRole('button', { name: 'Basketball' })
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    fireEvent.click(chip)
+    await waitFor(() => expect(where()).not.toContain('topic='))
+    expect(where()).toContain('tab=predict')
+    fireEvent.click(within(group).getByRole('button', { name: 'In play · 14' }))
+    await waitFor(() => expect(where()).toContain('live=1'))
+    fireEvent.click(within(group).getByRole('button', { name: 'In play · 14' }))
+    await waitFor(() => expect(where()).not.toContain('live='))
+  })
+
+  it('"All" clears a quick filter as well as a category', async () => {
+    renderAt('/wallet?tab=predict&live=1')
+    await row()
+    fireEvent.click(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: 'All' }))
+    await waitFor(() => expect(where()).not.toContain('live='))
+  })
+
+  it('a topic in the address that discover does not list is still shown, active and clearable', async () => {
+    renderAt('/wallet?tab=predict&topic=Some-Shared-Topic')
+    const group = await row()
+    const chip = within(group).getByRole('button', { name: 'Some-Shared-Topic' })
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    await waitFor(() => expect(client.fetchEvents).toHaveBeenCalledWith(137, expect.objectContaining({ topic: 'Some-Shared-Topic' })))
+    fireEvent.click(chip)
+    await waitFor(() => expect(where()).not.toContain('topic='))
+  })
+
+  it('keeps an active filter visible and clearable even when discover is absent', async () => {
+    client.fetchDiscover.mockRejectedValue(Object.assign(new Error('nf'), { status: 404, code: 'http_404' }))
+    renderAt('/wallet?tab=predict&topic=nba')
+    const chip = await screen.findByRole('button', { name: 'nba' })
+    expect(chip).toHaveAttribute('aria-pressed', 'true')
+    expect(screen.queryByRole('button', { name: /In play/ })).toBeNull()
+  })
+
+  it('ignores a malformed topic in the address', async () => {
+    renderAt('/wallet?tab=predict&topic=a%20b%3Cscript%3E')
+    await screen.findByText('Fed Decision in December?')
+    expect(client.fetchEvents).toHaveBeenCalledWith(137, expect.objectContaining({ topic: '' }))
+  })
+
+  it('lets live win over topic and topic over category when an address carries several', async () => {
+    renderAt('/wallet?tab=predict&cat=crypto&topic=nba&live=1')
+    await waitFor(() => expect(client.fetchEvents).toHaveBeenCalledWith(137, expect.objectContaining({ live: true, topic: '', category: '' })))
+  })
+
+  it('disables the chips while searching, pointing at the existing note', async () => {
+    renderAt('/wallet?tab=predict&q=rain')
+    const group = await row()
+    const note = screen.getByText(/Searching all categories/)
+    within(group).getAllByRole('button').forEach((b) => {
+      expect(b).toBeDisabled()
+      expect(b).toHaveAttribute('aria-describedby', note.id)
+    })
+    await waitFor(() => expect(client.fetchEvents).toHaveBeenCalledWith(137, expect.objectContaining({ q: 'rain', topic: '', live: false })))
+  })
+
+  it('is absent on a gateway with no event route, even if discover answers', async () => {
+    client.fetchEvents.mockRejectedValue(Object.assign(new Error('not found'), { status: 404, code: 'http_404' }))
+    client.fetchMarkets.mockResolvedValue({ markets: [], next: null, fetchedAt: envelope().confirmedAt, stale: false })
+    renderAt('/wallet?tab=predict&topic=nba')
+    await waitFor(() => expect(client.fetchMarkets).toHaveBeenCalled())
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Category' })).toBeNull())
+    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+  })
+
+  it('draws nothing from a discover answer older than its own bound (FR-002b)', async () => {
+    // Ten minutes old on the gateway's clock; the bound is five.
+    client.fetchDiscover.mockResolvedValue(
+      discoverBody({ confirmedAt: '2026-11-26T02:00:00.000Z', serverNow: '2026-11-26T02:10:00.000Z' }),
+    )
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    await settled()
+    expect(client.fetchDiscover).toHaveBeenCalled()
+    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+  })
+
+  it('draws the row from an answer two minutes old: the gateway caches for one and the client asks once a minute', async () => {
+    // The ordinary case on a healthy gateway. A 30 s price bound hid the row here.
+    client.fetchDiscover.mockResolvedValue(
+      discoverBody({ confirmedAt: '2026-11-26T02:08:00.000Z', serverNow: '2026-11-26T02:10:00.000Z' }),
+    )
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    expect(await screen.findByRole('group', { name: 'Active now' })).toBeInTheDocument()
+  })
+
+  it('draws nothing when the age of the answer cannot be known', async () => {
+    client.fetchDiscover.mockResolvedValue(discoverBody({ confirmedAt: 'not a time', serverNow: undefined }))
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    await settled()
+    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+  })
+
+  it('a stale flag alone does not hide the row while the answer is inside the bound', async () => {
+    client.fetchDiscover.mockResolvedValue(discoverBody({ stale: true, confirmedAt: envelope().serverNow }))
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    expect(await screen.findByRole('group', { name: 'Active now' })).toBeInTheDocument()
+  })
+
+  it('the empty state clears topic and live as well as category', async () => {
+    client.fetchEvents.mockResolvedValue(page([]))
+    renderAt('/wallet?tab=predict&topic=nba')
+    expect(await screen.findByText('No markets are listed under this topic right now.')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filter' }))
+    await waitFor(() => expect(where()).not.toContain('topic='))
+    expect(where()).toContain('tab=predict')
+  })
+
+  it('says an in-play list ignores sort, and disables the sort control', async () => {
+    renderAt('/wallet?tab=predict&live=1')
+    await screen.findByText('Fed Decision in December?')
+    expect(screen.getByLabelText('Sort by')).toBeDisabled()
+    expect(screen.getByText(/Events in play are listed by trading over the last day/)).toBeInTheDocument()
+  })
+
+  it('has no axe violations with the row present', async () => {
+    const { container } = renderAt('/wallet?tab=predict&topic=basketball')
+    await row()
+    await screen.findByText('Fed Decision in December?')
+    expect(await axe(container)).toHaveNoViolations()
+  })
+})
+
+describe('PredictPanel — the event page (spec 114 slice 4)', () => {
+  const SLUG = 'fed-decision-in-december'
+  const heading = () => screen.findByRole('heading', { level: 2, name: 'Fed Decision in December?' })
+
+  it('opens cold from its address, without the list having loaded — and without asking for it', async () => {
+    renderAt(`/wallet?tab=predict&event=${SLUG}`)
+    await heading()
+    expect(client.fetchEvent).toHaveBeenCalledWith(137, SLUG)
+    expect(client.fetchEvents).not.toHaveBeenCalled()
+    expect(client.fetchDiscover).not.toHaveBeenCalled()
+    expect(screen.queryByLabelText('Search markets')).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Category' })).toBeNull()
+    expect(document.querySelector('.event-card')).toBeNull()
+  })
+
+  it('opening PUSHES the address, keeps the list\'s params, and the browser Back restores the list', async () => {
+    renderAt('/wallet?tab=predict&cat=economy&sort=closing')
+    fireEvent.click(await screen.findByRole('button', { name: 'Fed Decision in December?' }))
+    await heading()
+    expect(where()).toContain(`event=${SLUG}`)
+    for (const kept of ['tab=predict', 'cat=economy', 'sort=closing']) expect(where()).toContain(kept)
+
+    fireEvent.click(screen.getByRole('button', { name: 'browser back' }))
+    await screen.findByLabelText('Search markets')
+    expect(where()).not.toContain('event=')
+    expect(where()).toContain('cat=economy')
+    expect(await screen.findByText('Fed Decision in December?')).toBeInTheDocument()
+    expect(screen.getByLabelText('Sort by')).toHaveValue('closing')
+    expect(screen.getByRole('button', { name: 'Economy' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('"Back to markets" removes event and restores the list view, keeping a quick filter and a search', async () => {
+    renderAt('/wallet?tab=predict&topic=nba')
+    fireEvent.click(await screen.findByRole('button', { name: 'Fed Decision in December?' }))
+    await heading()
+    fireEvent.click(screen.getByRole('button', { name: /Back to markets/ }))
+    await screen.findByLabelText('Search markets')
+    expect(where()).not.toContain('event=')
+    expect(where()).toContain('topic=nba')
+    expect(client.fetchEvents).toHaveBeenLastCalledWith(137, expect.objectContaining({ topic: 'nba' }))
+  })
+
+  it('"Back to markets" on a cold open replaces the entry (there is no list entry behind it to pop)', async () => {
+    renderAt(`/wallet?tab=predict&event=${SLUG}&cat=economy`)
+    await heading()
+    fireEvent.click(screen.getByRole('button', { name: /Back to markets/ }))
+    await screen.findByLabelText('Search markets')
+    expect(where()).not.toContain('event=')
+    expect(where()).toContain('cat=economy')
+  })
+
+  it('a Yes button on the page opens the ONE existing sheet for the adapted market', async () => {
+    renderAt(`/wallet?tab=predict&event=${SLUG}`)
+    await heading()
+    fireEvent.click(screen.getAllByRole('button', { name: /^Yes 75¢, Row 2/ })[0])
+    const dialogs = screen.getAllByRole('dialog')
+    expect(dialogs).toHaveLength(1)
+    expect(within(dialogs[0]).getByText('Fed Decision in December? — Row 2')).toBeInTheDocument()
+    expect(where()).toContain(`event=${SLUG}`)
+  })
+
+  it('an event page with a not-found event offers the way back to the list', async () => {
+    client.fetchEvent.mockRejectedValue(Object.assign(new Error('nf'), { status: 404, code: 'not_found' }))
+    renderAt('/wallet?tab=predict&event=gone-event')
+    expect(await screen.findByText(/could not find this event/i)).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: /Back to markets/ }))
+    expect(await screen.findByText('Fed Decision in December?')).toBeInTheDocument()
+  })
+
+  it('ignores an event slug the gateway would refuse and shows the list', async () => {
+    renderAt('/wallet?tab=predict&event=Bad%20Slug%21')
+    expect(await screen.findByText('Fed Decision in December?')).toBeInTheDocument()
+    expect(client.fetchEvent).not.toHaveBeenCalled()
+  })
+
+  it('has no axe violations on the event page', async () => {
+    const { container } = renderAt(`/wallet?tab=predict&event=${SLUG}`)
+    await heading()
+    expect(await axe(container)).toHaveNoViolations()
   })
 })

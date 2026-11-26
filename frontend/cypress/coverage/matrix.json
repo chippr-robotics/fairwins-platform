@@ -3503,30 +3503,34 @@
             "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-01",
             "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-02",
             "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-03",
-            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-04"
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-04",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-04b",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-04c"
           ]
         },
         {
           "id": "predict.market-page",
           "name": "Open an event by its address and see every outcome, its history, depth, volume, closing time and resolution source",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
-          "issue": "#1747"
+          "tests": [
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-05",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-06",
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-07"
+          ]
         },
         {
           "id": "predict.price-trust-state",
           "name": "A price that stops being confirmed is marked delayed with its age, then last known, and is never drawn as live",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
-          "issue": "#1747"
+          "tests": [
+            "frontend/cypress/e2e/fast/52-predict-live.cy.js::PL-08"
+          ]
         },
         {
           "id": "predict.amount-first-ticket",

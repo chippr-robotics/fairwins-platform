@@ -102,30 +102,36 @@ the seam they plug into is right from the start.
       the one-hour floor as configuration; `live` on `EventSummary`. Tests assert the upstream
       requests, the de-duplication (two tags naming the same events yield one topic), the
       exclusion of sub-hour events, and each half failing on its own.
-- [ ] T020b [US1] `fetchDiscover` in `predictClient.js`; `usePredictDiscover` (60 s refresh,
+- [X] T020b [US1] `fetchDiscover` in `predictClient.js`; `usePredictDiscover` (60 s refresh,
       paused while hidden); a quick-filter row under search in `PredictPanel` — an in-play chip
       with its count, then topic chips — absent when there is nothing behind it; `topic` and
       `live` in the address; an in-play card shows the venue's score and period as text.
-- [ ] T020c [US1] Vitest for the hook and the row; Cypress PL-04b a topic chip narrows the list
+- [X] T020c [US1] Vitest for the hook and the row; Cypress PL-04b a topic chip narrows the list
       and sets the address, PL-04c the in-play chip is absent when nothing is in play. Open the
       slice PR.
 
 ## Phase 5: Slice 4 — the event page (US2)
 
-- [ ] T021 [US2] `frontend/src/hooks/usePredictEvent.js` and `frontend/src/hooks/usePriceHistory.js`.
-- [ ] T022 [P] [US2] `frontend/src/components/predict/PriceHistoryChart.jsx` (recharts, lazy
+- [X] T021 [US2] `frontend/src/hooks/usePredictEvent.js` and `frontend/src/hooks/usePriceHistory.js`.
+- [X] T022 [P] [US2] `frontend/src/components/predict/PriceHistoryChart.jsx` (recharts, lazy
       loaded): five ranges, at most four series from `--chart-series-*`, gaps as gaps, live tail
       from the current reading, a text alternative naming each outcome's current value.
-- [ ] T023 [P] [US2] `frontend/src/components/predict/DepthLadder.jsx`: nearest levels both sides
+- [X] T023 [P] [US2] `frontend/src/components/predict/DepthLadder.jsx`: nearest levels both sides
       from the reading; an empty side says there is nothing on offer.
-- [ ] T024 [US2] `frontend/src/components/predict/EventPage.jsx` (+ `.css`) replacing
+- [X] T024 [US2] `frontend/src/components/predict/EventPage.jsx` (+ `.css`) replacing
       `MarketDetailSheet`: header, TrustChip, outcomes with Yes/No, chart, depth, rules and
       resolution source as text (https link only), closed and resolved states with no order
       control; addressed by `event=<slug>`; independent markets never drawn as a distribution.
-- [ ] T025 [US2] Vitest for the three components and two hooks; Cypress PL-05 open by address in
+- [X] T025 [US2] Vitest for the three components and two hooks; Cypress PL-05 open by address in
       a fresh session, PL-06 resolved event shows the winner and no order control, PL-07 a11y.
       Flip `predict.market-page` and `predict.price-trust-state` (PL-08: block the books route,
       see Delayed then Last known, and the ticket's refusal). Open the slice PR.
+
+- [ ] T025a [US2] Per-outcome traded volume (FR-005): the gateway's market row carries no
+      volume, so the event page shows the event's volume only. Add `volume` to `MarketRow` from the
+      venue's per-market figure and show it on each outcome row.
+- [ ] T025b [US3] The ticket's refusal on a non-live price (the last clause of PL-08) lands with
+      the ticket itself in slice 5; PL-08 covers the chip and the depth ladder today.
 
 ## Phase 6: Slice 5 — the amount-first ticket (US4)
 

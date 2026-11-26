@@ -45,7 +45,7 @@ describe('usePredictEvents', () => {
     expect(result.current.events.map((e) => e.slug)).toEqual([FED.slug, RAIN.slug])
     expect(result.current.stale).toBe(true)
     expect(result.current.stamp).toMatchObject({ confirmedAtMs: Date.parse(envelope().confirmedAt) })
-    expect(client.fetchEvents).toHaveBeenCalledWith(137, { chainId: 137, category: 'economy', sort: 'volume24h', q: '' })
+    expect(client.fetchEvents).toHaveBeenCalledWith(137, { chainId: 137, category: 'economy', sort: 'volume24h', q: '', topic: '', live: false })
   })
 
   it('is unsupported (and does not fetch) off Polygon', async () => {
@@ -93,7 +93,26 @@ describe('usePredictEvents', () => {
     expect(client.fetchEvents).not.toHaveBeenCalled()
     await advance(150)
     expect(client.fetchEvents).toHaveBeenCalledTimes(1)
-    expect(client.fetchEvents).toHaveBeenCalledWith(137, { chainId: 137, category: '', sort: '', q: 'rain' })
+    expect(client.fetchEvents).toHaveBeenCalledWith(137, { chainId: 137, category: '', sort: '', q: 'rain', topic: '', live: false })
+  })
+
+  it('sends topic or live when set, and re-queries when either changes', async () => {
+    client.fetchEvents.mockResolvedValue(page([RAIN]))
+    const { rerender } = renderHook((p) => usePredictEvents(p), { initialProps: { topic: 'nba' } })
+    await flush()
+    expect(client.fetchEvents).toHaveBeenLastCalledWith(137, expect.objectContaining({ topic: 'nba', live: false, category: '' }))
+    rerender({ live: true })
+    await flush()
+    expect(client.fetchEvents).toHaveBeenLastCalledWith(137, expect.objectContaining({ topic: '', live: true }))
+    expect(client.fetchEvents).toHaveBeenCalledTimes(2)
+  })
+
+  it('sends neither topic nor live while a search is set (search wins)', async () => {
+    client.fetchEvents.mockResolvedValue(page([RAIN]))
+    renderHook(() => usePredictEvents({ topic: 'nba', live: true, q: 'rain' }))
+    await advance(400)
+    expect(client.fetchEvents).toHaveBeenCalledTimes(1)
+    expect(client.fetchEvents).toHaveBeenCalledWith(137, { chainId: 137, category: '', sort: '', q: 'rain', topic: '', live: false })
   })
 
   it('pages: loadMore appends and de-duplicates by slug', async () => {
@@ -215,6 +234,16 @@ describe('usePredictEvents', () => {
       await advance(15_000)
       expect(client.fetchEvents).not.toHaveBeenCalled()
       expect(client.fetchMarkets).toHaveBeenCalledTimes(1)
+    })
+
+    it('ignores topic and live on the older market list', async () => {
+      client.fetchEvents.mockRejectedValue(notFound())
+      client.fetchMarkets.mockResolvedValue(LEGACY)
+      const { result } = renderHook(() => usePredictEvents({ topic: 'nba', live: true }))
+      await flush()
+      expect(result.current.legacy).toBe(true)
+      expect(client.fetchMarkets).toHaveBeenCalledWith(137, { q: '', next: undefined })
+      expect(result.current.events).toHaveLength(1)
     })
 
     it('does not fall back for a chain the gateway does not serve, or for an outage', async () => {

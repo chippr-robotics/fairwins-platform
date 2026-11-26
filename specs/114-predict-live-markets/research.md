@@ -202,10 +202,16 @@ they carry, chosen so that each adds events the earlier ones did not.
    thing on the venue to a slot machine, and FR-002c keeps them findable by search and category
    and out of the row that says "look here". A match has a start time and an end date days later
    (or equal), so the test is "ends more than zero and at most sixty minutes after it starts".
-3. Pick greedily by **marginal** day volume: take the tag carrying the most, remove its events,
-   repeat. `nba` then leaves `basketball` nearly empty and four names for one Fed meeting become
-   one, with no list of synonyms to maintain.
-4. Stop at eight, or when a tag adds less than a floor.
+3. Pick greedily by **focus**: marginal day volume divided by the square root of the events it
+   is spread over (owner's decision, 2026-11-26). Take the best, remove its events, repeat. `nba`
+   then leaves `basketball` nearly empty and four names for one Fed meeting become one, with no
+   list of synonyms to maintain. The square root is what separates a topic from a category: by
+   raw volume a wide tag (`finance`, seventeen events) beats a narrow one carrying nearly as much
+   (`fed`, three), and a quick filter is most useful when it narrows to one subject. The choice is
+   made by cross-multiplying squares in integers, so no float decides an order.
+4. Stop at eight. A tag whose marginal volume is under a floor (1% of the day's considered
+   volume) is passed over, not treated as the end of the list: under focus ranking a small
+   single-event tag can outscore a wide one that clears the floor.
 
 **Rationale**: volume in the last day is the one signal that is both honest and hard to fake
 cheaply. Two tempting alternatives fail on inspection. *Surge* (a day against the week's average)
@@ -213,13 +219,20 @@ saturated at exactly 7× for every event younger than a week, so it ranks newnes
 has its own sort. *Biggest price moves* was led entirely by matches that had just finished and
 gone to 0.999; it measures resolution, not news.
 
-**What it produced on the day it was built** (2026-11-26, real venue data through the gateway's
-own client): Basketball, Finance, NFL, Trump, Soccer, Bitcoin, Global Elections, Hockey, with
-fifty or more events in play. Sensible, and broader than the venue's own chips: summing volume
-favours a wide tag (`finance`, seventeen events) over a narrow hot one (`fed`, three events
-carrying nearly as much). Ranking by marginal volume divided by the square root of the events
-added would put NFL, Fed and Jensen Huang ahead of Finance. That is a tuning choice left open; the
-selection is one pure function, so its ranking can change without the route or the client changing.
+**What it produced on the day it was built** (2026-11-26, real venue data): NFL, ceo, Global
+Rates, NBA, Bitcoin, Champions League, Main Election, AI. By raw volume the same data gave
+Basketball, Finance, NFL, Trump, Soccer, Bitcoin, Global Elections, Hockey. Focus does what it was
+chosen for, and it has a cost worth knowing: it prefers the *narrowest* tag over the top events,
+and the venue's narrowest tags are sometimes its least readable ("ceo" and "Global Rates" are the
+venue's own labels for the Nvidia chief-executive markets and the Fed decision). Labels are shown
+as the venue gives them. If that proves confusing, the remedy is a floor on events per topic or a
+short table of preferred names, not a return to raw volume.
+
+**How fresh it has to be**: not as fresh as a price. The gateway caches the answer for a minute
+and the client asks once a minute, so a healthy answer is routinely one to two minutes old. The
+first build judged it by the 30 s price bound and hid the row for most of every cycle, which no
+test saw because every test served a fresh answer. Quick filters have their own bound (five
+minutes), and tests now serve a two-minute-old answer and expect the row.
 
 **What it is not**: a recommendation. The row ranks by what the venue's traders did, never by
 fee, and FairWins' own members' activity is not an input (that would need a record of who looked

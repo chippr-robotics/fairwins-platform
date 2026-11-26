@@ -89,6 +89,24 @@ describe('EventCard', () => {
     expect(onOpen).toHaveBeenLastCalledWith(FED, FED.markets[1])
   })
 
+  it('labels an event in play with the venue\'s own score and period, as plain text', () => {
+    renderCard(mkEvent({ live: { score: '91-101', period: 'Q4', elapsed: '06:47' }, marketCount: 1 }))
+    const label = document.querySelector('.event-card-live')
+    expect(label).toHaveTextContent('In play · 91-101 · Q4')
+    // Text only: nothing animated, no countdown (the elapsed clock is not shown).
+    expect(label.children).toHaveLength(0)
+    expect(document.body.textContent).not.toMatch(/06:47/)
+  })
+
+  it('says only "In play" when the venue gave no score or period, and nothing for an event that is not in play', () => {
+    const { unmount } = renderCard(mkEvent({ live: { score: null, period: null, elapsed: null } }))
+    expect(document.querySelector('.event-card-live')).toHaveTextContent(/^In play$/)
+    unmount()
+    renderCard(mkEvent({ live: null }))
+    expect(document.querySelector('.event-card-live')).toBeNull()
+    expect(document.body.textContent).not.toMatch(/In play/)
+  })
+
   it('has no axe violations', async () => {
     const { container } = renderCard(FED, { directions: { '0xf1': 'up' } })
     expect(await axe(container)).toHaveNoViolations()

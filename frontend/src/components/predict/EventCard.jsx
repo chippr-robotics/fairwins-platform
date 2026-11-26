@@ -8,11 +8,14 @@
  *  - rows are never drawn as shares of a whole: there is no stacked bar or total, because a
  *    `mutuallyExclusive: false` event's markets are independent and probabilities are not rescaled (FR-008);
  *  - a null volume prints no figure; a null end date prints no closing line.
- * Trading is not built here: choosing a row hands (event, row) to `onOpen`.
+ *  - an event in play says "In play" with the venue's own score and period, as plain text: no animation, no
+ *    colour-only meaning, nothing more urgent than the venue's words (FR-002c, FR-028).
+ * Trading is not built here: choosing a row hands (event, row) to `onOpen`; the title hands the event to
+ * `onOpenEvent` when the caller has an event page to open (else it opens the first tradable row, as before).
  */
 import { categoryLabel } from '../../lib/predict/categories'
 import { defaultRow } from '../../lib/predict/eventAdapters'
-import { formatPercent, formatCents, formatVolume, formatClosing } from '../../lib/predict/format'
+import { formatPercent, formatCents, formatVolume, formatClosing, formatInPlay } from '../../lib/predict/format'
 import './EventCard.css'
 
 const MOVE_TEXT = { up: 'up since the last update', down: 'down since the last update' }
@@ -58,7 +61,7 @@ function Row({ event, row, single, direction, onOpen }) {
   )
 }
 
-export default function EventCard({ event, directions = {}, onOpen }) {
+export default function EventCard({ event, directions = {}, onOpen, onOpenEvent }) {
   const rows = event.markets || []
   const single = (Number(event.marketCount) || rows.length) <= 1
   const more = Math.max(0, (Number(event.marketCount) || 0) - rows.length)
@@ -66,11 +69,22 @@ export default function EventCard({ event, directions = {}, onOpen }) {
   const closes = formatClosing(event.endDate)
   const category = categoryLabel(event.category)
   const opener = defaultRow(event)
+  const inPlay = formatInPlay(event.live)
 
   return (
     <li className="event-card" data-slug={event.slug}>
-      {category && <span className="event-card-category">{category}</span>}
-      {opener ? (
+      {(category || inPlay) && (
+        <span className="event-card-kicker">
+          {category && <span className="event-card-category">{category}</span>}
+          {inPlay && <span className="event-card-live">{inPlay}</span>}
+        </span>
+      )}
+      {onOpenEvent ? (
+        // The title opens the event's own page (its address is `event=<slug>`); a row's Yes/No still opens the sheet.
+        <button type="button" className="event-card-title" onClick={() => onOpenEvent(event)}>
+          {event.title}
+        </button>
+      ) : opener ? (
         <button type="button" className="event-card-title" aria-haspopup="dialog" onClick={() => onOpen(event, opener)}>
           {event.title}
         </button>

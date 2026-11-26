@@ -58,3 +58,43 @@ export const envelope = (over = {}) => ({
   stale: false,
   ...over,
 })
+
+// ── Event detail (`/events/:slug`) fixtures — spec 114 slice 4 ──
+
+/** `n` rows, most likely LAST on purpose (the page must rank them), each with its own Yes/No tokens. */
+export const mkRows = (n, { negRisk = false } = {}) =>
+  Array.from({ length: n }, (_, i) =>
+    mkRow({
+      conditionId: `0xr${i}`,
+      label: `Row ${i}`,
+      negRisk,
+      outcomes: [
+        { name: 'Yes', tokenId: `y${i}`, price: String(((i + 1) / (n + 1)).toFixed(3)) },
+        { name: 'No', tokenId: `n${i}`, price: String((1 - (i + 1) / (n + 1)).toFixed(3)) },
+      ],
+      displayPrice: String(((i + 1) / (n + 1)).toFixed(3)),
+    }),
+  )
+
+export const mkDetail = (over = {}) => {
+  const markets = over.markets ?? mkRows(3)
+  return {
+    slug: 'fed-decision-in-december',
+    title: 'Fed Decision in December?',
+    category: 'economy',
+    volume: '61605847.12',
+    volume24h: '1820443.9',
+    endDate: '2030-12-10T12:00:00Z',
+    mutuallyExclusive: true,
+    marketCount: markets.length,
+    live: null,
+    description: 'Resolves to the FOMC target range announced on the decision date.',
+    resolutionSource: 'https://www.federalreserve.gov/monetarypolicy.htm',
+    status: 'open',
+    ...over,
+    markets,
+  }
+}
+
+/** The full `/events/:slug` body: the event itself plus the envelope. */
+export const detailBody = (over = {}, env = {}) => ({ ...mkDetail(over), ...envelope(env) })

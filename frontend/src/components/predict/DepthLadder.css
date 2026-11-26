@@ -1,0 +1,50 @@
+/* DepthLadder (spec 114) — tokens only. A stale book changes its text colour AND says so in words. */
+
+.event-depth .event-depth-note {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0 0 0.4rem;
+}
+.event-depth .event-depth-table {
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+  width: 100%;
+}
+.event-depth .event-depth-table caption {
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+  padding-bottom: 0.3rem;
+  text-align: left;
+}
+.event-depth .event-depth-table th,
+.event-depth .event-depth-table td {
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  padding: 0.3rem 0.5rem;
+  text-align: right;
+}
+.event-depth .event-depth-table th:first-child,
+.event-depth .event-depth-table td:first-child {
+  text-align: left;
+}
+.event-depth .event-depth-table thead th {
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+.event-depth .event-depth-table tbody th {
+  font-weight: 600;
+}
+.event-depth .event-depth-table td[colspan] {
+  color: var(--text-secondary);
+  text-align: left;
+}
+/* Between asks and bids: a heavier rule marks where the two sides meet, in addition to the words. */
+.event-depth .event-depth-table tbody + tbody tr:first-child > * {
+  border-top: 2px solid var(--border-color);
+}
+.event-depth--stale .event-depth-table th,
+.event-depth--stale .event-depth-table td {
+  color: var(--text-secondary);
+}
