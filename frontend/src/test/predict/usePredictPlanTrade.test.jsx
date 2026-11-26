@@ -25,7 +25,8 @@ function makeDeps(over = {}) {
     ensureCreds: vi.fn().mockResolvedValue(CREDS),
     makeClient: vi.fn(() => ({ id: 'clob-client' })),
     makeBuilderConfig: vi.fn(() => undefined),
-    submitOrder: vi.fn().mockResolvedValue({ orderId: '0xresting', status: 'live' }),
+    submitOrder: vi.fn().mockResolvedValue({ orderId: '0xlegacy', status: 'live' }),
+    submitRestingOrder: vi.fn().mockResolvedValue({ orderId: '0xresting', status: 'live' }),
     submitMarketOrder: vi.fn().mockResolvedValue({ orderId: '0xmarket', status: 'matched' }),
     cancelOrder: vi.fn(),
     resolveTradeSigner: vi.fn(() => ({ canSign: true, kind: 'eoa', address: TRADER })),
@@ -53,6 +54,7 @@ const nothingSigned = (deps) => {
   expect(deps.makeClient).not.toHaveBeenCalled()
   expect(deps.submitMarketOrder).not.toHaveBeenCalled()
   expect(deps.submitOrder).not.toHaveBeenCalled()
+  expect(deps.submitRestingOrder).not.toHaveBeenCalled()
 }
 
 beforeEach(() => {
@@ -317,21 +319,94 @@ describe('usePredictPlanTrade — review, then sign', () => {
   })
 
   it('a plain failure is an honest error with the reason, and Edit recovers the ticket', async () => {
-    const deps = makeDeps({ submitMarketOrder: vi.fn().mockRejectedValue(new Error('insufficient balance')) })
+    const deps = makeDeps({ submitMarketOrder: vi.fn().mockRejectedValue(new Error('market is closed')) })
     const { result } = await ready(deps)
     act(() => result.current.review())
     await act(async () => {
       await result.current.confirm()
     })
     expect(result.current.state).toBe('error')
-    expect(result.current.reason).toBe('insufficient balance')
+    expect(result.current.reason).toBe('market is closed')
     act(() => result.current.edit())
     expect(result.current.state).toBe('planning')
+  })
+
+  it('a balance or allowance shortfall is an error that says so — NOT "the market moved" (it would never succeed on a re-sign)', async () => {
+    for (const said of ['not enough balance / allowance', 'insufficient balance']) {
+      const deps = makeDeps({ submitMarketOrder: vi.fn().mockRejectedValue(Object.assign(new Error(said), { status: 400 })) })
+      const { result, unmount } = await ready(deps)
+      act(() => result.current.review())
+      let out
+      await act(async () => {
+        out = await result.current.confirm()
+      })
+      expect(out).toBeNull()
+      expect(result.current.state).toBe('error')
+      expect(result.current.notice).toBeNull()
+      expect(result.current.reason).toMatch(/does not have enough|not allowed/)
+      expect(result.current.reason).toMatch(/Nothing was placed/)
+      unmount()
+    }
+  })
+
+  it('OUTCOME UNKNOWN: an answer that never arrived is neither sent nor failed, and there is no way back to Sign', async () => {
+    const lost = Object.assign(new Error('Polymarket did not confirm whether it received this order.'), { outcomeUnknown: true })
+    const deps = makeDeps({ submitMarketOrder: vi.fn().mockRejectedValue(lost) })
+    const { result } = await ready(deps)
+    act(() => result.current.review())
+    let out
+    await act(async () => {
+      out = await result.current.confirm()
+    })
+    expect(out).toEqual({ outcomeUnknown: true })
+    expect(result.current.state).toBe('unknown')
+    expect(result.current.reason).toMatch(/may have been placed/)
+    expect(result.current.reason).toMatch(/before you send anything again/)
+    expect(result.current.result).toBeNull()
+    // Edit must not turn an unknown outcome back into a signable ticket, and Sign does nothing.
+    act(() => result.current.edit())
+    expect(result.current.state).toBe('unknown')
+    await act(async () => {
+      await result.current.confirm()
+    })
+    expect(deps.submitMarketOrder).toHaveBeenCalledTimes(1)
+  })
+
+  it('two Sign presses delivered before a re-render post ONE order', async () => {
+    const deps = makeDeps()
+    const { result } = await ready(deps)
+    act(() => result.current.review())
+    await act(async () => {
+      // Both calls close over the same render: `confirming` is false in each.
+      const confirm = result.current.confirm
+      await Promise.all([confirm(), confirm()])
+    })
+    expect(deps.submitMarketOrder).toHaveBeenCalledTimes(1)
+    expect(result.current.state).toBe('done')
+  })
+
+  it('enabling trading is noticed in the same session: the next order does not run the setup again', async () => {
+    let cached = null
+    const deps = makeDeps({
+      loadCachedCreds: vi.fn(() => cached),
+      ensureCreds: vi.fn(async () => {
+        cached = CREDS
+        return CREDS
+      }),
+    })
+    const { result } = await ready(deps)
+    expect(result.current.tradingEnabled).toBe(false)
+    act(() => result.current.review())
+    await act(async () => {
+      await result.current.confirm()
+    })
+    expect(result.current.state).toBe('done')
+    expect(result.current.tradingEnabled).toBe(true)
   })
 })
 
 describe('usePredictPlanTrade — the order types and the signer rails', () => {
-  it('a named price rests: the EXISTING submitOrder (GTC) with whole-hundredth shares at that price', async () => {
+  it('a named price rests (GTC) with whole-hundredth shares at that price, ON THE TICK IT WAS REVIEWED ON', async () => {
     const deps = makeDeps()
     const { result } = await ready(deps, { ownPrice: '0.57' })
     expect(result.current.view).toMatchObject({ kind: 'resting', shares: '87.71', payAtMost: '49.9947' })
@@ -339,8 +414,47 @@ describe('usePredictPlanTrade — the order types and the signer rails', () => {
     await act(async () => {
       await result.current.confirm()
     })
-    expect(deps.submitOrder).toHaveBeenCalledWith({ id: 'clob-client' }, { tokenId: TOKEN, side: 'BUY', price: '0.57', size: '87.71', negRisk: false })
+    expect(deps.submitRestingOrder).toHaveBeenCalledTimes(1)
+    const [client, order] = deps.submitRestingOrder.mock.calls[0]
+    expect(client).toEqual({ id: 'clob-client' })
+    // The tick travels with the order so the SDK refuses, rather than re-rounds, if the venue's tick is now coarser.
+    expect(order).toStrictEqual({ tokenId: TOKEN, side: 'BUY', price: '0.57', size: '87.71', negRisk: undefined, tickSize: '0.01' })
     expect(deps.submitMarketOrder).not.toHaveBeenCalled()
+    expect(deps.submitOrder).not.toHaveBeenCalled()
+  })
+
+  it('negRisk is passed only when STATED: unknown is left out so the SDK asks the venue, never signed as false', async () => {
+    for (const [given, sent] of [[true, true], [false, false], [undefined, undefined], [null, null]]) {
+      const deps = makeDeps()
+      const { result, unmount } = await ready(deps, { negRisk: given })
+      act(() => result.current.review())
+      await act(async () => {
+        await result.current.confirm()
+      })
+      expect(deps.submitMarketOrder.mock.calls[0][1].negRisk).toBe(sent)
+      unmount()
+    }
+  })
+
+  it('FEES: an order that rests is quoted at the MAKER rate; its ceiling allows for the taker rate and says it is contingent', async () => {
+    const deps = makeDeps()
+    // 57¢ is below the best ask (93¢): it rests.
+    const { result } = await ready(deps, { ownPrice: '0.57' })
+    expect(result.current.view.crossesBook).toBe(false)
+    expect(result.current.quote.builderFeeUnits).toBe(0n) // maker rate is 0 bps
+    expect(result.current.quote.feeLines).toEqual([])
+    expect(result.current.ceiling.contingent).toBe(true)
+    expect(result.current.ceiling.builderFeeUnits).toBeGreaterThan(0n) // taker rate: 50 bps of 49.9947
+    expect(result.current.ceiling.totalCostUnits).toBe(result.current.ceiling.notionalUnits + result.current.ceiling.builderFeeUnits)
+  })
+
+  it('FEES: a named price that crosses the book fills at once — the TAKER rate, on both the quote and the ceiling', async () => {
+    const deps = makeDeps()
+    const { result } = await ready(deps, { ownPrice: '0.95' })
+    expect(result.current.view).toMatchObject({ kind: 'resting', crossesBook: true })
+    expect(result.current.quote.builderFeeUnits).toBeGreaterThan(0n)
+    expect(result.current.ceiling.contingent).toBe(false)
+    expect(result.current.ceiling.builderFeeUnits).toBe(result.current.quote.builderFeeUnits)
   })
 
   it('a sell signs the shares at the limit below the worst bid', async () => {
@@ -350,7 +464,7 @@ describe('usePredictPlanTrade — the order types and the signer rails', () => {
     await act(async () => {
       await result.current.confirm()
     })
-    expect(deps.submitMarketOrder.mock.calls[0][1]).toEqual({ tokenId: TOKEN, side: 'SELL', amount: '100', limitPrice: '0.92', negRisk: false, tickSize: '0.01' })
+    expect(deps.submitMarketOrder.mock.calls[0][1]).toEqual({ tokenId: TOKEN, side: 'SELL', amount: '100', limitPrice: '0.92', tickSize: '0.01' })
   })
 
   it('CUSTODY: a passkey session signs through the same ERC-1271 client (signatureType 3, maker == funder == the account)', async () => {

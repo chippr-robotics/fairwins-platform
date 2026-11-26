@@ -6,17 +6,18 @@
  *
  * Every number here is the plan's (`reviewed`), and the pay figure is the order's real maker amount, so what
  * is shown is what is signed. The fee lines come from `computeCostForPlan`: the builder fee is its own line,
- * the venue's fee is disclosed in words, and a zero fee draws no line.
+ * the venue's fee is disclosed in words, and a zero fee draws no line. A buy's fee lines and its total are
+ * read from the SAME quote (the ceiling), so the lines add up to the total; every figure names USDC.
  */
 import { forwardRef } from 'react'
-import { feeDisclosureText, firstTradeText, WRONG_NETWORK_TEXT, NETWORK_FEE_TEXT, CUSTODY_TEXT } from '../../lib/predict/disclosures'
+import { feeDisclosureText, restingFeeText, firstTradeText, WRONG_NETWORK_TEXT, NETWORK_FEE_TEXT, CUSTODY_TEXT } from '../../lib/predict/disclosures'
 import { formatUsd, formatUsdExact, formatShareCount, formatPriceCents } from '../../lib/predict/format'
-import { nearCertainty, depthStatement } from '../../lib/predict/ticketStatements'
+import { nearCertainty, depthStatement, usdc, venueFeeNote } from '../../lib/predict/ticketStatements'
 
 const BUSY_LABEL = { enabling: 'Enabling…', signing: 'Signing…', submitting: 'Submitting…' }
 
 const OrderReview = forwardRef(function OrderReview(
-  { reviewed, quote, ceiling, outcomeName, state, notice, signerKind, onWrongNetwork, tradingEnabled, builderBps, onEdit, onSign },
+  { reviewed, quote, ceiling, outcomeName, state, notice, signerKind, onWrongNetwork, tradingEnabled, builderBps, fee, onEdit, onSign },
   headingRef,
 ) {
   if (!reviewed) return null
@@ -24,8 +25,10 @@ const OrderReview = forwardRef(function OrderReview(
   const resting = reviewed.kind === 'resting'
   const busy = state === 'enabling' || state === 'signing' || state === 'submitting'
   const limit = formatPriceCents(reviewed.limitPrice, buy ? 'up' : 'down')
-  const exact = (v) => (resting ? formatUsdExact(v) : formatUsd(v, 'up'))
-  const risk = nearCertainty(reviewed, quote, ceiling)
+  const exact = (v) => usdc(resting ? formatUsdExact(v) : formatUsd(v, 'up'))
+  const basis = ceiling ?? quote
+  const venueNote = venueFeeNote(fee)
+  const risk = nearCertainty(reviewed, quote, ceiling, fee)
   const depth = depthStatement(reviewed)
 
   return (
@@ -46,18 +49,21 @@ const OrderReview = forwardRef(function OrderReview(
         {buy ? (
           <>
             <div>
-              <dt>You pay at most</dt>
+              <dt>You pay at most, before fees</dt>
               <dd data-testid="review-pay">{exact(reviewed.payAtMost)}</dd>
             </div>
-            {quote?.feeLines.map((f) => (
+            {basis?.feeLines.map((f) => (
               <div key={f.label} className="order-ticket-fee-line">
-                <dt>{f.label}</dt>
-                <dd>+{formatUsd(f.amount, 'up')}</dd>
+                <dt>
+                  {f.label}
+                  {basis.contingent ? ', if it fills at once' : ''}
+                </dt>
+                <dd>+{usdc(formatUsd(f.amount, 'up'))}</dd>
               </div>
             ))}
             <div className="order-ticket-total">
-              <dt>The most you can lose</dt>
-              <dd data-testid="review-max-loss">{formatUsd(ceiling?.totalCostUnits ?? quote?.totalCostUnits, 'up')}</dd>
+              <dt>The most you can lose{venueNote}</dt>
+              <dd data-testid="review-max-loss">{usdc(formatUsd(basis?.totalCostUnits, 'up'))}</dd>
             </div>
             <div>
               <dt>You get about</dt>
@@ -66,12 +72,12 @@ const OrderReview = forwardRef(function OrderReview(
               </dd>
             </div>
             <div>
-              <dt>If you are right</dt>
-              <dd>{formatUsd(reviewed.payoutIfRight, 'down')}</dd>
+              <dt>If you are right, you receive{venueNote}</dt>
+              <dd>{usdc(formatUsd(reviewed.payoutIfRight, 'down'))}</dd>
             </div>
             <div>
-              <dt>If you are wrong</dt>
-              <dd>$0.00</dd>
+              <dt>If you are wrong, you receive</dt>
+              <dd>{usdc('$0.00')}</dd>
             </div>
           </>
         ) : (
@@ -84,17 +90,17 @@ const OrderReview = forwardRef(function OrderReview(
             </div>
             <div>
               <dt>Sale value before fees</dt>
-              <dd>{formatUsd(reviewed.proceeds, 'down')}</dd>
+              <dd>{usdc(formatUsd(reviewed.proceeds, 'down'))}</dd>
             </div>
             {quote?.feeLines.map((f) => (
               <div key={f.label} className="order-ticket-fee-line">
                 <dt>{f.label}</dt>
-                <dd>−{formatUsd(f.amount, 'up')}</dd>
+                <dd>−{usdc(formatUsd(f.amount, 'up'))}</dd>
               </div>
             ))}
             <div className="order-ticket-total">
-              <dt>You receive about (before Polymarket’s fee)</dt>
-              <dd>{formatUsd(quote?.netProceedsUnits, 'down')}</dd>
+              <dt>You receive about{venueNote}</dt>
+              <dd data-testid="review-receive">{usdc(formatUsd(quote?.netProceedsUnits, 'down'))}</dd>
             </div>
           </>
         )}
@@ -106,7 +112,7 @@ const OrderReview = forwardRef(function OrderReview(
 
       {reviewed.partial && (
         <p className="order-ticket-note" role="status">
-          This order is for {buy ? formatUsd(reviewed.partial.fillable, 'down') : `${formatShareCount(reviewed.partial.fillable)} shares`}{' '}
+          This order is for {buy ? usdc(formatUsd(reviewed.partial.fillable, 'down')) : `${formatShareCount(reviewed.partial.fillable)} shares`}{' '}
           — the part of what you entered that has {buy ? 'an offer' : 'a bid'} at the prices shown.
         </p>
       )}
@@ -123,7 +129,7 @@ const OrderReview = forwardRef(function OrderReview(
             {reviewed.crossesBook && (
               <p>
                 That price is already {buy ? 'on offer' : 'bid'}, so this will fill at once at the best prices instead of
-                resting — and the builder fee applies to that fill.
+                resting.
               </p>
             )}
           </>
@@ -137,7 +143,11 @@ const OrderReview = forwardRef(function OrderReview(
 
       <p className="order-ticket-note">{NETWORK_FEE_TEXT}</p>
       <p className="order-ticket-note">{CUSTODY_TEXT}</p>
-      <p className="order-ticket-note">{feeDisclosureText(builderBps)}</p>
+      <p className="order-ticket-note">
+        {resting
+          ? restingFeeText({ makerBps: fee?.builderMakerFeeBps, takerBps: builderBps, crosses: reviewed.crossesBook, buy })
+          : feeDisclosureText(builderBps)}
+      </p>
       {onWrongNetwork && (
         <p className="order-ticket-warn" role="status">
           {WRONG_NETWORK_TEXT}

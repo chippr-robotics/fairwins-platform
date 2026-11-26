@@ -96,12 +96,12 @@ describe('OrderTicket — the amount comes first', () => {
     type('50')
     expect(dd('figure-average')).toBe('94¢')
     expect(dd('figure-shares')).toMatch(/≈ 53\.19/)
-    expect(dd('figure-payout')).toBe('$53.19')
-    expect(dd('figure-max-loss')).toBe('$50.25')
+    expect(dd('figure-payout')).toBe('$53.19 USDC')
+    expect(dd('figure-max-loss')).toBe('$50.25 USDC')
     type('25')
     expect(dd('figure-shares')).toMatch(/≈ 26\.59/)
-    expect(dd('figure-payout')).toBe('$26.59')
-    expect(dd('figure-max-loss')).toBe('$25.13') // 25.00 + 0.125 builder fee, rounded UP to the cent
+    expect(dd('figure-payout')).toBe('$26.59 USDC')
+    expect(dd('figure-max-loss')).toBe('$25.13 USDC') // 25.00 + 0.125 builder fee, rounded UP to the cent
   })
 
   it('every fee is its own line; the builder fee is emphasised and the sentences are the ones TradeConfirm uses', () => {
@@ -111,8 +111,43 @@ describe('OrderTicket — the amount comes first', () => {
     expect(fee.closest('div')).toHaveClass('order-ticket-fee-line')
     expect(fee.closest('div')).toHaveTextContent('+$0.25')
     expect(screen.getByText(/FairWins charges a 0\.50% builder fee on this trade, included above\. Polymarket also charges its own taker fee/)).toBeInTheDocument()
-    expect(screen.getByText('Network fee: none — you sign, no gas')).toBeInTheDocument()
+    expect(screen.getByText('Signing this order costs no network fee.')).toBeInTheDocument()
     expect(document.body.textContent).not.toMatch(/builder[^.]{0,40}\bfree\b/i)
+  })
+
+  it('the column ADDS UP: "You pay at most" + each fee line = "The most you can lose", all read from the signed ceiling', () => {
+    renderTicket()
+    type('50')
+    const cents = (text) => Math.round(Number(text.replace(/[^0-9.]/g, '')) * 100)
+    const pay = cents(dd('figure-pay'))
+    const fee = cents(screen.getByText('FairWins builder fee').nextSibling.textContent)
+    expect(pay).toBe(5000)
+    expect(pay + fee).toBe(cents(dd('figure-max-loss')))
+    fireEvent.click(screen.getByRole('button', { name: 'Review order' }))
+    const reviewFee = cents(screen.getByText('FairWins builder fee').nextSibling.textContent)
+    expect(cents(dd('review-pay')) + reviewFee).toBe(cents(dd('review-max-loss')))
+  })
+
+  it('every money figure names USDC (spec 057 FR-011)', () => {
+    renderTicket()
+    type('50')
+    expect(screen.getByLabelText(/amount to spend \(USDC\)/i)).toBeInTheDocument()
+    for (const id of ['figure-pay', 'figure-payout', 'figure-max-loss']) expect(dd(id)).toMatch(/^\$[\d,.]+ USDC$/)
+    expect(screen.getByText('FairWins builder fee').nextSibling).toHaveTextContent('+$0.25 USDC')
+  })
+
+  it('Polymarket’s own fee is named beside every figure it would change — unless its rate was READ as zero', () => {
+    renderTicket() // the venue's rate here is 100 bps
+    type('50')
+    expect(screen.getByText('The most you can lose (before Polymarket’s fee)')).toBeInTheDocument()
+    expect(screen.getByText('If you are right, you receive (before Polymarket’s fee)')).toBeInTheDocument()
+  })
+
+  it('…and a rate the gateway could not read is NOT a zero: the figures stay qualified', () => {
+    trade.current = makeTrade({ fee: { feeRateBps: null, builderTakerFeeBps: 50, builderMakerFeeBps: 0 } })
+    renderTicket()
+    type('50')
+    expect(screen.getByText('The most you can lose (before Polymarket’s fee)')).toBeInTheDocument()
   })
 
   it('a zero builder fee draws no fee line', () => {
@@ -120,7 +155,10 @@ describe('OrderTicket — the amount comes first', () => {
     renderTicket()
     type('50')
     expect(screen.queryByText('FairWins builder fee')).toBeNull()
-    expect(dd('figure-max-loss')).toBe('$50.00')
+    expect(dd('figure-max-loss')).toBe('$50.00 USDC')
+    // …and with the venue's rate read as zero too, nothing is "before" anything.
+    expect(screen.getByText('The most you can lose')).toBeInTheDocument()
+    expect(screen.getByText('If you are right, you receive')).toBeInTheDocument()
   })
 
   it('quick amounts fill the field; none is pre-selected; each press is deliberate', () => {
@@ -129,7 +167,7 @@ describe('OrderTicket — the amount comes first', () => {
     expect(screen.getByLabelText(/amount to spend/i)).toHaveValue('25')
     expect(screen.getByRole('button', { name: '$25' })).toHaveAttribute('aria-pressed', 'true')
     expect(screen.getByRole('button', { name: '$50' })).toHaveAttribute('aria-pressed', 'false')
-    expect(dd('figure-payout')).toBe('$26.59')
+    expect(dd('figure-payout')).toBe('$26.59 USDC')
   })
 
   it('what is typed can only be what is signed: digits, one dot, two decimals', () => {
@@ -143,7 +181,7 @@ describe('OrderTicket — what an order would do to the book, said plainly (FR-0
   it('near certainty (average price at or above 90¢): dollars at risk beside dollars to gain', () => {
     renderTicket()
     type('50')
-    expect(screen.getByText('You put $50.25 at risk to gain $2.94.')).toBeInTheDocument()
+    expect(screen.getByText('You put $50.25 USDC at risk to gain $2.94 USDC. Polymarket’s own fee is not in these figures and makes the gain smaller.')).toBeInTheDocument()
   })
 
   it('no such sentence below 90¢', () => {
@@ -165,13 +203,13 @@ describe('OrderTicket — what an order would do to the book, said plainly (FR-0
   it('more than the visible depth: says how much CAN be filled', () => {
     renderTicket()
     type('2000')
-    expect(screen.getByText('Only $1,340.00 of this can be filled at the prices shown.')).toBeInTheDocument()
+    expect(screen.getByText('Only $1,340.00 USDC of this can be filled at the prices shown.')).toBeInTheDocument()
   })
 
   it('refusals are sentences, never reason codes', () => {
     renderTicket()
     type('1')
-    expect(screen.getByText('The smallest order here is 5 shares (about $4.70).')).toBeInTheDocument()
+    expect(screen.getByText('The smallest order here is 5 shares (about $4.70 USDC).')).toBeInTheDocument()
     type('0')
     expect(screen.getByText(/rounds to nothing/i)).toBeInTheDocument()
   })
@@ -242,7 +280,7 @@ describe('OrderTicket — outcome and side', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Max' }))
     expect(screen.getByLabelText(/shares to sell/i)).toHaveValue('100.45')
     expect(dd('figure-average')).toBe('93¢')
-    expect(dd('figure-payout')).toBe('$92.95') // 100.45 × 93¢ = 93.41, less the 0.5% builder fee, rounded DOWN
+    expect(dd('figure-payout')).toBe('$92.95 USDC') // 100.45 × 93¢ = 93.41, less the 0.5% builder fee, rounded DOWN
     expect(screen.getByText(/You receive about/)).toBeInTheDocument()
     expect(screen.queryByText('The most you can lose')).toBeNull()
     expect(screen.queryByRole('button', { name: '$25' })).toBeNull()
@@ -291,11 +329,11 @@ describe('OrderReview — the step before the signature', () => {
     toReview()
     expect(screen.getByRole('heading', { name: 'Review your order' })).toBeInTheDocument()
     expect(screen.getByText('Nothing has been signed yet.')).toBeInTheDocument()
-    expect(dd('review-pay')).toBe('$50.00')
-    expect(dd('review-max-loss')).toBe('$50.25')
+    expect(dd('review-pay')).toBe('$50.00 USDC')
+    expect(dd('review-max-loss')).toBe('$50.25 USDC')
     expect(screen.getByText(/You get about/).nextSibling).toHaveTextContent('53.19 Yes shares')
-    expect(screen.getByText('If you are right').nextSibling).toHaveTextContent('$53.19')
-    expect(screen.getByText('If you are wrong').nextSibling).toHaveTextContent('$0.00')
+    expect(screen.getByText('If you are right, you receive (before Polymarket’s fee)').nextSibling).toHaveTextContent('$53.19 USDC')
+    expect(screen.getByText('If you are wrong, you receive').nextSibling).toHaveTextContent('$0.00 USDC')
     expect(screen.getByText(/Price limit: 95¢/)).toBeInTheDocument()
     expect(screen.getByText(/cannot fill above 95¢ a share\. Whatever is not filled is cancelled and not charged\./)).toBeInTheDocument()
     expect(screen.getByText('FairWins never holds your funds or your key. The order goes to Polymarket; the outcome is decided there.')).toBeInTheDocument()
@@ -351,13 +389,42 @@ describe('OrderReview — the step before the signature', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Review order' }))
     expect(screen.getByText(/Your price: 57¢\./)).toBeInTheDocument()
     expect(screen.getByText(/rests on Polymarket’s book until it is filled or you cancel it, and it may never fill/)).toBeInTheDocument()
-    expect(dd('review-pay')).toBe('$49.9947') // exactly what is signed: 87.71 shares at 57¢
+    expect(dd('review-pay')).toBe('$49.9947 USDC') // exactly what is signed: 87.71 shares at 57¢
     expect(screen.getByRole('button', { name: 'Sign and place order (no gas)' })).toBeInTheDocument()
+  })
+
+  it('a named price that RESTS pays the maker rate: no "included above" with nothing above, and the ceiling allows for filling at once', () => {
+    renderTicket()
+    type('50')
+    fireEvent.click(screen.getByRole('button', { name: 'Set my own price' }))
+    fireEvent.change(screen.getByLabelText(/your price, in cents/i), { target: { value: '57' } })
+    const check = () => {
+      expect(screen.getByText(/An order that rests and fills later pays no FairWins builder fee\./)).toBeInTheDocument()
+      expect(screen.queryByText(/FairWins charges a 0\.50% builder fee on this trade, included above/)).toBeNull()
+      // The one fee line is the contingent one, and it is labelled as such.
+      expect(screen.getByText('FairWins builder fee, if it fills at once').nextSibling).toHaveTextContent('+$0.25 USDC')
+    }
+    check()
+    expect(dd('figure-pay')).toBe('$49.9947 USDC')
+    expect(dd('figure-max-loss')).toBe('$50.25 USDC') // 49.9947 + 0.2499735 at the taker rate, rounded up
+    fireEvent.click(screen.getByRole('button', { name: 'Review order' }))
+    check()
+    expect(dd('review-max-loss')).toBe('$50.25 USDC')
+  })
+
+  it('a named price that CROSSES the book fills at once: the taker rate, as an ordinary fee line', () => {
+    renderTicket()
+    type('50')
+    fireEvent.click(screen.getByRole('button', { name: 'Set my own price' }))
+    fireEvent.change(screen.getByLabelText(/your price, in cents/i), { target: { value: '95' } })
+    expect(screen.getByText(/fills at once and FairWins’ 0\.50% builder fee applies, included above\./)).toBeInTheDocument()
+    expect(screen.getByText('FairWins builder fee')).toBeInTheDocument()
+    expect(screen.queryByText('FairWins builder fee, if it fills at once')).toBeNull()
   })
 
   it('a partial fill is signed for what can be filled and the review says the order is smaller than what was typed', () => {
     toReview('2000')
-    expect(dd('review-pay')).toBe('$1,340.00')
+    expect(dd('review-pay')).toBe('$1,340.00 USDC')
     expect(screen.getByText(/This order is for \$1,340\.00/)).toBeInTheDocument()
   })
 
@@ -404,6 +471,25 @@ describe('OrderTicket — gates, as today', () => {
     expect(screen.getByRole('button', { name: 'Back to the ticket' })).toBeInTheDocument()
   })
 
+  it('OUTCOME UNKNOWN: says the order may have been placed, offers NO way to send it again, and points at where to check', () => {
+    trade.current = makeTrade({
+      status: 'unknown',
+      reason: 'Polymarket did not confirm whether it received this order. It may have been placed. Check your positions and open orders before you send anything again.',
+    })
+    renderTicket()
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(/did not confirm whether it received this order\. It may have been placed/)
+    expect(alert).toHaveTextContent(/Sending it again from here could buy twice, so this ticket will not offer that/)
+    expect(screen.getByRole('link', { name: /Check on Polymarket/ })).toBeInTheDocument()
+    expect(within(alert).getByRole('button', { name: 'Close' })).toBeInTheDocument()
+    // No route back to an amount, a review or a signature.
+    expect(screen.queryByRole('button', { name: 'Back to the ticket' })).toBeNull()
+    expect(screen.queryByRole('button', { name: /^Sign/ })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'Review order' })).toBeNull()
+    expect(screen.queryByLabelText(/amount to spend/i)).toBeNull()
+    expect(document.body.textContent).not.toMatch(/Order sent|could not be submitted/)
+  })
+
   it('done never says "bought" or "filled": it says what the venue answered and not to send it again', () => {
     trade.current = makeTrade({ status: 'done', result: { kind: 'submitted', orderId: '0x1', status: 'matched' } })
     renderTicket()
@@ -419,6 +505,33 @@ describe('OrderTicket — gates, as today', () => {
 })
 
 describe('OrderTicket — never stranded (FR-029)', () => {
+  it('the books route going missing WHILE an order is being signed does not swap the ticket out from under it', () => {
+    trade.current = makeTrade({ status: 'submitting' })
+    renderTicket()
+    act(() => setBooksRouteMissing(true))
+    // Still the ticket: no fresh fixed-price confirm for the same outcome beside an order in flight.
+    expect(screen.queryByLabelText(/Number of Yes shares to buy/i)).toBeNull()
+    expect(document.querySelector('.order-ticket')).not.toBeNull()
+  })
+
+  it('…nor once it has been answered: the answer stays on screen', () => {
+    for (const status of ['done', 'unknown', 'error']) {
+      trade.current = makeTrade({ status, reason: 'A reason.', result: { kind: 'submitted', status: 'matched' } })
+      const { unmount } = renderTicket()
+      act(() => setBooksRouteMissing(true))
+      expect(screen.queryByLabelText(/Number of Yes shares to buy/i)).toBeNull()
+      unmount()
+      act(() => setBooksRouteMissing(false))
+    }
+  })
+
+  it('…but an idle ticket does fall back when the route turns out to be missing', () => {
+    renderTicket()
+    expect(screen.getByLabelText(/amount to spend/i)).toBeInTheDocument()
+    act(() => setBooksRouteMissing(true))
+    expect(screen.getByLabelText(/Number of Yes shares to buy/i)).toBeInTheDocument()
+  })
+
   it('a gateway with no books route: renders the fixed-price confirm for the same outcome', () => {
     setBooksRouteMissing(true)
     renderTicket({ initialTokenId: NO_TOKEN })

@@ -162,8 +162,22 @@ the seam they plug into is right from the start.
       ships with it fixed at one tick.
 - [ ] T032b The spec-057 ticket, kept as the fallback for a gateway without the new routes, passes
       `negRisk: false` for a sell opened from a position. On a neg-risk market that order is
-      signed for the wrong exchange and the venue rejects it. The new ticket takes the flag from
-      the position; fix the old path or retire it once every gateway serves the new routes.
+      signed for the wrong exchange and the venue rejects it. The new ticket passes the flag only
+      when it is stated and otherwise lets the order SDK ask the venue; fix the old path the same
+      way or retire it once every gateway serves the new routes.
+- [ ] T032c The spec-057 ticket's `submitOrder` reports a venue refusal as an order sent (it reads
+      no error from the answer) and cannot tell a refusal from an answer that never arrived. The
+      new ticket's two submit functions classify the answer (`readPostFailure`); move the old path
+      onto the same reading, with the `unknown` state on `TradeConfirm`, or retire it.
+- [ ] T032d Positions: the gateway reports `negRisk: false` when the venue's answer carries no
+      flag. Report `null` there instead, so an absent flag is not readable as a stated one. (The
+      ticket already treats a position's `false` as unstated.)
+- [X] T032e Review fixes before the slice PR. Signing path: an answer that never arrived is
+      `unknown` and offers no re-send; a balance shortfall is an error, not "the market moved";
+      ref-based locks against a double press; the ticket is not swapped out mid-sign; a resting
+      order carries its reviewed tick; `negRisk` unstated is asked of the venue. Fees: lines and
+      total from one quote; USDC on every figure; "before Polymarket's fee" unless the rate was
+      read as zero; the maker or taker rate named on a named-price order.
 
 ## Phase 7: Slice 6 — order progress (US5)
 

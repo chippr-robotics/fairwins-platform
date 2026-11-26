@@ -665,38 +665,38 @@ describe('Predict — the amount-first order ticket (spec 114, slice 5)', () => 
     amount().type('50')
     figure('figure-average').should('have.text', '94¢')
     figure('figure-shares').should('contain.text', '53.19')
-    figure('figure-payout').should('have.text', '$53.19')
-    figure('figure-max-loss').should('have.text', '$50.25')
+    figure('figure-payout').should('have.text', '$53.19 USDC')
+    figure('figure-max-loss').should('have.text', '$50.25 USDC')
     // 94¢ is near certainty: dollars at risk beside dollars to gain, in plain currency.
-    ticket().should('contain.text', 'You put $50.25 at risk to gain $2.94.')
+    ticket().should('contain.text', 'You put $50.25 USDC at risk to gain $2.94 USDC.')
     reviewButton().should('be.enabled')
 
     // The figures FOLLOW the amount.
     amount().clear().type('25')
-    figure('figure-payout').should('have.text', '$26.59')
-    figure('figure-max-loss').should('have.text', '$25.13')
+    figure('figure-payout').should('have.text', '$26.59 USDC')
+    figure('figure-max-loss').should('have.text', '$25.13 USDC')
     // A quick amount is a deliberate press, and it is the same arithmetic.
     ticket().contains('button', '$100').click()
     amount().should('have.value', '100')
-    figure('figure-payout').should('have.text', '$106.38')
+    figure('figure-payout').should('have.text', '$106.38 USDC')
   })
 
   it('[PL-10] predict.amount-first-ticket — an amount beyond the visible depth says how much can be filled, and an amount below the minimum says so at entry', () => {
     openYes({ depth: 'thin' })
     amount().type('200')
-    ticket().should('contain.text', 'Only $85.30 of this can be filled at the prices shown.')
+    ticket().should('contain.text', 'Only $85.30 USDC of this can be filled at the prices shown.')
     ticket().should('contain.text', 'This takes about 100% of what is on offer at these prices.')
     reviewButton().should('be.enabled')
     // The order that would be signed is for what can be filled, and the review says it is smaller than what was typed.
     reviewButton().click()
     ticket().contains('h4', 'Review your order').should('be.visible')
     ticket().should('contain.text', 'This order is for $85.30')
-    figure('review-pay').should('have.text', '$85.30')
+    figure('review-pay').should('have.text', '$85.30 USDC')
     ticket().contains('button', 'Edit').click()
 
     // Below the venue's minimum (5 shares): stated at entry, with the sentence a member can act on, never a code.
     amount().clear().type('1')
-    ticket().should('contain.text', 'The smallest order here is 5 shares (about $4.70).')
+    ticket().should('contain.text', 'The smallest order here is 5 shares (about $4.70 USDC).')
     figure('figure-average').should('not.exist')
     reviewButton().should('be.disabled')
     ticket().should('not.contain.text', 'below-minimum')
@@ -706,13 +706,16 @@ describe('Predict — the amount-first order ticket (spec 114, slice 5)', () => 
     openYes()
     amount().type('50')
     // The builder fee is its OWN line, a real cost, disclosed before anything is signed.
-    ticket().find('.order-ticket-fee-line').should('have.length', 1).and('contain.text', 'FairWins builder fee').and('contain.text', '+$0.25')
+    ticket().find('.order-ticket-fee-line').should('have.length', 1).and('contain.text', 'FairWins builder fee').and('contain.text', '+$0.25 USDC')
+    // The column adds up, in USDC: what is paid at most, plus the fee line, is the most that can be lost.
+    figure('figure-pay').should('have.text', '$50.00 USDC')
+    figure('figure-max-loss').should('have.text', '$50.25 USDC')
     ticket().should(($t) => {
       const text = $t.text()
       expect(text, 'the rate').to.match(/0\.50% builder fee/)
       expect(text, 'where the fee sits').to.match(/included above/i)
       expect(text, 'the venue fee is a separate charge').to.match(/Polymarket also charges its own taker fee/)
-      expect(text, 'the order itself is gasless').to.match(/Network fee: none — you sign, no gas/)
+      expect(text, 'the order itself is gasless').to.match(/Signing this order costs no network fee\./)
       expect(text, 'an additive cost is never "free"').to.not.match(/builder[^.]{0,40}\bfree\b/i)
     })
     noSignature()
@@ -721,8 +724,8 @@ describe('Predict — the amount-first order ticket (spec 114, slice 5)', () => 
     reviewButton().click()
     ticket().contains('h4', 'Review your order').should('be.visible')
     ticket().should('contain.text', 'Nothing has been signed yet.')
-    figure('review-pay').should('have.text', '$50.00')
-    figure('review-max-loss').should('have.text', '$50.25')
+    figure('review-pay').should('have.text', '$50.00 USDC')
+    figure('review-max-loss').should('have.text', '$50.25 USDC')
     ticket().find('.order-ticket-fee-line').should('contain.text', 'FairWins builder fee')
     ticket().should('contain.text', 'Price limit: 94.1¢.')
     ticket().should('contain.text', 'cannot fill above 94.1¢ a share')

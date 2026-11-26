@@ -17,17 +17,29 @@
  * reaches the depth ⇒ `moved`; (2) first-time setup if needed (one gasless signature; passkey: approvals);
  * (3) re-plan again right before the order is built — the ceremonies can take minutes; (4) sign with the
  * REVIEWED limit and amount, never a newer one. A marketable order is fill-and-kill at that limit; a price the
- * member named rests (GTC) through the existing `submitOrder`. `done` returns what the venue answered; order
+ * member named rests (GTC) on the tick it was reviewed on. `done` returns what the venue answered; order
  * tracking is a later slice.
+ *
+ * `unknown` (passed through from usePredictTrade): the order was sent and the venue's answer never arrived.
+ * It is terminal for this ticket — there is no way back to Sign from it, because the same fill-and-kill order
+ * sent twice can fill twice.
+ *
+ * Fees (spec 057 FR-012): an order that rests is a MAKER when it fills, so its quote uses the builder's maker
+ * rate; one that crosses the book fills at once as a TAKER. The ceiling of a resting buy assumes whichever of
+ * the two is larger, because the book can move between review and arrival — `ceiling.contingent` says the
+ * ceiling's fee is not the one expected to apply.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePredictTrade } from './usePredictTrade'
 import { computeCostForPlan } from '../lib/predict/clobOrder'
 import { planForTicket, checkStillSignable } from '../lib/predict/ticketPlan'
 import { reclassify } from '../lib/markets/priceReading'
-import { submitMarketOrder as defaultSubmitMarketOrder, submitOrder as defaultSubmitOrder } from '../lib/predict/clobSession'
+import { submitMarketOrder as defaultSubmitMarketOrder, submitRestingOrder as defaultSubmitRestingOrder } from '../lib/predict/clobSession'
 
-const PASS_THROUGH = new Set(['checking', 'geoblocked', 'blocked', 'enabling', 'signing', 'submitting', 'done', 'error'])
+const PASS_THROUGH = new Set(['checking', 'geoblocked', 'blocked', 'enabling', 'signing', 'submitting', 'done', 'error', 'unknown'])
+
+/** Does this plan fill as a maker? Only an order that rests WITHOUT crossing the book. */
+const fillsAsMaker = (v) => v?.kind === 'resting' && v.crossesBook !== true
 
 export function usePredictPlanTrade({
   tokenId,
@@ -38,18 +50,21 @@ export function usePredictPlanTrade({
   toleranceTicks = 1,
   tickSize,
   minOrderSize,
-  negRisk = false,
+  // true | false when the listing states it; anything else and the SDK asks the venue (never a guessed false).
+  negRisk,
   walletClient,
   deps,
 } = {}) {
   const trade = usePredictTrade({ deps, walletClient })
   const sendMarket = deps?.submitMarketOrder ?? defaultSubmitMarketOrder
-  const sendResting = deps?.submitOrder ?? defaultSubmitOrder
+  const sendResting = deps?.submitRestingOrder ?? defaultSubmitRestingOrder
 
   const [phase, setPhase] = useState('editing') // editing | review
   const [reviewed, setReviewed] = useState(null)
   const [notice, setNotice] = useState(null) // { code: 'moved' | 'not-live' | 'venue', reason? }
   const [confirming, setConfirming] = useState(false)
+  // A ref as well as the state: two presses delivered in one render both read `confirming === false`.
+  const confirmingRef = useRef(false)
 
   // The latest inputs, read at SIGN time: a closure captured when Review was pressed would re-plan against a
   // reading that has since aged, which is the very thing FR-021 exists to prevent.
@@ -63,11 +78,22 @@ export function usePredictPlanTrade({
     [reading, side, typed, ownPrice, toleranceTicks, tickSize, minOrderSize]
   )
   const quoteOf = useCallback(
-    (v) => (v?.status === 'ok' && trade.fee ? computeCostForPlan(v.feePlan, side, trade.fee) : null),
+    (v) => (v?.status === 'ok' && trade.fee ? computeCostForPlan(v.feePlan, side, trade.fee, { isMaker: fillsAsMaker(v) }) : null),
     [trade.fee, side]
   )
   const ceilingOf = useCallback(
-    (v) => (v?.status === 'ok' && v.ceilingPlan && trade.fee ? computeCostForPlan(v.ceilingPlan, side, trade.fee) : null),
+    (v) => {
+      if (v?.status !== 'ok' || !trade.fee) return null
+      if (v.kind === 'resting') {
+        const asMaker = computeCostForPlan(v.feePlan, side, trade.fee, { isMaker: true })
+        const asTaker = computeCostForPlan(v.feePlan, side, trade.fee, { isMaker: false })
+        if (!asMaker || !asTaker) return null
+        const worst = asTaker.builderFeeUnits >= asMaker.builderFeeUnits ? asTaker : asMaker
+        const expected = fillsAsMaker(v) ? asMaker : asTaker
+        return { ...worst, contingent: worst.builderFeeUnits !== expected.builderFeeUnits }
+      }
+      return v.ceilingPlan ? computeCostForPlan(v.ceilingPlan, side, trade.fee) : null
+    },
     [trade.fee, side]
   )
   const quote = useMemo(() => quoteOf(view), [quoteOf, view])
@@ -119,7 +145,7 @@ export function usePredictPlanTrade({
   const send = useCallback(
     (client, r) =>
       r.kind === 'resting'
-        ? sendResting(client, { tokenId, side: r.signed.side, price: r.signed.limitPrice, size: r.signed.size, negRisk })
+        ? sendResting(client, { tokenId, side: r.signed.side, price: r.signed.limitPrice, size: r.signed.size, negRisk, tickSize: r.signed.tickSize })
         : sendMarket(client, {
             tokenId,
             side: r.signed.side,
@@ -132,7 +158,8 @@ export function usePredictPlanTrade({
   )
 
   const confirm = useCallback(async () => {
-    if (phase !== 'review' || !reviewed || confirming) return null
+    if (phase !== 'review' || !reviewed || confirming || confirmingRef.current) return null
+    confirmingRef.current = true
     setConfirming(true)
     const recheck = () => checkStillSignable({ reviewed, ...latest.current, reading: reclassify(latest.current.reading) })
     const moveTo = (check) => {
@@ -182,6 +209,7 @@ export function usePredictPlanTrade({
       }
       return res
     } finally {
+      confirmingRef.current = false
       setConfirming(false)
     }
   }, [phase, reviewed, confirming, trade, send])

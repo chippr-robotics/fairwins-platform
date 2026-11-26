@@ -82,21 +82,44 @@ describe('marketOrderSignedAmounts — pinned to the real SDK (createMarketOrder
     expect(marketOrderSignedAmounts({ side: 'BUY', amount: '0.004', limitPrice: '0.5', tickSize: '0.01' })).toBeNull()
   })
 
-  it('agrees with the SDK across a few hundred random orders on every tick (OrderBuilder, public export)', async () => {
+  // The SDK derives the taker amount in floating point; this twin is exact. Measured over 200,000 orders
+  // (2026-11-26): the MAKER amount never differed; a taker amount under 100,000 never differed; from there to a
+  // billion it differed, in about 1 order in 50, by one step of the last decimal the SDK signs on that tick;
+  // beyond a billion the SDK runs out of precision. The bounds below are that measurement, so a release that
+  // drifts further — or at ordinary sizes at all — fails here.
+  const UNIT = 1_000_000n
+  const EXACT_BELOW = 100_000n * UNIT
+  const ONE_STEP_BELOW = 1_000_000_000n * UNIT
+  const amountStep = { '0.1': 1_000n, '0.01': 100n, '0.001': 10n, '0.0001': 1n } // micro-units per signed decimal
+
+  it('agrees with the SDK across random orders on every tick: the maker amount ALWAYS, the taker amount exactly at ordinary sizes and within one signed decimal at very large ones', async () => {
     const builder = new OrderBuilder(wallet(), 137, 0)
-    let seed = 20261126
-    const rnd = (n) => {
-      seed = (seed * 1664525 + 1013904223) % 4294967296
-      return seed % n
+    // mulberry32. The linear generator this replaced has low bits that cycle with period 4, and the loop drew
+    // four numbers per order — so `seed % 4` picked the SAME tick and `seed % 2` the SAME side every time: all
+    // 240 "random orders on every tick" were sells on the 0.01 tick. Hence the `seen` counts at the bottom.
+    let a = 20261126
+    const next = () => {
+      a = (a + 0x6d2b79f5) | 0
+      let t = Math.imul(a ^ (a >>> 15), 1 | a)
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296
     }
+    const rnd = (n) => Math.floor(next() * n)
     const ticks = { '0.1': 1, '0.01': 2, '0.001': 3, '0.0001': 4 }
-    for (let i = 0; i < 240; i++) {
+    const seen = { ordinary: 0, large: 0, largeDrifted: 0, huge: 0, ticks: new Set(), sides: new Set() }
+    for (let i = 0; i < 1500; i++) {
       const tick = Object.keys(ticks)[rnd(4)]
       const pd = ticks[tick]
       const steps = 10 ** pd
-      const priceUnits = 1 + rnd(steps - 1)
+      // A third of the prices sit on the edges of the grid — where a small price turns a modest amount into a
+      // very large share count.
+      const priceUnits = i % 3 === 0 ? [1, 2, 3, steps - 1][rnd(4)] : 1 + rnd(steps - 1)
       const price = (priceUnits / steps).toFixed(pd).replace(/0+$/, '').replace(/\.$/, '')
-      const cents = 1 + rnd(500000)
+      // Amounts from cents to ten million, with .99 and whole-dollar endings over-represented.
+      const magnitude = [100, 1_000, 10_000, 100_000, 1_000_000, 10_000_000, 100_000_000, 1_000_000_000][rnd(8)]
+      let cents = 1 + rnd(magnitude)
+      if (i % 5 === 1) cents = Math.floor(cents / 100) * 100 + 99
+      if (i % 5 === 2) cents = Math.floor(cents / 100) * 100 + 100
       const amount = (cents / 100).toFixed(2)
       const side = rnd(2) ? 'BUY' : 'SELL'
       const built = await builder.buildMarketOrder(
@@ -104,11 +127,66 @@ describe('marketOrderSignedAmounts — pinned to the real SDK (createMarketOrder
         { tickSize: tick, negRisk: i % 2 === 0 },
       )
       const signed = marketOrderSignedAmounts({ side, amount, limitPrice: price, tickSize: tick })
-      expect({ i, side, amount, price, tick, maker: built.makerAmount, taker: built.takerAmount }).toEqual({
-        i, side, amount, price, tick, maker: signed.makerUnits.toString(), taker: signed.takerUnits.toString(),
-      })
+      const at = { i, side, amount, price, tick }
+      seen.ticks.add(tick)
+      seen.sides.add(side)
+      // What the member GIVES is exact, always: it is the "You pay at most" / "You sell up to" figure.
+      expect({ ...at, maker: built.makerAmount }).toEqual({ ...at, maker: signed.makerUnits.toString() })
+      const diff = BigInt(built.takerAmount) - signed.takerUnits
+      const abs = diff < 0n ? -diff : diff
+      if (signed.takerUnits < EXACT_BELOW) {
+        seen.ordinary++
+        expect({ ...at, taker: built.takerAmount }).toEqual({ ...at, taker: signed.takerUnits.toString() })
+      } else if (signed.takerUnits < ONE_STEP_BELOW) {
+        seen.large++
+        if (abs !== 0n) seen.largeDrifted++
+        expect({ ...at, withinOneStep: abs <= amountStep[tick] }).toEqual({ ...at, withinOneStep: true })
+      } else {
+        seen.huge++
+        // Past a billion only the scale is asserted: the two agree to better than one part in a trillion.
+        expect({ ...at, close: abs * 1_000_000_000_000n <= signed.takerUnits }).toEqual({ ...at, close: true })
+      }
     }
-  }, 60_000)
+    // Every branch really ran — a fuzz that never reaches a range proves nothing about it — and the drift it
+    // allows for is one that actually occurs.
+    expect([...seen.ticks].sort()).toEqual(['0.0001', '0.001', '0.01', '0.1'])
+    expect([...seen.sides].sort()).toEqual(['BUY', 'SELL'])
+    expect(seen.ordinary).toBeGreaterThan(900)
+    expect(seen.large).toBeGreaterThan(200)
+    expect(seen.largeDrifted).toBeGreaterThan(0)
+    expect(seen.huge).toBeGreaterThan(5)
+  }, 120_000)
+
+  it('the drift is real and is the SDK\'s: $72.99 at one tick of a 0.0001 market is signed one millionth of a share short', async () => {
+    // 72.99 ÷ 0.0001 = 729,900 exactly. In floating point the SDK lands a hair under and floors.
+    const builder = new OrderBuilder(wallet(), 137, 0)
+    const built = await builder.buildMarketOrder(
+      { tokenID: TOKEN, side: Side.BUY, amount: 72.99, price: 0.0001, orderType: OrderType.FAK },
+      { tickSize: '0.0001', negRisk: false },
+    )
+    const signed = marketOrderSignedAmounts({ side: 'BUY', amount: '72.99', limitPrice: '0.0001', tickSize: '0.0001' })
+    expect(built.makerAmount).toBe('72990000')
+    expect(signed.makerUnits).toBe(72_990_000n)
+    expect(signed.takerUnits).toBe(729_900_000_000n)
+    expect(BigInt(built.takerAmount) - signed.takerUnits).toBe(-1n)
+  })
+})
+
+describe('a resting order is signed on the tick it was REVIEWED on, or not at all', () => {
+  it('the venue\'s tick has become coarser than the reviewed one: the SDK refuses instead of rounding the member\'s price', async () => {
+    // Reviewed at 57.5¢ on a 0.001 tick; by the time the order is built the venue's tick is 0.01.
+    const client = offlineClient('0.01')
+    await expect(
+      client.createOrder({ tokenID: TOKEN, side: Side.BUY, size: 10, price: 0.575 }, { tickSize: '0.001', negRisk: false }),
+    ).rejects.toThrow(/invalid tick size/)
+  })
+
+  it('WITHOUT the tick the same order is built at a different price than the member named — which is why it is passed', async () => {
+    const client = offlineClient('0.01')
+    const order = await client.createOrder({ tokenID: TOKEN, side: Side.BUY, size: 10, price: 0.575 }, { negRisk: false })
+    // 10 shares: a 57.5¢ order would give 5.75 USDC. The SDK rounded the price to the 0.01 grid instead.
+    expect(order.makerAmount).not.toBe('5750000')
+  })
 })
 
 describe('restingOrderSignedAmounts — pinned to the real SDK (createOrder)', () => {

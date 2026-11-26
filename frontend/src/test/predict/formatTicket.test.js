@@ -1,6 +1,7 @@
+import { restingFeeText } from '../../lib/predict/disclosures'
 import { describe, it, expect } from 'vitest'
 import { formatUsd, formatUsdExact, formatShareCount, formatPriceCents } from '../../lib/predict/format'
-import { nearCertainty, depthStatement, refusalSentence } from '../../lib/predict/ticketStatements'
+import { nearCertainty, depthStatement, refusalSentence, venueFeeNote } from '../../lib/predict/ticketStatements'
 
 describe('ticket money formatting rounds AGAINST the member and never invents a zero', () => {
   it('costs round up, proceeds round down', () => {
@@ -41,7 +42,17 @@ describe('ticket money formatting rounds AGAINST the member and never invents a 
 describe('ticketStatements', () => {
   const ok = (over) => ({ status: 'ok', side: 'buy', averagePrice: '0.94', payoutIfRight: '53.191489', ...over })
   it('near certainty: dollars at risk beside dollars to gain', () => {
-    expect(nearCertainty(ok(), { totalCostUnits: 50_250000n })).toBe('You put $50.25 at risk to gain $2.94.')
+    // The venue's own rate was READ as zero: the figures stand unqualified.
+    expect(nearCertainty(ok(), { totalCostUnits: 50_250000n }, null, { feeRateBps: 0 })).toBe('You put $50.25 USDC at risk to gain $2.94 USDC.')
+  })
+  it('the gain is "before Polymarket’s fee" unless that rate was read as zero — an unread rate is not a zero', () => {
+    const said = 'You put $50.25 USDC at risk to gain $2.94 USDC. Polymarket’s own fee is not in these figures and makes the gain smaller.'
+    expect(nearCertainty(ok(), { totalCostUnits: 50_250000n }, null, { feeRateBps: 100 })).toBe(said)
+    expect(nearCertainty(ok(), { totalCostUnits: 50_250000n }, null, { feeRateBps: null })).toBe(said)
+    expect(nearCertainty(ok(), { totalCostUnits: 50_250000n })).toBe(said)
+    expect(venueFeeNote({ feeRateBps: 0 })).toBe('')
+    expect(venueFeeNote({ feeRateBps: null })).toBe(' (before Polymarket’s fee)')
+    expect(venueFeeNote(undefined)).toBe(' (before Polymarket’s fee)')
   })
   it('exactly 90¢ counts; 89.9¢ does not; a sell never does', () => {
     expect(nearCertainty(ok({ averagePrice: '0.9', payoutIfRight: '55.55' }), { totalCostUnits: 50_000000n })).toMatch(/at risk to gain/)
@@ -50,7 +61,7 @@ describe('ticketStatements', () => {
   })
   it('when even being right returns less than was put in, it says so instead of a gain', () => {
     expect(nearCertainty(ok({ averagePrice: '0.995', payoutIfRight: '50.25' }), { totalCostUnits: 50_500000n })).toBe(
-      'You put $50.50 at risk and, even if you are right, receive $50.25 — less than you put in.',
+      'You put $50.50 USDC at risk and, even if you are right, receive $50.25 USDC — less than you put in.',
     )
   })
   it('depth share only from 10%', () => {
@@ -64,6 +75,32 @@ describe('ticketStatements', () => {
       const text = refusalSentence({ reason, min: { shares: '5', usd: '4.7' } }, { side: 'buy', tick: '0.01', ownPrice: true })
       expect(text).toMatch(/\s/)
       expect(text).not.toContain(reason)
+    }
+  })
+})
+
+describe('restingFeeText — which builder rate a named-price order pays, said in words', () => {
+  it('rests: the maker rate (none here), and the taker rate named as what applies if it fills at once', () => {
+    const buy = restingFeeText({ makerBps: 0, takerBps: 50, crosses: false, buy: true })
+    expect(buy).toMatch(/^An order that rests and fills later pays no FairWins builder fee\./)
+    expect(buy).toMatch(/fills at once instead and FairWins’ 0\.50% builder fee applies — the most you can lose above allows for that\./)
+    expect(buy).not.toMatch(/included above/) // there is no fee line above a maker order: never claim one
+    expect(restingFeeText({ makerBps: 0, takerBps: 50, crosses: false, buy: false })).toMatch(/you then receive that much less/)
+  })
+  it('a non-zero maker rate is its own statement and IS included above', () => {
+    expect(restingFeeText({ makerBps: 10, takerBps: 50 })).toMatch(/pays FairWins’ 0\.10% builder fee \(the maker rate\), included above\./)
+  })
+  it('crosses the book: it fills at once, at the taker rate, shown as a line', () => {
+    expect(restingFeeText({ makerBps: 0, takerBps: 50, crosses: true })).toMatch(/fills at once and FairWins’ 0\.50% builder fee applies, included above\./)
+  })
+  it('no builder fee at all: says so, never "0%"', () => {
+    expect(restingFeeText({ makerBps: 0, takerBps: 0, crosses: true })).toMatch(/FairWins charges no builder fee on it\./)
+    expect(restingFeeText({ makerBps: 0, takerBps: 0 })).not.toMatch(/0%|0\.00%/)
+  })
+  it('always names the venue\'s own fees, and never calls anything free', () => {
+    for (const args of [{ crosses: true, takerBps: 50 }, { takerBps: 50 }, {}]) {
+      expect(restingFeeText(args)).toMatch(/Polymarket sets its own fees for each market/)
+      expect(restingFeeText(args)).not.toMatch(/\bfree\b/i)
     }
   })
 })

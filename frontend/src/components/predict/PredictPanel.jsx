@@ -400,7 +400,9 @@ export default function PredictPanel() {
     const name = p.outcome || 'Outcome'
     setTicket({
       source: 'position',
-      market: { question: `${name} position`, polymarketUrl: 'https://polymarket.com', negRisk: p.negRisk === true },
+      // A position's `false` may only mean the venue's answer did not carry the flag, so only `true` is taken as
+      // stated; otherwise it is left out and the order SDK asks the venue for this exact token before signing.
+      market: { question: `${name} position`, polymarketUrl: 'https://polymarket.com', negRisk: p.negRisk === true ? true : undefined },
       outcomes: [{ name, tokenId: p.tokenId, price: p.bestBid?.amount ?? null }],
       initialTokenId: p.tokenId,
       mode: 'sell',

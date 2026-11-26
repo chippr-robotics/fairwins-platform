@@ -179,8 +179,10 @@ price ≥ 90¢) states the dollars at risk beside the dollars to gain; an amount
 much can be filled; a refusal is always a sentence ("The smallest order here is 5 shares (about $4.70)."), never
 a reason code. A reading that is **not live** shows "Waiting for a current price…" with its age, **no figure**,
 and Review disabled — `planForTicket` returns only `{ status: 'not-live' }`, and `planOrder` refuses first.
-"Set my own price" (collapsed, unmounted until opened) turns the order into a resting GTC order through the
-existing `submitOrder`, and the review says it rests and may never fill.
+"Set my own price" (collapsed, unmounted until opened) turns the order into a resting GTC order
+(`submitRestingOrder`), and the review says it rests and may never fill. The tick the member reviewed on travels
+with that order: if the venue's tick has since become coarser, the SDK **refuses** it. Without the tick the SDK
+would round the member's price to the nearest step of the new grid and place an order at a price nobody reviewed.
 
 **The limit is the guarantee.** A marketable order is sent **fill-and-kill** (`OrderType.FAK`, never FOK) with
 `price` = the plan's `limitPrice`: the worst price the member accepts (worst level touched, plus one tick). The
@@ -203,11 +205,55 @@ a sell's shares down to hundredths; the plan is built from the rounded amount, s
 figure and says it differs from what was typed. If part of an order has no offer at any shown price, only the
 fillable part is signed, so the ceiling shown is the ceiling of the signature.
 
-**Fees and disclosure are unchanged in substance** (spec 057 FR-003/FR-010–FR-012): the builder fee is its own line,
-the venue's own taker fee is disclosed in words, a zero fee draws no line, and signing stays blocked when the fee
-schedule cannot be confirmed. The sentences live once, in `lib/predict/disclosures.js`, used by both order
-surfaces. The order itself is gasless ("Network fee: none — you sign, no gas"); a passkey member's first-trade
-approvals note is unchanged.
+*Exactly how far "equal" goes.* The **maker** amount — what the member gives, the figure shown as "You pay at most"
+/ "You sell up to" — matched the SDK in every one of 200,000 random orders. The **taker** amount (the minimum
+received) is derived, and the SDK derives it in floating point: it matched whenever it was under 100,000 shares or
+USDC; from there to a billion it differed in about 1 order in 50, by one step of the last decimal the SDK signs;
+beyond a billion the SDK runs out of precision. That is why shares are shown as "about" and no surface prints the
+taker amount as an exact figure. The test asserts those bounds. (Its first version claimed "random orders on every
+tick" and reported perfect agreement. It drew `seed % 4` and `seed % 2` from a linear generator whose low bits
+cycle with period 4, four draws per order — so every one of its 240 orders was a **sell on the 0.01 tick**, under
+$5,000. If you write a fuzz, assert that each branch ran.)
+
+**Which exchange the order is signed for.** `negRisk` picks the contract that verifies the signature. A market row
+carries the flag from the listing; a position may not, and a missing flag is **left out** of the SDK call so the
+SDK asks the venue for that token. It is never signed as `false` by default.
+
+**What the venue's answer means.** The SDK never throws from the post — its HTTP helper returns every failure as
+`{ error, status? }` — so a throw out of `createAndPost…` means nothing was sent (the order could not be built, or
+the member declined to sign), and `readPostFailure` (`lib/predict/clobSession.js`) reads what comes back:
+
+| Answer | Means | The ticket |
+| :-- | :-- | :-- |
+| a 4xx, or `success: false` | refused before it could match; nothing placed | `error`, with the venue's short reason and a way back |
+| a balance or allowance shortfall | refused; will not succeed on a re-sign | `error` that says so — **not** "the market moved" |
+| "no orders found to match" and similar | the limit no longer reaches the book | `moved`: new figures, another deliberate Sign |
+| a 5xx, a 408, or **no HTTP status** | the order **may** have been received | `unknown` |
+
+`unknown` is terminal for the ticket. It says the order may have been placed, points at positions and open orders,
+and offers no way back to Sign, because the same fill-and-kill order sent twice can fill twice. An HTML error page
+or an object is never shown as the reason. Two more guards against a second order: `signAndPost` and `confirm` each
+hold a ref-based lock (state alone cannot stop two calls made in one render), and the ticket is not swapped for
+the fixed-price confirm while an order is in flight or has just been answered.
+
+**Fees and disclosure** (spec 057 FR-003/FR-010–FR-012): the builder fee is its own line, the venue's own taker
+fee is disclosed in words, a zero fee draws no line, and signing stays blocked when the fee schedule cannot be
+confirmed. The sentences live once, in `lib/predict/disclosures.js`. Four rules the ticket adds:
+
+- **The column adds up.** A buy's fee lines and "The most you can lose" are read from the *same* quote — the
+  ceiling, i.e. what the signature can spend — so "You pay at most" plus each fee line equals the total.
+- **Every money figure names USDC** (FR-011). A "$" alone does not.
+- **Polymarket's own fee is in no figure**, because FairWins can read its rate but not what it will come to. Every
+  figure it would change ("The most you can lose", "If you are right, you receive", "You receive about", the
+  near-certainty sentence) says "before Polymarket's fee" — unless the gateway **read** the rate as zero. A rate it
+  could not read (`null`) is not a zero.
+- **A named-price order says which builder rate it pays.** One that rests fills later as a maker (the maker rate,
+  often none); one that crosses the book fills at once as a taker. `restingFeeText` says which, and a resting buy's
+  ceiling assumes the larger of the two — the book can move before the order arrives — with that fee line labelled
+  "if it fills at once".
+
+"Signing this order costs no network fee" is about the order only: a passkey member's first-trade approvals are a
+transaction, described by the first-trade note beside it.
 
 **Never stranded.** The ticket needs live readings, which come from the gateway's `/books` route. A gateway without
 it (404 — remembered by `lib/markets/routeSupport.js`; a 5xx is an outage, not an absent route) or without
@@ -215,8 +261,9 @@ it (404 — remembered by `lib/markets/routeSupport.js`; a 5xx is an outage, not
 opens. While the price source is merely unreachable the ticket stays in its waiting state with a link to the venue.
 
 **Moving parts.** `usePredictPlanTrade` composes `usePredictTrade` (which gained `signAndPost`, the shared
-body of every submission: gates → Polygon → approvals → creds → build client → `send(client)`; `submit` is now one
-caller of it) — region check, fee gate, signer rail and attribution are one implementation. `lib/predict/ticketPlan.js`
+body of every submission: gates → Polygon → approvals → signer → creds → last freshness check → build client →
+`send(client)`; everything that waits is done before the freshness check, so only the SDK's own build-and-sign
+follows it; `submit` is now one caller of it) — region check, fee gate, signer rail and attribution are one implementation. `lib/predict/ticketPlan.js`
 is the pure plan/re-check; `lib/predict/ticketStatements.js` the shared sentences. The ticket reads only its own
 outcome's two tokens through `useMarketReadings`; opened from an event page, the page selects that row first (its
 two tokens are already among its ten), and while a ticket for a *position* is open the page stands down, so the

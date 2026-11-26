@@ -210,15 +210,71 @@ export function toSdkNumber(decimal) {
 }
 
 /**
+ * What the venue's answer to a POSTED order means — a refusal, an answer nobody can interpret, or an order
+ * taken. The SDK never throws from the post itself: its HTTP helper turns every failure into a returned
+ * `{ error, status? }`, so a THROW out of `createAndPost…` happened before anything was sent (the order could
+ * not be built or the member declined to sign) and a RETURNED error happened at or after the send. Those two
+ * are different facts for a member, and this is the one place they are told apart:
+ *
+ *  - a 4xx: the request was refused before it could match — nothing was placed. A definite failure.
+ *  - `success: false` on a 200: the venue's own "no".
+ *  - a 5xx, a 408, or no HTTP status at all (the connection failed or the answer never arrived): the order
+ *    MAY have been received. `outcomeUnknown` is set, and the caller must not offer the same order again as
+ *    if nothing had happened — a fill-and-kill order sent twice can fill twice.
+ *
+ * The reason text is never a raw HTML error page or an object dump: only a short plain string from the venue
+ * is passed through.
+ */
+function readPostFailure(resp) {
+  if (!resp || typeof resp !== 'object') return null
+  if ('error' in resp) {
+    const status = Number.isInteger(resp.status) ? resp.status : null
+    const said = typeof resp.error === 'string' && resp.error.length <= 200 && !/[<>]/.test(resp.error) ? resp.error.trim() : ''
+    if (status != null && status >= 400 && status < 500 && status !== 408) {
+      return { outcomeUnknown: false, message: said || `Polymarket refused the order (HTTP ${status}).` }
+    }
+    return {
+      outcomeUnknown: true,
+      message: 'Polymarket did not confirm whether it received this order.',
+    }
+  }
+  if (resp.success === false) {
+    const said = typeof resp.errorMsg === 'string' && resp.errorMsg.length <= 200 && !/[<>]/.test(resp.errorMsg) ? resp.errorMsg.trim() : ''
+    return { outcomeUnknown: false, message: said || 'The venue did not accept the order.' }
+  }
+  return null
+}
+
+function readPosted(resp) {
+  const failure = readPostFailure(resp)
+  if (failure) {
+    throw Object.assign(new Error(failure.message), { raw: resp, status: resp?.status, outcomeUnknown: failure.outcomeUnknown })
+  }
+  return {
+    orderId: resp?.orderID ?? resp?.orderId ?? resp?.id ?? null,
+    status: resp?.status ?? (resp?.success ? 'accepted' : null),
+    raw: resp,
+  }
+}
+
+/**
+ * Which exchange contract the order is signed for. A boolean is passed through; anything else is LEFT OUT so
+ * the SDK asks the venue for that exact token (`getNegRisk`). A missing flag is never signed as `false`: that
+ * would be a guess about which contract verifies the signature.
+ */
+const negRiskOption = (negRisk) => (typeof negRisk === 'boolean' ? { negRisk } : {})
+
+/**
  * Submit a MARKETABLE order: fill-and-kill at a price LIMIT. `limitPrice` is the worst price the member
  * accepted at review — the SDK signs it as the order's price, so the venue can never fill beyond it and
  * whatever is not filled at or inside it is cancelled, not charged. `amount` is USDC for a buy and shares
  * for a sell (the SDK's `UserMarketOrder` meaning). Same client, same builder attribution and same return
  * shape as `submitOrder`; the signer behind the client is whichever rail the session already uses.
  *
- * An answer that carries an error (or `success: false`) is thrown, not returned: the venue refusing an
- * order must never reach the caller as an "order sent". The thrown error keeps `raw` and `status` so the
- * hook's region / price-moved mapping reads it exactly as it reads an SDK throw.
+ * Anything other than an order the venue took is THROWN, never returned as "order sent": see
+ * `readPostFailure` for the three cases. The thrown error keeps `raw` and `status` (so the hook's region
+ * mapping reads it exactly as it reads an SDK throw) and carries `outcomeUnknown` when the venue may have
+ * received the order.
  *
  * @param {object} client  makeClobClient result
  * @param {{ tokenId:string, side:'BUY'|'SELL', amount:string, limitPrice:string, negRisk?:boolean, tickSize:string }} order
@@ -233,18 +289,30 @@ export async function submitMarketOrder(client, { tokenId, side, amount, limitPr
       price: toSdkNumber(limitPrice),
       orderType: OrderType.FAK,
     },
-    { tickSize: String(tickSize), negRisk: Boolean(negRisk) },
+    { tickSize: String(tickSize), ...negRiskOption(negRisk) },
     OrderType.FAK,
   )
-  const refusal = typeof resp?.error === 'string' && resp.error ? resp.error : resp?.success === false ? resp?.errorMsg || 'The venue did not accept the order.' : null
-  if (refusal) {
-    throw Object.assign(new Error(refusal), { raw: resp, status: resp?.status })
-  }
-  return {
-    orderId: resp?.orderID ?? resp?.orderId ?? resp?.id ?? null,
-    status: resp?.status ?? (resp?.success ? 'accepted' : null),
-    raw: resp,
-  }
+  return readPosted(resp)
+}
+
+/**
+ * Submit a RESTING order (GTC) at a price the member named, for the amount-first ticket. It differs from the
+ * older `submitOrder` in three ways, each of which is the point:
+ *  - `tickSize` is PASSED, so if the venue's tick has become coarser than the one the member reviewed on, the
+ *    SDK refuses the order instead of rounding their price to a different one;
+ *  - price and size cross to the SDK through `toSdkNumber`, like the market order;
+ *  - the answer is read by `readPosted`, so a refusal is not reported as an order placed.
+ *
+ * @param {object} client  makeClobClient result
+ * @param {{ tokenId:string, side:'BUY'|'SELL', price:string, size:string, negRisk?:boolean, tickSize:string }} order
+ */
+export async function submitRestingOrder(client, { tokenId, side, price, size, negRisk, tickSize }) {
+  const resp = await client.createAndPostOrder(
+    { tokenID: String(tokenId), price: toSdkNumber(price), side: side === 'SELL' ? Side.SELL : Side.BUY, size: toSdkNumber(size) },
+    { tickSize: String(tickSize), ...negRiskOption(negRisk) },
+    OrderType.GTC,
+  )
+  return readPosted(resp)
 }
 
 /**
@@ -278,7 +346,20 @@ function gridOf(tickSize, limitPrice) {
 
 /**
  * What the SDK will SIGN for a market order (`createMarketOrder`): the maker/taker amounts and the price,
- * as exact decimal strings. The review shows these, so what is shown is what is signed. Pure BigInt.
+ * as decimal strings. Pure BigInt.
+ *
+ * The MAKER amount (what the member gives: USDC on a buy, shares on a sell) is exact for every input, and it
+ * is the figure the review shows as "You pay at most" / "You sell up to". The TAKER amount (the minimum the
+ * member receives) is derived, and the SDK derives it in floating point. Measured against the installed SDK
+ * over 200,000 random orders on every tick (2026-11-26):
+ *   - the maker amount never differed;
+ *   - a taker amount under 100,000 (shares or USDC) never differed (146,899 orders);
+ *   - from 100,000 up to a billion it differed in about 1 order in 50, by ONE step of the last decimal place
+ *     the SDK signs on that tick (0.0001 at a 0.01 tick, 0.00001 at 0.001, 0.000001 at 0.0001);
+ *   - above a billion the SDK's arithmetic runs out of precision and the difference grows (20 steps at tens
+ *     of billions) — sizes no book here has the depth for.
+ * That is measured, not proven, which is why no surface shows the taker amount as an exact figure: shares
+ * are "about".
  *
  *  - BUY: maker = USDC spent = `amount` rounded DOWN to cents (the SDK's 2-decimal input rounding);
  *    taker = the minimum shares = maker ÷ price at the tick's amount precision.

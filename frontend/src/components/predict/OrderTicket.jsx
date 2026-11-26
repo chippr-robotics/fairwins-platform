@@ -16,18 +16,24 @@
  * celebrates, and near certainty is stated as dollars at risk beside dollars to gain.
  *
  * Never stranded (FR-029): when the gateway has no books route no reading can ever be live, so this renders the
- * fixed-price `TradeConfirm` for the same outcome instead.
+ * fixed-price `TradeConfirm` for the same outcome instead — but never while an order is being signed or has
+ * just been answered: swapping then would unmount the ticket, let the in-flight order post unseen and offer a
+ * fresh confirm for the same outcome.
+ *
+ * Money (spec 057 FR-011/FR-012): every figure names USDC; the fee lines and the total they add up to are
+ * taken from the SAME quote (the signed ceiling), so the column sums; and Polymarket's own fee, which no
+ * figure here can include, is named beside every figure it would change unless its rate was read as zero.
  */
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react'
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useMarketReadings } from '../../hooks/useMarketReadings'
 import { usePredictPlanTrade } from '../../hooks/usePredictPlanTrade'
 import { readingKey, stateWords } from '../../lib/predict/eventPage'
 import { describeAge } from '../../lib/markets/priceReading'
 import { booksRouteMissing, subscribeBooksRoute } from '../../lib/markets/routeSupport'
 import { centsToPrice } from '../../lib/predict/ticketPlan'
-import { nearCertainty, depthStatement, refusalSentence, tickCents } from '../../lib/predict/ticketStatements'
+import { nearCertainty, depthStatement, refusalSentence, tickCents, usdc, venueFeeNote } from '../../lib/predict/ticketStatements'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'
-import { feeDisclosureText, firstTradeText, WRONG_NETWORK_TEXT, NETWORK_FEE_TEXT } from '../../lib/predict/disclosures'
+import { feeDisclosureText, restingFeeText, firstTradeText, WRONG_NETWORK_TEXT, NETWORK_FEE_TEXT } from '../../lib/predict/disclosures'
 import { formatCents, formatUsd, formatUsdExact, formatShareCount, formatPriceCents, decimalToMicro } from '../../lib/predict/format'
 import TrustChip from './TrustChip'
 import TradeConfirm from './TradeConfirm'
@@ -56,7 +62,7 @@ function clampAmount(raw) {
   return (cleaned.slice(0, dot + 1) + cleaned.slice(dot + 1).replace(/\./g, '').slice(0, 2)).slice(0, 15)
 }
 
-function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize, minOrderSize, onClose }) {
+function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize, minOrderSize, onClose, onHold }) {
   const buy = mode !== 'sell'
   const side = buy ? 'buy' : 'sell'
   const [tokenId, setTokenId] = useState(initialTokenId ?? outcomes[0]?.tokenId)
@@ -83,7 +89,8 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
     ownPrice,
     tickSize: tickSize ?? undefined,
     minOrderSize: minOrderSize ?? undefined,
-    negRisk: Boolean(market?.negRisk),
+    // Stated by the listing, or left out so the SDK asks the venue for this token — never a guessed `false`.
+    negRisk: typeof market?.negRisk === 'boolean' ? market.negRisk : undefined,
   })
   const { state, view, quote } = plan
 
@@ -104,6 +111,11 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
 
   const busy = state === 'enabling' || state === 'signing' || state === 'submitting'
   useSecondTick(state === 'waiting-price')
+  // While an order is in flight or has just been answered, this ticket must stay mounted (see the header).
+  const hold = busy || state === 'done' || state === 'unknown' || state === 'error'
+  useLayoutEffect(() => {
+    onHold?.(hold)
+  }, [hold, onHold])
 
   const ids = { title: useId(), amount: useId(), own: useId(), msg: useId(), ownMsg: useId() }
   const builderBps = plan.fee?.builderTakerFeeBps ?? 0
@@ -136,7 +148,10 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
   const figures = state === 'planning' && view.status === 'ok'
   const resting = figures && view.kind === 'resting'
   const ceiling = figures ? plan.ceiling : null
-  const risk = figures ? nearCertainty(view, quote, ceiling) : null
+  // A buy's fee lines and its total come from ONE quote — the ceiling, which is what the signature can spend.
+  const basis = ceiling ?? quote
+  const venueNote = venueFeeNote(plan.fee)
+  const risk = figures ? nearCertainty(view, quote, ceiling, plan.fee) : null
   const depth = figures ? depthStatement(view) : null
   const canReview = figures && Boolean(quote)
 
@@ -208,6 +223,24 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
           </div>
         )}
 
+        {state === 'unknown' && (
+          <div className="order-ticket-alert" role="alert">
+            <p>{plan.reason}</p>
+            <p>
+              Sending it again from here could {buy ? 'buy' : 'sell'} twice, so this ticket will not offer that. Your
+              positions and open orders, here or on Polymarket, show whether it went through.
+            </p>
+            <div className="order-ticket-actions">
+              <a className="order-ticket-link" href={POLYMARKET_URL} target="_blank" rel="noopener noreferrer">
+                Check on Polymarket ↗
+              </a>
+              <button type="button" className="order-ticket-primary" onClick={onClose}>
+                Close
+              </button>
+            </div>
+          </div>
+        )}
+
         {state === 'done' && (
           <div className="order-ticket-step">
             <p className="order-ticket-note" role="status">
@@ -235,6 +268,7 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
             onWrongNetwork={plan.onWrongNetwork}
             tradingEnabled={plan.tradingEnabled}
             builderBps={builderBps}
+            fee={plan.fee}
             onEdit={plan.edit}
             onSign={plan.confirm}
           />
@@ -282,7 +316,7 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
             {reading && <TrustChip reading={reading} />}
 
             <label className="order-ticket-field" htmlFor={ids.amount}>
-              <span>{buy ? 'Amount to spend' : 'Shares to sell'}</span>
+              <span>{buy ? 'Amount to spend (USDC)' : 'Shares to sell'}</span>
               <span className="order-ticket-input-row">
                 {buy && <span aria-hidden="true">$</span>}
                 <input
@@ -358,39 +392,42 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
                 {buy ? (
                   <>
                     <div>
-                      <dt>Cost before fees</dt>
-                      <dd>{resting ? formatUsdExact(view.payAtMost) : formatUsd(view.plan.cost, 'up')}</dd>
+                      <dt>You pay at most, before fees</dt>
+                      <dd data-testid="figure-pay">{usdc(resting ? formatUsdExact(view.payAtMost) : formatUsd(view.payAtMost, 'up'))}</dd>
                     </div>
-                    {quote?.feeLines.map((f) => (
+                    {basis?.feeLines.map((f) => (
                       <div key={f.label} className="order-ticket-fee-line">
-                        <dt>{f.label}</dt>
-                        <dd>+{formatUsd(f.amount, 'up')}</dd>
+                        <dt>
+                          {f.label}
+                          {basis.contingent ? ', if it fills at once' : ''}
+                        </dt>
+                        <dd>+{usdc(formatUsd(f.amount, 'up'))}</dd>
                       </div>
                     ))}
                     <div>
-                      <dt>If you are right, you receive</dt>
-                      <dd data-testid="figure-payout">{formatUsd(view.payoutIfRight, 'down')}</dd>
+                      <dt>If you are right, you receive{venueNote}</dt>
+                      <dd data-testid="figure-payout">{usdc(formatUsd(view.payoutIfRight, 'down'))}</dd>
                     </div>
                     <div className="order-ticket-total">
-                      <dt>The most you can lose</dt>
-                      <dd data-testid="figure-max-loss">{formatUsd(ceiling?.totalCostUnits ?? quote?.totalCostUnits, 'up')}</dd>
+                      <dt>The most you can lose{venueNote}</dt>
+                      <dd data-testid="figure-max-loss">{usdc(formatUsd(basis?.totalCostUnits, 'up'))}</dd>
                     </div>
                   </>
                 ) : (
                   <>
                     <div>
                       <dt>Sale value before fees</dt>
-                      <dd>{formatUsd(view.proceeds, 'down')}</dd>
+                      <dd>{usdc(formatUsd(view.proceeds, 'down'))}</dd>
                     </div>
                     {quote?.feeLines.map((f) => (
                       <div key={f.label} className="order-ticket-fee-line">
                         <dt>{f.label}</dt>
-                        <dd>−{formatUsd(f.amount, 'up')}</dd>
+                        <dd>−{usdc(formatUsd(f.amount, 'up'))}</dd>
                       </div>
                     ))}
                     <div className="order-ticket-total">
-                      <dt>You receive about (before Polymarket’s fee)</dt>
-                      <dd data-testid="figure-payout">{formatUsd(quote?.netProceedsUnits, 'down')}</dd>
+                      <dt>You receive about{venueNote}</dt>
+                      <dd data-testid="figure-payout">{usdc(formatUsd(quote?.netProceedsUnits, 'down'))}</dd>
                     </div>
                   </>
                 )}
@@ -400,14 +437,14 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
             {figures && view.partial && (
               <p className="order-ticket-note" role="status">
                 {buy
-                  ? `Only ${formatUsd(view.partial.fillable, 'down')} of this can be filled at the prices shown.`
+                  ? `Only ${usdc(formatUsd(view.partial.fillable, 'down'))} of this can be filled at the prices shown.`
                   : `Only ${formatShareCount(view.partial.fillable)} of these shares can be sold at the prices shown.`}
               </p>
             )}
             {figures && !view.partial && view.rounded && view.kind === 'marketable' && (
               <p className="order-ticket-note">
                 Amounts are signed in whole {buy ? 'cents' : 'hundredths of a share'}: this order is for{' '}
-                {buy ? formatUsdExact(view.signed.amount) : `${formatShareCount(view.signed.amount)} shares`}, not what you typed.
+                {buy ? usdc(formatUsdExact(view.signed.amount)) : `${formatShareCount(view.signed.amount)} shares`}, not what you typed.
               </p>
             )}
             {depth && <p className="order-ticket-note">{depth}</p>}
@@ -453,7 +490,11 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
             </div>
 
             <p className="order-ticket-note">{NETWORK_FEE_TEXT}</p>
-            <p className="order-ticket-note">{feeDisclosureText(builderBps)}</p>
+            <p className="order-ticket-note">
+              {resting
+                ? restingFeeText({ makerBps: plan.fee?.builderMakerFeeBps, takerBps: builderBps, crosses: view.crossesBook, buy })
+                : feeDisclosureText(builderBps)}
+            </p>
             {plan.onWrongNetwork && (
               <p className="order-ticket-warn" role="status">
                 {WRONG_NETWORK_TEXT}
@@ -478,11 +519,12 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
 
 export default function OrderTicket(props) {
   const missing = useSyncExternalStore(subscribeBooksRoute, booksRouteMissing, booksRouteMissing)
+  const [held, setHeld] = useState(false)
   const { market, outcomes, initialTokenId, mode, onClose } = props
-  if (missing) {
+  if (missing && !held) {
     // No books route ⇒ no reading can ever be live: fall back to the fixed-price confirm (FR-029).
     const o = outcomes.find((x) => x.tokenId === initialTokenId) ?? outcomes[0]
     return <TradeConfirm market={market} outcome={o} side={mode === 'sell' ? 'SELL' : 'BUY'} onClose={onClose} />
   }
-  return <TicketBody {...props} />
+  return <TicketBody {...props} onHold={setHeld} />
 }
