@@ -168,6 +168,59 @@ entry is needed and `check:finops` is unaffected. Slice 7 adds one gateway envir
 for the feed's address, which is not a payee, and one nginx change (response buffering off for the
 stream location) that belongs to that slice.
 
+## R16 — Quick filters: what is active now
+
+**Decision**: one gateway route, `/discover`, computed from two venue reads and cached for 60 s:
+the hundred events with the most trading in the last day, and the events in play. It returns the
+count and leading events in play, and up to eight **topics** — venue tags ranked by the trading
+they carry, chosen so that each adds events the earlier ones did not.
+
+**Probed (2026-11-26)**:
+
+- The venue has no "trending" endpoint and its tags carry no usable flag (`forceShow` was set on
+  none of the first hundred). Trending has to be derived.
+- An event carries `volume24hr`, `volume1wk`, `openInterest`, `competitive`, `commentCount`,
+  `featured` with `featuredOrder`, `new`, and for a match `live`, `ended`, `score`, `period`,
+  `elapsed`, `startTime`, `seriesSlug`. `?live=true` returns only events in play (fifty at the
+  time, with scores); `?featured=true&order=featuredOrder` returns the venue's own curated list;
+  `?tag_slug=<any tag>` filters by any tag, not only our categories.
+- A listing with `limit` above 50 is served only compressed. The gateway's `fetch` asks for that
+  by default; a client that does not gets `gzip_required`.
+- Summed over the top hundred events, the heaviest tags were `sports`, `games`, `recurring`,
+  `basketball`, `nba`, `tech`, `finance`, `nvidia`, `nfl`, … and `fed`, `fed-rates`, `fomc`,
+  `economic-policy` each named the same three events.
+
+**How topics are chosen**:
+
+1. Drop the fixed categories' own tags, and a short denylist of tags that describe a market's
+   mechanics rather than its subject (`recurring`, `games`, `hit-price`, `crypto-prices`, reward
+   programme tags).
+2. Drop events that open and close within an hour before counting anything. **Probed**: the venue
+   runs five- and fifteen-minute "up or down" markets, marked by a series `recurrence` of `5m` or
+   `15m` and by an end time minutes after their start time. None was among the hundred most traded
+   events when probed, so this is a guard rather than a large exclusion; they are the nearest
+   thing on the venue to a slot machine, and FR-002c keeps them findable by search and category
+   and out of the row that says "look here". A match has a start time and an end date days later
+   (or equal), so the test is "ends more than zero and at most sixty minutes after it starts".
+3. Pick greedily by **marginal** day volume: take the tag carrying the most, remove its events,
+   repeat. `nba` then leaves `basketball` nearly empty and four names for one Fed meeting become
+   one, with no list of synonyms to maintain.
+4. Stop at eight, or when a tag adds less than a floor.
+
+**Rationale**: volume in the last day is the one signal that is both honest and hard to fake
+cheaply. Two tempting alternatives fail on inspection. *Surge* (a day against the week's average)
+saturated at exactly 7× for every event younger than a week, so it ranks newness, which already
+has its own sort. *Biggest price moves* was led entirely by matches that had just finished and
+gone to 0.999; it measures resolution, not news.
+
+**What it is not**: a recommendation. The row ranks by what the venue's traders did, never by
+fee, and FairWins' own members' activity is not an input (that would need a record of who looked
+at what, which this feature does not keep).
+
+**Alternatives**: the venue's curated `featured` list (available, and worth showing as the
+default order of the unfiltered list, but it is someone else's editorial choice and changes
+slowly); a fixed list of topics (stale within a week).
+
 ## Open items carried into slices
 
 | Item | Slice | How it closes |
@@ -176,3 +229,4 @@ stream location) that belongs to that slice.
 | SDK fill-and-kill with a price, both signer paths | 5 | first task; fallback named in R7 |
 | Poll cadence against the gateway's read quota (60/min per caller) | 2 | one batched book route call per tick, not one per outcome |
 | Whether an unreadable limit blocks or warns | 8 | owner's decision before that slice |
+| The denylist and the one-hour floor for topics | 3b | confirmed by the owner; both are configuration |

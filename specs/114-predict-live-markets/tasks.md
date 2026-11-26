@@ -94,6 +94,22 @@ the seam they plug into is right from the start.
 - [ ] T020 [US1] Update `frontend/src/config/navSearchIndex.js` synonyms for Predict if category
       names warrant; run `src/test/nav/navSearchIndex.test.jsx`. Open the slice PR.
 
+## Phase 4b: Slice 3b — quick filters (US1, FR-002a–c)
+
+- [ ] T020a [US1] Gateway `GET /v1/polymarket/:chainId/discover` and the `topic` / `live`
+      parameters on `/events` per contracts/gateway-predict-api.md: topic selection by marginal
+      day volume (research R16) as a pure, separately tested function; the mechanics denylist and
+      the one-hour floor as configuration; `live` on `EventSummary`. Tests assert the upstream
+      requests, the de-duplication (two tags naming the same events yield one topic), the
+      exclusion of sub-hour events, and each half failing on its own.
+- [ ] T020b [US1] `fetchDiscover` in `predictClient.js`; `usePredictDiscover` (60 s refresh,
+      paused while hidden); a quick-filter row under search in `PredictPanel` — an in-play chip
+      with its count, then topic chips — absent when there is nothing behind it; `topic` and
+      `live` in the address; an in-play card shows the venue's score and period as text.
+- [ ] T020c [US1] Vitest for the hook and the row; Cypress PL-04b a topic chip narrows the list
+      and sets the address, PL-04c the in-play chip is absent when nothing is in play. Open the
+      slice PR.
+
 ## Phase 5: Slice 4 — the event page (US2)
 
 - [ ] T021 [US2] `frontend/src/hooks/usePredictEvent.js` and `frontend/src/hooks/usePriceHistory.js`.
@@ -183,7 +199,7 @@ the seam they plug into is right from the start.
 
 ## Dependencies
 
-T002–T007 → T008–T014 → T015–T020 → T021–T025 → T026–T032 → T033–T036.
+T002–T007 → T008–T014 → T015–T020 → T020a–T020c → T021–T025 → T026–T032 → T033–T036.
 T037–T040 need T012 and the feed. T041–T043 need T037's backend. Within a phase, `[P]` tasks touch
 different files and can run together.
 

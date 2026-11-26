@@ -241,8 +241,19 @@ still applies until the waiting period ends.
   one item showing its leading markets and their current probabilities.
 - **FR-002**: Members MUST be able to filter by category, search by text across categories, and
   sort by at least trading volume, newest and closing soonest.
-- **FR-003**: Category, search and sort MUST be reflected in the address so a view can be
-  returned to or shared, and each event MUST have its own address.
+- **FR-002a**: Beneath search the list MUST offer quick filters drawn from what is active at the
+  venue now: events in play (with their count), and the topics carrying the most trading over the
+  last day. Topics MUST be distinct from one another (two names for the same set of events are
+  one filter) and MUST NOT repeat the fixed categories.
+- **FR-002b**: A quick filter MUST be absent when it has nothing behind it (no event in play, no
+  topic readable) and MUST NOT be shown from a reading older than the bound in FR-011; the list
+  remains usable without them.
+- **FR-002c**: Quick filters are navigation, never a recommendation: the surface MUST NOT rank
+  them by what earns FairWins more, MUST NOT promote markets that open and close within an hour,
+  and MUST label an in-play event as in play with the venue's own score and period, nothing more
+  urgent than that (FR-028).
+- **FR-003**: Category, quick filter, search and sort MUST be reflected in the address so a view
+  can be returned to or shared, and each event MUST have its own address.
 - **FR-004**: Each listed event MUST show its traded volume and when it closes.
 
 **Understanding a market**
@@ -398,3 +409,5 @@ still applies until the waiting period ends.
 - Perps and swap surfaces (follow-up specs adopting the feed).
 - Price alerts and notifications when the app is closed.
 - Commentary, social features and rankings of members.
+- Ranking by FairWins' own members' activity, and personalised suggestions. Quick filters reflect
+  the venue as a whole.

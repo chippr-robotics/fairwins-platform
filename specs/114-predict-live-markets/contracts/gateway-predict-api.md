@@ -54,6 +54,43 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
   `invalid_cursor` / `invalid_query`, 429 `quota_exceeded`, 503 `upstream_unavailable`. A `q`
   longer than 128 characters is truncated, as on the existing markets route.
 
+Two further filters, each exclusive with `category` and ignored when `q` is present:
+
+| Query | Values | Effect |
+|---|---|---|
+| `topic` | a venue tag slug, `^[a-z0-9-]{1,64}$` (400 `invalid_topic`) | events carrying that tag |
+| `live` | `1` | events in play only; `sort` is ignored and the order is trading in the last day |
+
+An event in play carries `"live": { "score": "91-101", "period": "Q4", "elapsed": "06:47" }`
+(each a string or null, as the venue gives them); every other event carries `"live": null`.
+
+## GET `/v1/polymarket/:chainId/discover`
+
+What is active at the venue now, for the quick filters under search. No parameters.
+
+```json
+{
+  "live": { "count": 14, "events": [ /* up to 6 EventSummary, most traded first */ ] },
+  "topics": [
+    { "slug": "nba", "label": "NBA", "events": 9, "volume24h": "10200000.00" },
+    { "slug": "nvidia", "label": "Nvidia", "events": 13, "volume24h": "9200000.00" }
+  ],
+  "confirmedAt": "…", "serverNow": "…", "stale": false
+}
+```
+
+- `topics` holds at most eight, chosen by marginal trading over the last day so that no two name
+  the same events (research R16). `events` and `volume24h` are what the topic **added**, not its
+  total. `label` is the venue's text, capped at 40 characters.
+- Excluded before counting: the fixed categories' own tags, the mechanics denylist, and events
+  that open and close within an hour.
+- `live.count` is the number of events in play that the venue returned in one page of fifty.
+  When that page was full the object also carries `"more": true`, and the count is shown as
+  "50+", never as an exact figure.
+- Either half may be unreadable on its own: `"live": null` or `"topics": null`, never an empty
+  list standing in for a failure. Both unreadable is 503.
+- TTL 60 s.
+
 ## GET `/v1/polymarket/:chainId/events/:slug`
 
 The same event with **all** markets, plus `description` (text, ≤ 4,000 chars),
