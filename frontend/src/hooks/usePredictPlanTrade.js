@@ -30,10 +30,8 @@
  * the two is larger, because the book can move between review and arrival — `ceiling.contingent` says the
  * ceiling's fee is not the one expected to apply.
  */
-import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePredictTrade } from './usePredictTrade'
-import { WalletContext } from '../contexts/WalletContext.js'
-import { trackSignedOrder as defaultTrackSignedOrder } from '../lib/predict/orderProgress'
 import { computeCostForPlan } from '../lib/predict/clobOrder'
 import { planForTicket, checkStillSignable } from '../lib/predict/ticketPlan'
 import { reclassify } from '../lib/markets/priceReading'
@@ -61,8 +59,6 @@ export function usePredictPlanTrade({
   deps,
 } = {}) {
   const trade = usePredictTrade({ deps, walletClient })
-  const account = useContext(WalletContext)?.address ?? null
-  const trackOrder = deps?.trackSignedOrder ?? defaultTrackSignedOrder
   const sendMarket = deps?.submitMarketOrder ?? defaultSubmitMarketOrder
   const sendResting = deps?.submitRestingOrder ?? defaultSubmitRestingOrder
 
@@ -200,6 +196,17 @@ export function usePredictPlanTrade({
       // own fill outside the window the tracker later reads trades from.
       const signedAt = Date.now()
       const res = await trade.signAndPost((client) => send(client, reviewed), {
+        // Handed to the progress tracker by signAndPost, the one place every ticket's order passes.
+        track: {
+          tokenId,
+          side: reviewed.signed.side,
+          kind: reviewed.kind,
+          size: reviewed.kind === 'resting' ? reviewed.signed.size : reviewed.signed.amount,
+          sizeUnit: reviewed.kind === 'resting' || reviewed.signed.side === 'SELL' ? 'shares' : 'USDC',
+          limitPrice: reviewed.signed.limitPrice,
+          label,
+          signedAt,
+        },
         beforeSign: async () => {
           const check = recheck()
           if (check.ok) return true
@@ -210,27 +217,6 @@ export function usePredictPlanTrade({
       if (late) {
         moveTo(late)
         return { moved: true }
-      }
-      // Hand the order to the tracker (slice 6). Only an order that was actually posted: an answer, or an answer
-      // that never arrived (`outcomeUnknown` — tracked as unconfirmed and looked up, never re-sent).
-      if (res?.outcomeUnknown || (res && !res.aborted && !res.priceChanged && (res.orderId || res.orderHash))) {
-        const r = reviewed
-        trackOrder(
-          account,
-          {
-            tokenId,
-            side: r.signed.side,
-            kind: r.kind,
-            size: r.kind === 'resting' ? r.signed.size : r.signed.amount,
-            sizeUnit: r.kind === 'resting' || r.signed.side === 'SELL' ? 'shares' : 'USDC',
-            limitPrice: r.signed.limitPrice,
-            label,
-            signedAt,
-          },
-          res.outcomeUnknown
-            ? { unconfirmed: true, reason: res.reason ?? null, posted: { computedId: res.orderHash ?? null } }
-            : { posted: { orderId: res.orderId ?? null, status: res.status ?? null, computedId: res.orderHash ?? null } },
-        )
       }
       if (res?.priceChanged) {
         // The venue could not match at the reviewed limit: the market moved. Back to a fresh review.
@@ -243,7 +229,7 @@ export function usePredictPlanTrade({
       confirmingRef.current = false
       setConfirming(false)
     }
-  }, [phase, reviewed, confirming, trade, send, trackOrder, account, tokenId, label])
+  }, [phase, reviewed, confirming, trade, send, tokenId, label])
 
   const reset = useCallback(() => {
     setPhase('editing')

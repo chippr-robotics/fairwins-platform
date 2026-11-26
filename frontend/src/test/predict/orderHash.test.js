@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { createWalletClient, http, hashTypedData, recoverAddress } from 'viem'
 import { polygon } from 'viem/chains'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
-import { makeClobClient, submitMarketOrder, submitRestingOrder, signedOrderHash } from '../../lib/predict/clobSession'
+import { makeClobClient, submitMarketOrder, submitRestingOrder, submitOrder, signedOrderHash } from '../../lib/predict/clobSession'
 
 // The suite-wide setup stubs the SDK; this file needs the real one, for clobSession.js too.
 vi.mock('@polymarket/clob-client', async (importActual) => importActual())
@@ -96,6 +96,25 @@ describe('the split build-then-post signs the same order as the SDK one-call pat
     const b = offlineClient({ negRisk: true })
     const out = await submitMarketOrder(b.client, { tokenId: TOKEN, side: 'BUY', amount: '10', limitPrice: '0.5', tickSize: '0.01' })
     expect(out.orderHash).toBe(digestOf(b.posted[0].order, NEG_RISK_EXCHANGE))
+  })
+})
+
+describe('the fixed-price fallback (submitOrder) shares that path', () => {
+  it('signs the same order as the SDK one-call path with NO tick passed (the SDK resolves it), GTC, and its id is the signed digest', async () => {
+    const a = offlineClient()
+    await a.client.createAndPostOrder({ tokenID: TOKEN, price: 0.5, side: SDK.Side.BUY, size: 100 }, { negRisk: false }, SDK.OrderType.GTC)
+    const b = offlineClient()
+    const out = await submitOrder(b.client, { tokenId: TOKEN, side: 'BUY', price: '0.5', size: '100', negRisk: false })
+    expect(withoutSalt(b.posted[0].order)).toEqual(withoutSalt(a.posted[0].order))
+    expect(b.posted[0].type).toBe('GTC')
+    expect(out.orderHash).toBe(digestOf(b.posted[0].order, EXCHANGE))
+  })
+
+  it('a SELL from a position with the flag unstated is signed for the exchange the venue names — not the guessed standard one', async () => {
+    const { client, posted } = offlineClient({ negRisk: true })
+    const out = await submitOrder(client, { tokenId: TOKEN, side: 'SELL', price: '0.55', size: '20' })
+    expect(out.orderHash).toBe(digestOf(posted[0].order, NEG_RISK_EXCHANGE))
+    expect(out.orderHash).not.toBe(digestOf(posted[0].order, EXCHANGE))
   })
 })
 

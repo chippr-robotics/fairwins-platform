@@ -31,7 +31,7 @@ import { readingKey, stateWords } from '../../lib/predict/eventPage'
 import { describeAge } from '../../lib/markets/priceReading'
 import { booksRouteMissing, subscribeBooksRoute } from '../../lib/markets/routeSupport'
 import { centsToPrice } from '../../lib/predict/ticketPlan'
-import { nearCertainty, depthStatement, refusalSentence, tickCents, usdc, venueFeeNote } from '../../lib/predict/ticketStatements'
+import { nearCertainty, depthStatement, refusalSentence, tickCents, usdc, venueFeeNote, unknownOutcomeText, orderSentText } from '../../lib/predict/ticketStatements'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'
 import { feeDisclosureText, restingFeeText, firstTradeText, WRONG_NETWORK_TEXT, NETWORK_FEE_TEXT } from '../../lib/predict/disclosures'
 import { formatCents, formatUsd, formatUsdExact, formatShareCount, formatPriceCents, decimalToMicro } from '../../lib/predict/format'
@@ -228,11 +228,7 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
         {state === 'unknown' && (
           <div className="order-ticket-alert" role="alert">
             <p>{plan.reason}</p>
-            <p>
-              Sending it again from here could {buy ? 'buy' : 'sell'} twice, so this ticket will not offer that. It is
-              listed under “Your orders in progress” as not confirmed, and this app looks it up on Polymarket for you.
-              Your positions and open orders, here or on Polymarket, also show whether it went through.
-            </p>
+            <p>{unknownOutcomeText(buy)}</p>
             <div className="order-ticket-actions">
               <a className="order-ticket-link" href={POLYMARKET_URL} target="_blank" rel="noopener noreferrer">
                 Check on Polymarket ↗
@@ -247,9 +243,7 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
         {state === 'done' && (
           <div className="order-ticket-step">
             <p className="order-ticket-note" role="status">
-              Order sent to Polymarket{plan.result?.status ? ` — the venue answered “${plan.result.status}”` : ''}. Matching and
-              settlement happen there, so your position updates once they complete. Follow it under “Your orders in
-              progress”. Do not send it again.
+              {orderSentText(plan.result?.status)}
             </p>
             <div className="order-ticket-actions">
               <button type="button" className="order-ticket-primary" onClick={onClose}>

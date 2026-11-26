@@ -89,4 +89,43 @@ describe('TradeConfirm', () => {
     const { container } = render(<TradeConfirm market={MARKET} outcome={OUTCOME} side="BUY" onClose={() => {}} />)
     expect(await axe(container)).toHaveNoViolations()
   })
+
+  const UNKNOWN = 'Polymarket did not confirm whether it received this order. It may have been placed. Check your positions and open orders before you send anything again.'
+
+  it('UNKNOWN: the same sentences as the amount-first ticket, a way to check, and NO way to send it again', async () => {
+    const { unknownOutcomeText } = await import('../../lib/predict/ticketStatements')
+    hookState.current = makeHook({ status: 'unknown', reason: UNKNOWN })
+    const { container } = render(<TradeConfirm market={MARKET} outcome={OUTCOME} side="BUY" onClose={() => {}} />)
+    const alert = screen.getByRole('alert')
+    expect(alert).toHaveTextContent(UNKNOWN)
+    expect(alert).toHaveTextContent(unknownOutcomeText(true))
+    expect(alert).toHaveTextContent(/Your orders in progress/)
+    expect(screen.getByRole('link', { name: /Check on Polymarket/ })).toBeInTheDocument()
+    // the form is gone: no Sign, no amount, nothing that sends again
+    expect(screen.queryByRole('button', { name: /sign|submit|send|again|retry/i })).toBeNull()
+    expect(screen.queryByLabelText(/shares to buy/i)).toBeNull()
+    expect(screen.queryByText(/fail|error/i)).toBeNull()
+    expect(await axe(container)).toHaveNoViolations()
+  })
+
+  it('DONE says where to follow the order and not to send it again; it is not reachable by a refusal (the hook reports those as `error`)', () => {
+    hookState.current = makeHook({ status: 'done', result: { kind: 'submitted', status: 'live' } })
+    render(<TradeConfirm market={MARKET} outcome={OUTCOME} side="BUY" onClose={() => {}} />)
+    expect(screen.getByRole('status')).toHaveTextContent(/Order sent to Polymarket — the venue answered “live”/)
+    expect(screen.getByRole('status')).toHaveTextContent(/Do not send it again/)
+  })
+
+  it('negRisk is handed over ONLY when the market states a boolean — an unstated flag is left out so the venue is asked', () => {
+    for (const [stated, expected] of [[true, true], [false, false], [undefined, undefined], [null, undefined]]) {
+      const hook = makeHook()
+      hookState.current = hook
+      const { unmount } = render(<TradeConfirm market={{ ...MARKET, negRisk: stated }} outcome={OUTCOME} side="SELL" onClose={() => {}} />)
+      fireEvent.change(screen.getByLabelText(/shares to sell/i), { target: { value: '10' } })
+      fireEvent.click(screen.getByRole('button', { name: /sign sell/i }))
+      expect(hook.submit).toHaveBeenCalledTimes(1)
+      expect(hook.submit.mock.calls[0][1].negRisk, String(stated)).toBe(expected)
+      expect(hook.submit.mock.calls[0][1].label).toMatch(/^Sell Yes — Will it rain/)
+      unmount()
+    }
+  })
 })
