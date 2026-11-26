@@ -3486,6 +3486,79 @@
       "memberFacing": false,
       "reason": "A contract test-infrastructure spec (coverage policy, revert-assertion gates, fuzz harnesses, adversarial unit tests). It adds no member-facing flow and changes no production bytecode.",
       "flows": []
+    },
+    {
+      "id": "114-predict-live-markets",
+      "title": "Predict \u2014 live markets, market pages and an amount-first ticket",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "predict.browse-by-event",
+          "name": "Find a market by category, search or sort, with the markets of one event on one card",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1747"
+        },
+        {
+          "id": "predict.market-page",
+          "name": "Open an event by its address and see every outcome, its history, depth, volume, closing time and resolution source",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1747"
+        },
+        {
+          "id": "predict.price-trust-state",
+          "name": "A price that stops being confirmed is marked delayed with its age, then last known, and is never drawn as live",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1747"
+        },
+        {
+          "id": "predict.amount-first-ticket",
+          "name": "Enter an amount and see average price, shares, payout, maximum loss and every fee before signing; a non-live price yields no figures",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "disclosure",
+          "tests": [],
+          "issue": "#1747"
+        },
+        {
+          "id": "predict.order-progress",
+          "name": "Follow an order from signed to settled without refreshing, with unconfirmed distinct from failed, surviving a reload",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1747"
+        },
+        {
+          "id": "predict.self-limit",
+          "name": "An order past a self-set spending limit is declined at review; relaxing a limit waits out its period",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "access",
+          "tests": [],
+          "issue": "#1747"
+        }
+      ]
     }
   ]
 }
