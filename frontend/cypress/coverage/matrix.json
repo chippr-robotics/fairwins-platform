@@ -3486,6 +3486,35 @@
       "memberFacing": false,
       "reason": "A contract test-infrastructure spec (coverage policy, revert-assertion gates, fuzz harnesses, adversarial unit tests). It adds no member-facing flow and changes no production bytecode.",
       "flows": []
+    },
+    {
+      "id": "113-single-submission-engine",
+      "title": "Single submission engine (zero-fee sponsored operations)",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "engine.sponsored-any-network",
+          "name": "A passkey member holding no native coin sends a sponsored transaction on a network with no paymaster: the signed fee is zero, the platform's gas wallet pays, and the member's native balance is zero before and after",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "account-native",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1700"
+        },
+        {
+          "id": "engine.sponsorship-refused-self-funded",
+          "name": "Sponsorship refused before signing: the member is told they pay the network fee, confirms once, and the action lands self-funded with the platform reimbursed",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "account-native",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1700"
+        }
+      ]
     }
   ]
 }

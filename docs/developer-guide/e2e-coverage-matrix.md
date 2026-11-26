@@ -26,12 +26,12 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 116 |
-| With a member-facing flow | 91 |
-| Member-facing flows | 214 |
+| Spec directories | 117 |
+| With a member-facing flow | 92 |
+| Member-facing flows | 216 |
 | 🟢 covered | 193 |
 | 🟡 partial | 5 |
-| 🔴 absent | 7 |
+| 🔴 absent | 9 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -40,7 +40,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Custody — member funds are escrowed, moved, bridged, swept or sent
 
-89 flows — 🟢 72 · 🟡 5 · 🔴 4 · ⚪ 8 · covered-but-not-proven 0
+91 flows — 🟢 72 · 🟡 5 · 🔴 6 · ⚪ 8 · covered-but-not-proven 0
 
 ### `001-cypress-e2e-flows` — Core wager lifecycle (create → accept → resolve → claim/refund)
 
@@ -350,6 +350,13 @@ establish the outcome. They are listed in full at the end of this document.
 | `sigil.pair-and-add` | Pair with the local Sigil bridge, read the inserted disk's account and remaining presignatures, and save it as an off-chain account (public metadata only; the pairing token device-scoped) | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-01, SIG-04) |  |
 | `sigil.sign-message` | Acting as the Sigil account, Protect ▸ Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address | 🟢 covered | settled | `no-chain` | `51-protect-sigil.cy.js` (SIG-03) |  |
 | `sigil.operate-as-send` | Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log | 🟢 covered | settled | `on-chain` | `46-sigil-operate-as-send.cy.js` (SGO-01) |  |
+
+### `113-single-submission-engine` — Single submission engine (zero-fee sponsored operations)
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `engine.sponsored-any-network` | A passkey member holding no native coin sends a sponsored transaction on a network with no paymaster: the signed fee is zero, the platform's gas wallet pays, and the member's native balance is zero before and after | 🔴 absent | none | — (proposed: account-native) | #1700 |  |
+| `engine.sponsorship-refused-self-funded` | Sponsorship refused before signing: the member is told they pay the network fee, confirms once, and the action lands self-funded with the platform reimbursed | 🔴 absent | none | — (proposed: account-native) | #1700 |  |
 
 ## Disclosure — a member consents to a cost
 
