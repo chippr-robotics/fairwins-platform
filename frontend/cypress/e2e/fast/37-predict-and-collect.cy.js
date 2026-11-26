@@ -79,14 +79,48 @@ const MARKETS = [
   },
 ]
 
-/** Answer the Predict half of the gateway. `query` filters, mirroring the proxy. */
+/**
+ * Spec 114: the Predict list reads the gateway's `/events` route. Each fixture market above is served
+ * as a one-market event (the shape the list renders), so PR-01..04 keep asserting what they always did.
+ */
+const asEvent = (m) => ({
+  slug: m.slug,
+  title: m.question,
+  category: null,
+  volume: null,
+  volume24h: null,
+  endDate: m.endDate,
+  mutuallyExclusive: false,
+  marketCount: 1,
+  markets: [
+    {
+      conditionId: m.conditionId,
+      label: m.question,
+      tradable: m.tradable,
+      negRisk: Boolean(m.negRisk),
+      outcomes: m.outcomes,
+      bestBid: null,
+      bestAsk: null,
+      lastTradePrice: null,
+      displayPrice: m.outcomes[0].price,
+      tickSize: '0.01',
+      minOrderSize: '5',
+    },
+  ],
+})
+
+/** Answer the Predict half of the gateway. `q` filters, mirroring the proxy. */
 function predictGateway() {
   cy.intercept({ method: 'GET', url: GATEWAY_URL }, (req) => {
-    if (!/\/markets(\?|$)/.test(req.url)) return req.continue()
+    if (!/\/events(\?|$)/.test(req.url)) return req.continue()
     const q = (new URL(req.url).searchParams.get('q') || '').toLowerCase()
-    const markets = q ? MARKETS.filter((m) => m.question.toLowerCase().includes(q)) : MARKETS
-    req.reply({ statusCode: 200, body: { markets, next: null, fetchedAt: Date.now(), stale: false } })
-  }).as('markets')
+    const found = q ? MARKETS.filter((m) => m.question.toLowerCase().includes(q)) : MARKETS
+    const now = new Date().toISOString()
+    req.reply({
+      statusCode: 200,
+      body: { events: found.map(asEvent), next: null, confirmedAt: now, serverNow: now, stale: false },
+    })
+  }).as('events')
 
   cy.intercept({ method: 'GET', url: /localhost:8899\/v1\/polymarket\/\d+\/fee-rate/ }, {
     statusCode: 200,
@@ -129,12 +163,12 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
     waitForAccount()
 
     cy.get('[aria-label="Predict"]', { timeout: 40000 }).should('exist')
-    cy.get('.predict-grid li', { timeout: 20000 }).should('have.length', MARKETS.length)
+    cy.get('.event-card', { timeout: 20000 }).should('have.length', MARKETS.length)
     cy.contains('Will it rain in London tomorrow?').should('exist')
 
     // Searching narrows to the gateway's own answer — the filter is served, not done locally.
     cy.get('[aria-label="Search markets"]').type('harbour')
-    cy.get('.predict-grid li', { timeout: 20000 }).should('have.length', 1)
+    cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
     cy.contains('Will the harbour freeze this winter?').should('exist')
 
     /*
@@ -160,7 +194,7 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
     cy.visit('/wallet?tab=predict')
     waitForAccount()
 
-    cy.get('.predict-grid li', { timeout: 40000 }).first().find('button, [role="button"]').first().click({ force: true })
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-title').click()
     cy.get('.market-detail', { timeout: 20000 }).should('exist')
     cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
 
@@ -195,7 +229,7 @@ describe('Predict and Collect (specs 057 / 055 / 056 / 013)', () => {
     cy.visit('/wallet?tab=predict')
     waitForAccount()
 
-    cy.get('.predict-grid li', { timeout: 40000 }).first().find('button, [role="button"]').first().click({ force: true })
+    cy.get('.event-card', { timeout: 40000 }).first().find('.event-card-title').click()
     cy.get('.market-detail', { timeout: 20000 }).should('exist')
     cy.get('.market-detail').contains('button', /^Buy$/).first().click({ force: true })
 

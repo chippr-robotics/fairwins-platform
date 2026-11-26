@@ -1,12 +1,11 @@
-/* PredictPanel (spec 057) — Predict tab: market browse grid. Mirrors CollectiblesPanel. */
+/* PredictPanel (spec 057, reworked by 114) — Predict tab: event browse list. */
 
 .predict-panel {
   display: flex;
   flex-direction: column;
   gap: 0.9rem;
 }
-/* Title and refresh on one line. `center`, not `flex-start`: with the intro paragraph
-    gone there is nothing under the heading for the button to align to. */
+/* Title and the list's trust chip on one line. */
 .predict-panel-header {
   align-items: center;
   display: flex;
@@ -15,15 +14,6 @@
 }
 .predict-panel-header h3 {
   margin: 0;
-}
-.predict-refresh {
-  background: transparent;
-  border: 1px solid var(--border-color);
-  border-radius: 8px;
-  color: var(--text-primary);
-  cursor: pointer;
-  padding: 0.35rem 0.8rem;
-  white-space: nowrap;
 }
 
 .predict-search input {
@@ -61,8 +51,11 @@
 }
 .predict-degraded-actions button,
 .predict-degraded-actions a {
-  color: var(--brand-primary);
+  align-items: center;
+  color: var(--accent-color);
   cursor: pointer;
+  display: inline-flex;
+  min-height: 44px;
 }
 .predict-degraded-actions button {
   background: transparent;
@@ -73,60 +66,74 @@
 .predict-grid {
   display: grid;
   gap: 0.6rem;
-  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 21rem), 1fr));
   list-style: none;
   margin: 0;
   padding: 0;
 }
-.predict-card {
-  display: flex;
-}
-.predict-card-button {
-  background: var(--surface-color, var(--bg-secondary));
-  border: 1px solid var(--border-color);
-  border-radius: 12px;
-  cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-  padding: 0.8rem 0.9rem;
-  text-align: left;
-  width: 100%;
-}
-.predict-card-button:hover {
-  border-color: var(--brand-primary);
-}
-.predict-card-button:focus-visible {
-  outline: 2px solid var(--brand-primary);
-  outline-offset: 2px;
-}
-.predict-card-question {
-  color: var(--text-primary);
-  font-weight: 600;
-  line-height: 1.3;
-}
-.predict-card-meta {
+.predict-panel .predict-controls {
   align-items: center;
-  color: var(--text-secondary);
   display: flex;
   flex-wrap: wrap;
-  font-size: 0.8rem;
+  gap: 0.6rem 1rem;
+  justify-content: space-between;
+}
+.predict-panel .predict-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.predict-panel .predict-chip {
+  background: transparent;
+  border: 1px solid var(--border-color);
+  border-radius: 999px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 0.85rem;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0.3rem 0.9rem;
+}
+.predict-panel .predict-chip[aria-pressed='true'] {
+  background: var(--primary-button);
+  border-color: var(--primary-button);
+  color: var(--primary-button-text);
+}
+.predict-panel .predict-chip:disabled {
+  background: var(--disabled-bg);
+  border-color: var(--disabled-bg);
+  color: var(--disabled-text);
+  cursor: default;
+}
+.predict-panel .predict-chip:focus-visible,
+.predict-panel .predict-sort select:focus-visible,
+.predict-panel .predict-load-more:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+.predict-panel .predict-sort {
+  align-items: center;
+  color: var(--text-secondary);
+  display: inline-flex;
+  font-size: 0.85rem;
   gap: 0.5rem;
 }
-.predict-card-category {
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-}
-.predict-card-price {
-  background: var(--bg-tertiary);
-  border-radius: 6px;
+.predict-panel .predict-sort select {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
   color: var(--text-primary);
-  font-weight: 600;
-  margin-left: auto;
-  padding: 0.1rem 0.45rem;
+  min-height: 44px;
+  padding: 0.3rem 0.6rem;
 }
-.predict-card-closed {
-  color: var(--warning-text);
+.predict-panel .predict-sort select:disabled {
+  background: var(--disabled-bg);
+  color: var(--disabled-text);
+}
+.predict-panel .predict-search-note {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin: 0;
 }
 
 .predict-load-more {
@@ -134,7 +141,9 @@
   background: transparent;
   border: 1px solid var(--border-color);
   border-radius: 8px;
+  color: var(--text-primary);
   cursor: pointer;
+  min-height: 44px;
   padding: 0.5rem 1.2rem;
 }
 .predict-load-more:disabled {

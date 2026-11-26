@@ -1206,7 +1206,7 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
-at specs/109-token-news/plan.md
+at specs/114-predict-live-markets/plan.md
 <!-- SPECKIT END -->
 - **Workstation credentials live in Secret Manager, never in `.env` (spec 097).** The machine the
   platform is administered FROM is a production surface — it can read a funded deploy key that also

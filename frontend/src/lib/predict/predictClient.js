@@ -98,3 +98,33 @@ export function fetchFeeRate(chainId, tokenId) {
 export function fetchPositions(chainId, address) {
   return request(`/v1/polymarket/${chainId}/positions?address=${encodeURIComponent(address)}`)
 }
+
+/* ── Spec 114 — live markets reads. Every success body ends with { confirmedAt, serverNow, stale }. ── */
+
+/** Events list → { events, next, confirmedAt, serverNow, stale }. `q` ignores category/sort (gateway rule). */
+export function fetchEvents(chainId, { category = '', sort = '', q = '', next = '' } = {}) {
+  const qs = new URLSearchParams()
+  if (q) qs.set('q', q)
+  if (category) qs.set('category', category)
+  if (sort) qs.set('sort', sort)
+  if (next) qs.set('next', next)
+  const suffix = qs.toString() ? `?${qs}` : ''
+  return request(`/v1/polymarket/${chainId}/events${suffix}`)
+}
+
+/** One event with all its markets → EventDetail + envelope. */
+export function fetchEvent(chainId, slug) {
+  return request(`/v1/polymarket/${chainId}/events/${encodeURIComponent(slug)}`)
+}
+
+/** Order books for one to ten token ids → { books, unreadable, confirmedAt, serverNow, stale }. */
+export function fetchBooks(chainId, tokenIds) {
+  const ids = (Array.isArray(tokenIds) ? tokenIds : [tokenIds]).map((t) => encodeURIComponent(String(t)))
+  return request(`/v1/polymarket/${chainId}/books?token_ids=${ids.join(',')}`)
+}
+
+/** Price history for one token → { tokenId, range, points: [{ t, p }], confirmedAt, serverNow, stale }. */
+export function fetchHistory(chainId, tokenId, range = '1d') {
+  const qs = new URLSearchParams({ token_id: String(tokenId), range })
+  return request(`/v1/polymarket/${chainId}/prices-history?${qs}`)
+}

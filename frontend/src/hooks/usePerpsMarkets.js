@@ -6,7 +6,7 @@
  * outage. Per-venue health rides alongside as `sources` (FR-004): a degraded venue is disclosed
  * while the others keep rendering.
  *
- * Race-safe: a request id guards stale responses (the usePredictMarkets idiom). Deps are
+ * Race-safe: a request id guards stale responses (the usePredictEvents idiom). Deps are
  * injectable for tests.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'

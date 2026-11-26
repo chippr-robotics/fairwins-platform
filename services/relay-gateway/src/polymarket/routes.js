@@ -24,7 +24,18 @@ import {
   normalizeGammaPage,
   normalizeFeeRate,
   normalizePositionsList,
+  normalizeEvent,
+  normalizeEventPage,
+  normalizeBook,
+  normalizeHistory,
+  isEventSlug,
+  isRange,
+  isSort,
+  EVENT_SORTS,
+  HISTORY_RANGES,
 } from './normalize.js'
+import { isCategory, tagSlugFor } from './categories.js'
+import { selectTopics, TOPIC_SLUG_RE } from './discover.js'
 
 /**
  * @param {object} config full gateway config (only .polymarket is read)
@@ -36,13 +47,19 @@ import {
  *   killSwitch: {isActive: () => boolean},
  * }} deps
  */
-export function createPolymarketRouter(config, { client, gammaClient, dataClient, cache, quotas, writeQuotas, killSwitch, feeRates }) {
+export function createPolymarketRouter(
+  config,
+  { client, gammaClient, dataClient, cache, quotas, writeQuotas, killSwitch, feeRates, now = () => Date.now() }
+) {
   const pm = config.polymarket
   const gamma = gammaClient ?? client // browse/search host (public)
   const data = dataClient ?? client // positions host (public)
   const router = express.Router()
 
   const GAMMA_PAGE = 100 // markets fetched per Gamma page (volume-ranked; q filters this set)
+  const EVENT_PAGE = 20 // events per page (spec 114); the cursor is an offset in events
+  const MAX_BOOK_TOKENS = 10
+  const CURSOR_NUMERIC_RE = /^\d{1,6}$/
 
   // Builder attribution (spec 057): the shared BUILDER creds (POLYMARKET_API_* — verified valid *builder*
   // creds, NOT user L2 creds) sign the POLY_BUILDER_* headers server-side so they never reach the browser.
@@ -100,6 +117,18 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
 
   const respond = (res, { value, fetchedAt, stale }) =>
     res.json({ ...value, fetchedAt: new Date(fetchedAt).toISOString(), stale })
+
+  // Spec 114 envelope: `confirmedAt` is when the gateway fetched the cached copy from the venue,
+  // `serverNow` the gateway's own clock at response time (the injectable one), `stale` that the venue
+  // could not be reached and the copy is older than its TTL. A client computes a price's age from
+  // these two stamps, never from its own wall clock.
+  const respondLive = (res, value, { confirmedAt, stale }) =>
+    res.json({
+      ...value,
+      confirmedAt: new Date(confirmedAt).toISOString(),
+      serverNow: new Date(now()).toISOString(),
+      stale,
+    })
 
   function handleError(res, err) {
     if (err instanceof GatewayError) {
@@ -170,6 +199,226 @@ export function createPolymarketRouter(config, { client, gammaClient, dataClient
         return market
       })
       respond(res, result)
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
+  // ---- GET /v1/polymarket/:chainId/events (spec 114: events with their markets, categories, search) ----
+  // Gamma /events (or /public-search when `q` is present, in which case category/sort are ignored).
+  // Read-only: nothing here accepts, forwards or signs an order.
+  router.get('/v1/polymarket/:chainId/events', async (req, res) => {
+    try {
+      requirePolygon(req.params.chainId)
+      const { category, topic, live, sort, next, q } = req.query
+      if (category !== undefined && !isCategory(category)) {
+        throw new GatewayError(400, 'invalid_category', 'category is not one of the supported categories')
+      }
+      if (topic !== undefined && !(typeof topic === 'string' && TOPIC_SLUG_RE.test(topic))) {
+        throw new GatewayError(400, 'invalid_topic', 'topic must be a venue tag slug (letters, digits and hyphens, at most 64)')
+      }
+      if (live !== undefined && live !== '1') {
+        throw new GatewayError(400, 'invalid_filter', 'live must be 1 when present')
+      }
+      if ([category, topic, live].filter((v) => v !== undefined).length > 1) {
+        throw new GatewayError(400, 'invalid_filter', 'category, topic and live are exclusive; send at most one')
+      }
+      if (sort !== undefined && !isSort(sort)) {
+        throw new GatewayError(400, 'invalid_sort', 'sort must be volume24h, newest or closing')
+      }
+      if (next !== undefined && !(typeof next === 'string' && CURSOR_NUMERIC_RE.test(next))) {
+        throw new GatewayError(400, 'invalid_cursor', 'malformed pagination cursor')
+      }
+      if (q !== undefined && typeof q !== 'string') throw new GatewayError(400, 'invalid_query', 'q must be text')
+      const search = typeof q === 'string' ? q.trim().slice(0, 128) : ''
+      const offset = next === undefined ? 0 : Number.parseInt(next, 10)
+      guard(req)
+
+      let result
+      if (search) {
+        // The venue's search is by page; our cursor stays an event offset. Keys are bounded: q is
+        // capped at 128 characters, the offset is numeric, and category/sort are not part of it.
+        result = await cache.fetchThrough(`events:q:${search.toLowerCase()}:${offset}`, pm.cacheTtlMs, async () => {
+          const body = await gamma.get('/public-search', {
+            query: {
+              q: search,
+              limit_per_type: String(EVENT_PAGE),
+              page: String(Math.floor(offset / EVENT_PAGE) + 1),
+              events_status: 'active',
+            },
+          })
+          return normalizeEventPage(body, { offset, limit: EVENT_PAGE })
+        })
+      } else {
+        // `live=1` ignores sort: the order is trading in the last day.
+        const sortId = live !== undefined ? 'volume24h' : (sort ?? 'volume24h')
+        const { order, ascending } = EVENT_SORTS[sortId]
+        // Topic slugs are case-sensitive at the venue, so the key keeps their case.
+        const filterKey = live !== undefined ? 'live' : topic !== undefined ? `topic:${topic}` : (category ?? 'all')
+        result = await cache.fetchThrough(`events:${filterKey}:${sortId}:${offset}`, pm.cacheTtlMs, async () => {
+          const query = {
+            active: 'true',
+            closed: 'false',
+            archived: 'false',
+            order,
+            ascending,
+            limit: String(EVENT_PAGE),
+            offset: String(offset),
+          }
+          if (category !== undefined) query.tag_slug = tagSlugFor(category)
+          if (topic !== undefined) query.tag_slug = topic
+          if (live !== undefined) query.live = 'true'
+          // Active-but-past-end events are still open at the venue until UMA settles them, and they
+          // sort FIRST ascending; "closing soon" means not yet closed, so start from now.
+          if (sortId === 'closing') query.end_date_min = new Date(now()).toISOString().replace(/\.\d+Z$/, 'Z')
+          const body = await gamma.get('/events', { query })
+          return normalizeEventPage(body, { offset, limit: EVENT_PAGE })
+        })
+      }
+      respondLive(res, result.value, { confirmedAt: result.fetchedAt, stale: result.stale })
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
+  // ---- GET /v1/polymarket/:chainId/discover (spec 114 R16: what is active now) ------------------
+  // Two independent venue reads, each its own cache entry (single-flight + serve-stale per half): the
+  // hundred most-traded events (-> topics) and the events in play (-> live). One half failing yields
+  // null for that half only; an honestly empty half is [] / {count:0}. Both failing is a 503.
+  const LIVE_PAGE = 50
+  const TOP_PAGE = 100
+  const LIVE_LEADERS = 6
+  const BASE_EVENTS_QUERY = { active: 'true', closed: 'false', archived: 'false', order: 'volume24hr', ascending: 'false' }
+  router.get('/v1/polymarket/:chainId/discover', async (req, res) => {
+    try {
+      requirePolygon(req.params.chainId)
+      guard(req)
+
+      const [liveR, topR] = await Promise.allSettled([
+        cache.fetchThrough('discover:live', pm.discoverTtlMs, async () => {
+          const body = await gamma.get('/events', { query: { ...BASE_EVENTS_QUERY, live: 'true', limit: String(LIVE_PAGE) } })
+          if (!Array.isArray(body)) throw new Error('events not readable')
+          const inPlay = body.filter((e) => e?.closed !== true).map((e) => normalizeEvent(e)).filter((e) => e?.live != null)
+          return {
+            count: inPlay.length,
+            ...(body.length >= LIVE_PAGE ? { more: true } : {}),
+            events: inPlay.slice(0, LIVE_LEADERS),
+          }
+        }),
+        cache.fetchThrough('discover:top', pm.discoverTtlMs, async () => {
+          const body = await gamma.get('/events', { query: { ...BASE_EVENTS_QUERY, limit: String(TOP_PAGE) } })
+          if (!Array.isArray(body)) throw new Error('events not readable')
+          return { topics: selectTopics(body.filter((e) => e?.closed !== true)) }
+        }),
+      ])
+      const read = [liveR, topR].filter((r) => r.status === 'fulfilled')
+      if (read.length === 0) throw new Error('no half of discover could be read')
+      respondLive(
+        res,
+        {
+          live: liveR.status === 'fulfilled' ? liveR.value.value : null,
+          topics: topR.status === 'fulfilled' ? topR.value.value.topics : null,
+        },
+        {
+          confirmedAt: Math.min(...read.map((r) => r.value.fetchedAt)),
+          stale: read.some((r) => r.value.stale),
+        }
+      )
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
+  // ---- GET /v1/polymarket/:chainId/events/:slug (spec 114: one event, every market) -----------
+  router.get('/v1/polymarket/:chainId/events/:slug', async (req, res) => {
+    try {
+      requirePolygon(req.params.chainId)
+      const { slug } = req.params
+      if (!isEventSlug(slug)) throw new GatewayError(400, 'invalid_event', 'event slug is malformed')
+      guard(req)
+
+      const result = await cache.fetchThrough(`event:${slug}`, pm.cacheTtlMs, async () => {
+        const body = await gamma.get('/events', { query: { slug } })
+        const event = normalizeEvent(Array.isArray(body) ? body[0] : null, { detail: true })
+        if (!event) throw new GatewayError(404, 'not_found', 'the marketplace does not know this event')
+        return event
+      })
+      respondLive(res, result.value, { confirmedAt: result.fetchedAt, stale: result.stale })
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
+  // ---- GET /v1/polymarket/:chainId/books?token_ids=a,b,c (spec 114: per-token cached books) ---
+  // Each token is its own cache entry (TTL = the book TTL), so a request for several tokens is
+  // assembled from per-token entries and ten members watching one outcome cost the venue ONE
+  // request per window. A token that cannot be read is listed in `unreadable` and is absent from
+  // `books` — never an empty book, and never a reason to blank the others.
+  router.get('/v1/polymarket/:chainId/books', async (req, res) => {
+    try {
+      requirePolygon(req.params.chainId)
+      const raw = req.query.token_ids
+      if (typeof raw !== 'string' || raw === '') {
+        throw new GatewayError(400, 'invalid_token', 'token_ids must be a comma-separated list of numeric token ids')
+      }
+      const parts = raw.split(',')
+      if (parts.length > MAX_BOOK_TOKENS) {
+        throw new GatewayError(400, 'too_many_tokens', `at most ${MAX_BOOK_TOKENS} token ids per request`)
+      }
+      if (!parts.every(isTokenId)) {
+        throw new GatewayError(400, 'invalid_token', 'token_ids must be a comma-separated list of numeric token ids')
+      }
+      const tokenIds = [...new Set(parts)]
+      guard(req)
+
+      const settled = await Promise.allSettled(
+        tokenIds.map((tokenId) =>
+          cache.fetchThrough(`book:${tokenId}`, pm.bookTtlMs, async () => {
+            const book = normalizeBook(await client.get('/book', { query: { token_id: tokenId } }))
+            // A body that is not a readable book is a failed read: throwing keeps it out of the
+            // cache (the previous good copy, if any, is served stale instead).
+            if (!book || book.tokenId !== tokenId) throw new Error('book not readable')
+            return book
+          })
+        )
+      )
+      const books = []
+      const unreadable = []
+      let confirmedAt = Infinity
+      let stale = false
+      settled.forEach((r, i) => {
+        if (r.status === 'fulfilled') {
+          books.push(r.value.value)
+          confirmedAt = Math.min(confirmedAt, r.value.fetchedAt)
+          stale = stale || r.value.stale
+        } else {
+          unreadable.push(tokenIds[i])
+        }
+      })
+      // Nothing was confirmed with the venue, so there is no honest confirmedAt to state.
+      if (books.length === 0) throw new Error('no book could be read')
+      respondLive(res, { books, unreadable }, { confirmedAt, stale })
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
+  // ---- GET /v1/polymarket/:chainId/prices-history?token_id=&range= (spec 114) -----------------
+  router.get('/v1/polymarket/:chainId/prices-history', async (req, res) => {
+    try {
+      requirePolygon(req.params.chainId)
+      const tokenId = typeof req.query.token_id === 'string' ? req.query.token_id : ''
+      if (!isTokenId(tokenId)) throw new GatewayError(400, 'invalid_token', 'token_id must be a numeric token id')
+      const range = req.query.range
+      if (!isRange(range)) throw new GatewayError(400, 'invalid_range', 'range must be 1h, 1d, 1w, 1m or max')
+      guard(req)
+
+      const { interval, fidelity } = HISTORY_RANGES[range]
+      const result = await cache.fetchThrough(`history:${tokenId}:${range}`, pm.historyTtlMs, async () => {
+        const body = await client.get('/prices-history', { query: { market: tokenId, interval, fidelity } })
+        return { tokenId, range, points: normalizeHistory(body) }
+      })
+      respondLive(res, result.value, { confirmedAt: result.fetchedAt, stale: result.stale })
     } catch (err) {
       handleError(res, err)
     }

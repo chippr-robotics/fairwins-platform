@@ -57,6 +57,10 @@
  *   POLYMARKET_TIMEOUT_MS      upstream request timeout (default 5000)
  *   POLYMARKET_RETRIES         upstream retries on 5xx/transport for reads (default 1; writes never retry)
  *   POLYMARKET_CACHE_TTL_MS    market/fee read cache TTL (default 15000 — prices move fast)
+ *   POLYMARKET_BOOK_TTL_MS     per-token order-book cache TTL (spec 114; default 2000, floor 1000 —
+ *                              a lower value is clamped with one boot log line, never a boot failure)
+ *   POLYMARKET_HISTORY_TTL_MS  price-history cache TTL (spec 114; default 60000)
+ *   POLYMARKET_DISCOVER_TTL_MS /discover quick-filter cache TTL, per half (spec 114; default 60000)
  *   POLYMARKET_QUOTA_PER_ADDRESS reads/min counted per requested address (default 60)
  *   POLYMARKET_QUOTA_GLOBAL    reads/min across all callers (default 300)
  *   POLYMARKET_QUOTA_WINDOW_MS quota window (default 60000)
@@ -643,6 +647,19 @@ export function loadConfig(env = process.env, opts = {}) {
       timeoutMs: int(env, 'POLYMARKET_TIMEOUT_MS', 5000),
       retries: int(env, 'POLYMARKET_RETRIES', 1),
       cacheTtlMs: int(env, 'POLYMARKET_CACHE_TTL_MS', 15_000),
+      // Spec 114: books are cached PER TOKEN so ten members watching one outcome cost the venue one
+      // request per window. Below the floor the proxy would amplify load without buying freshness a
+      // member can see — clamp and log once rather than failing boot (a tuning error, not a lie).
+      bookTtlMs: (() => {
+        const BOOK_TTL_FLOOR_MS = 1000
+        const raw = int(env, 'POLYMARKET_BOOK_TTL_MS', 2000)
+        if (raw < BOOK_TTL_FLOOR_MS) {
+          console.warn(`[relay-gateway] POLYMARKET_BOOK_TTL_MS=${raw} is below the ${BOOK_TTL_FLOOR_MS}ms floor; clamped to ${BOOK_TTL_FLOOR_MS}`)
+        }
+        return Math.max(raw, BOOK_TTL_FLOOR_MS)
+      })(),
+      historyTtlMs: int(env, 'POLYMARKET_HISTORY_TTL_MS', 60_000),
+      discoverTtlMs: int(env, 'POLYMARKET_DISCOVER_TTL_MS', 60_000),
       quotaPerAddress: int(env, 'POLYMARKET_QUOTA_PER_ADDRESS', 60),
       quotaGlobal: int(env, 'POLYMARKET_QUOTA_GLOBAL', 300),
       quotaWindowMs: int(env, 'POLYMARKET_QUOTA_WINDOW_MS', 60_000),

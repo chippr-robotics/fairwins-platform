@@ -3,7 +3,7 @@
  * The Polymarket upstream is mocked via the injectable polymarketFetch; everything else uses the
  * same build-the-app-with-injected-deps pattern as opensea.test.js.
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import request from 'supertest'
 import { createApp } from '../src/server.js'
 import { createKillSwitch } from '../src/policy/killswitch.js'
@@ -17,7 +17,18 @@ import {
   normalizeFeeRate,
   normalizePosition,
   validateOrderBody,
+  normalizeEvent,
+  normalizeMarketRow,
+  normalizeBook,
+  normalizeHistory,
+  displayPrice,
+  isEventSlug,
+  isRange,
+  isSort,
 } from '../src/polymarket/normalize.js'
+import { isCategory, tagSlugFor, categoryForTags } from '../src/polymarket/categories.js'
+import { selectTopics, MECHANICS_DENYLIST } from '../src/polymarket/discover.js'
+import { createPolymarketClient } from '../src/polymarket/client.js'
 import { testConfig, mockProviders, mockEngine, ORIGIN_SECRET, TEST_NOW } from './helpers.js'
 
 const TRADER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
@@ -382,5 +393,901 @@ describe('predict builder-sign (attribution)', () => {
   it('honors the killswitch', async () => {
     const { app } = build({ killSwitch: createKillSwitch(true) })
     await post(app, BUILDER_SIGN_PATH, signReq).expect(503)
+  })
+})
+
+// ==== spec 114: live-markets reads (events, event detail, books, prices-history) ==================
+// Fixtures are trimmed from payloads probed live on 2026-11-26. Every route test asserts the REQUEST
+// the gateway sent upstream (path + query), because a fake that answers any request with the same
+// body cannot tell a correct proxy from a wrong one.
+
+const T_YES = '17640596861394454242836532536014033416733783473450136742726948856144855149507'
+const T_NO = '104236736263775307891497202874191911203963566711959725788584750440530976742193'
+const T_A = '111'
+const T_B = '222'
+const T_C = '333'
+
+const gammaRow = (over = {}) => ({
+  conditionId: '0x' + '01'.repeat(32),
+  question: 'Will the Fed decrease interest rates by 50+ bps after the December 2026 meeting?',
+  groupItemTitle: '50+ bps decrease',
+  image: 'https://example.invalid/row.jpg',
+  icon: 'https://example.invalid/row-icon.jpg',
+  outcomes: '["Yes", "No"]',
+  outcomePrices: '["0.0015", "0.9985"]',
+  clobTokenIds: JSON.stringify([T_YES, T_NO]),
+  bestBid: 0.001,
+  bestAsk: 0.002,
+  lastTradePrice: 0.002,
+  spread: 0.001,
+  orderPriceMinTickSize: 0.001,
+  orderMinSize: 5,
+  acceptingOrders: true,
+  active: true,
+  closed: false,
+  ...over,
+})
+
+const EVENT_SLUG = 'fed-decision-in-december'
+const gammaEvent = (over = {}) => ({
+  id: '1',
+  slug: EVENT_SLUG,
+  title: 'Fed Decision in December?',
+  description: 'Resolves to the FOMC decision.',
+  resolutionSource: 'https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm',
+  endDate: '2026-12-10T04:59:00Z',
+  image: 'https://example.invalid/event.jpg',
+  icon: 'https://example.invalid/event-icon.jpg',
+  active: true,
+  closed: false,
+  volume: '61605847.12',
+  volume24hr: 1820443.9,
+  liquidity: 100,
+  negRisk: true,
+  tags: [{ slug: 'fed', label: 'Fed' }, { slug: 'economy', label: 'Economy' }],
+  markets: [
+    gammaRow({ conditionId: '0x' + '01'.repeat(32), groupItemTitle: '50+ bps decrease' }),
+    gammaRow({
+      conditionId: '0x' + '02'.repeat(32),
+      groupItemTitle: '25 bps increase',
+      outcomePrices: '["0.935", "0.065"]',
+      bestBid: 0.93,
+      bestAsk: 0.94,
+      lastTradePrice: 0.93,
+    }),
+    gammaRow({ conditionId: '0x' + '03'.repeat(32), groupItemTitle: 'No change', outcomePrices: '["0.5", "0.5"]' }),
+    gammaRow({ conditionId: '0x' + '04'.repeat(32), groupItemTitle: 'Closed row', closed: true, acceptingOrders: false, outcomePrices: '["0.99", "0.01"]' }),
+    gammaRow({ conditionId: '0x' + '05'.repeat(32), groupItemTitle: '25 bps decrease', outcomePrices: '["0.2", "0.8"]' }),
+  ],
+  ...over,
+})
+
+// CLOB /book: bids and asks arrive WORST-FIRST (best is the LAST element). Strings are the venue's.
+const clobBook = (assetId, over = {}) => ({
+  market: CONDITION,
+  asset_id: assetId,
+  timestamp: '1795659205677',
+  hash: 'f67c3666d8b90cfb48a29861679cc3e0a93af60a',
+  bids: [
+    { price: '0.90', size: '10.50' },
+    { price: '0.92', size: '5120.00' },
+    { price: '0.93', size: '284698.76' },
+  ],
+  asks: [
+    { price: '0.99', size: '1' },
+    { price: '0.95', size: '220072.890' },
+    { price: '0.94', size: '7' },
+  ],
+  min_order_size: '5',
+  tick_size: '0.01',
+  neg_risk: true,
+  last_trade_price: '0.93',
+  ...over,
+})
+
+const EVENTS_PATH = '/v1/polymarket/137/events'
+const EVENT_PATH = `/v1/polymarket/137/events/${EVENT_SLUG}`
+const BOOKS_PATH = '/v1/polymarket/137/books'
+const HISTORY_PATH = '/v1/polymarket/137/prices-history'
+
+/** The query the gateway sent on the LAST upstream call whose URL contains `needle`. */
+function lastQuery(fetchFake, needle) {
+  const call = [...fetchFake.calls].reverse().find((c) => c.url.includes(needle))
+  expect(call, `no upstream call containing ${needle}`).toBeDefined()
+  const u = new URL(call.url)
+  return { path: u.pathname, q: Object.fromEntries(u.searchParams) }
+}
+const callsTo = (fetchFake, needle) => fetchFake.calls.filter((c) => c.url.includes(needle))
+
+describe('spec 114 normalize: categories and validators', () => {
+  it('maps only bounded ids to venue tag slugs', () => {
+    expect(isCategory('economy')).toBe(true)
+    expect(isCategory('toString')).toBe(false)
+    expect(isCategory('nope')).toBe(false)
+    expect(tagSlugFor('economy')).toBe('economy')
+    expect(tagSlugFor('culture')).toBe('pop-culture')
+    expect(tagSlugFor('nope')).toBeNull()
+    expect(categoryForTags([{ slug: 'fed' }, { slug: 'economy' }, { slug: 'politics' }])).toBe('economy')
+    expect(categoryForTags([{ slug: 'fed' }])).toBeNull()
+  })
+
+  it('validates slug, range and sort', () => {
+    expect(isEventSlug('a-b-1')).toBe(true)
+    expect(isEventSlug('A')).toBe(false)
+    expect(isEventSlug('a/b')).toBe(false)
+    expect(isEventSlug('a'.repeat(161))).toBe(false)
+    expect(isRange('1d')).toBe(true)
+    expect(isRange('1y')).toBe(false)
+    expect(isSort('newest')).toBe(true)
+    expect(isSort('volume')).toBe(false)
+  })
+})
+
+describe('spec 114 normalize: display price', () => {
+  it('is the midpoint without float drift while spread <= 0.10, else the last trade', () => {
+    expect(displayPrice('0.93', '0.94', '0.5')).toBe('0.935')
+    expect(displayPrice('0.1', '0.2', '0.5')).toBe('0.15') // spread exactly 0.10 still uses the midpoint
+    expect(displayPrice('0.1', '0.21', '0.5')).toBe('0.5')
+    expect(displayPrice('0.93', null, '0.5')).toBe('0.5')
+    expect(displayPrice(null, null, null)).toBeNull()
+    expect(displayPrice('0.3', '0.4', null)).toBe('0.35') // 0.3+0.4 is 0.7000000000000001 in floats
+  })
+})
+
+describe('spec 114 normalize: event rows', () => {
+  it('summarises at most four rows, tradable first then by Yes price, keeping the total', () => {
+    const e = normalizeEvent(gammaEvent())
+    expect(e).toMatchObject({
+      slug: EVENT_SLUG,
+      title: 'Fed Decision in December?',
+      category: 'economy',
+      volume: '61605847.12',
+      volume24h: '1820443.9',
+      endDate: '2026-12-10T04:59:00Z',
+      mutuallyExclusive: true,
+      marketCount: 5,
+    })
+    expect(e.markets).toHaveLength(4)
+    expect(e.markets.map((m) => m.label)).toEqual(['25 bps increase', 'No change', '25 bps decrease', '50+ bps decrease'])
+    // The closed row is the one cut, even though its Yes price (0.99) is the highest.
+    expect(e.markets.some((m) => m.label === 'Closed row')).toBe(false)
+    expect(e.description).toBeUndefined()
+    expect(e.status).toBeUndefined()
+  })
+
+  it('shapes a row from the venue fields, as strings, with a midpoint display price', () => {
+    const row = normalizeEvent(gammaEvent()).markets[0]
+    expect(row).toEqual({
+      conditionId: '0x' + '02'.repeat(32),
+      label: '25 bps increase',
+      tradable: true,
+      negRisk: false,
+      outcomes: [
+        { name: 'Yes', tokenId: T_YES, price: '0.935' },
+        { name: 'No', tokenId: T_NO, price: '0.065' },
+      ],
+      bestBid: '0.93',
+      bestAsk: '0.94',
+      lastTradePrice: '0.93',
+      displayPrice: '0.935',
+      tickSize: '0.001',
+      minOrderSize: '5',
+    })
+  })
+
+  it('keeps an omitted number null — never "0" — and falls back to the question for the label', () => {
+    const e = normalizeEvent(gammaEvent({ volume: undefined, volume24hr: null, markets: [gammaRow({ groupItemTitle: undefined, bestBid: undefined, bestAsk: undefined, lastTradePrice: null, orderMinSize: undefined })] }))
+    expect(e.volume).toBeNull()
+    expect(e.volume24h).toBeNull()
+    const row = e.markets[0]
+    expect(row.label).toMatch(/^Will the Fed decrease/)
+    expect(row).toMatchObject({ bestBid: null, bestAsk: null, lastTradePrice: null, displayPrice: null, minOrderSize: null })
+  })
+
+  it('never forwards an image, icon or markup field, and drops a category it does not own', () => {
+    const e = normalizeEvent(gammaEvent({ tags: [{ slug: 'fed' }] }), { detail: true })
+    expect(e.category).toBeNull()
+    expect(JSON.stringify(e)).not.toMatch(/example\.invalid|"image"|"icon"/)
+    expect(JSON.stringify(normalizeMarketRow(gammaRow()))).not.toMatch(/image|icon/)
+  })
+
+  it('caps the description at 4,000 characters of plain text', () => {
+    const e = normalizeEvent(gammaEvent({ description: 'x'.repeat(5000) }), { detail: true })
+    expect(e.description).toHaveLength(4000)
+  })
+
+  it('reads the resolution source from the event, else from a market, else null', () => {
+    expect(normalizeEvent(gammaEvent(), { detail: true }).resolutionSource).toMatch(/^https:\/\/www\.federalreserve/)
+    expect(normalizeEvent(gammaEvent({ resolutionSource: '', markets: [gammaRow({ resolutionSource: 'AP' })] }), { detail: true }).resolutionSource).toBe('AP')
+    expect(normalizeEvent(gammaEvent({ resolutionSource: '' }), { detail: true }).resolutionSource).toBeNull()
+  })
+
+  it('names the winner of a resolved row only when exactly one outcome settled at 1', () => {
+    const resolved = gammaRow({ closed: true, active: false, umaResolutionStatus: 'resolved', outcomePrices: '["0", "1"]' })
+    const e = normalizeEvent(gammaEvent({ closed: true, markets: [resolved] }), { detail: true })
+    expect(e.status).toBe('resolved')
+    expect(e.markets[0]).toMatchObject({ tradable: false, winner: 'No' })
+
+    // Resolved but the prices do not say who won (an even split): null, never a guess.
+    const split = gammaRow({ closed: true, umaResolutionStatus: 'resolved', outcomePrices: '["0.5", "0.5"]' })
+    expect(normalizeEvent(gammaEvent({ closed: true, markets: [split] }), { detail: true }).markets[0].winner).toBeNull()
+
+    // Closed but not yet resolved: no winner key at all, and the event is `closed`, not `resolved`.
+    const pending = gammaRow({ closed: true, umaResolutionStatus: 'proposed', outcomePrices: '["1", "0"]' })
+    const p = normalizeEvent(gammaEvent({ closed: true, markets: [pending] }), { detail: true })
+    expect(p.status).toBe('closed')
+    expect('winner' in p.markets[0]).toBe(false)
+    // An open event's rows never carry a winner.
+    expect('winner' in normalizeEvent(gammaEvent(), { detail: true }).markets[0]).toBe(false)
+  })
+
+  it('drops unusable events and unusable rows instead of failing', () => {
+    expect(normalizeEvent({ title: 'no slug' })).toBeNull()
+    expect(normalizeEvent(null)).toBeNull()
+    expect(normalizeEvent(gammaEvent({ markets: [{ junk: true }, gammaRow()] })).marketCount).toBe(1)
+  })
+})
+
+describe('spec 114 normalize: books and history', () => {
+  it('returns levels best-first, capped at 25, with the venue strings byte-identical', () => {
+    const b = normalizeBook(clobBook(T_A))
+    expect(b.bids).toEqual([['0.93', '284698.76'], ['0.92', '5120.00'], ['0.90', '10.50']])
+    expect(b.asks).toEqual([['0.94', '7'], ['0.95', '220072.890'], ['0.99', '1']])
+    expect(b).toMatchObject({
+      tokenId: T_A,
+      tickSize: '0.01',
+      minOrderSize: '5',
+      lastTradePrice: '0.93',
+      venueTime: new Date(1795659205677).toISOString(),
+      venueHash: 'f67c3666d8b90cfb48a29861679cc3e0a93af60a',
+    })
+    const deep = normalizeBook(clobBook(T_A, { bids: Array.from({ length: 40 }, (_, i) => ({ price: (0.01 + i / 100).toFixed(2), size: '1' })) }))
+    expect(deep.bids).toHaveLength(25)
+    expect(deep.bids[0][0]).toBe('0.40') // the 25 BEST of 40, not the 25 worst
+  })
+
+  it('treats a body that is not a book as unreadable (null), and a real empty book as empty', () => {
+    expect(normalizeBook(null)).toBeNull()
+    expect(normalizeBook({ asset_id: T_A, bids: 'nope', asks: [] })).toBeNull()
+    expect(normalizeBook({ bids: [], asks: [] })).toBeNull()
+    expect(normalizeBook(clobBook(T_A, { bids: [], asks: [] }))).toMatchObject({ bids: [], asks: [] })
+  })
+
+  it('maps history to {t, p} with p as a string and drops malformed points', () => {
+    expect(normalizeHistory({ history: [{ t: 1795572611, p: 0.935 }, { t: 'x', p: 0.1 }, { t: 5, p: null }, { t: 6, p: 7 }] })).toEqual([{ t: 1795572611, p: '0.935' }])
+    expect(normalizeHistory({ history: [] })).toEqual([])
+    expect(normalizeHistory(undefined)).toEqual([])
+  })
+})
+
+describe('spec 114 GET /events', () => {
+  const eventsFetch = (body = [gammaEvent()], extra = {}) => mockPolymarketFetch({ 'gamma-api.polymarket.com/events': body, ...extra })
+
+  it('lists events by 24h volume by default and sends exactly that query upstream', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    const res = await get(app, EVENTS_PATH).expect(200)
+    expect(res.body.events).toHaveLength(1)
+    expect(res.body.events[0]).toMatchObject({ slug: EVENT_SLUG, category: 'economy', marketCount: 5 })
+    expect(res.body.next).toBeNull() // one event is not a full page
+    expect(lastQuery(polymarketFetch, '/events')).toEqual({
+      path: '/events',
+      q: { active: 'true', closed: 'false', archived: 'false', order: 'volume24hr', ascending: 'false', limit: '20', offset: '0' },
+    })
+  })
+
+  it('filters by the venue tag slug of the category and passes the offset cursor', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    await get(app, `${EVENTS_PATH}?category=culture&next=40`).expect(200)
+    expect(lastQuery(polymarketFetch, '/events').q).toMatchObject({ tag_slug: 'pop-culture', offset: '40', order: 'volume24hr' })
+  })
+
+  it('maps each sort to the venue ordering', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    await get(app, `${EVENTS_PATH}?sort=newest`).expect(200)
+    expect(lastQuery(polymarketFetch, '/events').q).toMatchObject({ order: 'startDate', ascending: 'false' })
+    await get(app, `${EVENTS_PATH}?sort=closing`).expect(200)
+    // "closing" starts at the gateway's clock, so events past their end date but unsettled do not lead.
+    expect(lastQuery(polymarketFetch, '/events').q).toMatchObject({
+      order: 'endDate',
+      ascending: 'true',
+      end_date_min: new Date(TEST_NOW * 1000).toISOString().replace('.000Z', 'Z'),
+    })
+  })
+
+  it('offers the next cursor only when the venue returned a full page, and never lists closed events', async () => {
+    const page = Array.from({ length: 20 }, (_, i) => gammaEvent({ slug: `e-${i}`, closed: i === 0 }))
+    const { app } = build({ polymarketFetch: eventsFetch(page) })
+    const res = await get(app, `${EVENTS_PATH}?next=20`).expect(200)
+    expect(res.body.next).toBe('40')
+    expect(res.body.events).toHaveLength(19)
+    expect(res.body.events.some((e) => e.slug === 'e-0')).toBe(false)
+  })
+
+  it('uses the venue search for q and ignores category and sort', async () => {
+    const search = { events: [gammaEvent()], pagination: { hasMore: true, totalResults: 50 } }
+    const { app, polymarketFetch } = build({ polymarketFetch: mockPolymarketFetch({ '/public-search': search }) })
+    const res = await get(app, `${EVENTS_PATH}?q=fed%20decision&category=crypto&sort=closing&next=20`).expect(200)
+    expect(res.body.events[0].slug).toBe(EVENT_SLUG)
+    expect(res.body.next).toBe('40')
+    const sent = lastQuery(polymarketFetch, 'gamma-api')
+    expect(sent.path).toBe('/public-search')
+    expect(sent.q).toMatchObject({ q: 'fed decision', limit_per_type: '20', page: '2' })
+    expect(sent.q.tag_slug).toBeUndefined()
+    expect(sent.q.order).toBeUndefined()
+    expect(callsTo(polymarketFetch, '/events')).toHaveLength(0)
+  })
+
+  it('caps q at 128 characters before it reaches the venue', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: mockPolymarketFetch({ '/public-search': { events: [], pagination: { hasMore: false } } }) })
+    await get(app, `${EVENTS_PATH}?q=${'a'.repeat(300)}`).expect(200)
+    expect(lastQuery(polymarketFetch, '/public-search').q.q).toHaveLength(128)
+  })
+
+  it('carries the confirmedAt / serverNow / stale envelope from the gateway clock', async () => {
+    const { app } = build({ polymarketFetch: eventsFetch() })
+    const res = await get(app, EVENTS_PATH).expect(200)
+    const iso = new Date(TEST_NOW * 1000).toISOString()
+    expect(res.body).toMatchObject({ confirmedAt: iso, serverNow: iso, stale: false })
+  })
+
+  it('serves the last good copy flagged stale when the venue goes down, and 503s with nothing cached', async () => {
+    const fake = eventsFetch()
+    const { app, clock } = build({ polymarketFetch: fake })
+    await get(app, EVENTS_PATH).expect(200)
+    clock.t += 60 // beyond the 15 s TTL
+    fake.failWith = 503
+    const res = await get(app, EVENTS_PATH).expect(200)
+    expect(res.body.stale).toBe(true)
+    expect(res.body.confirmedAt).toBe(new Date(TEST_NOW * 1000).toISOString()) // when WE last confirmed it
+    expect(res.body.serverNow).toBe(new Date((TEST_NOW + 60) * 1000).toISOString())
+
+    const cold = build({ polymarketFetch: Object.assign(eventsFetch(), { failWith: 503 }) })
+    const down = await get(cold.app, EVENTS_PATH).expect(503)
+    expect(down.body.error.code).toBe('upstream_unavailable')
+  })
+
+  it('rejects bad parameters with the contract codes, before any upstream call', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    expect((await get(app, `${EVENTS_PATH}?category=nope`).expect(400)).body.error.code).toBe('invalid_category')
+    expect((await get(app, `${EVENTS_PATH}?category=`).expect(400)).body.error.code).toBe('invalid_category')
+    expect((await get(app, `${EVENTS_PATH}?sort=best`).expect(400)).body.error.code).toBe('invalid_sort')
+    expect((await get(app, `${EVENTS_PATH}?next=abc`).expect(400)).body.error.code).toBe('invalid_cursor')
+    expect((await get(app, `${EVENTS_PATH}?next=-1`).expect(400)).body.error.code).toBe('invalid_cursor')
+    expect(polymarketFetch.calls).toHaveLength(0)
+  })
+
+  it('validates before the read quota is spent', async () => {
+    const { app } = build({ env: { POLYMARKET_QUOTA_PER_ADDRESS: '1', POLYMARKET_QUOTA_GLOBAL: '100' }, polymarketFetch: eventsFetch() })
+    await get(app, `${EVENTS_PATH}?category=nope`).expect(400)
+    await get(app, `${EVENTS_PATH}?category=nope`).expect(400)
+    await get(app, EVENTS_PATH).expect(200) // the 400s consumed nothing
+    expect((await get(app, EVENTS_PATH).expect(429)).body.error.code).toBe('quota_exceeded')
+  })
+
+  it('honours the killswitch and 404s off Polygon', async () => {
+    expect((await get(build({ killSwitch: createKillSwitch(true) }).app, EVENTS_PATH).expect(503)).body.error.code).toBe('killswitch_active')
+    expect((await get(build().app, '/v1/polymarket/1/events').expect(404)).body.error.code).toBe('unsupported_chain')
+  })
+})
+
+describe('spec 114 GET /events/:slug', () => {
+  it('returns every market plus description, resolution source and status', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: mockPolymarketFetch({ 'gamma-api.polymarket.com/events': [gammaEvent()] }) })
+    const res = await get(app, EVENT_PATH).expect(200)
+    expect(res.body).toMatchObject({ slug: EVENT_SLUG, status: 'open', description: 'Resolves to the FOMC decision.', marketCount: 5 })
+    expect(res.body.resolutionSource).toMatch(/^https:/)
+    expect(res.body.markets).toHaveLength(5)
+    expect(res.body.markets.map((m) => m.label)).toContain('Closed row')
+    expect(res.body.stale).toBe(false)
+    expect(lastQuery(polymarketFetch, '/events')).toEqual({ path: '/events', q: { slug: EVENT_SLUG } })
+  })
+
+  it('carries the winner of a resolved market', async () => {
+    const resolved = gammaEvent({
+      closed: true,
+      markets: [gammaRow({ closed: true, active: false, umaResolutionStatus: 'resolved', outcomePrices: '["1", "0"]' })],
+    })
+    const { app } = build({ polymarketFetch: mockPolymarketFetch({ 'gamma-api.polymarket.com/events': [resolved] }) })
+    const res = await get(app, EVENT_PATH).expect(200)
+    expect(res.body.status).toBe('resolved')
+    expect(res.body.markets[0].winner).toBe('Yes')
+  })
+
+  it('404s not_found when the venue returns no event for the slug', async () => {
+    const { app } = build({ polymarketFetch: mockPolymarketFetch({ 'gamma-api.polymarket.com/events': [] }) })
+    expect((await get(app, EVENT_PATH).expect(404)).body.error.code).toBe('not_found')
+  })
+
+  it('rejects a malformed slug with invalid_event and never calls the venue', async () => {
+    const { app, polymarketFetch } = build()
+    expect((await get(app, '/v1/polymarket/137/events/Bad_Slug').expect(400)).body.error.code).toBe('invalid_event')
+    expect((await get(app, `/v1/polymarket/137/events/${'a'.repeat(161)}`).expect(400)).body.error.code).toBe('invalid_event')
+    expect(polymarketFetch.calls).toHaveLength(0)
+  })
+
+  it('honours the killswitch and 404s off Polygon', async () => {
+    expect((await get(build({ killSwitch: createKillSwitch(true) }).app, EVENT_PATH).expect(503)).body.error.code).toBe('killswitch_active')
+    expect((await get(build().app, `/v1/polymarket/1/events/${EVENT_SLUG}`).expect(404)).body.error.code).toBe('unsupported_chain')
+  })
+})
+
+describe('spec 114 GET /books', () => {
+  /** CLOB /book fake: answers per token_id; a token mapped to `null` fails with a venue 404. */
+  const bookFetch = (perToken) =>
+    mockPolymarketFetch({
+      '/book': (url) => {
+        const id = new URL(url).searchParams.get('token_id')
+        const b = perToken[id]
+        return b == null ? jsonRes({ error: 'No orderbook exists for the requested token id' }, 404) : jsonRes(b)
+      },
+    })
+
+  it('returns best-first books for the requested tokens and asks the venue per token', async () => {
+    const fake = bookFetch({ [T_A]: clobBook(T_A), [T_B]: clobBook(T_B, { last_trade_price: '0.05' }) })
+    const { app } = build({ polymarketFetch: fake })
+    const res = await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B}`).expect(200)
+    expect(res.body.books.map((b) => b.tokenId)).toEqual([T_A, T_B])
+    expect(res.body.books[0].bids[0]).toEqual(['0.93', '284698.76'])
+    expect(res.body.books[0].asks[0]).toEqual(['0.94', '7'])
+    expect(res.body.unreadable).toEqual([])
+    expect(res.body.stale).toBe(false)
+    const sent = callsTo(fake, '/book').map((c) => ({ path: new URL(c.url).pathname, token: new URL(c.url).searchParams.get('token_id') }))
+    expect(sent).toEqual([
+      { path: '/book', token: T_A },
+      { path: '/book', token: T_B },
+    ])
+  })
+
+  it('lists one failing token as unreadable without blanking the others or inventing an empty book', async () => {
+    const fake = bookFetch({ [T_A]: clobBook(T_A), [T_B]: null, [T_C]: clobBook(T_C) })
+    const { app } = build({ polymarketFetch: fake })
+    const res = await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B},${T_C}`).expect(200)
+    expect(res.body.books.map((b) => b.tokenId)).toEqual([T_A, T_C])
+    expect(res.body.unreadable).toEqual([T_B])
+    expect(res.body.books.some((b) => b.tokenId === T_B)).toBe(false)
+  })
+
+  it('treats a 200 body that is not a book as unreadable too', async () => {
+    const fake = bookFetch({ [T_A]: clobBook(T_A), [T_B]: { error: 'weird' } })
+    const { app } = build({ polymarketFetch: fake })
+    const res = await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B}`).expect(200)
+    expect(res.body.unreadable).toEqual([T_B])
+  })
+
+  it('503s when no requested token could be read (nothing was confirmed)', async () => {
+    const { app } = build({ polymarketFetch: bookFetch({ [T_A]: null }) })
+    expect((await get(app, `${BOOKS_PATH}?token_ids=${T_A}`).expect(503)).body.error.code).toBe('upstream_unavailable')
+  })
+
+  it('caches per token: an overlapping request only asks the venue for the new token', async () => {
+    const fake = bookFetch({ [T_A]: clobBook(T_A), [T_B]: clobBook(T_B), [T_C]: clobBook(T_C) })
+    const { app } = build({ polymarketFetch: fake })
+    await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B}`).expect(200)
+    await get(app, `${BOOKS_PATH}?token_ids=${T_B},${T_C}`).expect(200)
+    const tokens = callsTo(fake, '/book').map((c) => new URL(c.url).searchParams.get('token_id'))
+    expect(tokens.sort()).toEqual([T_A, T_B, T_C]) // B fetched once, though requested twice
+  })
+
+  it('refetches after the book TTL, and stamps confirmedAt with the OLDEST token served', async () => {
+    const fake = bookFetch({ [T_A]: clobBook(T_A), [T_B]: clobBook(T_B) })
+    const { app, clock } = build({ polymarketFetch: fake })
+    await get(app, `${BOOKS_PATH}?token_ids=${T_A}`).expect(200)
+    clock.t += 1 // 1 s: inside the 2 s book TTL for A; B is new
+    const res = await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B}`).expect(200)
+    expect(callsTo(fake, '/book')).toHaveLength(2)
+    expect(res.body.confirmedAt).toBe(new Date(TEST_NOW * 1000).toISOString()) // A's, the older
+    expect(res.body.serverNow).toBe(new Date((TEST_NOW + 1) * 1000).toISOString())
+    clock.t += 5
+    await get(app, `${BOOKS_PATH}?token_ids=${T_A}`).expect(200)
+    expect(callsTo(fake, '/book')).toHaveLength(3)
+  })
+
+  it('flags stale when a token is served from a copy older than its TTL because the venue failed', async () => {
+    const fake = bookFetch({ [T_A]: clobBook(T_A), [T_B]: clobBook(T_B) })
+    const { app, clock } = build({ polymarketFetch: fake })
+    await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B}`).expect(200)
+    clock.t += 30
+    fake.failWith = 503
+    const res = await get(app, `${BOOKS_PATH}?token_ids=${T_A},${T_B}`).expect(200)
+    expect(res.body.stale).toBe(true)
+    expect(res.body.books).toHaveLength(2)
+    expect(res.body.confirmedAt).toBe(new Date(TEST_NOW * 1000).toISOString())
+  })
+
+  it('floors the book TTL at 1 s, with one boot warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      expect(testConfig({ ...PM_ENV, POLYMARKET_BOOK_TTL_MS: '10' }).polymarket.bookTtlMs).toBe(1000)
+      expect(warn.mock.calls.filter((c) => String(c[0]).includes('POLYMARKET_BOOK_TTL_MS'))).toHaveLength(1)
+      expect(testConfig({ ...PM_ENV }).polymarket).toMatchObject({ bookTtlMs: 2000, historyTtlMs: 60000 })
+    } finally {
+      warn.mockRestore()
+    }
+  })
+
+  it('rejects malformed, missing and excess token ids', async () => {
+    const { app, polymarketFetch } = build()
+    expect((await get(app, BOOKS_PATH).expect(400)).body.error.code).toBe('invalid_token')
+    expect((await get(app, `${BOOKS_PATH}?token_ids=`).expect(400)).body.error.code).toBe('invalid_token')
+    expect((await get(app, `${BOOKS_PATH}?token_ids=${T_A},0xabc`).expect(400)).body.error.code).toBe('invalid_token')
+    expect((await get(app, `${BOOKS_PATH}?token_ids=${T_A},,${T_B}`).expect(400)).body.error.code).toBe('invalid_token')
+    const eleven = Array.from({ length: 11 }, (_, i) => String(i + 1)).join(',')
+    expect((await get(app, `${BOOKS_PATH}?token_ids=${eleven}`).expect(400)).body.error.code).toBe('too_many_tokens')
+    expect(polymarketFetch.calls).toHaveLength(0)
+  })
+
+  it('accepts exactly ten tokens', async () => {
+    const ids = Array.from({ length: 10 }, (_, i) => String(i + 1))
+    const fake = bookFetch(Object.fromEntries(ids.map((id) => [id, clobBook(id)])))
+    const { app } = build({ polymarketFetch: fake })
+    const res = await get(app, `${BOOKS_PATH}?token_ids=${ids.join(',')}`).expect(200)
+    expect(res.body.books).toHaveLength(10)
+  })
+
+  it('honours the killswitch and 404s off Polygon', async () => {
+    expect((await get(build({ killSwitch: createKillSwitch(true) }).app, `${BOOKS_PATH}?token_ids=${T_A}`).expect(503)).body.error.code).toBe('killswitch_active')
+    expect((await get(build().app, `/v1/polymarket/1/books?token_ids=${T_A}`).expect(404)).body.error.code).toBe('unsupported_chain')
+  })
+})
+
+describe('spec 114 GET /prices-history', () => {
+  const HISTORY = { history: [{ t: 1795572611, p: 0.935 }, { t: 1795572911, p: 0.94 }] }
+  const historyFetch = (body = HISTORY) => mockPolymarketFetch({ '/prices-history': body })
+
+  it.each([
+    ['1h', '1h', '1'],
+    ['1d', '1d', '5'],
+    ['1w', '1w', '30'],
+    ['1m', '1m', '180'],
+    ['max', 'max', '720'],
+  ])('maps range %s to interval=%s fidelity=%s upstream', async (range, interval, fidelity) => {
+    const fake = historyFetch()
+    const { app } = build({ polymarketFetch: fake })
+    const res = await get(app, `${HISTORY_PATH}?token_id=${T_A}&range=${range}`).expect(200)
+    expect(res.body).toMatchObject({ tokenId: T_A, range, stale: false })
+    expect(res.body.points).toEqual([{ t: 1795572611, p: '0.935' }, { t: 1795572911, p: '0.94' }])
+    expect(lastQuery(fake, '/prices-history')).toEqual({ path: '/prices-history', q: { market: T_A, interval, fidelity } })
+  })
+
+  it('returns an empty list, not an error, for a market with no history', async () => {
+    const { app } = build({ polymarketFetch: historyFetch({ history: [] }) })
+    const res = await get(app, `${HISTORY_PATH}?token_id=${T_A}&range=1d`).expect(200)
+    expect(res.body.points).toEqual([])
+  })
+
+  it('caches for the history TTL (60 s) and then flags a stale copy when the venue is down', async () => {
+    const fake = historyFetch()
+    const { app, clock } = build({ polymarketFetch: fake })
+    await get(app, `${HISTORY_PATH}?token_id=${T_A}&range=1d`).expect(200)
+    clock.t += 30
+    await get(app, `${HISTORY_PATH}?token_id=${T_A}&range=1d`).expect(200)
+    expect(callsTo(fake, '/prices-history')).toHaveLength(1)
+    clock.t += 60
+    fake.failWith = 503
+    const res = await get(app, `${HISTORY_PATH}?token_id=${T_A}&range=1d`).expect(200)
+    expect(res.body.stale).toBe(true)
+  })
+
+  it('rejects a malformed token or range', async () => {
+    const { app, polymarketFetch } = build()
+    expect((await get(app, `${HISTORY_PATH}?range=1d`).expect(400)).body.error.code).toBe('invalid_token')
+    expect((await get(app, `${HISTORY_PATH}?token_id=0xabc&range=1d`).expect(400)).body.error.code).toBe('invalid_token')
+    expect((await get(app, `${HISTORY_PATH}?token_id=${T_A}&range=1y`).expect(400)).body.error.code).toBe('invalid_range')
+    expect((await get(app, `${HISTORY_PATH}?token_id=${T_A}`).expect(400)).body.error.code).toBe('invalid_range')
+    expect(polymarketFetch.calls).toHaveLength(0)
+  })
+
+  it('honours the killswitch and 404s off Polygon', async () => {
+    expect((await get(build({ killSwitch: createKillSwitch(true) }).app, `${HISTORY_PATH}?token_id=${T_A}&range=1d`).expect(503)).body.error.code).toBe('killswitch_active')
+    expect((await get(build().app, `/v1/polymarket/1/prices-history?token_id=${T_A}&range=1d`).expect(404)).body.error.code).toBe('unsupported_chain')
+  })
+})
+
+// ---- spec 114 R16: quick filters ------------------------------------------------------------------
+
+const ev = (slug, vol, tags, over = {}) => ({ slug, title: slug, volume24hr: vol, tags: tags.map((t) => (typeof t === 'string' ? { slug: t, label: t } : t)), ...over })
+
+describe('spec 114 selectTopics', () => {
+  it('yields ONE topic for two tags naming the same events, and marginal (not total) figures', () => {
+    const events = [ev('a', 100, ['fed', 'fomc']), ev('b', 50, ['fed', 'fomc']), ev('c', 30, ['nvidia'])]
+    const topics = selectTopics(events, { minShare: 0 })
+    expect(topics.map((t) => t.slug)).toEqual(['fed', 'nvidia']) // fed/fomc tie on volume+count -> slug ascending
+    expect(topics[0]).toEqual({ slug: 'fed', label: 'fed', events: 2, volume24h: '150' })
+  })
+
+  it('leaves a narrower tag only the events the broader one did not cover', () => {
+    const events = [ev('a', 100, ['nba', 'basketball']), ev('b', 90, ['nba']), ev('c', 10, ['basketball'])]
+    const topics = selectTopics(events, { minShare: 0 })
+    expect(topics).toEqual([
+      { slug: 'nba', label: 'nba', events: 2, volume24h: '190' },
+      { slug: 'basketball', label: 'basketball', events: 1, volume24h: '10' },
+    ])
+    // Totals would have said basketball = 110 across 2 events.
+  })
+
+  it('never offers category tags, denylisted tags (any case), forceHide tags or sub-hour events', () => {
+    const events = [
+      ev('a', 100, ['sports', 'pop-culture', 'Recurring', '5M', 'Hide-From-New', 'earn-7', 'EARN-4', { slug: 'hidden', label: 'H', forceHide: true }, 'real']),
+      ev('b', 999, ['five-minute-thing'], { startTime: '2026-11-26T10:00:00Z', endDate: '2026-11-26T10:05:00Z' }),
+      ev('c', 999, ['fifteen-thing'], { series: [{ recurrence: '15m' }] }),
+      ev('d', 500, ['match-tag'], { startTime: '2026-11-26T10:00:00Z', endDate: '2026-11-26T10:00:00Z' }), // zero span: a match
+      ev('e', 400, ['days-tag'], { startTime: '2026-11-26T10:00:00Z', endDate: '2026-11-29T10:00:00Z' }),
+    ]
+    const slugs = selectTopics(events, { minShare: 0 }).map((t) => t.slug)
+    expect(slugs).toEqual(['match-tag', 'days-tag', 'real'])
+    for (const d of MECHANICS_DENYLIST) expect(slugs).not.toContain(d)
+  })
+
+  it('ignores events with no positive day volume', () => {
+    expect(selectTopics([ev('a', 0, ['x']), ev('b', null, ['y']), ev('c', undefined, ['z'])], { minShare: 0 })).toEqual([])
+  })
+
+  it('stops when the best marginal volume falls below the floor', () => {
+    const events = [ev('a', 990, ['big']), ev('b', 5, ['tiny'])] // total 995; 1% floor = 9.95
+    expect(selectTopics(events).map((t) => t.slug)).toEqual(['big'])
+    expect(selectTopics(events, { minShare: 0 }).map((t) => t.slug)).toEqual(['big', 'tiny'])
+  })
+
+  it('breaks ties by more events then slug ascending, identically on every run', () => {
+    const events = [ev('a', 10, ['zed']), ev('b', 5, ['zed']), ev('c', 15, ['alpha']), ev('d', 15, ['beta'])]
+    const first = selectTopics(events, { minShare: 0 }).map((t) => t.slug)
+    expect(first).toEqual(['zed', 'alpha', 'beta']) // zed: 15 over 2 events beats the single-event ties
+    expect(selectTopics([...events].reverse(), { minShare: 0 }).map((t) => t.slug)).toEqual(first)
+  })
+
+  it('respects max', () => {
+    const events = Array.from({ length: 12 }, (_, i) => ev(`e${i}`, 100 + i, [`t${String(i).padStart(2, '0')}`]))
+    expect(selectTopics(events, { minShare: 0 })).toHaveLength(8)
+    expect(selectTopics(events, { minShare: 0, max: 3 })).toHaveLength(3)
+  })
+
+  it('sums without float drift, emits the venue spelling, caps labels, and drops slugs that are not tag-shaped', () => {
+    const events = [
+      ev('a', 0.1, [{ slug: 'Global-Rates', label: 'Global Rates' }]),
+      ev('b', 0.2, [{ slug: 'Global-Rates', label: 'Global Rates' }, { slug: 'bad slug!', label: 'x' }, { slug: 'x'.repeat(65), label: 'y' }]),
+      ev('c', 1, [{ slug: 'long', label: 'L'.repeat(60) }]),
+      ev('d', 1, [{ slug: 'nolabel' }]),
+    ]
+    const topics = selectTopics(events, { minShare: 0 })
+    expect(topics.find((t) => t.slug === 'Global-Rates')).toMatchObject({ volume24h: '0.3', events: 2 }) // not 0.30000000000000004
+    expect(topics.find((t) => t.slug === 'long').label).toBe('L'.repeat(40))
+    expect(topics.find((t) => t.slug === 'nolabel').label).toBe('nolabel')
+    expect(topics.map((t) => t.slug)).not.toContain('bad slug!')
+    expect(topics.every((t) => t.slug.length <= 64)).toBe(true)
+  })
+
+  it('honours caller-supplied exclusions and category predicate; empty input is []', () => {
+    const events = [ev('a', 10, ['mine', 'other'])]
+    expect(selectTopics(events, { minShare: 0, excludeSlugs: ['MINE'], isCategoryTag: (s) => s === 'other' })).toEqual([])
+    expect(selectTopics([])).toEqual([])
+    expect(selectTopics(undefined)).toEqual([])
+  })
+})
+
+describe('spec 114 market row negRisk comes from the MARKET', () => {
+  it('reflects the market flag when the event differs, on summary and detail rows', () => {
+    for (const detail of [false, true]) {
+      const a = normalizeEvent(gammaEvent({ negRisk: false, markets: [gammaRow({ negRisk: true })] }), { detail })
+      expect(a.mutuallyExclusive).toBe(false)
+      expect(a.markets[0].negRisk).toBe(true)
+      const b = normalizeEvent(gammaEvent({ negRisk: true, markets: [gammaRow({ negRisk: false })] }), { detail })
+      expect(b.mutuallyExclusive).toBe(true)
+      expect(b.markets[0].negRisk).toBe(false)
+    }
+    expect(normalizeMarketRow(gammaRow({ neg_risk: true })).negRisk).toBe(true)
+    expect(normalizeMarketRow(gammaRow()).negRisk).toBe(false)
+  })
+})
+
+describe('spec 114 live state on events', () => {
+  it('carries { score, period, elapsed } only when the venue says live and not ended', () => {
+    const inPlay = normalizeEvent(gammaEvent({ live: true, ended: false, score: '91-101', period: 'Q4', elapsed: '06:47' }))
+    expect(inPlay.live).toEqual({ score: '91-101', period: 'Q4', elapsed: '06:47' })
+    expect(normalizeEvent(gammaEvent({ live: true, ended: false, score: '1-0', period: 'P'.repeat(40), elapsed: '' })).live).toEqual({
+      score: '1-0',
+      period: 'P'.repeat(20),
+      elapsed: null,
+    })
+    expect(normalizeEvent(gammaEvent({ live: true, ended: true, score: '1-0' })).live).toBeNull()
+    expect(normalizeEvent(gammaEvent({ live: false, score: '1-0' })).live).toBeNull()
+    expect(normalizeEvent(gammaEvent()).live).toBeNull()
+    expect(normalizeEvent(gammaEvent({ live: true }), { detail: true }).live).toEqual({ score: null, period: null, elapsed: null })
+  })
+})
+
+describe('spec 114 client keeps accept-encoding for the venue', () => {
+  it('neither sets nor strips accept-encoding, so the runtime default (gzip) reaches the venue', async () => {
+    const seen = []
+    const client = createPolymarketClient({
+      baseUrl: 'https://gamma.invalid',
+      fetchImpl: async (url, opts) => {
+        seen.push(opts.headers)
+        return jsonRes([])
+      },
+    })
+    await client.get('/events', { query: { limit: '100' } })
+    expect(Object.keys(seen[0]).map((k) => k.toLowerCase())).not.toContain('accept-encoding')
+  })
+})
+
+describe('spec 114 GET /events topic and live filters', () => {
+  const eventsFetch = (body = [gammaEvent()]) => mockPolymarketFetch({ 'gamma-api.polymarket.com/events': body })
+
+  it('topic sends tag_slug as the venue spells it, with the normal sort', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    await get(app, `${EVENTS_PATH}?topic=Global-Rates&sort=newest`).expect(200)
+    expect(lastQuery(polymarketFetch, '/events').q).toMatchObject({ tag_slug: 'Global-Rates', order: 'startDate', ascending: 'false' })
+    expect(lastQuery(polymarketFetch, '/events').q.live).toBeUndefined()
+  })
+
+  it('live=1 sends live=true, ignores sort, and orders by day volume', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    await get(app, `${EVENTS_PATH}?live=1&sort=closing`).expect(200)
+    const q = lastQuery(polymarketFetch, '/events').q
+    expect(q).toMatchObject({ live: 'true', order: 'volume24hr', ascending: 'false', active: 'true', closed: 'false' })
+    expect(q.end_date_min).toBeUndefined()
+    expect(q.tag_slug).toBeUndefined()
+  })
+
+  it('keys the cache by filter so topics, live and the plain list never answer for each other', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    await get(app, EVENTS_PATH).expect(200)
+    await get(app, `${EVENTS_PATH}?topic=nba`).expect(200)
+    await get(app, `${EVENTS_PATH}?topic=NBA`).expect(200)
+    await get(app, `${EVENTS_PATH}?live=1`).expect(200)
+    await get(app, `${EVENTS_PATH}?live=1`).expect(200) // cached
+    expect(callsTo(polymarketFetch, '/events')).toHaveLength(4)
+  })
+
+  it('refuses combinations and malformed values before any upstream call', async () => {
+    const { app, polymarketFetch } = build({ polymarketFetch: eventsFetch() })
+    for (const qs of ['category=crypto&topic=nba', 'category=crypto&live=1', 'topic=nba&live=1']) {
+      expect((await get(app, `${EVENTS_PATH}?${qs}`).expect(400)).body.error.code).toBe('invalid_filter')
+    }
+    expect((await get(app, `${EVENTS_PATH}?live=true`).expect(400)).body.error.code).toBe('invalid_filter')
+    expect((await get(app, `${EVENTS_PATH}?live=`).expect(400)).body.error.code).toBe('invalid_filter')
+    for (const bad of ['', 'a%20b', 'x'.repeat(65), 'a_b', 'a&topic=b']) {
+      expect((await get(app, `${EVENTS_PATH}?topic=${bad}`).expect(400)).body.error.code).toBe('invalid_topic')
+    }
+    expect(polymarketFetch.calls).toHaveLength(0)
+  })
+
+  it('search wins over topic and live', async () => {
+    const search = { events: [gammaEvent()], pagination: { hasMore: false } }
+    const { app, polymarketFetch } = build({ polymarketFetch: mockPolymarketFetch({ '/public-search': search }) })
+    await get(app, `${EVENTS_PATH}?q=fed&topic=nba`).expect(200)
+    await get(app, `${EVENTS_PATH}?q=fed&live=1`).expect(200)
+    expect(callsTo(polymarketFetch, '/events')).toHaveLength(0)
+    expect(lastQuery(polymarketFetch, '/public-search').q.tag_slug).toBeUndefined()
+  })
+
+  it('marks an in-play event with its live state and every other event null', async () => {
+    const page = [gammaEvent({ slug: 'game', live: true, ended: false, score: '91-101', period: 'Q4', elapsed: '06:47' }), gammaEvent({ slug: 'plain' })]
+    const { app } = build({ polymarketFetch: eventsFetch(page) })
+    const res = await get(app, EVENTS_PATH).expect(200)
+    expect(res.body.events[0].live).toEqual({ score: '91-101', period: 'Q4', elapsed: '06:47' })
+    expect(res.body.events[1].live).toBeNull()
+  })
+})
+
+describe('spec 114 GET /discover', () => {
+  const DISCOVER_PATH = '/v1/polymarket/137/discover'
+  const inPlay = (i) => gammaEvent({ slug: `g-${i}`, live: true, ended: false, score: '1-0', period: 'Q1', elapsed: '01:00' })
+  const topEvents = () => [gammaEvent({ slug: 'a', volume24hr: 100, tags: [{ slug: 'fed', label: 'Fed' }, { slug: 'economy', label: 'Economy' }] }), gammaEvent({ slug: 'b', volume24hr: 50, tags: [{ slug: 'nvidia', label: 'Nvidia' }] })]
+  /** live half answered by a URL containing live=true; the top-100 half by limit=100. */
+  const discoverFetch = ({ live = [], top = topEvents() } = {}) =>
+    mockPolymarketFetch({
+      'live=true': (u) => (typeof live === 'function' ? live(u) : jsonRes(live)),
+      'limit=100': (u) => (typeof top === 'function' ? top(u) : jsonRes(top)),
+    })
+  const down = () => jsonRes({ error: 'down' }, 503)
+
+  it('makes exactly the two upstream reads the contract names', async () => {
+    const f = discoverFetch({ live: [inPlay(1)] })
+    const { app } = build({ polymarketFetch: f })
+    await get(app, DISCOVER_PATH).expect(200)
+    const eventsCalls = callsTo(f, '/events').map((c) => Object.fromEntries(new URL(c.url).searchParams))
+    expect(eventsCalls).toHaveLength(2)
+    expect(eventsCalls).toContainEqual({ active: 'true', closed: 'false', archived: 'false', order: 'volume24hr', ascending: 'false', limit: '100' })
+    expect(eventsCalls).toContainEqual({ active: 'true', closed: 'false', archived: 'false', order: 'volume24hr', ascending: 'false', live: 'true', limit: '50' })
+    expect(callsTo(f, '/events').every((c) => new URL(c.url).pathname === '/events')).toBe(true)
+  })
+
+  it('returns the in-play leaders, the count and the topics', async () => {
+    const live = Array.from({ length: 9 }, (_, i) => inPlay(i))
+    const { app } = build({ polymarketFetch: discoverFetch({ live }) })
+    const res = await get(app, DISCOVER_PATH).expect(200)
+    expect(res.body.live.count).toBe(9)
+    expect(res.body.live.more).toBeUndefined()
+    expect(res.body.live.events).toHaveLength(6)
+    expect(res.body.live.events[0]).toMatchObject({ slug: 'g-0', live: { score: '1-0', period: 'Q1', elapsed: '01:00' } })
+    // economy is a fixed category, so fed is the topic that names the first event.
+    expect(res.body.topics).toEqual([
+      { slug: 'fed', label: 'Fed', events: 1, volume24h: '100' },
+      { slug: 'nvidia', label: 'Nvidia', events: 1, volume24h: '50' },
+    ])
+    const iso = new Date(TEST_NOW * 1000).toISOString()
+    expect(res.body).toMatchObject({ confirmedAt: iso, serverNow: iso, stale: false })
+  })
+
+  it('says more:true only when the venue page of fifty came back full', async () => {
+    const full = build({ polymarketFetch: discoverFetch({ live: Array.from({ length: 50 }, (_, i) => inPlay(i)) }) })
+    const res = await get(full.app, DISCOVER_PATH).expect(200)
+    expect(res.body.live).toMatchObject({ count: 50, more: true })
+    const short = build({ polymarketFetch: discoverFetch({ live: Array.from({ length: 49 }, (_, i) => inPlay(i)) }) })
+    expect((await get(short.app, DISCOVER_PATH).expect(200)).body.live.more).toBeUndefined()
+  })
+
+  it('nothing in play is an honest empty, not null', async () => {
+    const { app } = build({ polymarketFetch: discoverFetch({ live: [] }) })
+    const res = await get(app, DISCOVER_PATH).expect(200)
+    expect(res.body.live).toEqual({ count: 0, events: [] })
+  })
+
+  it('an honestly empty topics list is [] while an unreadable one is null', async () => {
+    const empty = build({ polymarketFetch: discoverFetch({ top: [] }) })
+    expect((await get(empty.app, DISCOVER_PATH).expect(200)).body.topics).toEqual([])
+  })
+
+  it('live half failing alone -> live: null, topics present, 200', async () => {
+    const { app } = build({ polymarketFetch: discoverFetch({ live: down }) })
+    const res = await get(app, DISCOVER_PATH).expect(200)
+    expect(res.body.live).toBeNull()
+    expect(res.body.topics).toHaveLength(2)
+  })
+
+  it('topics half failing alone -> topics: null, live present, 200', async () => {
+    const { app } = build({ polymarketFetch: discoverFetch({ live: [inPlay(1)], top: down }) })
+    const res = await get(app, DISCOVER_PATH).expect(200)
+    expect(res.body.topics).toBeNull()
+    expect(res.body.live.count).toBe(1)
+  })
+
+  it('both halves failing -> 503 upstream_unavailable', async () => {
+    const { app } = build({ polymarketFetch: discoverFetch({ live: down, top: down }) })
+    expect((await get(app, DISCOVER_PATH).expect(503)).body.error.code).toBe('upstream_unavailable')
+  })
+
+  it('a body that is not an event list is a failed read, never an empty one', async () => {
+    const { app } = build({ polymarketFetch: discoverFetch({ live: () => jsonRes({ error: 'gzip_required' }), top: down }) })
+    expect((await get(app, DISCOVER_PATH).expect(503)).body.error.code).toBe('upstream_unavailable')
+  })
+
+  it('confirmedAt is the OLDER half and stale is either; each half is cached and refreshed on its own', async () => {
+    const flags = { topDown: false, liveDown: false }
+    const f = discoverFetch({
+      live: () => (flags.liveDown ? down() : jsonRes([inPlay(1)])),
+      top: () => (flags.topDown ? down() : jsonRes(topEvents())),
+    })
+    const { app, clock } = build({ polymarketFetch: f })
+    await get(app, DISCOVER_PATH).expect(200) // both read at T0
+    clock.t += 30 // inside the 60 s TTL
+    await get(app, DISCOVER_PATH).expect(200)
+    expect(callsTo(f, '/events')).toHaveLength(2) // second request answered from cache
+    clock.t += 40 // T0+70: both expired; topics cannot be refreshed, live can
+    flags.topDown = true
+    const res = await get(app, DISCOVER_PATH).expect(200)
+    expect(res.body.stale).toBe(true)
+    expect(res.body.topics).toHaveLength(2) // last good copy, flagged
+    expect(res.body.live.count).toBe(1)
+    expect(res.body.confirmedAt).toBe(new Date(TEST_NOW * 1000).toISOString()) // the older (topics) half
+  })
+
+  it('honours the killswitch and 404s off Polygon', async () => {
+    expect((await get(build({ killSwitch: createKillSwitch(true) }).app, DISCOVER_PATH).expect(503)).body.error.code).toBe('killswitch_active')
+    expect((await get(build().app, '/v1/polymarket/1/discover').expect(404)).body.error.code).toBe('unsupported_chain')
+  })
+
+  it('is read-only', async () => {
+    await post(build().app, DISCOVER_PATH, { order: {} }).expect((r) => expect([404, 405]).toContain(r.status))
+  })
+})
+
+describe('spec 114 is read-only', () => {
+  it('exposes no order, cancel or write route among the new paths', async () => {
+    const { app } = build()
+    for (const path of [EVENTS_PATH, EVENT_PATH, BOOKS_PATH, HISTORY_PATH]) {
+      await post(app, path, { order: {} }).expect((r) => expect([404, 405]).toContain(r.status))
+    }
   })
 })

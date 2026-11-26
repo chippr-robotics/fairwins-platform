@@ -9,6 +9,10 @@ import {
   predictAvailable,
   fetchMarkets,
   fetchFeeRate,
+  fetchEvents,
+  fetchEvent,
+  fetchBooks,
+  fetchHistory,
   PredictUnavailable,
 } from '../../lib/predict/predictClient'
 
@@ -55,5 +59,43 @@ describe('reads/writes', () => {
   it('soft-fails when the gateway is unconfigured', async () => {
     delete import.meta.env.VITE_RELAYER_URL
     await expect(fetchMarkets(137)).rejects.toBeInstanceOf(PredictUnavailable)
+  })
+})
+
+describe('spec 114 reads', () => {
+  it('fetchEvents sends only the filters it was given', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ events: [], next: null }))
+    await fetchEvents(137, { category: 'economy', sort: 'closing', next: '20' })
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE}/v1/polymarket/137/events?category=economy&sort=closing&next=20`)
+    fetch.mockResolvedValueOnce(jsonRes({ events: [] }))
+    await fetchEvents(137, { q: 'fed rate' })
+    expect(fetch.mock.calls[1][0]).toBe(`${BASE}/v1/polymarket/137/events?q=fed+rate`)
+    fetch.mockResolvedValueOnce(jsonRes({ events: [] }))
+    await fetchEvents(137)
+    expect(fetch.mock.calls[2][0]).toBe(`${BASE}/v1/polymarket/137/events`)
+  })
+
+  it('fetchEvent encodes the slug', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ slug: 'a-b' }))
+    const r = await fetchEvent(137, 'a-b/../x')
+    expect(r.slug).toBe('a-b')
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE}/v1/polymarket/137/events/a-b%2F..%2Fx`)
+  })
+
+  it('fetchBooks joins token ids with commas', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ books: [], unreadable: [] }))
+    await fetchBooks(137, ['111', '222'])
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE}/v1/polymarket/137/books?token_ids=111,222`)
+  })
+
+  it('fetchHistory passes token and range', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ points: [] }))
+    await fetchHistory(137, '111', '1w')
+    expect(fetch.mock.calls[0][0]).toBe(`${BASE}/v1/polymarket/137/prices-history?token_id=111&range=1w`)
+  })
+
+  it('surfaces a gateway error code from a books read', async () => {
+    fetch.mockResolvedValueOnce(jsonRes({ error: { code: 'upstream_unavailable', reason: 'down' } }, 503))
+    await expect(fetchBooks(137, ['1'])).rejects.toMatchObject({ name: 'PredictUnavailable', code: 'upstream_unavailable', status: 503 })
   })
 })
