@@ -144,25 +144,6 @@ export function makeClobClient(
   )
 }
 
-/**
- * Submit a signed CLOB order (build + sign + post in one call — the SDK resolves tick size, fee rate, and
- * negRisk, and rounds amounts). Returns { orderId, status, raw }.
- * @param {object} client  makeClobClient result
- * @param {{ tokenId, side:'BUY'|'SELL', price:number, size:number, negRisk?:boolean, orderType?:string }} order
- */
-export async function submitOrder(client, { tokenId, side, price, size, negRisk, orderType = OrderType.GTC }) {
-  const resp = await client.createAndPostOrder(
-    { tokenID: String(tokenId), price: Number(price), side: side === 'SELL' ? Side.SELL : Side.BUY, size: Number(size) },
-    { negRisk: Boolean(negRisk) },
-    orderType,
-  )
-  return {
-    orderId: resp?.orderID ?? resp?.orderId ?? resp?.id ?? null,
-    status: resp?.status ?? (resp?.success ? 'accepted' : null),
-    raw: resp,
-  }
-}
-
 /* ── Spec 114 slice 5 — the amount-first (market) order ───────────────────────────────────────────── */
 
 const MICRO = 1_000_000n
@@ -334,24 +315,51 @@ export async function submitMarketOrder(client, { tokenId, side, amount, limitPr
 }
 
 /**
- * Submit a RESTING order (GTC) at a price the member named, for the amount-first ticket. It differs from the
- * older `submitOrder` in three ways, each of which is the point:
- *  - `tickSize` is PASSED, so if the venue's tick has become coarser than the one the member reviewed on, the
- *    SDK refuses the order instead of rounding their price to a different one;
- *  - price and size cross to the SDK through `toSdkNumber`, like the market order;
- *  - the answer is read by `readPosted`, so a refusal is not reported as an order placed.
+ * The ONE build → hash → post path for a limit (resting-capable) order, shared by `submitRestingOrder` (the
+ * amount-first ticket) and `submitOrder` (the fixed-price fallback), so the two cannot drift on what the
+ * safety rules are: the exchange is resolved by `resolveNegRisk` (a non-boolean answer refuses the order);
+ * price and size cross to the SDK through `toSdkNumber`; the order's id is computed before the post; and the
+ * answer is read by `readPosted`, so a refusal THROWS and an answer that never arrived carries
+ * `outcomeUnknown`.
+ *
+ * `tickSize` is passed to the SDK ONLY when the caller knows it (the amount-first ticket reviews on a tick, so
+ * a venue tick that has become coarser makes the SDK refuse instead of rounding the member's price). The
+ * fixed-price ticket has no reviewed tick: it leaves the option out and the SDK resolves the venue's current
+ * tick for the token itself — a tick is never invented here.
+ */
+async function buildAndPostLimit(client, { tokenId, side, price, size, negRisk, tickSize, orderType }) {
+  const resolvedNegRisk = await resolveNegRisk(client, tokenId, negRisk)
+  const order = await client.createOrder(
+    { tokenID: String(tokenId), price: toSdkNumber(price), side: side === 'SELL' ? Side.SELL : Side.BUY, size: toSdkNumber(size) },
+    { ...(tickSize != null ? { tickSize: String(tickSize) } : {}), negRisk: resolvedNegRisk },
+  )
+  const orderHash = signedOrderHash(order, resolvedNegRisk)
+  return readPosted(await client.postOrder(order, orderType), orderHash)
+}
+
+/**
+ * Submit a RESTING order (GTC) at a price the member named, for the amount-first ticket. `tickSize` is the tick
+ * the member reviewed on (see `buildAndPostLimit`).
  *
  * @param {object} client  makeClobClient result
  * @param {{ tokenId:string, side:'BUY'|'SELL', price:string, size:string, negRisk?:boolean, tickSize:string }} order
  */
-export async function submitRestingOrder(client, { tokenId, side, price, size, negRisk, tickSize }) {
-  const resolvedNegRisk = await resolveNegRisk(client, tokenId, negRisk)
-  const order = await client.createOrder(
-    { tokenID: String(tokenId), price: toSdkNumber(price), side: side === 'SELL' ? Side.SELL : Side.BUY, size: toSdkNumber(size) },
-    { tickSize: String(tickSize), negRisk: resolvedNegRisk },
-  )
-  const orderHash = signedOrderHash(order, resolvedNegRisk)
-  return readPosted(await client.postOrder(order, OrderType.GTC), orderHash)
+export function submitRestingOrder(client, { tokenId, side, price, size, negRisk, tickSize }) {
+  return buildAndPostLimit(client, { tokenId, side, price, size, negRisk, tickSize, orderType: OrderType.GTC })
+}
+
+/**
+ * Submit a fixed-price order — the spec-057 fallback ticket's path. Same build → hash → post and the same
+ * answer reading as `submitRestingOrder`: a refusal is thrown, never returned as "order sent"; an answer that
+ * never arrived is thrown with `outcomeUnknown`; `orderHash` is known before the post. No `tickSize`: this path
+ * has none to pass, so the SDK resolves it. `negRisk` is a stated boolean or left out (the venue is asked).
+ * Returns { orderId, status, orderHash, raw }.
+ *
+ * @param {object} client  makeClobClient result
+ * @param {{ tokenId:string, side:'BUY'|'SELL', price:string|number, size:string|number, negRisk?:boolean, orderType?:string }} order
+ */
+export function submitOrder(client, { tokenId, side, price, size, negRisk, orderType = OrderType.GTC }) {
+  return buildAndPostLimit(client, { tokenId, side, price, size, negRisk, orderType })
 }
 
 /**

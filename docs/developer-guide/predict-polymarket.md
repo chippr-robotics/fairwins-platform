@@ -78,8 +78,9 @@ Read hosts are configurable via `POLYMARKET_GAMMA_URL` / `POLYMARKET_DATA_URL` /
   (satisfying CLOB V2's signer-binding rule). The pinned SDK (5.8.1, archived) predates `POLY_1271` in
   its `SignatureType` enum, but forwards the raw number into the signed order unvalidated —
   `SIG_TYPE_POLY_1271` in `clobSession.js` is the one place the value lives.
-- `submitOrder` / `cancelOrder` / `fetchOpenOrders` — `createAndPostOrder` builds, signs, and posts in
-  one call (the SDK resolves tick size, fee rate, and negRisk). **The order struct and its EIP-712
+- `submitOrder` / `cancelOrder` / `fetchOpenOrders` — `submitOrder` builds with the SDK's `createOrder`, hashes,
+  then posts (see "Order progress"; the SDK resolves tick size when none is passed, and fee rate). `negRisk` is a
+  stated boolean or the venue's answer — never a guess. **The order struct and its EIP-712
   signing are owned by the SDK** — we don't hand-roll it (the real struct is 12 fields, domain
   `"Polymarket CTF Exchange"` v`1`, with **no** `builder` field; attribution rides on headers, below).
 
@@ -254,6 +255,16 @@ confirmed. The sentences live once, in `lib/predict/disclosures.js`. Four rules 
 
 "Signing this order costs no network fee" is about the order only: a passkey member's first-trade approvals are a
 transaction, described by the first-trade note beside it.
+
+**The fixed-price fallback has the same safety rules.** `TradeConfirm` → `usePredictTrade.submit` →
+`clobSession.submitOrder` shares ONE internal build → hash → post function with `submitRestingOrder`
+(`buildAndPostLimit`), so it too throws a venue refusal instead of reporting it as an order sent, treats an
+answer that never arrived as `unknown` (the sentences are shared with `OrderTicket` — `unknownOutcomeText` /
+`orderSentText` in `ticketStatements.js` — and there is no re-send control), asks the venue which exchange a market
+settles on when the listing does not state it (a sell opened from a position no longer signs `negRisk: false`;
+a non-boolean answer signs nothing), and hands every order it places to the progress tracker. The hand-off lives
+in ONE place, `usePredictTrade.signAndPost({ track })`, which both tickets use. The one difference: this path has
+no reviewed tick, so none is passed and the SDK resolves the venue's current one.
 
 **Never stranded.** The ticket needs live readings, which come from the gateway's `/books` route. A gateway without
 it (404 — remembered by `lib/markets/routeSupport.js`; a 5xx is an outage, not an absent route) or without

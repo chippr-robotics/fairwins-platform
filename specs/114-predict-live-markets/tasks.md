@@ -160,12 +160,12 @@ the seam they plug into is right from the start.
 
 - [ ] T032a [US4] A member-adjustable price tolerance (research R7 allows up to 2¢). The ticket
       ships with it fixed at one tick.
-- [ ] T032b The spec-057 ticket, kept as the fallback for a gateway without the new routes, passes
+- [X] T032b The spec-057 ticket, kept as the fallback for a gateway without the new routes, passes
       `negRisk: false` for a sell opened from a position. On a neg-risk market that order is
       signed for the wrong exchange and the venue rejects it. The new ticket passes the flag only
       when it is stated and otherwise lets the order SDK ask the venue; fix the old path the same
       way or retire it once every gateway serves the new routes.
-- [ ] T032c The spec-057 ticket's `submitOrder` reports a venue refusal as an order sent (it reads
+- [X] T032c The spec-057 ticket's `submitOrder` reports a venue refusal as an order sent (it reads
       no error from the answer) and cannot tell a refusal from an answer that never arrived. The
       new ticket's two submit functions classify the answer (`readPostFailure`); move the old path
       onto the same reading, with the `unknown` state on `TradeConfirm`, or retire it.

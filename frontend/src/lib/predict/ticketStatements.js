@@ -60,3 +60,15 @@ export function refusalSentence(view, { side, tick, ownPrice }) {
   }
 }
 
+
+/**
+ * What the member is told when the venue's answer to a sent order never arrived (spec 114, FR-024). ONE copy for
+ * the amount-first ticket and the fixed-price one: the order is not a failure, it is not offered again from the
+ * ticket that sent it (a second fill-and-kill could fill twice), and the progress tracker is looking it up.
+ */
+export const unknownOutcomeText = (buy) =>
+  `Sending it again from here could ${buy ? 'buy' : 'sell'} twice, so this ticket will not offer that. It is listed under “Your orders in progress” as not confirmed, and this app looks it up on Polymarket for you. Your positions and open orders, here or on Polymarket, also show whether it went through.`
+
+/** What the member is told once the venue has TAKEN an order: where to follow it, and not to send it again. */
+export const orderSentText = (venueStatus) =>
+  `Order sent to Polymarket${venueStatus ? ` — the venue answered “${venueStatus}”` : ''}. Matching and settlement happen there, so your position updates once they complete. Follow it under “Your orders in progress”. Do not send it again.`

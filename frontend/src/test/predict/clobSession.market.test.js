@@ -77,11 +77,6 @@ describe('submitMarketOrder', () => {
     ).rejects.toThrow(/not enough balance/)
   })
 
-  it('leaves submitOrder (the fixed-price confirm\'s path) exactly as it was: GTC through createAndPostOrder', async () => {
-    const c = client()
-    await submitOrder(c, { tokenId: TOKEN, side: 'BUY', price: '0.5', size: '100', negRisk: false })
-    expect(c.createAndPostOrder).toHaveBeenCalledWith({ tokenID: TOKEN, price: 0.5, side: Side.BUY, size: 100 }, { negRisk: false }, 'GTC')
-  })
 })
 
 const ORDER = { tokenId: TOKEN, side: 'BUY', amount: '10', limitPrice: '0.5', negRisk: false, tickSize: '0.01' }
@@ -228,5 +223,66 @@ describe('submitRestingOrder — a price the member named', () => {
 describe('toSdkNumber', () => {
   it('is the guard the call above relies on', () => {
     expect(toSdkNumber('0.57')).toBe(0.57)
+  })
+})
+
+describe('submitOrder — the fixed-price fallback shares the amount-first ticket\'s build → hash → post', () => {
+  const FIXED = { tokenId: TOKEN, side: 'BUY', price: '0.5', size: '100', negRisk: false }
+
+  it('builds with createOrder then posts GTC by default — NUMBER price/size, and NO tick option (this path has none; the SDK resolves it)', async () => {
+    const c = client({ success: true, orderID: '0xfixed', status: 'live' })
+    const out = await submitOrder(c, FIXED)
+    expect(c.createOrder).toHaveBeenCalledWith({ tokenID: TOKEN, price: 0.5, side: Side.BUY, size: 100 }, { negRisk: false })
+    expect(c.createOrder.mock.calls[0][1]).not.toHaveProperty('tickSize')
+    expect(c.postOrder).toHaveBeenCalledWith(SIGNED, 'GTC')
+    expect(c.createAndPostOrder).not.toHaveBeenCalled()
+    expect(out).toEqual({ orderId: '0xfixed', status: 'live', orderHash: expect.stringMatching(HASH), raw: { success: true, orderID: '0xfixed', status: 'live' } })
+  })
+
+  it('keeps an explicit order type', async () => {
+    const c = client()
+    await submitOrder(c, { ...FIXED, orderType: OrderType.GTD })
+    expect(c.postOrder).toHaveBeenCalledWith(SIGNED, 'GTD')
+  })
+
+  it('a venue refusal THROWS (it used to be returned as an order sent), and an unread answer is outcomeUnknown with the pre-post id', async () => {
+    const refused = await submitOrder(client({ error: 'invalid signature', status: 400 }), FIXED).catch((e) => e)
+    expect(refused).toMatchObject({ message: 'invalid signature', outcomeUnknown: false, status: 400 })
+    const no = await submitOrder(client({ success: false, errorMsg: 'not enough balance' }), FIXED).catch((e) => e)
+    expect(no).toMatchObject({ message: 'not enough balance', outcomeUnknown: false })
+    for (const resp of [{ error: 'Network Error' }, { error: 'bad gateway', status: 502 }]) {
+      const lost = await submitOrder(client(resp), FIXED).catch((e) => e)
+      expect(lost.outcomeUnknown).toBe(true)
+      expect(lost.orderHash).toMatch(HASH)
+    }
+  })
+
+  it('negRisk: stated passes through; unstated asks the venue; a non-boolean answer signs NOTHING and sends nothing', async () => {
+    const c = client()
+    await submitOrder(c, { ...FIXED, negRisk: true })
+    expect(c.getNegRisk).not.toHaveBeenCalled()
+    expect(c.createOrder.mock.calls[0][1]).toStrictEqual({ negRisk: true })
+
+    const asked = client()
+    asked.getNegRisk.mockResolvedValue(true)
+    await submitOrder(asked, { ...FIXED, negRisk: undefined })
+    expect(asked.getNegRisk).toHaveBeenCalledWith(TOKEN)
+    expect(asked.createOrder.mock.calls[0][1]).toStrictEqual({ negRisk: true })
+
+    for (const answer of [undefined, null, 'true', 1]) {
+      const bad = client()
+      bad.getNegRisk.mockResolvedValue(answer)
+      await expect(submitOrder(bad, { ...FIXED, negRisk: undefined })).rejects.toThrow(/did not say which/)
+      expect(bad.createOrder).not.toHaveBeenCalled()
+      expect(bad.postOrder).not.toHaveBeenCalled()
+    }
+  })
+
+  it('refuses a price or size that does not survive the number conversion — nothing is sent', async () => {
+    const c = client()
+    await expect(submitOrder(c, { ...FIXED, price: 'abc' })).rejects.toThrow()
+    await expect(submitOrder(c, { ...FIXED, size: '1e-7' })).rejects.toThrow()
+    expect(c.createOrder).not.toHaveBeenCalled()
+    expect(c.postOrder).not.toHaveBeenCalled()
   })
 })

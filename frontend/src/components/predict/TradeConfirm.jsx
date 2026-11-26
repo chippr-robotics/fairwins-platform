@@ -12,6 +12,7 @@ import { formatUnits } from '../../lib/evm/units'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
 import { feeDisclosureText, firstTradeText, WRONG_NETWORK_TEXT } from '../../lib/predict/disclosures'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'
+import { unknownOutcomeText, orderSentText } from '../../lib/predict/ticketStatements'
 import './TradeConfirm.css'
 
 const POLYMARKET_URL = 'https://polymarket.com'
@@ -158,7 +159,13 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
                 type="button"
                 className="trade-confirm-submit"
                 disabled={!canSign || busy}
-                onClick={() => trade.submit(params, { negRisk: Boolean(market?.negRisk) })}
+                onClick={() =>
+                  // Stated as a boolean or left out: an unstated flag is asked of the venue, never signed as false.
+                  trade.submit(params, {
+                    negRisk: typeof market?.negRisk === 'boolean' ? market.negRisk : undefined,
+                    label: `${isBuy ? 'Buy' : 'Sell'} ${outcome?.name} — ${market?.question ?? ''}`.trim(),
+                  })
+                }
               >
                 {trade.status === 'enabling'
                   ? 'Enabling…'
@@ -172,8 +179,18 @@ export default function TradeConfirm({ market, outcome, side = 'BUY', onClose })
 
         {trade.status === 'done' && (
           <p className="trade-confirm-done" role="status">
-            Order submitted. Your position will update once it fills.
+            {orderSentText(trade.result?.status)}
           </p>
+        )}
+
+        {trade.status === 'unknown' && (
+          <div className="trade-confirm-error" role="alert">
+            <p>{trade.reason}</p>
+            <p>{unknownOutcomeText(isBuy)}</p>
+            <a href={POLYMARKET_URL} target="_blank" rel="noopener noreferrer">
+              Check on Polymarket ↗
+            </a>
+          </div>
         )}
 
         {trade.status === 'error' && (

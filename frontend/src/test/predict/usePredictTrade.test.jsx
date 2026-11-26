@@ -22,7 +22,8 @@ function makeDeps(over = {}) {
     ensureCreds: vi.fn().mockResolvedValue({ key: 'k', secret: 's', passphrase: 'p' }),
     makeClient: vi.fn(() => ({ id: 'clob-client' })),
     makeBuilderConfig: vi.fn(() => undefined),
-    submitOrder: vi.fn().mockResolvedValue({ orderId: '0xneworder', status: 'matched' }),
+    submitOrder: vi.fn().mockResolvedValue({ orderId: '0xneworder', status: 'matched', orderHash: '0xhash' }),
+    trackSignedOrder: vi.fn(),
     cancelOrder: vi.fn().mockResolvedValue({ cancelled: true }),
     resolveTradeSigner: vi.fn(() => ({ canSign: true, kind: 'eoa', address: TRADER })),
     loadCachedCreds: vi.fn(() => null),
@@ -228,5 +229,69 @@ describe('usePredictTrade', () => {
     expect(sendCalls).not.toHaveBeenCalled()
     const [, , opts] = deps.makeClient.mock.calls[0]
     expect(opts).toMatchObject({ signatureType: 3, funderAddress: TRADER })
+  })
+})
+
+describe('usePredictTrade.submit — the fixed-price path keeps the amount-first ticket\'s safety rules', () => {
+  const ready = async (deps) => {
+    const hook = renderHook(() => usePredictTrade({ deps }), { wrapper: wrapperFor() })
+    await act(async () => { await hook.result.current.loadFee(TOKEN) })
+    return hook
+  }
+
+  it('negRisk is passed ONLY when stated: true/false pass through, anything else is left out so the venue is asked', async () => {
+    for (const [given, expected] of [[true, true], [false, false], [undefined, undefined], [null, undefined], ['yes', undefined]]) {
+      const deps = makeDeps()
+      const { result } = await ready(deps)
+      await act(async () => { await result.current.submit(BUY, { negRisk: given }) })
+      expect(deps.submitOrder.mock.calls[0][1].negRisk, String(given)).toBe(expected)
+    }
+    const deps = makeDeps()
+    const { result } = await ready(deps)
+    await act(async () => { await result.current.submit(BUY) })
+    expect(deps.submitOrder.mock.calls[0][1].negRisk).toBeUndefined() // no `= false` default
+  })
+
+  it('a venue refusal is an ERROR, never "done"', async () => {
+    const refusal = Object.assign(new Error('invalid signature'), { status: 400, outcomeUnknown: false })
+    const deps = makeDeps({ submitOrder: vi.fn().mockRejectedValue(refusal) })
+    const { result } = await ready(deps)
+    await act(async () => { await result.current.submit(BUY, {}) })
+    expect(result.current.status).toBe('error')
+    expect(result.current.result).toBeNull()
+    expect(deps.trackSignedOrder).not.toHaveBeenCalled()
+  })
+
+  it('an answer that never arrived is `unknown`, tracked as UNCONFIRMED under the pre-post id, and cannot be sent again from this hook state', async () => {
+    const lost = Object.assign(new Error('Polymarket did not confirm whether it received this order.'), { outcomeUnknown: true, orderHash: '0xpre' })
+    const deps = makeDeps({ submitOrder: vi.fn().mockRejectedValue(lost) })
+    const { result } = await ready(deps)
+    let res
+    await act(async () => { res = await result.current.submit(BUY, { label: 'Buy Yes' }) })
+    expect(result.current.status).toBe('unknown')
+    expect(result.current.result).toBeNull()
+    expect(res).toMatchObject({ outcomeUnknown: true, orderHash: '0xpre' })
+    expect(deps.trackSignedOrder).toHaveBeenCalledTimes(1)
+    const [account, facts, outcome] = deps.trackSignedOrder.mock.calls[0]
+    expect(account).toBe(TRADER)
+    expect(facts).toMatchObject({ tokenId: TOKEN, side: 'BUY', kind: 'resting', size: '100', sizeUnit: 'shares', limitPrice: '0.5', label: 'Buy Yes', signedAt: expect.any(Number) })
+    expect(outcome).toMatchObject({ unconfirmed: true, posted: { computedId: '0xpre' } })
+  })
+
+  it('an order the venue took is handed to the tracker with the venue id and the pre-post id', async () => {
+    const deps = makeDeps()
+    const { result } = await ready(deps)
+    await act(async () => { await result.current.submit(BUY, {}) })
+    expect(result.current.status).toBe('done')
+    expect(deps.trackSignedOrder).toHaveBeenCalledTimes(1)
+    expect(deps.trackSignedOrder.mock.calls[0][2]).toEqual({ posted: { orderId: '0xneworder', status: 'matched', computedId: '0xhash' } })
+  })
+
+  it('a balance shortfall is an error and is not tracked', async () => {
+    const deps = makeDeps({ submitOrder: vi.fn().mockRejectedValue(Object.assign(new Error('not enough balance / allowance'), { status: 400 })) })
+    const { result } = await ready(deps)
+    await act(async () => { await result.current.submit(BUY, {}) })
+    expect(result.current.status).toBe('error')
+    expect(deps.trackSignedOrder).not.toHaveBeenCalled()
   })
 })

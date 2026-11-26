@@ -25,6 +25,7 @@ import { computeCost as defaultComputeCost } from '../lib/predict/clobOrder'
 import { resolveTradeSigner as defaultResolveTradeSigner } from '../lib/predict/tradeSigner'
 import { fetchFeeRate as defaultFetchFeeRate, predictGatewayUrl } from '../lib/predict/predictClient'
 import { checkGeoblock as defaultCheckGeoblock } from '../lib/predict/geoblock'
+import { trackSignedOrder as defaultTrackSignedOrder } from '../lib/predict/orderProgress'
 import { makePasskeyClobSigner as defaultMakePasskeySigner } from '../lib/predict/passkeyClobSigner'
 import { missingPredictApprovals as defaultMissingApprovals } from '../lib/predict/passkeyApprovals'
 import {
@@ -47,7 +48,7 @@ const isFundsError = (e) => /balance|allowance|insufficient/i.test(String(e?.mes
 const isPriceMove = (e) => /price|tick|marketable|not enough|match/i.test(String(e?.message ?? e?.raw?.error ?? ''))
 const FUNDS_REASON =
   'Polymarket refused the order: this account does not have enough of what the order spends, or has not allowed Polymarket’s exchange to move it. Nothing was placed.'
-const UNKNOWN_REASON =
+export const UNKNOWN_REASON =
   'Polymarket did not confirm whether it received this order. It may have been placed. Check your positions and open orders before you send anything again.'
 
 export function usePredictTrade(options = {}) {
@@ -59,6 +60,7 @@ export function usePredictTrade(options = {}) {
       ensureCreds: defaultEnsureCreds,
       makeClient: defaultMakeClient,
       makeBuilderConfig: defaultMakeBuilderConfig,
+      trackSignedOrder: defaultTrackSignedOrder,
       submitOrder: defaultSubmitOrder,
       submitMarketOrder: defaultSubmitMarketOrder,
       cancelOrder: defaultCancelOrder,
@@ -242,13 +244,19 @@ export function usePredictTrade(options = {}) {
    * plan-first ticket (usePredictPlanTrade) differ ONLY in what `send` calls — signer, rail, credentials and
    * attribution are this one path.
    *
+   * `track` (optional) is the PUBLIC facts of the order ({ tokenId, side, kind, size, sizeUnit, limitPrice, label,
+   * signedAt? }). When given, an order the venue took — and one whose answer never arrived — is handed to the
+   * progress tracker HERE, the one place every ticket's order passes, so progress and "not confirmed" behave the
+   * same whichever ticket placed it. It happens even when the request was superseded: an accepted order is
+   * always tracked.
+   *
    * `beforeSign` (optional) runs after approvals and creds are ready and immediately before the order is
    * built and signed: return false to abort with nothing signed (status returns to 'ready', result
    * `{ aborted: true }`). The ticket uses it to re-plan against the CURRENT reading at the last moment
    * (FR-021) — the ceremonies above can take a member minutes.
    */
   const signAndPost = useCallback(
-    async (send, { beforeSign } = {}) => {
+    async (send, { beforeSign, track } = {}) => {
       if (postingRef.current) return null
       if (!fee || !signer.canSign) {
         setStatus('blocked')
@@ -256,6 +264,10 @@ export function usePredictTrade(options = {}) {
         return null
       }
       postingRef.current = true
+      const startedAt = Date.now() // before any ceremony: the tracker reads trades from a window that starts here
+      const handOff = (outcome) => {
+        if (track) deps.trackSignedOrder(wallet.address, { signedAt: startedAt, ...track }, outcome)
+      }
       try {
         if (!(await ensureNetwork())) {
           setStatus('error')
@@ -288,6 +300,9 @@ export function usePredictTrade(options = {}) {
           })
           setStatus('submitting')
           const submitted = await send(client)
+          if (submitted && !isRegionError(submitted) && (submitted.orderId || submitted.orderHash)) {
+            handOff({ posted: { orderId: submitted.orderId ?? null, status: submitted.status ?? null, computedId: submitted.orderHash ?? null } })
+          }
           // Superseded while the post was in flight (a fee reload, a reset): the SCREEN has moved on, so no state
           // is set — but the order went out, and the caller must still be told, or an accepted order is neither
           // shown nor tracked.
@@ -304,6 +319,7 @@ export function usePredictTrade(options = {}) {
           // An order whose fate is unknown is reported even if this request was superseded: it is the one
           // outcome a member must hear about, whatever else the screen has moved on to.
           if (e?.outcomeUnknown && !isRegionError(e)) {
+            handOff({ unconfirmed: true, reason: UNKNOWN_REASON, posted: { computedId: e.orderHash ?? null } })
             setStatus('unknown')
             setReason(UNKNOWN_REASON)
             // `orderHash`: the order's id, computed before the post, so the tracker can look it up (never re-post).
@@ -335,17 +351,33 @@ export function usePredictTrade(options = {}) {
     [fee, signer, ensureNetwork, ensureApprovals, ensureCreds, buildSdkSigner, wallet.address, deps]
   )
 
-  /** Build + sign + submit a fixed-price order (the SDK does all three; attribution rides on the builder config). */
+  /**
+   * Build + sign + submit a fixed-price order. `negRisk` is passed ONLY when the market states it as a boolean;
+   * otherwise it is left out and the order is signed for whichever exchange the venue says that token settles on
+   * (never a guessed `false`).
+   */
   const submit = useCallback(
-    (params, { negRisk = false } = {}) =>
-      signAndPost((client) =>
-        deps.submitOrder(client, {
-          tokenId: params.tokenId,
-          side: params.side,
-          price: params.price,
-          size: params.size,
-          negRisk,
-        })
+    (params, { negRisk, label = null } = {}) =>
+      signAndPost(
+        (client) =>
+          deps.submitOrder(client, {
+            tokenId: params.tokenId,
+            side: params.side,
+            price: params.price,
+            size: params.size,
+            negRisk: typeof negRisk === 'boolean' ? negRisk : undefined,
+          }),
+        {
+          track: {
+            tokenId: params.tokenId,
+            side: params.side,
+            kind: 'resting',
+            size: params.size,
+            sizeUnit: 'shares',
+            limitPrice: params.price,
+            label,
+          },
+        }
       ),
     [signAndPost, deps]
   )
