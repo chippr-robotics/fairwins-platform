@@ -26,12 +26,12 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 117 |
-| With a member-facing flow | 92 |
-| Member-facing flows | 220 |
+| Spec directories | 118 |
+| With a member-facing flow | 93 |
+| Member-facing flows | 222 |
 | 🟢 covered | 198 |
 | 🟡 partial | 5 |
-| 🔴 absent | 8 |
+| 🔴 absent | 10 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -634,7 +634,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Information — read-only surfaces
 
-54 flows — 🟢 54 · 🟡 0 · 🔴 0 · ⚪ 0 · covered-but-not-proven 12
+56 flows — 🟢 54 · 🟡 0 · 🔴 2 · ⚪ 0 · covered-but-not-proven 12
 
 ### `005-multi-recipient-encryption` — Multi-recipient encryption
 
@@ -874,6 +874,13 @@ establish the outcome. They are listed in full at the end of this document.
 | `predict.market-page` | Open an event by its address and see every outcome, its history, depth, volume, closing time and resolution source | 🟢 covered | flow | `no-chain` | `52-predict-live.cy.js` (PL-05, PL-06, PL-07) |  |
 | `predict.price-trust-state` | A price that stops being confirmed is marked delayed with its age, then last known, and is never drawn as live | 🟢 covered | flow | `no-chain` | `52-predict-live.cy.js` (PL-08) |  |
 | `predict.order-progress` | Follow an order from signed to settled without refreshing, with unconfirmed distinct from failed, surviving a reload | 🟢 covered | flow | `no-chain` | `52-predict-live.cy.js` (PL-13, PL-14, PL-15) |  |
+
+### `115-predict-live-game-views` — Predict — live game views for sports markets
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `predict.game-scoreboard` | A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
+| `predict.game-field-and-plays` | A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
 
 ## No member consequence
 

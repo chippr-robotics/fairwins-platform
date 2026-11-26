@@ -3574,6 +3574,35 @@
           "issue": "#1747"
         }
       ]
+    },
+    {
+      "id": "115-predict-live-game-views",
+      "title": "Predict \u2014 live game views for sports markets",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "predict.game-scoreboard",
+          "name": "A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1756"
+        },
+        {
+          "id": "predict.game-field-and-plays",
+          "name": "A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1756"
+        }
+      ]
     }
   ]
 }
