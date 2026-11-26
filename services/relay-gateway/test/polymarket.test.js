@@ -1099,6 +1099,47 @@ describe('spec 114 market row negRisk comes from the MARKET', () => {
   })
 })
 
+describe('spec 114 per-market volume on MarketRow (T025a)', () => {
+  it('carries the venue figures as decimal strings, formatted like the event-level volume', () => {
+    const row = normalizeMarketRow(gammaRow({ volume: '2050810.4307630006', volume24hr: 12345.5 }))
+    expect(row.volume).toBe('2050810.4307630006')
+    expect(row.volume24h).toBe('12345.5')
+    // a bare number (volumeNum) is printed the same way the event's volume24hr is
+    expect(normalizeMarketRow(gammaRow({ volumeNum: 2050810.4307630006 })).volume).toBe('2050810.4307630006')
+    for (const detail of [false, true]) {
+      const ev = normalizeEvent(gammaEvent({ markets: [gammaRow({ volume: '10', volume24hr: 2 })] }), { detail })
+      expect(ev.markets[0]).toMatchObject({ volume: '10', volume24h: '2' })
+    }
+  })
+
+  it('is null, never "0" or 0, when the venue row does not carry the field', () => {
+    const row = normalizeMarketRow(gammaRow())
+    expect(row.volume).toBeNull()
+    expect(row.volume24h).toBeNull()
+    const junk = normalizeMarketRow(gammaRow({ volume: '', volume24hr: 'n/a' }))
+    expect(junk.volume).toBeNull()
+    expect(junk.volume24h).toBeNull()
+    // a stated zero is a real figure and stays "0"
+    expect(normalizeMarketRow(gammaRow({ volume24hr: 0 })).volume24h).toBe('0')
+  })
+})
+
+describe('spec 114 position negRisk is a stated boolean or null (T032d)', () => {
+  const pos = (over) => normalizePosition({ asset: TOKEN, size: 10, ...over })
+  it('is true / false only when the venue stated a boolean', () => {
+    expect(pos({ negativeRisk: true }).negRisk).toBe(true)
+    expect(pos({ negativeRisk: false }).negRisk).toBe(false)
+    expect(pos({ negRisk: true }).negRisk).toBe(true)
+    expect(pos({ negRisk: false }).negRisk).toBe(false)
+  })
+  it('is null when the flag is absent or not a boolean', () => {
+    expect(pos({}).negRisk).toBeNull()
+    expect(pos({ negativeRisk: null }).negRisk).toBeNull()
+    expect(pos({ negativeRisk: 'true' }).negRisk).toBeNull()
+    expect(pos({ negativeRisk: 1 }).negRisk).toBeNull()
+  })
+})
+
 describe('spec 114 live state on events', () => {
   it('carries { score, period, elapsed } only when the venue says live and not ended', () => {
     const inPlay = normalizeEvent(gammaEvent({ live: true, ended: false, score: '91-101', period: 'Q4', elapsed: '06:47' }))
