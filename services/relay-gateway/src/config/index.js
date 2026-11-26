@@ -60,6 +60,7 @@
  *   POLYMARKET_BOOK_TTL_MS     per-token order-book cache TTL (spec 114; default 2000, floor 1000 —
  *                              a lower value is clamped with one boot log line, never a boot failure)
  *   POLYMARKET_HISTORY_TTL_MS  price-history cache TTL (spec 114; default 60000)
+ *   POLYMARKET_DISCOVER_TTL_MS /discover quick-filter cache TTL, per half (spec 114; default 60000)
  *   POLYMARKET_QUOTA_PER_ADDRESS reads/min counted per requested address (default 60)
  *   POLYMARKET_QUOTA_GLOBAL    reads/min across all callers (default 300)
  *   POLYMARKET_QUOTA_WINDOW_MS quota window (default 60000)
@@ -658,6 +659,7 @@ export function loadConfig(env = process.env, opts = {}) {
         return Math.max(raw, BOOK_TTL_FLOOR_MS)
       })(),
       historyTtlMs: int(env, 'POLYMARKET_HISTORY_TTL_MS', 60_000),
+      discoverTtlMs: int(env, 'POLYMARKET_DISCOVER_TTL_MS', 60_000),
       quotaPerAddress: int(env, 'POLYMARKET_QUOTA_PER_ADDRESS', 60),
       quotaGlobal: int(env, 'POLYMARKET_QUOTA_GLOBAL', 300),
       quotaWindowMs: int(env, 'POLYMARKET_QUOTA_WINDOW_MS', 60_000),

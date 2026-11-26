@@ -28,6 +28,10 @@ export const isCategory = (id) => typeof id === 'string' && Object.hasOwn(CATEGO
 /** The venue tag slug for one of our ids, or null for anything else. */
 export const tagSlugFor = (id) => (isCategory(id) ? CATEGORY_TAGS[id] : null)
 
+/** True when `slug` is the venue tag behind one of our fixed categories (compared case-insensitively). */
+export const isCategoryTagSlug = (slug) =>
+  typeof slug === 'string' && Object.values(CATEGORY_TAGS).some((v) => v === slug.toLowerCase())
+
 /**
  * Our id for an event's tags: the first tag slug that maps back to one of our categories, in the
  * event's own tag order; null when none does. Never invents a category.

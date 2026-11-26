@@ -252,6 +252,7 @@ const DECIMAL_RE = /^\d+(\.\d+)?$/
 const DESCRIPTION_MAX = 4000
 const RESOLUTION_SOURCE_MAX = 500
 const TEXT_MAX = 500
+const LIVE_TEXT_MAX = 20
 export const SUMMARY_MARKET_CAP = 4
 export const BOOK_DEPTH_CAP = 25
 /** The venue's own rule for the headline probability: midpoint while the spread is at most 10c. */
@@ -281,7 +282,7 @@ export const isSort = (v) => typeof v === 'string' && Object.hasOwn(EVENT_SORTS,
  * A non-negative decimal as a string, or null. A string that already is one is returned
  * UNCHANGED (never parsed and re-printed); a finite number is printed without exponent notation.
  */
-function decimalString(v) {
+export function decimalString(v) {
   if (typeof v === 'string') return DECIMAL_RE.test(v) ? v : null
   if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) return null
   const s = String(v)
@@ -326,13 +327,27 @@ export function displayPrice(bestBid, bestAsk, lastTradePrice) {
 }
 
 /** Plain text, control characters removed, capped by code points; null when empty/not a string. */
-function plainText(v, max) {
+export function plainText(v, max) {
   if (typeof v !== 'string') return null
   // eslint-disable-next-line no-control-regex
   const cleaned = v.replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
   if (cleaned.trim() === '') return null
   const points = Array.from(cleaned)
   return points.length > max ? points.slice(0, max).join('') : cleaned
+}
+
+/**
+ * In-play state (FR-002b): `{ score, period, elapsed }` (each plain text <= 20 chars, or null when the
+ * venue omitted or blanked it) ONLY when the venue says `live === true && ended !== true`; else null.
+ * A status the venue did not give is never invented.
+ */
+export function normalizeLive(raw) {
+  if (raw?.live !== true || raw?.ended === true) return null
+  return {
+    score: plainText(raw.score, LIVE_TEXT_MAX),
+    period: plainText(raw.period, LIVE_TEXT_MAX),
+    elapsed: plainText(raw.elapsed, LIVE_TEXT_MAX),
+  }
 }
 
 const isResolved = (raw) => raw?.closed === true && raw?.umaResolutionStatus === 'resolved'
@@ -367,6 +382,8 @@ export function normalizeMarketRow(raw, { detail = false } = {}) {
     conditionId,
     label: plainText(raw.groupItemTitle, TEXT_MAX) ?? plainText(raw.question, TEXT_MAX) ?? conditionId,
     tradable: raw.closed !== true && raw.active !== false && raw.acceptingOrders !== false && outcomes.length > 0,
+    // The MARKET's own flag (it selects the exchange contract an order is signed for) — never the event's.
+    negRisk: Boolean(raw.negRisk ?? raw.neg_risk),
     outcomes,
     bestBid,
     bestAsk,
@@ -417,6 +434,7 @@ export function normalizeEvent(raw, { detail = false } = {}) {
     endDate: typeof raw.endDate === 'string' && raw.endDate !== '' ? raw.endDate : null,
     mutuallyExclusive: Boolean(raw.negRisk),
     marketCount: rows.length,
+    live: normalizeLive(raw),
   }
   if (!detail) {
     const ranked = rows

@@ -35,6 +35,7 @@ import {
   HISTORY_RANGES,
 } from './normalize.js'
 import { isCategory, tagSlugFor } from './categories.js'
+import { selectTopics, TOPIC_SLUG_RE } from './discover.js'
 
 /**
  * @param {object} config full gateway config (only .polymarket is read)
@@ -209,9 +210,18 @@ export function createPolymarketRouter(
   router.get('/v1/polymarket/:chainId/events', async (req, res) => {
     try {
       requirePolygon(req.params.chainId)
-      const { category, sort, next, q } = req.query
+      const { category, topic, live, sort, next, q } = req.query
       if (category !== undefined && !isCategory(category)) {
         throw new GatewayError(400, 'invalid_category', 'category is not one of the supported categories')
+      }
+      if (topic !== undefined && !(typeof topic === 'string' && TOPIC_SLUG_RE.test(topic))) {
+        throw new GatewayError(400, 'invalid_topic', 'topic must be a venue tag slug (letters, digits and hyphens, at most 64)')
+      }
+      if (live !== undefined && live !== '1') {
+        throw new GatewayError(400, 'invalid_filter', 'live must be 1 when present')
+      }
+      if ([category, topic, live].filter((v) => v !== undefined).length > 1) {
+        throw new GatewayError(400, 'invalid_filter', 'category, topic and live are exclusive; send at most one')
       }
       if (sort !== undefined && !isSort(sort)) {
         throw new GatewayError(400, 'invalid_sort', 'sort must be volume24h, newest or closing')
@@ -240,9 +250,12 @@ export function createPolymarketRouter(
           return normalizeEventPage(body, { offset, limit: EVENT_PAGE })
         })
       } else {
-        const sortId = sort ?? 'volume24h'
+        // `live=1` ignores sort: the order is trading in the last day.
+        const sortId = live !== undefined ? 'volume24h' : (sort ?? 'volume24h')
         const { order, ascending } = EVENT_SORTS[sortId]
-        result = await cache.fetchThrough(`events:${category ?? 'all'}:${sortId}:${offset}`, pm.cacheTtlMs, async () => {
+        // Topic slugs are case-sensitive at the venue, so the key keeps their case.
+        const filterKey = live !== undefined ? 'live' : topic !== undefined ? `topic:${topic}` : (category ?? 'all')
+        result = await cache.fetchThrough(`events:${filterKey}:${sortId}:${offset}`, pm.cacheTtlMs, async () => {
           const query = {
             active: 'true',
             closed: 'false',
@@ -253,6 +266,8 @@ export function createPolymarketRouter(
             offset: String(offset),
           }
           if (category !== undefined) query.tag_slug = tagSlugFor(category)
+          if (topic !== undefined) query.tag_slug = topic
+          if (live !== undefined) query.live = 'true'
           // Active-but-past-end events are still open at the venue until UMA settles them, and they
           // sort FIRST ascending; "closing soon" means not yet closed, so start from now.
           if (sortId === 'closing') query.end_date_min = new Date(now()).toISOString().replace(/\.\d+Z$/, 'Z')
@@ -261,6 +276,54 @@ export function createPolymarketRouter(
         })
       }
       respondLive(res, result.value, { confirmedAt: result.fetchedAt, stale: result.stale })
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
+  // ---- GET /v1/polymarket/:chainId/discover (spec 114 R16: what is active now) ------------------
+  // Two independent venue reads, each its own cache entry (single-flight + serve-stale per half): the
+  // hundred most-traded events (-> topics) and the events in play (-> live). One half failing yields
+  // null for that half only; an honestly empty half is [] / {count:0}. Both failing is a 503.
+  const LIVE_PAGE = 50
+  const TOP_PAGE = 100
+  const LIVE_LEADERS = 6
+  const BASE_EVENTS_QUERY = { active: 'true', closed: 'false', archived: 'false', order: 'volume24hr', ascending: 'false' }
+  router.get('/v1/polymarket/:chainId/discover', async (req, res) => {
+    try {
+      requirePolygon(req.params.chainId)
+      guard(req)
+
+      const [liveR, topR] = await Promise.allSettled([
+        cache.fetchThrough('discover:live', pm.discoverTtlMs, async () => {
+          const body = await gamma.get('/events', { query: { ...BASE_EVENTS_QUERY, live: 'true', limit: String(LIVE_PAGE) } })
+          if (!Array.isArray(body)) throw new Error('events not readable')
+          const inPlay = body.filter((e) => e?.closed !== true).map((e) => normalizeEvent(e)).filter((e) => e?.live != null)
+          return {
+            count: inPlay.length,
+            ...(body.length >= LIVE_PAGE ? { more: true } : {}),
+            events: inPlay.slice(0, LIVE_LEADERS),
+          }
+        }),
+        cache.fetchThrough('discover:top', pm.discoverTtlMs, async () => {
+          const body = await gamma.get('/events', { query: { ...BASE_EVENTS_QUERY, limit: String(TOP_PAGE) } })
+          if (!Array.isArray(body)) throw new Error('events not readable')
+          return { topics: selectTopics(body.filter((e) => e?.closed !== true)) }
+        }),
+      ])
+      const read = [liveR, topR].filter((r) => r.status === 'fulfilled')
+      if (read.length === 0) throw new Error('no half of discover could be read')
+      respondLive(
+        res,
+        {
+          live: liveR.status === 'fulfilled' ? liveR.value.value : null,
+          topics: topR.status === 'fulfilled' ? topR.value.value.topics : null,
+        },
+        {
+          confirmedAt: Math.min(...read.map((r) => r.value.fetchedAt)),
+          stale: read.some((r) => r.value.stale),
+        }
+      )
     } catch (err) {
       handleError(res, err)
     }
