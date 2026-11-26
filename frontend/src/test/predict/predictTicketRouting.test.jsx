@@ -7,7 +7,7 @@
  *  - the event page's ten-key budget holds IN TOTAL while a ticket is open, from a row or from a position.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest'
-import { render, screen, fireEvent, within, act } from '@testing-library/react'
+import { render, screen, fireEvent, within, act, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { setWalletChain } from '../helpers/walletChain'
 import PredictPanel from '../../components/predict/PredictPanel'
@@ -142,14 +142,16 @@ describe('the market-data budget (≤ 10 keys on an event page, in total)', () =
   it('Sell on a position while the page is open: the page stands down, so the total stays within ten', async () => {
     renderAt(`/wallet?tab=predict&event=${SLUG}`)
     await screen.findByRole('heading', { level: 2, name: 'Fed Decision in December?' })
-    expect(feed.held.size).toBe(9) // eight rows' Yes tokens + the first row's No
-    // Positions arrive on their own read, after the page's heading: wait for the control rather than assume it.
+    // The states below are reached by effects and by reads that land on their own schedule, so each is waited
+    // for rather than assumed at one instant (this test failed about once in twenty runs on a loaded machine).
+    // The invariant itself is NOT eventual: `feed.max` is the most ever held at once, and it is checked strictly.
+    await waitFor(() => expect(feed.held.size).toBe(9)) // eight rows' Yes tokens + the first row's No
     fireEvent.click(await screen.findByRole('button', { name: 'Sell' }))
+    await waitFor(() => expect([...feed.held.keys()]).toEqual(['polymarket:pos1']))
     expect(feed.max).toBeLessThanOrEqual(10)
-    expect([...feed.held.keys()]).toEqual(['polymarket:pos1'])
     // Closing the ticket resumes the page's own readings.
     fireEvent.click(screen.getByRole('button', { name: 'Close' }))
-    await settle()
-    expect(feed.held.size).toBe(9)
+    await waitFor(() => expect(feed.held.size).toBe(9))
+    expect(feed.max).toBeLessThanOrEqual(10)
   })
 })
