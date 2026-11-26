@@ -27,6 +27,19 @@ describe('marketFromRow', () => {
     expect(marketFromRow(RAIN, row).outcomes[0].price).toBeNull()
   })
 
+  it('carries the per-market volume strings, null when unstated, null when the gateway predates the field', () => {
+    const stated = marketFromRow(FED, mkRow({ volume: '9348387.921928', volume24h: '0' }))
+    expect(stated.volume).toBe('9348387.921928')
+    expect(stated.volume24h).toBe('0') // a stated zero stays zero
+    const unstated = marketFromRow(FED, mkRow({ volume: null, volume24h: null }))
+    expect(unstated.volume).toBeNull()
+    expect(unstated.volume24h).toBeNull()
+    const older = mkRow()
+    delete older.volume
+    delete older.volume24h
+    expect(marketFromRow(FED, older).volume).toBeNull()
+  })
+
   it('carries tradability and the venue link', () => {
     const m = marketFromRow(FED, mkRow({ tradable: false }))
     expect(m.tradable).toBe(false)

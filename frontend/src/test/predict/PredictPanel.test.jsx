@@ -93,7 +93,7 @@ describe('PredictPanel — browse by event', () => {
     client.fetchEvents.mockResolvedValue(page([FED], { confirmedAt: envelope().serverNow }))
     renderAt()
     await screen.findByText('Fed Decision in December?')
-    expect(chipText()).toMatch(/Delayed · \d+ s/)
+    expect(chipText()).toMatch(/Delayed( · [1-9]\d* s)?$/) // an age under a second is not printed: "Delayed · 0 s" contradicts itself
     expect(chipText()).not.toMatch(/live/i)
   })
 

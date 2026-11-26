@@ -177,12 +177,18 @@
   font-size: 0.78rem;
   grid-column: 1 / -1;
 }
+.event-page .event-page-row-volume {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  grid-column: 1 / -1;
+}
 .event-page .event-page-row-actions {
   display: inline-flex;
   gap: 0.35rem;
 }
 .event-page .event-page-side {
   border-radius: 8px;
+  min-width: 4.75rem; /* Yes/No columns line up from row to row whatever the label ("<1¢", "100¢") */
   cursor: pointer;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
@@ -192,19 +198,15 @@
   padding: 0.3rem 0.6rem;
   white-space: nowrap;
 }
-.event-page .event-page-side--yes {
-  background: var(--primary-button);
-  border: 1px solid var(--primary-button);
-  color: var(--primary-button-text);
-}
-.event-page .event-page-side--yes:hover:not(:disabled) {
-  background: var(--primary-button-hover);
-}
+/* Yes and No carry EQUAL weight until the member chooses (FR-028): one rule, one fill, one border, one label colour,
+   told apart by their words. A filled Yes beside an outlined No read as the app recommending Yes on every market. */
+.event-page .event-page-side--yes,
 .event-page .event-page-side--no {
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-strong);
   color: var(--text-primary);
 }
+.event-page .event-page-side--yes:hover:not(:disabled),
 .event-page .event-page-side--no:hover:not(:disabled) {
   background: var(--bg-tertiary);
 }

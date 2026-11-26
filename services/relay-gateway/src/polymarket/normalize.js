@@ -169,7 +169,7 @@ export function normalizeFeeRate(body, tokenId) {
   }
 }
 
-/** One Data-API position -> {tokenId, conditionId, outcome, size, value, bestBid, negRisk}, or null. */
+/** One Data-API position -> {tokenId, conditionId, outcome, size, value, bestBid, negRisk}, or null. `negRisk` is boolean only when the venue stated one, else null. */
 export function normalizePosition(raw) {
   if (!raw) return null
   const tokenId = String(raw.asset ?? raw.token_id ?? raw.tokenId ?? '')
@@ -184,7 +184,8 @@ export function normalizePosition(raw) {
     // Data-API uses camelCase currentValue + curPrice (the current mark, our sell-price proxy).
     value: usdcQuote(raw.currentValue ?? raw.current_value ?? raw.value ?? null),
     bestBid: usdcQuote(raw.curPrice ?? raw.price ?? null),
-    negRisk: Boolean(raw.negativeRisk ?? raw.negRisk),
+    // true/false ONLY when the venue stated a boolean; an omitted flag is null, not a stated false.
+    negRisk: [raw.negativeRisk, raw.negRisk].find((v) => typeof v === 'boolean') ?? null,
   }
 }
 
@@ -385,6 +386,9 @@ export function normalizeMarketRow(raw, { detail = false } = {}) {
     // The MARKET's own flag (it selects the exchange contract an order is signed for) — never the event's.
     negRisk: Boolean(raw.negRisk ?? raw.neg_risk),
     outcomes,
+    // Per MARKET (both outcomes share it); null when the venue row omits it, never "0".
+    volume: decimalString(raw.volume) ?? decimalString(raw.volumeNum),
+    volume24h: decimalString(raw.volume24hr),
     bestBid,
     bestAsk,
     lastTradePrice,

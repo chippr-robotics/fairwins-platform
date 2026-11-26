@@ -27,7 +27,9 @@ export default function TrustChip({ reading, state, ageMs }) {
     return () => clearInterval(id)
   }, [ticking])
   const age = reading ? reading.ageMs?.() : ageMs
-  const ageText = copy.showAge && Number.isFinite(age) ? describeAge(age) : null
+  // A zero age beside "Delayed" contradicts itself: the event list is a 15 s poll, so its price is held out of Live
+  // even when it was confirmed this second (`demoted`). Under a second, the state alone is the honest statement.
+  const ageText = copy.showAge && Number.isFinite(age) && Math.round(age / 1000) >= 1 ? describeAge(age) : null
 
   return (
     <span className={`predict-trust-chip predict-trust-chip--${key}`} role="status">

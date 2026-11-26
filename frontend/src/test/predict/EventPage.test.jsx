@@ -95,6 +95,26 @@ describe('EventPage — header and outcomes', () => {
     expect(document.querySelectorAll('.event-page-pct')[0].textContent).toBe('75%')
   })
 
+  it('shows each market\'s own traded volume beside its outcome; unstated or absent prints nothing, never $0', async () => {
+    const absent = mkRow({ conditionId: '0xabs', label: 'Absent' })
+    delete absent.volume
+    renderPage({
+      markets: [
+        mkRow({ conditionId: '0xv1', label: 'Stated', volume: '9348387.921928', volume24h: '120.5' }),
+        mkRow({ conditionId: '0xv2', label: 'Zero', volume: '0', volume24h: '0' }),
+        mkRow({ conditionId: '0xv3', label: 'Unstated', volume: null, volume24h: null }),
+        absent,
+      ],
+    })
+    await ready()
+    const rows = Array.from(document.querySelectorAll('.event-page-row'))
+    const vol = (label) => rows.find((r) => r.textContent.includes(label)).querySelector('.event-page-row-volume')?.textContent ?? null
+    expect(vol('Stated')).toBe('$9.3M traded')
+    expect(vol('Zero')).toBe('$0 traded') // a stated zero is a stated zero
+    expect(vol('Unstated')).toBeNull()
+    expect(vol('Absent')).toBeNull()
+  })
+
   it('shows the venue\'s in-play words for an event in play, as plain text', async () => {
     renderPage({ live: { score: '91-101', period: 'Q4', elapsed: '06:47' } })
     await ready()

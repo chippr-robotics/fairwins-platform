@@ -51,6 +51,8 @@
   border-radius: 8px;
   color: var(--text-primary);
   cursor: pointer;
+  min-height: 44px;
+  min-width: 44px;
   padding: 0.3rem 0.7rem;
 }
 .market-detail-category {
@@ -74,6 +76,7 @@
   border: 1px solid var(--border-color);
   border-radius: 10px;
   display: flex;
+  flex-wrap: wrap;
   gap: 0.6rem;
   justify-content: space-between;
   padding: 0.55rem 0.7rem;
@@ -94,6 +97,8 @@
   border-radius: 8px;
   cursor: pointer;
   font-weight: 600;
+  min-height: 44px;
+  min-width: 44px;
   padding: 0.35rem 0.8rem;
 }
 .market-detail-buy {
@@ -109,6 +114,9 @@
 .market-detail-buy:disabled,
 .market-detail-sell:disabled {
   cursor: default;
+}
+/* The Buy fill is re-pointed to the disabled pair by index.css; only the outlined Sell needs to dim itself. */
+.market-detail-sell:disabled {
   opacity: 0.5;
 }
 

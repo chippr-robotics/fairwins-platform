@@ -42,7 +42,7 @@ const PAGE_SIZE = 3
 const TOKEN_YES = '71321045679252212594626385532706912750332728571942532289631379312455583992563'
 const TOKEN_NO = '52114319501245915516055106046884209969926127482827954674443846427813813222426'
 
-const row = (conditionId, label, displayPrice) => ({
+const row = (conditionId, label, displayPrice, volume = '9348387.921928', volume24h = '41200.5') => ({
   conditionId,
   label,
   tradable: true,
@@ -54,6 +54,9 @@ const row = (conditionId, label, displayPrice) => ({
   bestBid: null,
   bestAsk: null,
   lastTradePrice: null,
+  // Per-market traded volume (T025a): decimal strings; both outcomes of a market share it.
+  volume,
+  volume24h,
   displayPrice,
   tickSize: '0.01',
   minOrderSize: '5',
@@ -77,8 +80,8 @@ const event = (slug, title, category, markets, over = {}) => ({
 const EVENTS = [
   event('fed-decision-in-december', 'Fed Decision in December?', 'economy', [
     row('0xf1', '25 bps increase', '0.935'),
-    row('0xf2', 'No change', '0.05'),
-    row('0xf3', '50+ bps decrease', '0.004'),
+    row('0xf2', 'No change', '0.05', '812.4', '0'),
+    row('0xf3', '50+ bps decrease', '0.004', null, null),
     row('0xf4', '25 bps decrease', '0.003'),
   ], { marketCount: 6 }),
   event('bitcoin-above-200k', 'Bitcoin above $200k this year?', 'crypto', [row('0xb1', 'Bitcoin above $200k', '0.31')]),
@@ -457,6 +460,10 @@ describe('Predict — the event page (spec 114, slice 4)', () => {
     cy.get('.event-page-row').first().should('contain.text', '25 bps increase').and('contain.text', '94%')
     cy.get('.event-page-row').eq(2).should('contain.text', '<1%')
     cy.get('.event-page-row-actions').first().contains('button', /^Yes 94¢/).should('be.visible')
+    // Per-market volume (FR-005) beside each outcome: compact, a stated figure; an unstated one prints nothing, never $0.
+    cy.get('.event-page-row').first().find('.event-page-row-volume').should('have.text', '$9.3M traded')
+    cy.get('.event-page-row').eq(1).find('.event-page-row-volume').should('have.text', '$812 traded')
+    cy.get('.event-page-row').eq(2).find('.event-page-row-volume').should('not.exist')
 
     // The chart: five ranges, 1D by default, a request per range, and a line that is really drawn.
     cy.get('[role="group"][aria-label="Chart range"] button').should('have.length', 5)

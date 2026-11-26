@@ -127,7 +127,7 @@ the seam they plug into is right from the start.
       Flip `predict.market-page` and `predict.price-trust-state` (PL-08: block the books route,
       see Delayed then Last known, and the ticket's refusal). Open the slice PR.
 
-- [ ] T025a [US2] Per-outcome traded volume (FR-005): the gateway's market row carries no
+- [X] T025a [US2] Per-outcome traded volume (FR-005): the gateway's market row carries no
       volume, so the event page shows the event's volume only. Add `volume` to `MarketRow` from the
       venue's per-market figure and show it on each outcome row.
 - [X] T025b [US3] The ticket's refusal on a non-live price (the last clause of PL-08) lands with
@@ -227,10 +227,10 @@ the seam they plug into is right from the start.
 
 ## Phase 10: Polish
 
-- [ ] T044 [P] `docs/developer-guide/predict-polymarket.md` rewritten for the new surface; a
-      CLAUDE.md guardrail paragraph for spec 114 (the reading type, the seam, what stays on the
-      device).
-- [ ] T045 Capture harness and actor-critic screenshot pass for browse, event page, ticket and
+- [X] T044 [P] `docs/developer-guide/predict-polymarket.md` extended slice by slice for the new
+      surface (not rewritten: the spec-057 parts still hold); a CLAUDE.md guardrail paragraph for
+      spec 114 (the reading type, the seam, the order path, what stays on the device).
+- [X] T045 Capture harness and actor-critic screenshot pass for browse, event page, ticket and
       progress in both themes and both widths (`actor-critic-screens` skill).
 - [ ] T046 Walk quickstart.md end to end, including "Without the feed".
 

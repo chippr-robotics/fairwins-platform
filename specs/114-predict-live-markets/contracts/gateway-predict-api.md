@@ -38,6 +38,7 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
     "markets": [{
       "conditionId": "0x…", "label": "25 bps increase", "tradable": true, "negRisk": true,
       "outcomes": [{ "name": "Yes", "tokenId": "1116…", "price": "0.935" }, { "name": "No", "tokenId": "9448…", "price": "0.065" }],
+      "volume": "2050810.4307630006", "volume24h": "31877.42",
       "bestBid": "0.93", "bestAsk": "0.94", "lastTradePrice": "0.93", "displayPrice": "0.935",
       "tickSize": "0.01", "minOrderSize": "5"
     }]
@@ -51,6 +52,10 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
 - A row's `negRisk` is the **market's own** flag. It decides which exchange contract an order for
   that market is signed against, so it is never inferred from the event.
 - A number the venue did not give is `null`, never `"0"`.
+- A row's `volume` and `volume24h` (T025a) are the venue's own figures for that **MARKET** — both outcomes
+  of a market share them; there is no per-outcome volume. Decimal strings, formatted exactly as the
+  event-level `volume`/`volume24h` are; `null` when the venue's row omits the field (a stated `0` stays
+  `"0"`). They are not necessarily the sum of anything else on the page.
 - `sort=closing` lists only events whose closing time is still ahead.
 - TTL: `POLYMARKET_CACHE_TTL_MS` (15 s). Errors: 400 `invalid_category` / `invalid_sort` /
   `invalid_cursor` / `invalid_query`, 429 `quota_exceeded`, 503 `upstream_unavailable`. A `q`
@@ -146,5 +151,10 @@ TTL 60 s. `points` may be empty for a new market; that is `[]`, not an error.
 
 ## Unchanged
 
-`/markets`, `/markets/:conditionId`, `/fee-rate`, `/positions`, `/builder-sign`. No route in this
+`/markets`, `/markets/:conditionId`, `/fee-rate`, `/builder-sign`. No route in this
 contract accepts, forwards or signs an order.
+
+One change on `/positions` (T032d): each position's `negRisk` is `true` / `false` only when the venue
+stated a boolean (`negativeRisk`, else `negRisk`); when it did not, it is `null` — an absent flag is
+not a stated `false`. A client must not choose an exchange contract from a `null`; it resolves the
+market's own flag (a `MarketRow.negRisk`) first. Nothing else in the position shape changes.
