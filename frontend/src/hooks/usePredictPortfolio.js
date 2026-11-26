@@ -8,10 +8,11 @@
  * the member enables trading, open orders report status 'locked' (an honest "enable trading to see these").
  *
  * Mirror useCollectibles: tolerant WalletContext read, race-safe request ids, full reset on account/chain
- * switch. Off Polygon / no gateway / passkey session → {supported:false} and NO fetches (FR-018).
+ * switch. Off Polygon / no gateway → {supported:false} and NO fetches (FR-018). Positions are off for a passkey
+ * session (their gateway read needs no session, so that is the venue-side gate); OPEN ORDERS are read for passkey
+ * sessions too (T036c), with the same read-only signer the order tracker uses.
  */
 import { useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
-import { useWalletClient } from 'wagmi'
 import { useWalletChainId } from './useWalletChainId'
 import { WalletContext } from '../contexts/WalletContext.js'
 import { useVisiblePolling } from './useVisiblePolling'
@@ -21,6 +22,8 @@ import {
   makeClobClient as defaultMakeClient,
   fetchOpenOrders as defaultFetchOpenOrders,
 } from '../lib/predict/clobSession'
+import { resolveTradeSigner as defaultResolveTradeSigner } from '../lib/predict/tradeSigner'
+import { readOnlySigner, readClientOptions } from '../lib/predict/readClient'
 
 const POLYGON = 137
 
@@ -111,19 +114,20 @@ export function usePredictOpenOrders(options = {}) {
   const wallet = useContext(WalletContext) || {}
   const { address, isConnected, loginMethod } = wallet
   const chainId = useWalletChainId()
-  const { data: hookWalletClient } = useWalletClient()
-  const walletClient = options.walletClient ?? hookWalletClient
   const deps = useMemo(
     () => ({
       loadCachedCreds: defaultLoadCachedCreds,
       makeClient: defaultMakeClient,
       fetchOpenOrders: defaultFetchOpenOrders,
+      resolveTradeSigner: defaultResolveTradeSigner,
       ...options.deps,
     }),
     [options.deps]
   )
-  // Open orders need per-user creds + an EOA wallet client; passkey trading is deferred.
-  const supported = predictAvailable(chainId) && Number(chainId) === POLYGON && loginMethod !== 'passkey'
+  // Open orders are READ with the member's cached CLOB session and a signer that can only name the address (see
+  // `lib/predict/readClient`), exactly as the order tracker reads. So a passkey session reads them too — it never
+  // derives credentials and never prompts: no cached session means `locked`, not a ceremony.
+  const supported = predictAvailable(chainId) && Number(chainId) === POLYGON
 
   const [orders, setOrders] = useState([])
   const [phase, setPhase] = useState('idle') // idle | loading | ready | degraded | locked
@@ -134,7 +138,7 @@ export function usePredictOpenOrders(options = {}) {
   // `{ silent: true }` is the background refresh: no loading flash, and a failure keeps the last good read
   // (marked `stale`) instead of emptying the list. Returns whether the list changed.
   const load = useCallback(async (opts) => {
-    if (!supported || !isConnected || !address || !walletClient) return false
+    if (!supported || !isConnected || !address) return false
     const silent = opts?.silent === true
     const creds = deps.loadCachedCreds(address)
     if (!creds) {
@@ -146,7 +150,7 @@ export function usePredictOpenOrders(options = {}) {
     const reqId = ++reqIdRef.current
     if (!silent) setPhase('loading')
     try {
-      const client = deps.makeClient(walletClient, creds, {})
+      const client = deps.makeClient(readOnlySigner(address), creds, readClientOptions({ loginMethod, address, resolve: deps.resolveTradeSigner }))
       const list = await deps.fetchOpenOrders(client, {})
       if (reqId !== reqIdRef.current) return false
       const next = Array.isArray(list) ? list : []
@@ -168,7 +172,7 @@ export function usePredictOpenOrders(options = {}) {
       setPhase('degraded')
       return false
     }
-  }, [supported, isConnected, address, walletClient, deps])
+  }, [supported, isConnected, address, loginMethod, deps])
 
   useEffect(() => {
     reqIdRef.current++
@@ -178,10 +182,10 @@ export function usePredictOpenOrders(options = {}) {
     lastJson.current = ''
     load()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address, chainId, supported, walletClient])
+  }, [address, chainId, supported])
 
   useVisiblePolling(() => load({ silent: true }), {
-    enabled: supported && Boolean(isConnected && address && walletClient),
+    enabled: supported && Boolean(isConnected && address),
     ...OPEN_ORDERS_POLL,
     immediate: false,
     resetKey: `${address}|${chainId}`,

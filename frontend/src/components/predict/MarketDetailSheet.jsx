@@ -5,6 +5,7 @@
  */
 import { useRef, useEffect, useState } from 'react'
 import TradeConfirm from './TradeConfirm'
+import { formatPriceCents } from '../../lib/predict/format'
 import './MarketDetailSheet.css'
 
 export default function MarketDetailSheet({ market, onClose }) {
@@ -43,7 +44,7 @@ export default function MarketDetailSheet({ market, onClose }) {
             {market.outcomes.map((o) => (
               <li key={o.tokenId} className="market-detail-outcome">
                 <span className="market-detail-outcome-name">{o.name}</span>
-                <span className="market-detail-outcome-price">{o.price != null ? `${o.price} USDC` : 'no price'}</span>
+                <span className="market-detail-outcome-price">{o.price != null ? formatPriceCents(o.price, 'nearest') : 'no price'}</span>
                 <span className="market-detail-outcome-actions">
                   <button
                     type="button"

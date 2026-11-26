@@ -30,7 +30,8 @@ import { usePredictPlanTrade } from '../../hooks/usePredictPlanTrade'
 import { readingKey, stateWords } from '../../lib/predict/eventPage'
 import { describeAge } from '../../lib/markets/priceReading'
 import { booksRouteMissing, subscribeBooksRoute } from '../../lib/markets/routeSupport'
-import { centsToPrice } from '../../lib/predict/ticketPlan'
+import { centsToPrice, planForTicket } from '../../lib/predict/ticketPlan'
+import { toleranceChoices, ticksFor, effectiveId, DEFAULT_TOLERANCE } from '../../lib/predict/tolerance'
 import { nearCertainty, depthStatement, refusalSentence, tickCents, usdc, venueFeeNote, unknownOutcomeText, orderSentText } from '../../lib/predict/ticketStatements'
 import { polymarketMarketUrl } from '../../lib/predict/geoblock'
 import { feeDisclosureText, restingFeeText, firstTradeText, WRONG_NETWORK_TEXT, NETWORK_FEE_TEXT } from '../../lib/predict/disclosures'
@@ -81,12 +82,27 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
   const naming = ownOpen && ownCents.trim() !== ''
   const ownPrice = naming ? (centsToPrice(ownCents) ?? 'unusable') : ''
 
+  // Price tolerance (T032a, research R7): how far past the worst level touched the limit may sit. It lives in THIS
+  // component's state only — never in storage, never lifted to the panel — so every ticket opens at the tightest
+  // (one tick) and nobody carries a loosened limit forward by accident. Choosing another outcome is a different
+  // order and goes back to the default too.
+  const [toleranceId, setToleranceId] = useState(DEFAULT_TOLERANCE)
+  const [tolOpen, setTolOpen] = useState(false)
+  // The choices are measured from the worst level the order touches at the DEFAULT tolerance (the deepest level it
+  // reaches does not depend on the tolerance), else from the top of the book.
+  const base = planForTicket({ reading, side, typed, ownPrice, toleranceTicks: 1, tickSize: tickSize ?? undefined, minOrderSize: minOrderSize ?? undefined })
+  const topLevel = (buy ? reading?.asks : reading?.bids)?.[0]?.[0]
+  const choices = naming ? [] : toleranceChoices({ tickSize: tick, side, basis: base.status === 'ok' ? base.plan.worstPrice : (topLevel ?? null) })
+  const activeToleranceId = effectiveId(choices, toleranceId)
+  const toleranceTicks = ticksFor(choices.length ? choices : [{ ticks: 1 }], activeToleranceId)
+
   const plan = usePredictPlanTrade({
     tokenId: outcome.tokenId,
     reading,
     side,
     typed,
     ownPrice,
+    toleranceTicks,
     tickSize: tickSize ?? undefined,
     minOrderSize: minOrderSize ?? undefined,
     // Stated by the listing, or left out so the SDK asks the venue for this token — never a guessed `false`.
@@ -119,7 +135,7 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
     onHold?.(hold)
   }, [hold, onHold])
 
-  const ids = { title: useId(), amount: useId(), own: useId(), msg: useId(), ownMsg: useId() }
+  const ids = { title: useId(), amount: useId(), own: useId(), msg: useId(), ownMsg: useId(), tol: useId() }
   const builderBps = plan.fee?.builderTakerFeeBps ?? 0
   const linkOut = market?.polymarketUrl || polymarketMarketUrl(market) || POLYMARKET_URL
   const title = `${buy ? 'Buy' : 'Sell'} ${outcome.name} — ${market?.question}`
@@ -300,7 +316,10 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
                       type="button"
                       className={'order-ticket-outcome ' + (i === 0 ? 'order-ticket-outcome--yes' : 'order-ticket-outcome--no')}
                       aria-pressed={o.tokenId === outcome.tokenId}
-                      onClick={() => setTokenId(o.tokenId)}
+                      onClick={() => {
+                        setTokenId(o.tokenId)
+                        setToleranceId(DEFAULT_TOLERANCE)
+                      }}
                     >
                       <span aria-hidden="true">{o.tokenId === outcome.tokenId ? '✓ ' : ''}</span>
                       {o.name} {formatCents(priceOf(o))}
@@ -486,6 +505,41 @@ function TicketBody({ market, outcomes, initialTokenId, mode, position, tickSize
                 </div>
               )}
             </div>
+
+            {choices.length > 1 && (
+              <div className="order-ticket-own">
+                <button
+                  type="button"
+                  className="order-ticket-link-button"
+                  aria-expanded={tolOpen}
+                  aria-controls={ids.tol}
+                  onClick={() => setTolOpen((v) => !v)}
+                >
+                  Price tolerance{activeToleranceId !== DEFAULT_TOLERANCE ? `: ${choices.find((c) => c.id === activeToleranceId)?.cents}¢` : ''}
+                </button>
+                {tolOpen && (
+                  <div id={ids.tol} className="order-ticket-own-body">
+                    <p className="order-ticket-note">
+                      The price limit is the worst price this order can fill at; a wider tolerance fills more often when the
+                      price is moving, and can {buy ? 'cost' : 'pay'} up to that much {buy ? 'more' : 'less'} per share.
+                    </p>
+                    <div className="order-ticket-chips" role="group" aria-label="Price tolerance">
+                      {choices.map((c) => (
+                        <button
+                          key={c.id}
+                          type="button"
+                          className="order-ticket-chip"
+                          aria-pressed={c.id === activeToleranceId}
+                          onClick={() => setToleranceId(c.id)}
+                        >
+                          {c.id === 'tick' ? `One tick (${tickCents(tick)})` : `${c.cents}¢`}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
 
             <p className="order-ticket-note">{NETWORK_FEE_TEXT}</p>
             <p className="order-ticket-note">

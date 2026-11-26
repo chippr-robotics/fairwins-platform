@@ -158,7 +158,7 @@ the seam they plug into is right from the start.
       `predict.amount-first-ticket`. `teller` reviews the disclosure; `latch` reviews the passkey
       path. Open the slice PR.
 
-- [ ] T032a [US4] A member-adjustable price tolerance (research R7 allows up to 2¢). The ticket
+- [X] T032a [US4] A member-adjustable price tolerance (research R7 allows up to 2¢). The ticket
       ships with it fixed at one tick.
 - [X] T032b The spec-057 ticket, kept as the fallback for a gateway without the new routes, passes
       `negRisk: false` for a sell opened from a position. On a neg-risk market that order is
@@ -198,10 +198,10 @@ the seam they plug into is right from the start.
       received; whether a trade names its taker and maker order ids; what `after` means on the
       trades read; and whether the venue's order id equals the EIP-712 hash for a passkey
       (signature type 3) order. Until then the tracker never concludes "not delivered".
-- [ ] T036b The tracker's store is read, changed and written whole, so two tabs can overwrite
+- [X] T036b The tracker's store is read, changed and written whole, so two tabs can overwrite
       each other's record; and its poller picks the client shape from the login method rather
       than the resolved signer. Neither loses funds; the first can lose an "unconfirmed" notice.
-- [ ] T036c An "Open orders" list for passkey sessions (the tracker already works for them).
+- [X] T036c An "Open orders" list for passkey sessions (the tracker already works for them).
 
 ## Phase 8: Slice 7 — the stream source (blocked on the feed backend)
 
@@ -232,7 +232,10 @@ the seam they plug into is right from the start.
       spec 114 (the reading type, the seam, the order path, what stays on the device).
 - [X] T045 Capture harness and actor-critic screenshot pass for browse, event page, ticket and
       progress in both themes and both widths (`actor-critic-screens` skill).
-- [ ] T046 Walk quickstart.md end to end, including "Without the feed".
+- [X] T046 Walk quickstart.md end to end, including "Without the feed". Walked against the code as it is: the
+      document was corrected (settled is never shown, `markets.test.js` and `/v1/markets/capabilities` do not exist
+      yet, US6 is unbuilt). Steps that need a funded account, a real gateway to stop, or the unbuilt slices 7/8
+      are marked as not possible here in the document and were not walked.
 
 ## Dependencies
 

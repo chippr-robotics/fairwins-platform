@@ -110,7 +110,7 @@ describe('PredictPanel — browse by event', () => {
   it('a category chip puts cat in the address, keeps other params, and re-queries', async () => {
     renderAt('/wallet?tab=predict')
     await screen.findByText('Fed Decision in December?')
-    const group = screen.getByRole('group', { name: 'Category' })
+    const group = screen.getByRole('group', { name: 'Categories' })
     expect(within(group).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'true')
     fireEvent.click(within(group).getByRole('button', { name: 'Crypto' }))
     await waitFor(() => expect(client.fetchEvents).toHaveBeenLastCalledWith(137, expect.objectContaining({ category: 'crypto' })))
@@ -294,7 +294,7 @@ describe('PredictPanel — browse by event', () => {
     })
     renderAt('/wallet?tab=predict&cat=economy')
     expect(await screen.findByText('An older market?')).toBeInTheDocument()
-    expect(screen.queryByRole('group', { name: 'Category' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Categories' })).toBeNull()
     expect(screen.queryByLabelText(/sort by/i)).toBeNull()
     expect(screen.getByLabelText(/search markets/i)).toBeInTheDocument()
     expect(chipText()).not.toMatch(/live/i)
@@ -305,7 +305,7 @@ describe('PredictPanel — browse by event', () => {
     await screen.findByText('Fed Decision in December?')
     await settled()
     expect(client.fetchDiscover).toHaveBeenCalled()
-    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Popular now' })).toBeNull()
   })
 })
 
@@ -315,10 +315,32 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     { slug: 'NFL-playoffs', label: 'NFL', events: 3, volume24h: '8402870.58' },
   ]
   const discoverBody = (over = {}) => ({ live: { count: 14, events: [] }, topics: TOPICS, ...envelope(), ...over })
-  const row = () => screen.findByRole('group', { name: 'Active now' })
+  const row = () => screen.findByRole('group', { name: 'Popular now' })
 
   beforeEach(() => {
     client.fetchDiscover.mockResolvedValue(discoverBody())
+  })
+
+  it('labels each chip row with VISIBLE text that names its group — one accessible name each, no duplicate', async () => {
+    renderAt()
+    const popular = await row()
+    const categories = screen.getByRole('group', { name: 'Categories' })
+    for (const [group, text] of [[popular, 'Popular now'], [categories, 'Categories']]) {
+      const label = document.getElementById(group.getAttribute('aria-labelledby'))
+      expect(label).toHaveTextContent(text)
+      expect(label).toBeVisible()
+      expect(group).not.toHaveAttribute('aria-label')
+    }
+    expect(screen.getAllByRole('group', { name: /Popular now|Categories/ })).toHaveLength(2)
+  })
+
+  it('draws the "Popular now" label only with its row', async () => {
+    client.fetchDiscover.mockResolvedValue(discoverBody({ live: { count: 0, events: [] }, topics: [] }))
+    renderAt()
+    await screen.findByText('Fed Decision in December?')
+    await settled()
+    expect(screen.queryByText('Popular now')).toBeNull()
+    expect(screen.getByText('Categories')).toBeInTheDocument()
   })
 
   it('draws "In play · 14" then one chip per topic, directly under search and above the categories', async () => {
@@ -328,7 +350,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     expect(buttons.map((b) => b.textContent)).toEqual(['In play · 14', 'Basketball', 'NFL'])
     buttons.forEach((b) => expect(b).toHaveAttribute('aria-pressed', 'false'))
     const search = screen.getByLabelText('Search markets')
-    const category = screen.getByRole('group', { name: 'Category' })
+    const category = screen.getByRole('group', { name: 'Categories' })
     expect(search.compareDocumentPosition(group) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(group.compareDocumentPosition(category) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
@@ -357,7 +379,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     await screen.findByText('Fed Decision in December?')
     await settled()
     expect(client.fetchDiscover).toHaveBeenCalled()
-    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Popular now' })).toBeNull()
   })
 
   it('a topic chip sends topic, writes topic= and clears cat= in the same update', async () => {
@@ -368,7 +390,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     expect(where()).toContain('topic=NFL-playoffs')
     expect(where()).not.toContain('cat=')
     expect(within(group).getByRole('button', { name: 'NFL' })).toHaveAttribute('aria-pressed', 'true')
-    expect(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false')
+    expect(within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name: 'All' })).toHaveAttribute('aria-pressed', 'false')
   })
 
   it('In play, a topic and a category are mutually exclusive in the address', async () => {
@@ -382,7 +404,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     await waitFor(() => expect(where()).toContain('topic=basketball'))
     expect(where()).not.toContain('live=')
 
-    fireEvent.click(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: 'Sports' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name: 'Sports' }))
     await waitFor(() => expect(where()).toContain('cat=sports'))
     expect(where()).not.toContain('topic=')
     expect(where()).not.toContain('live=')
@@ -405,7 +427,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
   it('"All" clears a quick filter as well as a category', async () => {
     renderAt('/wallet?tab=predict&live=1')
     await row()
-    fireEvent.click(within(screen.getByRole('group', { name: 'Category' })).getByRole('button', { name: 'All' }))
+    fireEvent.click(within(screen.getByRole('group', { name: 'Categories' })).getByRole('button', { name: 'All' }))
     await waitFor(() => expect(where()).not.toContain('live='))
   })
 
@@ -454,8 +476,8 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     client.fetchMarkets.mockResolvedValue({ markets: [], next: null, fetchedAt: envelope().confirmedAt, stale: false })
     renderAt('/wallet?tab=predict&topic=nba')
     await waitFor(() => expect(client.fetchMarkets).toHaveBeenCalled())
-    await waitFor(() => expect(screen.queryByRole('group', { name: 'Category' })).toBeNull())
-    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+    await waitFor(() => expect(screen.queryByRole('group', { name: 'Categories' })).toBeNull())
+    expect(screen.queryByRole('group', { name: 'Popular now' })).toBeNull()
   })
 
   it('draws nothing from a discover answer older than its own bound (FR-002b)', async () => {
@@ -467,7 +489,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     await screen.findByText('Fed Decision in December?')
     await settled()
     expect(client.fetchDiscover).toHaveBeenCalled()
-    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Popular now' })).toBeNull()
   })
 
   it('draws the row from an answer two minutes old: the gateway caches for one and the client asks once a minute', async () => {
@@ -477,7 +499,7 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     )
     renderAt()
     await screen.findByText('Fed Decision in December?')
-    expect(await screen.findByRole('group', { name: 'Active now' })).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: 'Popular now' })).toBeInTheDocument()
   })
 
   it('draws nothing when the age of the answer cannot be known', async () => {
@@ -485,14 +507,14 @@ describe('PredictPanel — quick filters (spec 114 FR-002a–c)', () => {
     renderAt()
     await screen.findByText('Fed Decision in December?')
     await settled()
-    expect(screen.queryByRole('group', { name: 'Active now' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Popular now' })).toBeNull()
   })
 
   it('a stale flag alone does not hide the row while the answer is inside the bound', async () => {
     client.fetchDiscover.mockResolvedValue(discoverBody({ stale: true, confirmedAt: envelope().serverNow }))
     renderAt()
     await screen.findByText('Fed Decision in December?')
-    expect(await screen.findByRole('group', { name: 'Active now' })).toBeInTheDocument()
+    expect(await screen.findByRole('group', { name: 'Popular now' })).toBeInTheDocument()
   })
 
   it('the empty state clears topic and live as well as category', async () => {
@@ -530,7 +552,7 @@ describe('PredictPanel — the event page (spec 114 slice 4)', () => {
     expect(client.fetchEvents).not.toHaveBeenCalled()
     expect(client.fetchDiscover).not.toHaveBeenCalled()
     expect(screen.queryByLabelText('Search markets')).toBeNull()
-    expect(screen.queryByRole('group', { name: 'Category' })).toBeNull()
+    expect(screen.queryByRole('group', { name: 'Categories' })).toBeNull()
     expect(document.querySelector('.event-card')).toBeNull()
   })
 

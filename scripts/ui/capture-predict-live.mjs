@@ -255,11 +255,11 @@ const record = (n, state, extra = {}) => {
 // shot(name) takes the page; `full` frames the viewport (sheets), else the predict panel.
 const SCENARIOS = [
   { id: 'browse', world: { liveSlugs: ['next-election'] }, run: async (page, shot) => {
-    await openPredict(page); await page.waitForSelector('.event-card'); await page.waitForSelector('[role="group"][aria-label="Active now"] button'); await settle(page)
+    await openPredict(page); await page.waitForSelector('.event-card'); await page.waitForSelector('.predict-chip-label'); await settle(page)
     await shot('browse')
-    await page.locator('[role="group"][aria-label="Category"]').getByRole('button', { name: 'Crypto' }).click(); await page.waitForTimeout(900)
+    await page.getByRole('group', { name: 'Categories' }).getByRole('button', { name: 'Crypto' }).click(); await page.waitForTimeout(900)
     await shot('browse-category')
-    await page.locator('[role="group"][aria-label="Active now"]').getByRole('button', { name: /In play/ }).click(); await page.waitForTimeout(900)
+    await page.getByRole('group', { name: 'Popular now' }).getByRole('button', { name: /In play/ }).click(); await page.waitForTimeout(900)
     await shot('browse-in-play')
     await page.locator('[aria-label="Search markets"]').fill('zzzz'); await page.waitForTimeout(1200)
     await shot('browse-search-empty')
@@ -284,9 +284,9 @@ const SCENARIOS = [
     await shot('ticket-empty', { full: true })
     await amount(page).fill('50'); await page.waitForSelector('[data-testid="figure-average"]'); await settle(page)
     await shot('ticket-figures', { full: true })
-    await page.locator('.order-ticket-link-button').click(); await page.locator('.order-ticket-own-body input').fill('90'); await settle(page, 900)
+    await page.getByRole('button', { name: 'Set my own price' }).click(); await page.locator('.order-ticket-own-body input').fill('90'); await settle(page, 900)
     await shot('ticket-resting', { full: true })
-    await page.locator('.order-ticket-link-button').click(); await settle(page)
+    await page.getByRole('button', { name: 'Use the market price instead' }).click(); await settle(page)
     await amount(page).fill('50'); await page.waitForSelector('[data-testid="figure-average"]')
     world.books = 'aged-12'
     await page.waitForFunction(() => /Waiting for a current price/.test(document.querySelector('.order-ticket')?.textContent || ''), null, { timeout: 30_000 }); await settle(page)
@@ -303,6 +303,19 @@ const SCENARIOS = [
     await shot('focus-chip', { full: true })
     await page.keyboard.press('Shift+Tab'); await page.keyboard.press('Shift+Tab'); await settle(page, 300)
     await shot('focus-outcome', { full: true })
+  } },
+  { id: 'tolerance', world: {}, run: async (page, shot) => {
+    await openYes(page); await amount(page).fill('50'); await page.waitForSelector('[data-testid="figure-average"]'); await settle(page)
+    await page.getByRole('button', { name: /^Price tolerance/ }).scrollIntoViewIfNeeded()
+    await shot('tolerance-collapsed', { full: true })
+    await page.getByRole('button', { name: /^Price tolerance/ }).click(); await settle(page, 400)
+    await page.getByRole('button', { name: /^Price tolerance/ }).scrollIntoViewIfNeeded()
+    await shot('tolerance-open', { full: true })
+    await page.getByRole('group', { name: 'Price tolerance' }).getByRole('button', { name: '2¢' }).click(); await settle(page, 400)
+    await shot('tolerance-chosen', { full: true })
+    await ticketLoc(page).getByRole('button', { name: 'Review order' }).click(); await page.getByText('Review your order').waitFor(); await settle(page)
+    await page.getByText(/Price limit:/).scrollIntoViewIfNeeded()
+    await shot('tolerance-review', { full: true })
   } },
   { id: 'ticket-moved', world: {}, run: async (page, shot, world) => {
     await openYes(page); await amount(page).fill('50'); await page.waitForSelector('[data-testid="figure-average"]')

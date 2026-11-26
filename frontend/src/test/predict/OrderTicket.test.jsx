@@ -318,6 +318,102 @@ describe('OrderTicket — Set my own price (rests, FR-019)', () => {
   })
 })
 
+describe('OrderTicket — price tolerance (T032a, research R7)', () => {
+  const toggle = () => screen.getByRole('button', { name: /^Price tolerance/ })
+  const MM = { asks: [['0.940', '200'], ['0.941', '1200'], ['0.942', '12.5']], bids: [['0.930', '300']], tickSize: '0.001', price: '0.935' }
+  const limitOf = () => screen.getByText(/Price limit:/).textContent
+
+  it('is collapsed and UNMOUNTED until opened, and says in one sentence what it does', () => {
+    renderTicket()
+    type('50')
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('group', { name: 'Price tolerance' })).toBeNull()
+    fireEvent.click(toggle())
+    expect(screen.getByRole('group', { name: 'Price tolerance' })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'The price limit is the worst price this order can fill at; a wider tolerance fills more often when the price is moving, and can cost up to that much more per share.',
+      ),
+    ).toBeInTheDocument()
+  })
+
+  it('offers one tick (the default) and 2¢ on a 1¢ market — 1¢ IS one tick there — and never anything wider', () => {
+    renderTicket()
+    type('50')
+    fireEvent.click(toggle())
+    const labels = within(screen.getByRole('group', { name: 'Price tolerance' })).getAllByRole('button').map((b) => b.textContent)
+    expect(labels).toEqual(['One tick (1¢)', '2¢'])
+    expect(screen.getByRole('button', { name: 'One tick (1¢)' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('offers one tick, 1¢ and 2¢ on a 0.1¢ market, converted to ticks from the READING’s tick', () => {
+    setBook(bookReading(MM))
+    renderTicket({ tickSize: '0.01' }) // the listing says 1¢; the reading's own tick wins
+    type('50')
+    expect(dd('figure-average')).toBe('94¢')
+    fireEvent.click(toggle())
+    const labels = within(screen.getByRole('group', { name: 'Price tolerance' })).getAllByRole('button').map((b) => b.textContent)
+    expect(labels).toEqual(['One tick (0.1¢)', '1¢', '2¢'])
+  })
+
+  it('the choice drives the review’s Price limit; the ceiling of a buy is the amount, so it does not move', () => {
+    setBook(bookReading(MM))
+    renderTicket()
+    type('50')
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole('button', { name: '2¢' }))
+    expect(toggle()).toHaveTextContent('Price tolerance: 2¢')
+    const maxLoss = dd('figure-max-loss')
+    fireEvent.click(screen.getByRole('button', { name: 'Review order' }))
+    // worst level touched 0.940 + 2¢ = 0.96
+    expect(limitOf()).toMatch(/Price limit: 96¢/)
+    expect(dd('review-max-loss')).toBe(maxLoss)
+  })
+
+  it('the default is the tightest, and the choice does NOT survive into the next ticket', () => {
+    setBook(bookReading(MM))
+    const first = renderTicket()
+    type('50')
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole('button', { name: '2¢' }))
+    first.unmount()
+    renderTicket()
+    type('50')
+    expect(toggle()).toHaveAttribute('aria-expanded', 'false')
+    expect(toggle()).not.toHaveTextContent('2¢')
+    fireEvent.click(screen.getByRole('button', { name: 'Review order' }))
+    expect(limitOf()).toMatch(/Price limit: 94\.1¢/) // worst 0.940 + one tick (0.001)
+  })
+
+  it('choosing the other outcome goes back to the tightest', () => {
+    setBook(bookReading(MM), bookReading({ asks: [['0.070', '500']], bids: [['0.050', '500']], tickSize: '0.001', tokenId: NO_TOKEN, price: '0.06' }))
+    renderTicket()
+    type('50')
+    fireEvent.click(toggle())
+    fireEvent.click(screen.getByRole('button', { name: '2¢' }))
+    expect(toggle()).toHaveTextContent('2¢')
+    fireEvent.click(screen.getByRole('button', { name: /^No/ }))
+    expect(toggle()).not.toHaveTextContent('2¢')
+  })
+
+  it('a choice that would put the limit outside (0, 1) is not offered', () => {
+    setBook(bookReading({ asks: [['0.985', '1000']], bids: [['0.980', '1000']], tickSize: '0.001', price: '0.9825' }))
+    renderTicket()
+    type('50')
+    fireEvent.click(toggle())
+    const labels = within(screen.getByRole('group', { name: 'Price tolerance' })).getAllByRole('button').map((b) => b.textContent)
+    expect(labels).toEqual(['One tick (0.1¢)', '1¢']) // 0.985 + 2¢ = 1.005 is outside; 0.985 + 1¢ = 0.995 is the last grid point
+  })
+
+  it('is absent when the member names a price (a resting order has no tolerance)', () => {
+    renderTicket()
+    type('50')
+    fireEvent.click(screen.getByRole('button', { name: 'Set my own price' }))
+    fireEvent.change(screen.getByLabelText(/your price, in cents/i), { target: { value: '57' } })
+    expect(screen.queryByRole('button', { name: /^Price tolerance/ })).toBeNull()
+  })
+})
+
 describe('OrderReview — the step before the signature', () => {
   const toReview = (amount = '50') => {
     renderTicket()

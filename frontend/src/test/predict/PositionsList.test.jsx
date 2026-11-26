@@ -42,6 +42,12 @@ describe('PositionsList', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
+  it('prints a bid in cents, rounded down (what a seller receives), never a raw decimal', () => {
+    render(<PositionsList />)
+    expect(document.querySelector('.predict-position-value').textContent).toMatch(/^bid \d+(\.\d+)?¢$/)
+    expect(document.body.textContent).not.toMatch(/USDC/)
+  })
+
   it('is hidden entirely when disconnected', () => {
     positionsState.current = make({ status: 'disconnected', positions: [] })
     const { container } = render(<PositionsList />)

@@ -36,22 +36,15 @@ import {
   loadCachedCreds as defaultLoadCachedCreds,
   makeClobClient as defaultMakeClient,
   lookupOrder as defaultLookupOrder,
-  SIG_TYPE_POLY_1271,
 } from '../lib/predict/clobSession'
+import { resolveTradeSigner as defaultResolveTradeSigner } from '../lib/predict/tradeSigner'
+import { readOnlySigner, readClientOptions } from '../lib/predict/readClient'
 
 export const POLL_BASE_MS = 6_000
 export const POLL_MAX_MS = 30_000
 export const MAX_PER_ROUND = 8
 /** A `sent` order the venue still has no record of stops being polled after this (it is shown as it was). */
 export const SENT_POLL_HORIZON_MS = 60 * 60 * 1000
-
-/** A signer that can say which address it is and nothing else: reads need an address, never a signature. */
-const readOnlySigner = (address) => ({
-  getAddress: async () => address,
-  _signTypedData: async () => {
-    throw new Error('The order tracker only reads; it never signs.')
-  },
-})
 
 /** Shares matched, from trades that refer to the order. Trades the venue marks FAILED are not fills. */
 function sharesFromTrades(trades, orderId) {
@@ -77,6 +70,7 @@ export function usePredictOrders({ deps } = {}) {
       makeClient: defaultMakeClient,
       lookupOrder: defaultLookupOrder,
       removeRecord: defaultRemoveRecord,
+      resolveTradeSigner: defaultResolveTradeSigner,
       now: () => Date.now(),
       ...deps,
     }),
@@ -123,7 +117,7 @@ export function usePredictOrders({ deps } = {}) {
       .slice(0, MAX_PER_ROUND)
     if (!targets.length) return false
 
-    const client = d.makeClient(readOnlySigner(address), creds, loginMethod === 'passkey' ? { signatureType: SIG_TYPE_POLY_1271, funderAddress: address } : {})
+    const client = d.makeClient(readOnlySigner(address), creds, readClientOptions({ loginMethod, address, resolve: d.resolveTradeSigner }))
     let changed = false
     let sawUnreadable = false
     for (const r of targets) {

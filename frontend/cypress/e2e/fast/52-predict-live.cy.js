@@ -320,6 +320,9 @@ const signaturesSinceMark = (check) =>
   })
 const noSignature = () => signaturesSinceMark((n) => expect(n, 'the wallet has been asked for no signature').to.equal(0))
 
+/** A chip row by its VISIBLE label ("Popular now", "Categories"): the label is real text and names its group. */
+const chipRow = (label, opts) => cy.contains('.predict-chip-label', label, opts).parent().find('[role="group"]')
+
 function openPredict(search = '', { liveSlugs = [], books = 'fresh', depth = 'deep', onBeforeLoad, clob = clobDown } = {}) {
   cy.then(() => {
     world.liveSlugs = liveSlugs
@@ -347,11 +350,11 @@ describe('Predict — browse by event (spec 114)', () => {
     openPredict()
     cy.get('.event-card', { timeout: 20000 }).should('have.length', PAGE_SIZE)
 
-    cy.get('[role="group"][aria-label="Category"]').contains('button', 'Crypto').click()
+    chipRow('Categories').contains('button', 'Crypto').click()
     cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
     cy.get('.event-card').should('contain.text', 'Bitcoin above $200k')
     cy.get('.event-card').should('not.contain.text', 'Fed Decision')
-    cy.get('[role="group"][aria-label="Category"]').contains('button', 'Crypto').should('have.attr', 'aria-pressed', 'true')
+    chipRow('Categories').contains('button', 'Crypto').should('have.attr', 'aria-pressed', 'true')
     cy.location('search').should('include', 'tab=predict').and('include', 'cat=crypto')
 
     // The address IS the view: loading it again, from nothing, lands on the same list.
@@ -359,7 +362,7 @@ describe('Predict — browse by event (spec 114)', () => {
       openPredict(search.replace(/^\?tab=predict/, ''))
       cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
       cy.get('.event-card').should('contain.text', 'Bitcoin above $200k')
-      cy.get('[role="group"][aria-label="Category"]').contains('button', 'Crypto').should('have.attr', 'aria-pressed', 'true')
+      chipRow('Categories').contains('button', 'Crypto').should('have.attr', 'aria-pressed', 'true')
     })
   })
 
@@ -372,7 +375,7 @@ describe('Predict — browse by event (spec 114)', () => {
     cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
     cy.get('.event-card').should('contain.text', 'Will it rain in London tomorrow?')
     cy.contains(/Searching all categories/i).should('be.visible')
-    cy.get('[role="group"][aria-label="Category"] button').first().should('be.disabled')
+    chipRow('Categories').find('button').first().should('be.disabled')
     cy.location('search').should('include', 'q=rain')
   })
 
@@ -403,21 +406,21 @@ describe('Predict — browse by event (spec 114)', () => {
     cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
     cy.get('.event-card').should('contain.text', 'Bitcoin above $200k')
 
-    cy.get('[role="group"][aria-label="Active now"]', { timeout: 20000 }).contains('button', 'Elections').click()
+    chipRow('Popular now', { timeout: 20000 }).contains('button', 'Elections').click()
     cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
     cy.get('.event-card').should('contain.text', 'Who wins the next election?').and('not.contain.text', 'Bitcoin above')
-    cy.get('[role="group"][aria-label="Active now"]').contains('button', 'Elections').should('have.attr', 'aria-pressed', 'true')
+    chipRow('Popular now').contains('button', 'Elections').should('have.attr', 'aria-pressed', 'true')
     cy.location('search').should('include', 'topic=elections').and('not.include', 'cat=')
 
     // Choosing a category takes the topic back out of the address.
-    cy.get('[role="group"][aria-label="Category"]').contains('button', 'Crypto').click()
+    chipRow('Categories').contains('button', 'Crypto').click()
     cy.location('search').should('include', 'cat=crypto').and('not.include', 'topic=')
     cy.get('.event-card', { timeout: 20000 }).should('have.length', 1).and('contain.text', 'Bitcoin above')
 
     // Pressing a pressed topic again clears it.
-    cy.get('[role="group"][aria-label="Active now"]').contains('button', 'Bitcoin').click()
+    chipRow('Popular now').contains('button', 'Bitcoin').click()
     cy.location('search').should('include', 'topic=bitcoin')
-    cy.get('[role="group"][aria-label="Active now"]').contains('button', 'Bitcoin').click()
+    chipRow('Popular now').contains('button', 'Bitcoin').click()
     cy.location('search').should('not.include', 'topic=')
     cy.get('.event-card', { timeout: 20000 }).should('have.length', PAGE_SIZE)
   })
@@ -426,17 +429,36 @@ describe('Predict — browse by event (spec 114)', () => {
     openPredict('', { liveSlugs: [] })
     cy.get('.event-card', { timeout: 20000 }).should('have.length', PAGE_SIZE)
     // The topics are there, so the row is — and it names nothing in play.
-    cy.get('[role="group"][aria-label="Active now"]', { timeout: 20000 }).contains('button', 'Bitcoin').should('exist')
-    cy.get('[role="group"][aria-label="Active now"]').contains('button', /In play/).should('not.exist')
+    chipRow('Popular now', { timeout: 20000 }).contains('button', 'Bitcoin').should('exist')
+    chipRow('Popular now').contains('button', /In play/).should('not.exist')
     cy.get('.event-card-live').should('not.exist')
 
     openPredict('', { liveSlugs: ['next-election'] })
-    cy.get('[role="group"][aria-label="Active now"]', { timeout: 20000 }).contains('button', 'In play · 1').click()
+    chipRow('Popular now', { timeout: 20000 }).contains('button', 'In play · 1').click()
     cy.location('search').should('include', 'live=1')
     cy.get('.event-card', { timeout: 20000 }).should('have.length', 1)
     // The venue's own words, as text — and nothing urgent beyond them.
     cy.get('.event-card-live').should('have.text', 'In play · 91-101 · Q4')
     cy.get('.event-card').should('not.contain.text', '06:47')
+  })
+})
+
+describe('Predict — the chip rows are labelled in words (spec 114, T045 follow-up)', () => {
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.clearCookies()
+  })
+
+  it('[PL-04d] predict.browse-by-event — "Popular now" and "Categories" are visible text that names each chip group', () => {
+    openPredict()
+    cy.get('.event-card', { timeout: 20000 }).should('have.length', PAGE_SIZE)
+    chipRow('Popular now', { timeout: 20000 }).should('be.visible').and('have.attr', 'aria-labelledby')
+    chipRow('Categories').should('be.visible').and('have.attr', 'aria-labelledby')
+    cy.contains('.predict-chip-label', 'Popular now').should('be.visible').invoke('attr', 'id').then((id) => {
+      chipRow('Popular now').should('have.attr', 'aria-labelledby', id)
+    })
+    // One accessible name each: the label is the name, there is no second aria-label on the group.
+    chipRow('Categories').should('not.have.attr', 'aria-label')
   })
 })
 
@@ -759,6 +781,36 @@ describe('Predict — the amount-first order ticket (spec 114, slice 5)', () => 
     reviewButton().click()
     ticket().contains('button', 'Sign buy (no gas)').click()
     signaturesSinceMark((n) => expect(n, 'Sign is what asks the wallet').to.be.at.least(1))
+  })
+
+  it('[PL-11b] predict.amount-first-ticket — Price tolerance is collapsed, defaults to one tick, widens the limit (never the amount at risk) and is not remembered by the next ticket', () => {
+    openYes()
+    amount().type('50')
+    cy.get('.order-ticket').contains('button', /^Price tolerance/).should('have.attr', 'aria-expanded', 'false')
+    cy.get('.order-ticket [role="group"][aria-label="Price tolerance"]').should('not.exist')
+    cy.get('.order-ticket').contains('button', /^Price tolerance/).click()
+    ticket().should('contain.text', 'The price limit is the worst price this order can fill at; a wider tolerance fills more often when the price is moving, and can cost up to that much more per share.')
+    cy.get('.order-ticket [role="group"][aria-label="Price tolerance"] button').then(($b) => {
+      expect([...$b].map((b) => b.textContent)).to.deep.equal(['One tick (0.1¢)', '1¢', '2¢'])
+    })
+    const loss = '$50.25 USDC'
+    figure('figure-max-loss').should('have.text', loss)
+    cy.get('.order-ticket [role="group"][aria-label="Price tolerance"]').contains('button', '2¢').click()
+    cy.get('.order-ticket').contains('button', 'Price tolerance: 2¢').should('exist')
+    figure('figure-max-loss').should('have.text', loss) // a buy spends the amount; only the limit moves
+    reviewButton().click()
+    ticket().should('contain.text', 'Price limit: 96¢.').and('contain.text', 'cannot fill above 96¢ a share')
+    figure('review-max-loss').should('have.text', loss)
+    noSignature()
+    // A new ticket starts at the tightest: nobody carries a loosened limit forward by accident.
+    cy.get('body').type('{esc}')
+    cy.get('.order-ticket').should('not.exist')
+    cy.get('.event-page-row').first().find('.event-page-side--yes').click()
+    ticket().should('be.visible')
+    amount().type('50')
+    cy.get('.order-ticket').contains('button', /^Price tolerance/).should('have.attr', 'aria-expanded', 'false').and('not.contain.text', '2¢')
+    reviewButton().click()
+    ticket().should('contain.text', 'Price limit: 94.1¢.')
   })
 
   it('[PL-12] predict.amount-first-ticket — the open ticket and its review have no serious or critical accessibility violations', () => {

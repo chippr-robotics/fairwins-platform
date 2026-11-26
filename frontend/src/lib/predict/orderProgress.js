@@ -227,11 +227,39 @@ function saveStore(account, store) {
 
 export const loadOrders = (account, now) => loadStore(account, now).orders
 
-/** Insert or replace one record (by orderId), newest first. */
+/** `mismatch` is sticky, `verified` beats `unknown`: an id scheme is only ever learned, never forgotten. */
+const mergeScheme = (a, b) => (a === 'mismatch' || b === 'mismatch' ? 'mismatch' : a === 'verified' || b === 'verified' ? 'verified' : 'unknown')
+
+/**
+ * THE one way the device store is written (T036b). The store is shared by every tab of this browser, and each tab
+ * used to read the whole store, change it and write the whole thing back — so a record another tab added in
+ * between (an `unconfirmed` one, whose "do not send it again" notice is the whole point of keeping it) was
+ * overwritten with the older picture. A write is now a DELTA applied to what is on disk AT THAT MOMENT:
+ *  - `upserts` — each record is merged by `orderId`; when the disk already holds that id, the record with the
+ *    NEWER `updatedAt` stays (a tie goes to the writer, which is what bookkeeping patches that do not touch
+ *    `updatedAt` rely on);
+ *  - `removes` — ids the member dismissed, dropped from what is on disk and from nothing else;
+ *  - a record this writer never mentions is never touched, so it can never be dropped.
+ * `idScheme` merges as a union (mismatch is sticky).
+ */
+export function commitToStore(account, { upserts = [], removes = [], idScheme } = {}) {
+  if (!account) return
+  const disk = loadStore(account) // read NOW, not when the caller started its work
+  const byId = new Map(disk.orders.map((r) => [r.orderId, r]))
+  for (const mine of upserts) {
+    const theirs = byId.get(mine.orderId)
+    if (theirs && (theirs.updatedAt ?? 0) > (mine.updatedAt ?? 0)) continue
+    byId.set(mine.orderId, mine)
+  }
+  for (const id of removes) byId.delete(id)
+  // newest first, as `putRecord` always kept it
+  const orders = [...byId.values()].sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0) || (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+  saveStore(account, { ...disk, orders, idScheme: mergeScheme(disk.idScheme, idScheme ?? 'unknown') })
+}
+
+/** Insert or replace one record (by orderId); see `commitToStore` for what "replace" means across tabs. */
 export function putRecord(account, record, { idScheme } = {}) {
-  const store = loadStore(account)
-  const rest = store.orders.filter((r) => r.orderId !== record.orderId)
-  saveStore(account, { ...store, orders: [record, ...rest], idScheme: idScheme ?? store.idScheme })
+  commitToStore(account, { upserts: [record], idScheme })
 }
 
 /**
@@ -247,22 +275,21 @@ export function applyToStore(account, orderId, event, now = Date.now(), patch = 
   const merged = patch ? { ...next, ...patch } : next
   const patched = patch && Object.keys(patch).some((k) => merged[k] !== current[k])
   if (next === current && !patched) return current
-  saveStore(account, { ...store, orders: store.orders.map((r) => (r.orderId === orderId ? merged : r)) })
+  commitToStore(account, { upserts: [merged] })
   return next === current ? current : merged
 }
 
 /** Remove one record (the member dismissing an ending). */
 export function removeRecord(account, orderId) {
-  const store = loadStore(account)
-  if (!store.orders.some((r) => r.orderId === orderId)) return
-  saveStore(account, { ...store, orders: store.orders.filter((r) => r.orderId !== orderId) })
+  if (!loadStore(account).orders.some((r) => r.orderId === orderId)) return
+  commitToStore(account, { removes: [orderId] })
 }
 
 /** Bookkeeping that is not a state change (absence counters) — stored without touching `state` or `updatedAt`. */
 export function patchRecord(account, orderId, patch) {
-  const store = loadStore(account)
-  if (!store.orders.some((r) => r.orderId === orderId)) return
-  saveStore(account, { ...store, orders: store.orders.map((r) => (r.orderId === orderId ? { ...r, ...patch } : r)) })
+  const current = loadStore(account).orders.find((r) => r.orderId === orderId)
+  if (!current) return
+  commitToStore(account, { upserts: [{ ...current, ...patch }] })
 }
 
 /**

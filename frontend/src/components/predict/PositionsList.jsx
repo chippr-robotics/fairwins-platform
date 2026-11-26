@@ -11,6 +11,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePredictPositions } from '../../hooks/usePredictPortfolio'
 import TradeConfirm from './TradeConfirm'
+import { formatPriceCents } from '../../lib/predict/format'
 import './PositionsList.css'
 
 export default function PositionsList({ onSell, refreshSignal = 0 } = {}) {
@@ -61,7 +62,7 @@ export default function PositionsList({ onSell, refreshSignal = 0 } = {}) {
                 <span className="predict-position-outcome">{p.outcome || 'Outcome'}</span>
                 <span className="predict-position-size">{p.size} shares</span>
                 <span className="predict-position-value">
-                  {hasBid ? `bid ${p.bestBid.amount} USDC` : 'no bid'}
+                  {hasBid ? `bid ${formatPriceCents(p.bestBid.amount, 'down')}` : 'no bid'}
                 </span>
                 <button
                   type="button"
