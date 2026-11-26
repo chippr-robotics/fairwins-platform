@@ -85,15 +85,24 @@ describe('outbound RPC is paced', () => {
   })
 
   it('paces scanLogs between chunks', async () => {
+    // A virtual clock, through the limiter's own `now`/`sleep` seams. What is under test is the
+    // SCHEDULE scanLogs asks the limiter for, not the host's timer. Measured against the wall clock
+    // with a 2 ms allowance this failed in CI at 7 ms against a floor of 8: a few milliseconds of
+    // scheduling delay on one call come straight out of the next gap, on a runner nobody controls.
+    let clock = 1_000
     const at = []
-    const provider = { getLogs: async () => { at.push(Date.now()); return [] } }
-    const limiter = createRateLimiter({ perSecond: 100 })
+    const provider = { getLogs: async () => { at.push(clock); return [] } }
+    const limiter = createRateLimiter({
+      perSecond: 100, // 10 ms apart
+      now: () => clock,
+      sleep: async (ms) => { clock += ms },
+    })
 
     await scanLogs(provider, { address: '0xa', topics: ['0xb'] }, 0, 7_999, { chunk: 2_000, limiter })
 
     expect(at).toHaveLength(4)
     const gaps = at.slice(1).map((t, i) => t - at[i])
-    for (const g of gaps) expect(g).toBeGreaterThanOrEqual(8)
+    for (const g of gaps) expect(g).toBe(10)
   })
 
   it('an unset rate disables pacing rather than deadlocking on zero', async () => {
