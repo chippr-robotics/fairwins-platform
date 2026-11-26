@@ -135,7 +135,7 @@ the seam they plug into is right from the start.
 
 ## Phase 6: Slice 5 — the amount-first ticket (US4)
 
-- [ ] T026 [US4] **Verify first** (research R7): `@polymarket/clob-client` places a fill-and-kill
+- [X] T026 [US4] **Verify first** (research R7): `@polymarket/clob-client` places a fill-and-kill
       order with an explicit price for the wallet signer and the passkey (ERC-1271) signer.
       Record the result in research.md; if it cannot, implement the named fallback.
 - [ ] T027 [US4] Extend `frontend/src/lib/predict/clobSession.js` with the marketable order call
