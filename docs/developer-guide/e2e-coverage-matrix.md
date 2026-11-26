@@ -26,12 +26,12 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 
 | Metric | Count |
 |---|---|
-| Spec directories | 116 |
-| With a member-facing flow | 91 |
-| Member-facing flows | 214 |
+| Spec directories | 117 |
+| With a member-facing flow | 92 |
+| Member-facing flows | 220 |
 | 🟢 covered | 193 |
 | 🟡 partial | 5 |
-| 🔴 absent | 7 |
+| 🔴 absent | 13 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -353,7 +353,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Disclosure — a member consents to a cost
 
-20 flows — 🟢 19 · 🟡 0 · 🔴 0 · ⚪ 1 · covered-but-not-proven 0
+21 flows — 🟢 19 · 🟡 0 · 🔴 1 · ⚪ 1 · covered-but-not-proven 0
 
 ### `050-sponsored-paymaster` — Sponsored paymaster
 
@@ -435,9 +435,15 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `sigil.failure-vocabulary` | An unpaired bridge, a missing disk, no bridge at all, and an exhausted disk each render a named state and sign nothing | 🟢 covered | flow | `no-chain` | `51-protect-sigil.cy.js` (SIG-02, SIG-04) |  |
 
+### `114-predict-live-markets` — Predict — live markets, market pages and an amount-first ticket
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `predict.amount-first-ticket` | Enter an amount and see average price, shares, payout, maximum loss and every fee before signing; a non-live price yields no figures | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+
 ## Access — gating, identity and permission
 
-51 flows — 🟢 49 · 🟡 0 · 🔴 2 · ⚪ 0 · covered-but-not-proven 1
+52 flows — 🟢 49 · 🟡 0 · 🔴 3 · ⚪ 0 · covered-but-not-proven 1
 
 ### `003-polymarket-only-oracle-ui` — Polymarket-only oracle UI
 
@@ -620,9 +626,15 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `multichain.rail-unavailable-before-tap` | An acting identity whose rail cannot reach the target chain (passkey on bundlerless ETC/Mordor; vault signer elsewhere) sees the unavailability stated BEFORE the tap, naming the chain and the way out — never a submit-time chain-support error | 🔴 absent | none | — (proposed: account-native) | #1552 |  |
 
+### `114-predict-live-markets` — Predict — live markets, market pages and an amount-first ticket
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `predict.self-limit` | An order past a self-set spending limit is declined at review; relaxing a limit waits out its period | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+
 ## Information — read-only surfaces
 
-50 flows — 🟢 50 · 🟡 0 · 🔴 0 · ⚪ 0 · covered-but-not-proven 12
+54 flows — 🟢 50 · 🟡 0 · 🔴 4 · ⚪ 0 · covered-but-not-proven 12
 
 ### `005-multi-recipient-encryption` — Multi-recipient encryption
 
@@ -853,6 +865,15 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `news.portfolio-token-card` | Selecting a portfolio token shows that asset's latest news with link-out attribution; an unreadable feed renders a sentence + retry (never an empty feed pretending to be no news), an unmapped asset renders honest absence, and the module off hides the card | 🟢 covered | flow | `no-chain` | `49-token-news.cy.js` (TN-01, TN-03, TN-04, TN-04b, TN-06) |  |
 | `news.trade-pair-feed` | Selecting a trade pair shows the pair's token news below the amount entry under the same three-state honesty; items are text with attribution, never rendered HTML | 🟢 covered | flow | `no-chain` | `49-token-news.cy.js` (TN-05, TN-05b) |  |
+
+### `114-predict-live-markets` — Predict — live markets, market pages and an amount-first ticket
+
+| Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
+|---|---|---|---|---|---|---|
+| `predict.browse-by-event` | Find a market by category, search or sort, with the markets of one event on one card | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+| `predict.market-page` | Open an event by its address and see every outcome, its history, depth, volume, closing time and resolution source | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+| `predict.price-trust-state` | A price that stops being confirmed is marked delayed with its age, then last known, and is never drawn as live | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
+| `predict.order-progress` | Follow an order from signed to settled without refreshing, with unconfirmed distinct from failed, surviving a reload | 🔴 absent | none | — (proposed: no-chain) | #1747 |  |
 
 ## No member consequence
 
