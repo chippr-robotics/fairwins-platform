@@ -48,31 +48,31 @@ the seam they plug into is right from the start.
 
 ## Phase 3: Slice 2 — client foundation (US3: trust state)
 
-- [ ] T008 [P] [US3] `frontend/src/lib/markets/serverClock.js`: age from `confirmedAt`,
+- [X] T008 [P] [US3] `frontend/src/lib/markets/serverClock.js`: age from `confirmedAt`,
       `serverNow` and a monotonic receipt time; never reads the device wall clock. Tests in
       `frontend/src/test/markets/serverClock.test.js` include a device clock set an hour wrong.
-- [ ] T009 [P] [US3] `frontend/src/lib/markets/priceReading.js` per data-model.md: four
+- [X] T009 [P] [US3] `frontend/src/lib/markets/priceReading.js` per data-model.md: four
       constructors, `classify`, bounds in one exported constant, only `live` is `plannable`.
       Tests in `frontend/src/test/markets/priceReading.test.js`: each boundary, `stale: true` can
       never classify live, `unknown` carries no price.
-- [ ] T010 [P] [US4] `frontend/src/lib/predict/orderPlan.js` per data-model.md, BigInt
+- [X] T010 [P] [US4] `frontend/src/lib/predict/orderPlan.js` per data-model.md, BigInt
       micro-units. Tests in `frontend/src/test/predict/orderPlan.test.js`: single level, several
       levels, amount beyond depth (`unfilled` > 0), below minimum, limit on the tick grid and
       ≤ 0.99, sell side, a non-plannable reading returns `price-not-live`, and no float appears in
       any result.
-- [ ] T011 [US3] Add `fetchEvents`, `fetchEvent`, `fetchBooks`, `fetchHistory` to
+- [X] T011 [US3] Add `fetchEvents`, `fetchEvent`, `fetchBooks`, `fetchHistory` to
       `frontend/src/lib/predict/predictClient.js`; extend `frontend/src/test/predict/predictClient.test.js`.
-- [ ] T012 [US3] `frontend/src/lib/markets/feed.js` with the proxy-poll source
+- [X] T012 [US3] `frontend/src/lib/markets/feed.js` with the proxy-poll source
       (contracts/market-feed-seam.md): reference-counted keys, one poller, ten keys a request,
       paused while the document is hidden, back-off on error, re-classification on a one-second
       tick. Tests in `frontend/src/test/markets/feed.test.js` with fake timers: two subscribers
       share one request; the last unsubscribe stops polling; a value ages live → delayed →
       last-known with no new response; an `unreadable` token yields `unknown`, not an empty book.
-- [ ] T013 [US3] `frontend/src/hooks/useMarketReadings.js` over `feed.js`, and
+- [X] T013 [US3] `frontend/src/hooks/useMarketReadings.js` over `feed.js`, and
       `frontend/src/components/predict/TrustChip.jsx` (+ `.css`, tokens only): Live / Delayed · age
       / Last known · age, `role="status"`, announced on state change only. Tests in
       `frontend/src/test/predict/TrustChip.test.jsx`.
-- [ ] T014 [US3] Scoped Vitest (`src/test/markets src/test/predict src/test/brand`). Open the
+- [X] T014 [US3] Scoped Vitest (`src/test/markets src/test/predict src/test/brand`). Open the
       slice PR.
 
 ## Phase 4: Slice 3 — browse by event (US1) 🎯 first member-visible change

@@ -67,21 +67,23 @@ Input: a plannable reading, side, the amount (USDC to spend, or shares to sell),
 
 | Field | Type | Notes |
 |---|---|---|
-| `ok` | boolean | false with `reason` when not plannable, below minimum, or no depth |
+| `ok` | boolean | false with `reason`: `price-not-live` (checked first), `no-depth`, `below-minimum`, `invalid-amount`, `invalid-tick`, `invalid-tolerance`, `invalid-limit` |
 | `shares` | string | what the amount buys at current depth |
 | `averagePrice` | string | cost ÷ shares |
 | `worstPrice` | string | deepest level touched |
-| `limitPrice` | string | worst + tolerance, on the tick grid; what the signature carries |
-| `cost` | string | amount actually fillable; less than the amount when depth runs out |
-| `unfilled` | string | amount with no offer at any shown price |
+| `limitPrice` | string | buy: worst + tolerance, snapped up to the tick grid, at most one tick below 1; sell: worst − tolerance, snapped down, at least one tick. A member-named price must already be on the grid |
+| `cost` | string | buy: USDC the fill costs; sell: USDC it returns. Less than the amount when depth runs out |
+| `unfilled` | string | what had no offer at any shown price: USDC for a buy, shares for a sell. Only when every visible level was consumed; rounding dust left inside a level is not unfilled |
 | `depthShare` | number 0–1 | fraction of visible far-side size consumed |
-| `payoutIfRight` | string | shares × 1 |
-| `maxLoss` | string | cost + fees |
-| `fees` | lines from `computeCost` | unchanged from spec 057 |
+| `payoutIfRight` | string \| null | shares × 1 for a buy; `null` for a sell, which gives the payout up |
 | `kind` | `'marketable' \| 'resting'` | resting when the member names a price |
 
 Validation: amount > 0; shares ≥ `minOrderSize`; limit within (0, 1); never produced from a
-non-live reading.
+non-live reading. Rounding is always against the member: a buy's level cost and average round
+up, a sell's proceeds and average round down.
+
+Fees and maximum loss are not computed here. `planNotional(plan)` hands the cost to the existing
+`computeCost` (spec 057), and the ticket shows `cost + fees` as the most that can be lost.
 
 ## OrderProgress (`lib/predict/orderProgress.js`)
 
