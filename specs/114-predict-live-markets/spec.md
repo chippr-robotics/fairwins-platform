@@ -11,6 +11,20 @@ dedicated prediction-market site: a member should reach useful market informatio
 orders responsibly. Markets should be real time, and the data behind them robust enough to make
 informed decisions on. Order handling should happen behind the scenes." (issue #1747)
 
+## Clarifications
+
+### Session 2026-11-26
+
+- Q: Are a member's self-limits kept on their device or held by FairWins against their account?
+  → A: **Held by FairWins, against the account.** A limit kept on the device is cleared by
+  clearing the browser or picking up another phone. The change itself is still authorised by the
+  member's own account, on their device (FR-027a).
+- Q: What may FairWins-operated services hold on a member's behalf? → A: **Custody stays on the
+  device; the backend makes data and order handling smooth.** Keys, signatures and venue
+  credentials never leave the member's device. Market data, an order's progress and the member's
+  self-limits may be held by FairWins. Nothing FairWins holds can move value or stand in for the
+  member's consent (FR-035).
+
 ## Relationship to existing specs
 
 - **Spec 057 (Predict — Polymarket)** stands for custody (FR-004), fee disclosure (FR-003,
@@ -291,8 +305,17 @@ still applies until the waiting period ends.
 
 - **FR-026**: Members MUST be able to set a spending limit per period and a pause, and the ticket
   MUST decline at review an order that would exceed a limit.
+- **FR-026a**: Self-limits MUST be held by FairWins against the member's account, so that they
+  apply on every device the member uses and survive cleared local data.
 - **FR-027**: Tightening a limit MUST take effect immediately. Relaxing or removing one MUST take
-  effect only after a stated waiting period, and the surface MUST show when.
+  effect only after a stated waiting period, and the surface MUST show when. A pause MUST NOT be
+  ended early.
+- **FR-027a**: A change to a limit MUST be authorised by the member's own account on their
+  device. A change that cannot be verified MUST be neither applied nor reported as refused; the
+  member is asked to try again.
+- **FR-027b**: A limit or pause MUST NOT prevent a member from selling or closing what they hold.
+- **FR-027c**: If a member's limit cannot be read, the surface MUST say so and MUST NOT behave as
+  though no limit were set.
 - **FR-028**: The surface MUST NOT use streaks, leaderboards, countdown pressure, celebratory
   effects on a fill, or defaults that increase the amount at risk. Where the price of an outcome
   is near certainty the ticket MUST state the amount at risk beside the amount to be gained.
@@ -315,6 +338,9 @@ still applies until the waiting period ends.
 - **FR-033**: The surface MUST meet WCAG 2.1 AA, at phone and desktop widths, in both themes.
 - **FR-034**: Nothing in this feature may alter who may trade, what fees apply, or how they are
   disclosed under specs 007 and 057.
+- **FR-035**: Keys, signatures and the member's venue credentials MUST remain on the member's
+  device. FairWins-operated services MAY hold market data, order progress and self-limits, and
+  MUST NOT hold anything that could move value or sign on a member's behalf.
 
 ### Key Entities
 
@@ -328,8 +354,8 @@ still applies until the waiting period ends.
 - **Order plan**: What an amount would buy at current depth — average price, shares, worst price,
   fees — as shown to the member before signature.
 - **Order progress**: The sequence of states an order has passed through and its current one.
-- **Self-limit**: A member's own spending ceiling or pause, with the time a pending relaxation
-  takes effect.
+- **Self-limit**: A member's own spending ceiling or pause, held against their account, with the
+  time a pending relaxation takes effect and proof that the account asked for each change.
 
 ## Success Criteria *(mandatory)*
 
@@ -357,9 +383,9 @@ still applies until the waiting period ends.
   only keeps the door open.
 - The bounds in FR-011 and the waiting period in FR-027 are set in planning. Starting points:
   live within 5 seconds, last-known after 30, and 24 hours to relax a limit.
-- Whether self-limits are kept on the member's device or held by FairWins against the member's
-  account is decided in clarification. The second is harder to circumvent and is the first
-  member-keyed preference FairWins would store.
+- Self-limits are the first member-keyed preference FairWins stores. What a member's request to
+  erase that history means, and whether an unreadable limit blocks an order or only warns, are
+  settled in planning.
 - A limit binds orders placed through FairWins. A member who goes to the venue directly is not
   bound by it, and the surface says so rather than implying otherwise.
 - Chart history comes from the venue's own published price history.
