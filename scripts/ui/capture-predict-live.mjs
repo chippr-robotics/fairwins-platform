@@ -20,7 +20,10 @@ const require = createRequire(import.meta.url)
 const { chromium } = require('playwright')
 
 const OUT = resolve(process.argv[2] || 'predict-screens')
-const FILTER = process.argv[3] ? new RegExp(process.argv[3]) : null
+// Which states to capture: plain substrings, comma-separated ("ticket,progress"). Deliberately not a pattern —
+// a regular expression built from an argument is an injection sink even in a script only a developer runs.
+const FILTER = process.argv[3] ? process.argv[3].split(',').map((part) => part.trim()).filter(Boolean) : null
+const wanted = (name) => FILTER === null || FILTER.some((part) => name.includes(part))
 const BASE = process.argv[4] || 'http://127.0.0.1:5199'
 
 const SIZES = { desktop: { width: 1280, height: 720 }, phone: { width: 390, height: 844 } }
@@ -422,7 +425,7 @@ async function main() {
   for (const size of Object.keys(SIZES)) {
     for (const theme of ['light', 'dark']) {
       for (const sc of SCENARIOS) {
-        if (FILTER && !FILTER.test(sc.id)) continue
+        if (!wanted(sc.id)) continue
         const attempt = async () => {
           const world = makeWorld(sc.world)
           world.venueOrders = sc.venue
