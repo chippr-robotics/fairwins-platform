@@ -181,15 +181,15 @@ the seam they plug into is right from the start.
 
 ## Phase 7: Slice 6 — order progress (US5)
 
-- [ ] T033 [US5] `frontend/src/lib/predict/orderProgress.js`: the reducer of data-model.md and
+- [X] T033 [US5] `frontend/src/lib/predict/orderProgress.js`: the reducer of data-model.md and
       the `predict_orders_v1` device store; add a test asserting the key is absent from
       `lib/backup/syncedObjects.js`. Tests cover every transition and that `unconfirmed` is never
       terminal.
-- [ ] T034 [US5] `frontend/src/hooks/usePredictOrders.js`: polls the venue for tracked orders
+- [X] T034 [US5] `frontend/src/hooks/usePredictOrders.js`: polls the venue for tracked orders
       with the member's on-device session, resolves `unconfirmed` by lookup, never re-posts.
-- [ ] T035 [US5] `frontend/src/components/predict/OrderProgress.jsx`; make `PositionsList` and
+- [X] T035 [US5] `frontend/src/components/predict/OrderProgress.jsx`; make `PositionsList` and
       `OpenOrdersList` refresh on their own and drop their Refresh buttons.
-- [ ] T036 [US5] Vitest for reducer, hook and component; Cypress PL-13 progress advances without
+- [X] T036 [US5] Vitest for reducer, hook and component; Cypress PL-13 progress advances without
       refresh, PL-14 survives a reload, PL-15 a timed-out post shows unconfirmed and offers no
       resubmit. Flip `predict.order-progress`. Open the slice PR.
 

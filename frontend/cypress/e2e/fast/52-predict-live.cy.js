@@ -21,6 +21,14 @@
 // protects the member: no signature is requested until Sign is pressed — and to keep "none was requested"
 // from being vacuous, the same spy is shown to SEE the signature once Sign is pressed.
 //
+// Slice 6 adds order progress (PL-13..PL-15). The order itself cannot be PLACED in this tier (the CLOB has no
+// local stand-in), so these start from an order already on the device — exactly the state a member is in after
+// signing and reloading — and stub the venue's `GET /data/order/<id>` answer, which the tracker reads with the
+// member's cached session. That is an honest model of FR-023..FR-025 (progress without a refresh, survival of a
+// reload, an unconfirmed order that is never resubmitted); what it cannot show is the POST whose answer never
+// arrives — that leg (and the hand-off of the order to the tracker) is covered in Vitest
+// (usePredictPlanTrade.test, clobSession.market.test, orderHash.test).
+//
 // The legacy half (a gateway with no books route / no event route → the fixed-price sheet and confirm) is
 // covered in 37-predict-and-collect (PR-02b, PR-04b, PR-05).
 // =============================================================================
@@ -309,7 +317,7 @@ const signaturesSinceMark = (check) =>
   })
 const noSignature = () => signaturesSinceMark((n) => expect(n, 'the wallet has been asked for no signature').to.equal(0))
 
-function openPredict(search = '', { liveSlugs = [], books = 'fresh', depth = 'deep' } = {}) {
+function openPredict(search = '', { liveSlugs = [], books = 'fresh', depth = 'deep', onBeforeLoad, clob = clobDown } = {}) {
   cy.then(() => {
     world.liveSlugs = liveSlugs
     world.books = books
@@ -318,10 +326,10 @@ function openPredict(search = '', { liveSlugs = [], books = 'fresh', depth = 'de
   chainWorld()
   predictGateway()
   geoblock(false)
-  clobDown()
+  clob()
   connect()
   spyOnWallet()
-  cy.visit('/wallet?tab=predict' + search)
+  cy.visit('/wallet?tab=predict' + search, onBeforeLoad ? { onBeforeLoad } : undefined)
   cy.get('[aria-label="Wallet Account"]', { timeout: 40000 }).should('exist')
   cy.get('[aria-label="Predict"]', { timeout: 40000 }).should('exist')
 }
@@ -762,5 +770,95 @@ describe('Predict — the amount-first order ticket (spec 114, slice 5)', () => 
     cy.focused().should('have.class', 'order-ticket')
     cy.get('body').type('{esc}')
     cy.get('.order-ticket').should('not.exist')
+  })
+})
+
+describe('Predict — order progress (spec 114, slice 6)', () => {
+  const ORDER_ID = `0x${'ab'.repeat(32)}`
+  const venue = { status: 'LIVE', matched: '0', answer: 'order' } // mutable: the test moves the venue along
+  const tracker = () => cy.get('.order-progress', { timeout: 30000 })
+
+  const seed = (state, extra = {}) => (win) => {
+    const now = Date.now()
+    const record = {
+      orderId: ORDER_ID, idKnown: true, tokenId: TOKEN_YES, side: 'BUY', kind: 'resting', size: '10', sizeUnit: 'shares',
+      limitPrice: '0.4', label: 'Buy Yes — Fed Decision in December?', state, filledSize: '0', settledSize: null,
+      averageFillPrice: null, createdAt: now, updatedAt: now, reason: null, absentSince: null, absentReads: 0, ...extra,
+    }
+    win.localStorage.setItem(`fw_user_${ACCOUNT.toLowerCase()}_predict_orders_v1`, JSON.stringify({ v: 1, orders: [record], idScheme: 'unknown' }))
+    // The member's own CLOB session, as a trade earlier in the session would have left it (sessionStorage).
+    win.sessionStorage.setItem(`predict.clob.creds.${ACCOUNT.toLowerCase()}`, JSON.stringify({ key: 'k', secret: 'c2VjcmV0c2VjcmV0', passphrase: 'p' }))
+  }
+
+  /** The venue's answer for the order, read at request time; anything that would PLACE an order is counted. */
+  function venueStub() {
+    cy.intercept({ method: 'GET', url: /clob\.polymarket\.com\/data\/order\// }, (req) => {
+      if (venue.answer === 'missing') return req.reply({ statusCode: 404, body: { error: 'order not found' } })
+      req.reply({ statusCode: 200, body: { id: ORDER_ID, status: venue.status, owner: 'k', maker_address: ACCOUNT, market: '0xf1', asset_id: TOKEN_YES, side: 'BUY', original_size: '10', size_matched: venue.matched, price: '0.4', associate_trades: [], outcome: 'Yes', created_at: 1, expiration: '0', order_type: 'GTC' } })
+    }).as('venueOrder')
+    cy.intercept({ method: 'GET', url: /clob\.polymarket\.com\/data\/trades/ }, { statusCode: 200, body: { data: [], next_cursor: 'LTE=', count: 0, limit: 100 } })
+    cy.intercept({ method: 'POST', url: /clob\.polymarket\.com\/order/ }, { statusCode: 503, body: { error: 'down' } }).as('placed')
+  }
+  const open = (state, extra) => {
+    cy.then(() => Object.assign(venue, { status: 'LIVE', matched: '0', answer: 'order' }))
+    // The venue stub replaces the blanket 503 BEFORE the page loads: the tracker looks at once, on mount.
+    openPredict('', {
+      onBeforeLoad: seed(state, extra),
+      clob: () => {
+        clobDown()
+        venueStub() // registered after the blanket, so it answers first
+      },
+    })
+  }
+
+  beforeEach(() => {
+    cy.clearLocalStorage()
+    cy.clearCookies()
+  })
+
+  it('[PL-13] predict.order-progress — a resting order advances to partly matched and matched WITHOUT the member doing anything, and no list has a Refresh button', () => {
+    open('resting')
+    tracker().contains('Your orders in progress').should('exist')
+    tracker().should('contain.text', 'Waiting on Polymarket')
+    tracker().find('[aria-current="step"]').should('contain.text', 'Waiting on the order book (current step)')
+    cy.get('[aria-label="Predict"]').contains('button', /refresh/i).should('not.exist')
+    cy.then(() => Object.assign(venue, { matched: '4' }))
+    tracker().should('contain.text', 'Partly matched: 4 shares so far')
+    tracker().find('[aria-current="step"]').should('contain.text', 'Partly matched (current step)')
+    cy.then(() => Object.assign(venue, { status: 'MATCHED', matched: '10' }))
+    tracker().should('contain.text', 'Matched by Polymarket: 10 shares')
+    // "Matched" is the venue's word; settlement is the chain's, and this app does not claim it.
+    tracker().should('contain.text', 'Settlement happens on the blockchain').and('not.contain.text', 'Settled on chain (')
+    cy.a11yScan({ context: '.order-progress', label: 'predict order progress' })
+    cy.get('@placed.all').should('have.length', 0)
+  })
+
+  it('[PL-14] predict.order-progress — the order is still there, with its state, after the app is reloaded', () => {
+    open('resting')
+    tracker().should('contain.text', 'Waiting on Polymarket')
+    cy.reload()
+    cy.get('[aria-label="Predict"]', { timeout: 40000 }).should('exist')
+    tracker().should('contain.text', 'Buy Yes — Fed Decision in December?').and('contain.text', 'Waiting on Polymarket')
+    // Device-only, and public facts only: no signature or credential is in the stored record.
+    cy.window().then((win) => {
+      const raw = win.localStorage.getItem(`fw_user_${ACCOUNT.toLowerCase()}_predict_orders_v1`)
+      expect(raw).to.be.a('string')
+      expect(raw).to.not.match(/signature|secret|passphrase/i)
+    })
+  })
+
+  it('[PL-15] predict.order-progress — an order whose answer never arrived is "not confirmed", is not a failure, and offers no way to send it again', () => {
+    open('unconfirmed', { reason: 'Polymarket did not confirm whether it received this order.', filledSize: null })
+    cy.then(() => Object.assign(venue, { answer: 'missing' }))
+    tracker().should('contain.text', 'Not confirmed yet').and('contain.text', 'Do not send it again')
+    tracker().should(($t) => expect($t.text()).to.not.match(/fail|error|refused/i))
+    tracker().find('[role="alert"]').should('not.exist')
+    tracker().find('button').should('not.exist')
+    tracker().contains('a', 'Check on Polymarket').should('have.attr', 'rel').and('contain', 'noopener')
+    // Looked up, never posted: the stub has seen reads of the order and no attempt to place anything. With the
+    // order not found and this device never having seen a venue id match, it stays unconfirmed — not guessed.
+    cy.wait('@venueOrder')
+    tracker().should('contain.text', 'Not confirmed yet')
+    cy.get('@placed.all').should('have.length', 0)
   })
 })

@@ -120,7 +120,8 @@ describe('self-refresh (spec 114 slice 6, FR-025)', () => {
     await withTimers(async () => {
       const fetchOpenOrders = vi.fn().mockResolvedValueOnce([]).mockResolvedValue([{ id: '0xo1', side: 'BUY' }])
       const deps = { loadCachedCreds: () => ({ key: 'k' }), makeClient: () => ({}), fetchOpenOrders }
-      const { result } = renderHook(() => usePredictOpenOrders({ deps, walletClient: {} }), { wrapper })
+      const walletClient = {} // stable: a new object per render would restart the load effect every render
+      const { result } = renderHook(() => usePredictOpenOrders({ deps, walletClient }), { wrapper })
       await advance(0)
       expect(result.current.status).toBe('empty')
       await advance(OPEN_ORDERS_POLL.baseMs)
