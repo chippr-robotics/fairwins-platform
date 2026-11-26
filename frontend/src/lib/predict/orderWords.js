@@ -3,9 +3,22 @@
  * without rendering. "Matched" is the venue's word and "settled" is the chain's; nothing here says an order
  * was filled, bought or settled unless the state says the venue or the chain did.
  */
-import { formatShareCount } from './format'
+import { formatShareCount, formatPriceCents, decimalToMicro } from './format'
 
 const shares = (v) => (v == null ? null : `${formatShareCount(v)} shares`)
+/** A price as the rest of the surface says it — "40¢", never the raw "0.4". */
+const cents = (v) => formatPriceCents(v, 'nearest')
+/**
+ * What had matched when an order ended. Three different facts: the venue reported a fill; the venue reported
+ * NONE (a read zero — said plainly, not as "0 shares had matched … and still settle"); or it was not read
+ * (nothing is said either way).
+ */
+function endedFill(filledSize) {
+  if (filledSize == null) return ''
+  const micro = decimalToMicro(String(filledSize))
+  if (micro == null) return ''
+  return micro > 0n ? ` ${shares(filledSize)} had matched before it ended and still settle.` : ' Nothing had matched.'
+}
 
 /** What the order IS, from the public facts recorded when it was signed. */
 export function describeOrder(r) {
@@ -24,17 +37,17 @@ export function stateSentence(r) {
     case 'sent':
       return 'Sent to Polymarket, which took it. It is not yet reported as matched or waiting on the book.'
     case 'resting':
-      return `Waiting on Polymarket's order book at your price of ${r.limitPrice}. It fills only if the market reaches that price.`
+      return `Waiting on Polymarket's order book at your price of ${cents(r.limitPrice)}. It fills only if the market reaches that price.`
     case 'partial':
-      return `Partly matched${filled ? `: ${filled} so far` : ''}. The rest is still waiting on the book at ${r.limitPrice}.`
+      return `Partly matched${filled ? `: ${filled} so far` : ''}. The rest is still waiting on the book at ${cents(r.limitPrice)}.`
     case 'matched':
       return `Matched by Polymarket${filled ? `: ${filled}` : ''}. Settlement happens on the blockchain, and this app does not show that step, so your position updates once it completes.`
     case 'settled':
       return 'Settled on chain.'
     case 'cancelled':
-      return `Cancelled${filled ? `. ${filled} had matched before it ended and still settle` : ''}.`
+      return `Cancelled.${endedFill(r.filledSize)}`
     case 'expired':
-      return `Expired${filled ? `. ${filled} had matched before it ended and still settle` : ''}.`
+      return `Expired.${endedFill(r.filledSize)}`
     case 'rejected':
       return `Polymarket refused this order. ${r.reason ?? ''}`.trim()
     case 'not-delivered':

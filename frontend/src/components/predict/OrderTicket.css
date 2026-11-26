@@ -163,7 +163,8 @@
   outline-offset: 2px;
 }
 
-/* Outcome toggle: Yes = brand fill, No = neutral with a heavier edge. Selection is also a ✓ glyph. */
+/* Outcome toggle: the SELECTED outcome is the brand fill, Yes or No alike (selection, not a recommendation); it is also
+   marked with a ✓ glyph, so colour is never the only carrier. */
 .order-ticket .order-ticket-outcomes {
   display: flex;
   gap: 0.5rem;
@@ -172,15 +173,10 @@
   flex: 1;
   font-variant-numeric: tabular-nums;
 }
-.order-ticket .order-ticket-outcome--yes[aria-pressed='true'] {
+.order-ticket .order-ticket-outcome[aria-pressed='true'] {
   background: var(--primary-button);
   border-color: var(--primary-button);
   color: var(--primary-button-text);
-}
-.order-ticket .order-ticket-outcome--no[aria-pressed='true'] {
-  background: var(--bg-tertiary);
-  border: 2px solid var(--text-primary);
-  color: var(--text-primary);
 }
 .order-ticket .order-ticket-outcome-state {
   font-size: 0.75rem;

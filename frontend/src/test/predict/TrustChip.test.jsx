@@ -41,6 +41,12 @@ describe('TrustChip', () => {
     expect(container.textContent).not.toMatch(/\d+ (s|min|h)/)
   })
 
+  it('prints no age under a second: "Delayed · 0 s" would contradict itself (a demoted list price confirmed this second)', () => {
+    const { container } = render(<TrustChip state="delayed" ageMs={300} />)
+    expect(container.textContent).toContain('Delayed')
+    expect(container.textContent).not.toMatch(/0 s/)
+  })
+
   it('accepts state + ageMs directly', () => {
     const { container } = render(<TrustChip state="delayed" ageMs={48000} />)
     expect(container.textContent).toContain('Delayed · 48 s')

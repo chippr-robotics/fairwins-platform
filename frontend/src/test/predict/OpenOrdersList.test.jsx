@@ -50,6 +50,14 @@ describe('OpenOrdersList', () => {
     await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(venue)) // cancel still gets the venue's object, id intact
   })
 
+  it('a locked session says how to see the orders, and offers nothing that would sign — never a bare heading', () => {
+    ordersState.current = make({ status: 'locked', orders: [] })
+    render(<OpenOrdersList />)
+    expect(screen.getByRole('status')).toHaveTextContent('Sign in to trading to see your open orders. This list does not ask for a signature itself.')
+    expect(screen.queryByRole('button')).toBeNull()
+    expect(screen.queryByRole('listitem')).toBeNull()
+  })
+
   it('is hidden when disconnected or empty', () => {
     ordersState.current = make({ status: 'empty', orders: [] })
     const { container } = render(<OpenOrdersList />)

@@ -230,7 +230,7 @@ the seam they plug into is right from the start.
 - [X] T044 [P] `docs/developer-guide/predict-polymarket.md` extended slice by slice for the new
       surface (not rewritten: the spec-057 parts still hold); a CLAUDE.md guardrail paragraph for
       spec 114 (the reading type, the seam, the order path, what stays on the device).
-- [ ] T045 Capture harness and actor-critic screenshot pass for browse, event page, ticket and
+- [X] T045 Capture harness and actor-critic screenshot pass for browse, event page, ticket and
       progress in both themes and both widths (`actor-critic-screens` skill).
 - [ ] T046 Walk quickstart.md end to end, including "Without the feed".
 

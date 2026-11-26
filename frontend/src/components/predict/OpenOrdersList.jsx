@@ -50,7 +50,13 @@ export default function OpenOrdersList() {
         </p>
       )}
 
-      {status === 'degraded' ? (
+      {status === 'locked' ? (
+        // Reading open orders needs the member's trading session, and this list never asks for a signature
+        // just to read. A heading with nothing under it said neither "none" nor "not read".
+        <p className="predict-orders-status" role="status">
+          Sign in to trading to see your open orders. This list does not ask for a signature itself.
+        </p>
+      ) : status === 'degraded' ? (
         <p className="predict-orders-status" role="status">
           Order data is temporarily unavailable.
         </p>

@@ -430,9 +430,13 @@ async function main() {
           const { page, context } = await newPage(browser, { theme, size, world, seed })
           const shot = async (name, o = {}) => {
             const file = `${OUT}/${name}-${theme}-${size}.png`
-            if (o.el) await page.locator(o.el).first().screenshot({ path: file })
-            else if (o.full) await page.screenshot({ path: file })
-            else await page.locator('.predict-panel').first().screenshot({ path: file })
+            if (o.full) await page.screenshot({ path: file })
+            else {
+              // The PAGE as a member sees it: the panel's full height, at the full viewport width (an element
+              // screenshot clips to the panel's own box and hides the page's side gutter).
+              const box = await page.locator('.predict-panel').first().evaluate((el) => { const r = el.getBoundingClientRect(); return { y: Math.max(0, r.top + window.scrollY - 70), h: r.height + 70 } })
+              await page.screenshot({ path: file, fullPage: true, clip: { x: 0, y: box.y, width: SIZES[size].width, height: box.h } })
+            }
             shots.push(file); console.log('  shot', `${name}-${theme}-${size}`)
             await audit(page, `${name}-${theme}-${size}`, o.full ? (await page.locator('.order-ticket,.trade-confirm,.market-detail').count() ? '.order-ticket,.trade-confirm,.market-detail' : 'body') : (o.el || 'body'))
           }

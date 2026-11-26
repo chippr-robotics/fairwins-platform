@@ -107,19 +107,15 @@
   padding: 0.3rem 0.6rem;
   white-space: nowrap;
 }
-.predict-panel .event-card-side--yes {
-  background: var(--primary-button);
-  border: 1px solid var(--primary-button);
-  color: var(--primary-button-text);
-}
-.predict-panel .event-card-side--yes:hover:not(:disabled) {
-  background: var(--primary-button-hover);
-}
+/* Yes and No carry EQUAL weight until the member chooses (FR-028): one rule, one fill, one border, one label colour,
+   told apart by their words. A filled Yes beside an outlined No read as the app recommending Yes on every market. */
+.predict-panel .event-card-side--yes,
 .predict-panel .event-card-side--no {
   background: transparent;
-  border: 1px solid var(--border-color);
+  border: 1px solid var(--border-strong);
   color: var(--text-primary);
 }
+.predict-panel .event-card-side--yes:hover:not(:disabled),
 .predict-panel .event-card-side--no:hover:not(:disabled) {
   background: var(--bg-tertiary);
 }

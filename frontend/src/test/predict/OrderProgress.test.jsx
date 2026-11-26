@@ -83,6 +83,22 @@ describe('OrderProgress', () => {
     expect(screen.getByText(/3 shares had matched before it ended and still settle/)).toBeInTheDocument()
   })
 
+  it('an ending says what had matched as one of THREE facts: a fill, a read zero, or not read', () => {
+    expect(stateSentence(rec('cancelled', { filledSize: '3' }))).toBe('Cancelled. 3 shares had matched before it ended and still settle.')
+    // The venue said nothing matched: say so. "0 shares had matched … and still settle" is not a sentence.
+    expect(stateSentence(rec('cancelled', { filledSize: '0' }))).toBe('Cancelled. Nothing had matched.')
+    expect(stateSentence(rec('expired', { filledSize: '0.00' }))).toBe('Expired. Nothing had matched.')
+    // Not read is not zero: nothing is claimed either way.
+    expect(stateSentence(rec('cancelled', { filledSize: null }))).toBe('Cancelled.')
+    expect(stateSentence(rec('expired', { filledSize: null }))).toBe('Expired.')
+  })
+
+  it('a price is said in cents, as everywhere else on the surface — never the raw decimal', () => {
+    expect(stateSentence(rec('resting'))).toMatch(/at your price of 40¢\./)
+    expect(stateSentence(rec('partial', { filledSize: '4', limitPrice: '0.935' }))).toMatch(/waiting on the book at 93\.5¢\./)
+    for (const s of ['resting', 'partial']) expect(stateSentence(rec(s))).not.toMatch(/\b0\.4\b/)
+  })
+
   it('an unconfirmed order ends only when the MEMBER says they have checked: one control, and it is not a resend', () => {
     const onDismiss = vi.fn()
     render(<OrderProgress orders={[rec('unconfirmed', { orderId: '0xu' })]} onDismiss={onDismiss} />)
