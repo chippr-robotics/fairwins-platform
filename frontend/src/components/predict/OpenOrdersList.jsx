@@ -5,7 +5,24 @@
  */
 import { usePredictOpenOrders } from '../../hooks/usePredictPortfolio'
 import { usePredictTrade } from '../../hooks/usePredictTrade'
+import { asDecimal, toMicro, fromMicro } from '../../lib/predict/orderProgress'
 import './OpenOrdersList.css'
+
+/**
+ * What the venue's own order object says, in the words this row uses. The SDK returns `id`, `original_size` and
+ * `size_matched`; an already-normalised `{ orderId, size, remaining }` is read as it is. A figure the venue did not
+ * state is null and prints as "—", never as a guessed 0.
+ */
+function describeOpenOrder(o) {
+  const size = asDecimal(o?.size ?? o?.original_size)
+  let remaining = asDecimal(o?.remaining)
+  if (remaining == null && size != null) {
+    const matched = toMicro(asDecimal(o?.size_matched) ?? '')
+    const total = toMicro(size)
+    if (matched != null && total != null && matched <= total) remaining = fromMicro(total - matched)
+  }
+  return { id: o?.orderId ?? o?.id ?? null, size, remaining, price: asDecimal(o?.price) ?? null }
+}
 
 export default function OpenOrdersList() {
   const { status, orders, refresh, stale } = usePredictOpenOrders()
@@ -39,19 +56,22 @@ export default function OpenOrdersList() {
         </p>
       ) : (
         <ul className="predict-orders-list">
-          {orders.map((o) => (
-            <li key={o.orderId} className="predict-order">
-              <span className="predict-order-side" data-side={o.side}>
-                {o.side}
+          {orders.map((raw) => {
+            const o = describeOpenOrder(raw)
+            return (
+            <li key={o.id} className="predict-order">
+              <span className="predict-order-side" data-side={raw.side}>
+                {raw.side}
               </span>
               <span className="predict-order-detail">
-                {o.remaining}/{o.size} @ {o.price ?? '—'}
+                {o.remaining ?? '—'}/{o.size ?? '—'} @ {o.price ?? '—'}
               </span>
-              <button type="button" className="predict-order-cancel" disabled={busy} onClick={() => onCancel(o)}>
+              <button type="button" className="predict-order-cancel" disabled={busy} onClick={() => onCancel(raw)}>
                 {busy ? 'Cancelling…' : 'Cancel'}
               </button>
             </li>
-          ))}
+            )
+          })}
         </ul>
       )}
 

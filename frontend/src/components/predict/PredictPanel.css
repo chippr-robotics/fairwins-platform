@@ -17,9 +17,12 @@
 }
 
 .predict-search input {
+  background: var(--input-bg);
   border: 1px solid var(--border-color);
   border-radius: 10px;
+  color: var(--text-primary);
   font-size: 0.95rem;
+  min-height: 44px;
   padding: 0.55rem 0.75rem;
   width: 100%;
 }

@@ -127,7 +127,7 @@ the seam they plug into is right from the start.
       Flip `predict.market-page` and `predict.price-trust-state` (PL-08: block the books route,
       see Delayed then Last known, and the ticket's refusal). Open the slice PR.
 
-- [ ] T025a [US2] Per-outcome traded volume (FR-005): the gateway's market row carries no
+- [X] T025a [US2] Per-outcome traded volume (FR-005): the gateway's market row carries no
       volume, so the event page shows the event's volume only. Add `volume` to `MarketRow` from the
       venue's per-market figure and show it on each outcome row.
 - [X] T025b [US3] The ticket's refusal on a non-live price (the last clause of PL-08) lands with

@@ -39,6 +39,17 @@ describe('OpenOrdersList', () => {
     expect(ordersState.current.refresh).toHaveBeenCalled()
   })
 
+  it('reads the venue\'s own order shape (id / original_size / size_matched), and prints "—" for what it did not state', async () => {
+    const venue = { id: '0xv1', side: 'BUY', price: '0.4', original_size: '100', size_matched: '60' }
+    const bare = { id: '0xv2', side: 'SELL', price: '0.7' }
+    ordersState.current = make({ orders: [venue, bare] })
+    render(<OpenOrdersList />)
+    expect(screen.getByText('40/100 @ 0.4')).toBeInTheDocument()
+    expect(screen.getByText('—/— @ 0.7')).toBeInTheDocument() // never a guessed 0
+    fireEvent.click(screen.getAllByRole('button', { name: 'Cancel' })[0])
+    await waitFor(() => expect(cancelSpy).toHaveBeenCalledWith(venue)) // cancel still gets the venue's object, id intact
+  })
+
   it('is hidden when disconnected or empty', () => {
     ordersState.current = make({ status: 'empty', orders: [] })
     const { container } = render(<OpenOrdersList />)

@@ -177,12 +177,18 @@
   font-size: 0.78rem;
   grid-column: 1 / -1;
 }
+.event-page .event-page-row-volume {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  grid-column: 1 / -1;
+}
 .event-page .event-page-row-actions {
   display: inline-flex;
   gap: 0.35rem;
 }
 .event-page .event-page-side {
   border-radius: 8px;
+  min-width: 4.75rem; /* Yes/No columns line up from row to row whatever the label ("<1¢", "100¢") */
   cursor: pointer;
   font-size: 0.85rem;
   font-variant-numeric: tabular-nums;

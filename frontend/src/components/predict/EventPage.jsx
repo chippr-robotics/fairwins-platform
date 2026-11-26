@@ -51,6 +51,9 @@ function BackButton({ onBack }) {
   )
 }
 
+/** A market's own traded volume, compact; null (unstated, or an older gateway) prints nothing, never $0. */
+const rowVolume = (row) => formatVolume(row?.volume)
+
 export default function EventPage({ slug, onBack, onOpenRow, onOpenTicket, paused = false }) {
   const { status, event, stamp, stale, retry } = usePredictEvent(slug)
   const articleRef = useRef(null)
@@ -251,6 +254,7 @@ export default function EventPage({ slug, onBack, onOpenRow, onOpenTicket, pause
                   </span>{' '}
                   {words && <span className="event-page-state">{words}</span>}
                   {open && !words && <span className="sr-only">Live</span>}
+                  {rowVolume(row) && <span className="event-page-row-volume">{rowVolume(row)} traded</span>}
                 </button>
                 {open && row.tradable && (
                   <span className="event-page-row-actions">

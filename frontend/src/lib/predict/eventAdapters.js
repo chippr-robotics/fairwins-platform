@@ -20,6 +20,10 @@ export function marketFromRow(event, row) {
     category: categoryLabel(event.category),
     slug: event.slug,
     endDate: event.endDate ?? null,
+    // Per-MARKET traded volume (both outcomes share it): decimal strings, or null when the venue did not state
+    // it — and null when an older gateway has no such field. A stated "0" stays "0"; null is never drawn as $0.
+    volume: row.volume ?? null,
+    volume24h: row.volume24h ?? null,
     // `negRisk` selects WHICH exchange contract the order is signed for, so it comes from the
     // market row itself and is never inferred from the event. A row that does not state it cannot
     // be traded from here: an order signed for the wrong exchange is simply rejected, and a guess
