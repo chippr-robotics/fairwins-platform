@@ -922,6 +922,7 @@ export function createApp(config, deps = {}) {
       gammaClient: polymarketGammaClient,
       dataClient: polymarketDataClient,
       cache: deps.polymarketCache ?? createTtlCache({ now: nowMs }),
+      now: nowMs, // the injectable clock — spec 114's serverNow envelope reads it
       quotas: pmReadQuotas,
       writeQuotas: pmWriteQuotas,
       killSwitch,

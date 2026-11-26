@@ -74,6 +74,11 @@ export const ROUTE_TABLE = Object.freeze([
   r('GET', '/v1/polymarket/:chainId/markets/:conditionId', TIERS.ANONYMOUS, 'read', 'polymarket'),
   r('GET', '/v1/polymarket/:chainId/positions', TIERS.ANONYMOUS, 'read', 'polymarket'),
   r('GET', '/v1/polymarket/:chainId/fee-rate', TIERS.ANONYMOUS, 'read', 'polymarket'),
+  // Spec 114: live-markets reads — same tier and upstream as the markets reads above.
+  r('GET', '/v1/polymarket/:chainId/events', TIERS.ANONYMOUS, 'read', 'polymarket'),
+  r('GET', '/v1/polymarket/:chainId/events/:slug', TIERS.ANONYMOUS, 'read', 'polymarket'),
+  r('GET', '/v1/polymarket/:chainId/books', TIERS.ANONYMOUS, 'read', 'polymarket'),
+  r('GET', '/v1/polymarket/:chainId/prices-history', TIERS.ANONYMOUS, 'read', 'polymarket'),
   r('GET', '/v1/perps/config', TIERS.ANONYMOUS, 'read', 'perps'),
   r('GET', '/v1/perps/pairs', TIERS.ANONYMOUS, 'read', 'perps'),
   r('GET', '/v1/perps/positions', TIERS.ANONYMOUS, 'read', 'perps'),

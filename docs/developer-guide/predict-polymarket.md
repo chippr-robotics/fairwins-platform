@@ -38,6 +38,7 @@ in the confirm UI, never hidden and never described as free (`TradeConfirm.jsx`)
 | Capability flag (Polygon-only) | `frontend/src/config/networks.js` `PREDICT_CHAIN_IDS = {137}` |
 | Nav item | `frontend/src/config/appNav.js` `{ id: 'predict', label: 'Predict' }` |
 | Gateway proxy (public reads) | `services/relay-gateway/src/polymarket/` (client / normalize / routes) |
+| Gateway **live-market reads** (spec 114) | `GET …/events`, `…/events/:slug`, `…/books`, `…/prices-history` — see [Live-market reads](#live-market-reads-spec-114) |
 | Gateway **builder-sign** (attribution) | `POST /v1/polymarket/:chainId/builder-sign` — signs `POLY_BUILDER_*` headers with the shared builder creds (server-side only) |
 | **Per-user CLOB session** | `frontend/src/lib/predict/clobSession.js` — derive creds + build/sign/post orders via `@polymarket/clob-client` |
 | Region gate | `frontend/src/lib/predict/geoblock.js` — geoblock check + Polymarket link-out for restricted regions |
@@ -117,6 +118,42 @@ outage ⇒ honest message + a Polymarket link; fees unconfirmable ⇒ signing is
 fee); restricted region ⇒ honest notice + link-out; a passkey account whose signatures the CLOB rejects ⇒
 honest per-account error + the Polymarket link-out (FR-019's per-account fallback, not a blanket
 exclusion); a passkey session that lost its credential record ⇒ an actionable "sign in again".
+
+## Live-market reads (spec 114)
+
+Four cached, read-only routes that the redesigned Predict surface is built on. Contract:
+`specs/114-predict-live-markets/contracts/gateway-predict-api.md`. None accepts, forwards or signs
+an order.
+
+| Route | Upstream | Cache |
+|---|---|---|
+| `GET /v1/polymarket/:chainId/events?category=&sort=&q=&next=` | Gamma `/events` (or `/public-search` when `q` is set) | `POLYMARKET_CACHE_TTL_MS` |
+| `GET /v1/polymarket/:chainId/events/:slug` | Gamma `/events?slug=` | `POLYMARKET_CACHE_TTL_MS` |
+| `GET /v1/polymarket/:chainId/books?token_ids=a,b` (≤ 10) | CLOB `/book`, **cached per token** | `POLYMARKET_BOOK_TTL_MS` (2 s, floor 1 s) |
+| `GET /v1/polymarket/:chainId/prices-history?token_id=&range=` | CLOB `/prices-history` | `POLYMARKET_HISTORY_TTL_MS` (60 s) |
+
+Things that are deliberate:
+
+- **Every body ends `confirmedAt` / `serverNow` / `stale`.** `confirmedAt` is when the gateway
+  fetched its copy from the venue; the client measures a price's age from the two gateway
+  timestamps plus its own monotonic timer, never from the device clock. For `/books` it is the
+  **oldest** of the tokens served.
+- **Categories are a bounded table** (`polymarket/categories.js`), our id → the venue's tag slug.
+  An unknown id is a 400, never passed upstream, and cache keys stay bounded. `culture` maps to the
+  venue's `pop-culture`; a bare `culture` tag does not exist there.
+- **Books are best-first here and worst-first at the venue.** The normalizer sorts by price rather
+  than trusting either order, caps each side at 25, and passes prices and sizes through as the
+  venue's strings.
+- **One unreadable token never blanks the rest**: it is listed in `unreadable` and absent from
+  `books`. If *no* requested book could be read the answer is 503, because there is no
+  `confirmedAt` to give.
+- **A number the venue omitted is `null`.** Never `"0"`.
+- **The headline price follows the venue's rule** (`displayPrice`): the midpoint while the spread
+  is at most 10¢, else the last trade.
+- **Text only.** No image, icon or markup field is forwarded; descriptions are capped at 4,000
+  characters.
+- **`sort=closing` adds `end_date_min=<now>`** upstream. Without it an ascending end-date list
+  opens with events whose date passed long ago and never settled.
 
 ## Configuration
 

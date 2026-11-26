@@ -23,7 +23,7 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
 | `category` | a bounded id from `categories.js` | all |
 | `sort` | `volume24h` \| `newest` \| `closing` | `volume24h` |
 | `q` | text ≤ 128 chars; when present the venue's search is used and `category`/`sort` are ignored | — |
-| `next` | opaque cursor | — |
+| `next` | cursor returned by the previous page (digits only) | — |
 
 ```json
 {
@@ -49,8 +49,10 @@ Errors use the module's existing shape: `{ "error": { "code", "reason" } }`.
 
 - `markets` holds at most four rows, most likely first. Closed events are not listed.
 - A number the venue did not give is `null`, never `"0"`.
+- `sort=closing` lists only events whose closing time is still ahead.
 - TTL: `POLYMARKET_CACHE_TTL_MS` (15 s). Errors: 400 `invalid_category` / `invalid_sort` /
-  `invalid_cursor`, 429 `quota_exceeded`, 503 `upstream_unavailable`.
+  `invalid_cursor` / `invalid_query`, 429 `quota_exceeded`, 503 `upstream_unavailable`. A `q`
+  longer than 128 characters is truncated, as on the existing markets route.
 
 ## GET `/v1/polymarket/:chainId/events/:slug`
 
@@ -79,7 +81,10 @@ One to ten token ids (400 `invalid_token` for a malformed id, `too_many_tokens` 
 
 - Levels are best-first, at most 25 a side, prices and sizes as the venue's strings.
 - A token whose book could not be read is listed in `unreadable` and absent from `books`: one
-  failure never blanks the others and is never rendered as an empty book.
+  failure never blanks the others and is never rendered as an empty book. A book with no bids
+  or no asks is a real state and is returned as such.
+- If **no** requested book could be read the answer is 503 `upstream_unavailable`: nothing was
+  confirmed, so there is no `confirmedAt` to state. Duplicate ids are served once.
 - Cached per token for `POLYMARKET_BOOK_TTL_MS` (default 2,000, floor 1,000); a request for
   several tokens is served from per-token entries, so ten members watching one outcome cost the
   venue one request per two seconds.

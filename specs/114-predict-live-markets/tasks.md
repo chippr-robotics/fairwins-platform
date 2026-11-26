@@ -15,35 +15,35 @@ the seam they plug into is right from the start.
 
 ## Phase 1: Setup
 
-- [ ] T001 Verify the workspace install (`node scripts/deps/check-dependency-hygiene.js`); if
+- [X] T001 Verify the workspace install (`node scripts/deps/check-dependency-hygiene.js`); if
       `node_modules` is absent run `npm run deps:reinstall` (never plain `npm install`, spec 075).
       This feature adds no dependency; the lockfile must end byte-identical.
 
 ## Phase 2: Slice 1 — gateway reads (blocks everything)
 
-- [ ] T002 Add `POLYMARKET_BOOK_TTL_MS` (default 2000, floor 1000, one boot log line on clamp) and
+- [X] T002 Add `POLYMARKET_BOOK_TTL_MS` (default 2000, floor 1000, one boot log line on clamp) and
       `POLYMARKET_HISTORY_TTL_MS` (default 60000) to `services/relay-gateway/src/config/index.js`
       beside the existing `POLYMARKET_*` block, with its comment style.
-- [ ] T003 [P] Create `services/relay-gateway/src/polymarket/categories.js`: the bounded category
+- [X] T003 [P] Create `services/relay-gateway/src/polymarket/categories.js`: the bounded category
       id → venue tag slug table (research R3) and `isCategory()`. Confirm each slug returns events
       against the live venue and record the check in the PR.
-- [ ] T004 Extend `services/relay-gateway/src/polymarket/normalize.js` with `normalizeEvent`
+- [X] T004 Extend `services/relay-gateway/src/polymarket/normalize.js` with `normalizeEvent`
       (summary and detail), `normalizeMarketRow` (label from `groupItemTitle`, `displayPrice` by
       the venue's spread rule, numbers the venue omits → `null`), `normalizeBook` (flip to
       best-first, cap 25, strings preserved, `venueTime`, `venueHash`) and `normalizeHistory`.
       Text only: drop `image`, `icon` and any markup field (research R14). Comment each field's
       provenance.
-- [ ] T005 Add to `services/relay-gateway/src/polymarket/routes.js` the four routes of
+- [X] T005 Add to `services/relay-gateway/src/polymarket/routes.js` the four routes of
       contracts/gateway-predict-api.md: `/events`, `/events/:slug`, `/books`, `/prices-history`,
       each through `cache.fetchThrough` with the contract's TTLs and the
       `confirmedAt`/`serverNow`/`stale` envelope. `/books` caches per token and reports
       `unreadable` tokens instead of failing the batch.
-- [ ] T006 Tests in `services/relay-gateway/test/polymarket.test.js`, fixture-driven from the
+- [X] T006 Tests in `services/relay-gateway/test/polymarket.test.js`, fixture-driven from the
       probed payloads: each route's happy path; every 400 in the contract; a `null` volume stays
       `null`; a worst-first venue book comes back best-first; one unreadable token in a batch
       leaves the others intact; a stale copy is flagged; the request the gateway **sends**
       upstream is asserted (tag slug, order, interval and fidelity), not only what it returns.
-- [ ] T007 Run `npx vitest run` in `services/relay-gateway`; update
+- [X] T007 Run `npx vitest run` in `services/relay-gateway`; update
       `docs/developer-guide/predict-polymarket.md` with the four routes. Open the slice PR.
 
 ## Phase 3: Slice 2 — client foundation (US3: trust state)
