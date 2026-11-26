@@ -799,8 +799,9 @@ describe('Predict — order progress (spec 114, slice 6)', () => {
     cy.intercept({ method: 'GET', url: /clob\.polymarket\.com\/data\/trades/ }, { statusCode: 200, body: { data: [], next_cursor: 'LTE=', count: 0, limit: 100 } })
     cy.intercept({ method: 'POST', url: /clob\.polymarket\.com\/order/ }, { statusCode: 503, body: { error: 'down' } }).as('placed')
   }
-  const open = (state, extra) => {
-    cy.then(() => Object.assign(venue, { status: 'LIVE', matched: '0', answer: 'order' }))
+  // `answer` is what the venue says about the order from the FIRST look (the tracker looks as soon as the page mounts).
+  const open = (state, extra, answer = 'order') => {
+    cy.then(() => Object.assign(venue, { status: 'LIVE', matched: '0', answer }))
     // The venue stub replaces the blanket 503 BEFORE the page loads: the tracker looks at once, on mount.
     openPredict('', {
       onBeforeLoad: seed(state, extra),
@@ -848,17 +849,24 @@ describe('Predict — order progress (spec 114, slice 6)', () => {
   })
 
   it('[PL-15] predict.order-progress — an order whose answer never arrived is "not confirmed", is not a failure, and offers no way to send it again', () => {
-    open('unconfirmed', { reason: 'Polymarket did not confirm whether it received this order.', filledSize: null })
-    cy.then(() => Object.assign(venue, { answer: 'missing' }))
+    open('unconfirmed', { reason: 'Polymarket did not confirm whether it received this order.', filledSize: null }, 'missing')
     tracker().should('contain.text', 'Not confirmed yet').and('contain.text', 'Do not send it again')
     tracker().should(($t) => expect($t.text()).to.not.match(/fail|error|refused/i))
     tracker().find('[role="alert"]').should('not.exist')
-    tracker().find('button').should('not.exist')
+    // One control, and it is the member saying they have checked — never a way to send the order again.
+    tracker().find('button').should('have.length', 1).and('have.text', 'I have checked on Polymarket — stop tracking this')
     tracker().contains('a', 'Check on Polymarket').should('have.attr', 'rel').and('contain', 'noopener')
     // Looked up, never posted: the stub has seen reads of the order and no attempt to place anything. With the
     // order not found and this device never having seen a venue id match, it stays unconfirmed — not guessed.
     cy.wait('@venueOrder')
     tracker().should('contain.text', 'Not confirmed yet')
+    cy.get('@placed.all').should('have.length', 0)
+  })
+
+  it('[PL-15] predict.order-progress — an unconfirmed order the venue DOES hold is resolved by looking it up: it becomes a waiting order, and nothing is posted', () => {
+    open('unconfirmed', { reason: 'Polymarket did not confirm whether it received this order.', filledSize: null }, 'order')
+    tracker().should('contain.text', 'Waiting on Polymarket')
+    tracker().should('not.contain.text', 'Not confirmed yet')
     cy.get('@placed.all').should('have.length', 0)
   })
 })

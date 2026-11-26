@@ -13,10 +13,13 @@
  *    post. The dependencies it takes do not include a submit function at all.
  *  - A lookup that fails is not an event. Only what the venue actually said reaches the reducer; an unreadable
  *    answer leaves the record exactly as it was (and is counted as `unreadable` for the screen to say so).
- *  - "Not delivered" is concluded only when absence is meaningful: the order was not found, the member's trades
- *    show no fill from it, that has held across several reads over a waiting window, AND this device has seen
- *    a successful post whose venue id equalled the id we compute (`idScheme: 'verified'`). Otherwise the order
- *    stays unconfirmed with instructions to check.
+ *  - It NEVER concludes "not delivered" from absence. "Not found, and no trade names it" also describes an order
+ *    that filled and that this lookup cannot see: whether the venue keeps a fill-and-kill order after it matched,
+ *    and whether its trades name the order they came from, has not been checked against a real account. Telling
+ *    a member an order was not delivered when it filled is how they come to place it twice. So an unconfirmed
+ *    order resolves only POSITIVELY (the venue has it, or a trade names it); otherwise it stays unconfirmed, says
+ *    how to check, and ends when the member says they have checked. The reducer keeps the `not-delivered` state
+ *    for the day a lookup can prove it; nothing here emits it.
  *  - It never invents `settled` or `failed`: the app reads the venue, not the chain, for a matched order.
  *
  * Cadence (see useVisiblePolling): visible tab only; first look at once, then every 6 s backing off ×1.5 to
@@ -39,14 +42,8 @@ import {
 export const POLL_BASE_MS = 6_000
 export const POLL_MAX_MS = 30_000
 export const MAX_PER_ROUND = 8
-/** Not found, trades clean: this many reads over this long before an unconfirmed order is called not delivered. */
-export const ABSENT_READS_NEEDED = 3
-export const ABSENT_WINDOW_MS = 2 * 60 * 1000
 /** A `sent` order the venue still has no record of stops being polled after this (it is shown as it was). */
 export const SENT_POLL_HORIZON_MS = 60 * 60 * 1000
-
-export const NOT_DELIVERED_REASON =
-  'Polymarket has no record of this order and your trades show no fill from it, so nothing was bought or sold.'
 
 /** A signer that can say which address it is and nothing else: reads need an address, never a signature. */
 const readOnlySigner = (address) => ({
@@ -130,7 +127,7 @@ export function usePredictOrders({ deps } = {}) {
     let changed = false
     let sawUnreadable = false
     for (const r of targets) {
-      const found = await d.lookupOrder(client, { orderId: r.orderId, tokenId: r.tokenId, side: r.side, since: r.createdAt })
+      const found = await d.lookupOrder(client, { orderId: r.orderId, tokenId: r.tokenId, side: r.side, since: r.signedAt ?? r.createdAt })
       const t = d.now()
       if (found.kind === 'unreadable') {
         sawUnreadable = true
@@ -144,15 +141,9 @@ export function usePredictOrders({ deps } = {}) {
         const matched = sharesFromTrades(found.trades ?? [], r.orderId)
         if (matched) {
           next = applyToStore(address, r.orderId, { type: 'venue', status: 'matched', filledSize: matched }, t, { absentSince: null, absentReads: 0 })
-        } else if ((found.trades ?? []).length === 0 && r.state === 'unconfirmed') {
-          // Not found and no trade: evidence of absence, counted — but only enough of it, over time, on a scheme
-          // that has been seen to hold, becomes a conclusion.
-          const reads = (r.absentReads ?? 0) + 1
-          const since = r.absentSince ?? t
-          patchRecord(address, r.orderId, { absentReads: reads, absentSince: since })
-          if (current.idScheme === 'verified' && reads >= ABSENT_READS_NEEDED && t - since >= ABSENT_WINDOW_MS) {
-            next = applyToStore(address, r.orderId, { type: 'absent', reason: NOT_DELIVERED_REASON }, t)
-          }
+        } else if (r.state === 'unconfirmed') {
+          // Not found and no trade names it. Counted for the screen ("looked N times"); never a conclusion.
+          patchRecord(address, r.orderId, { absentReads: (r.absentReads ?? 0) + 1, absentSince: r.absentSince ?? t })
         }
         // sent/resting/partial with no record: the last known state stands; nothing is concluded from absence.
       }

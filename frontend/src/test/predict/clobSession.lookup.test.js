@@ -50,7 +50,7 @@ describe('lookupOrder', () => {
       const c = client({ getOrder: vi.fn().mockResolvedValue(answer) })
       const out = await lookupOrder(c, REF)
       expect(out).toEqual({ kind: 'absent', trades: [] })
-      expect(c.getTrades).toHaveBeenCalledWith({ asset_id: '111', after: String(1_700_000_000 - 60) })
+      expect(c.getTrades).toHaveBeenCalledWith({ asset_id: '111', after: String(1_700_000_000 - 3600) }) // an hour of slack: a wrong device clock must not hide a fill
       neverWrites(c)
     }
   })

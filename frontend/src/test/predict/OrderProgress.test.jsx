@@ -83,6 +83,18 @@ describe('OrderProgress', () => {
     expect(screen.getByText(/3 shares had matched before it ended and still settle/)).toBeInTheDocument()
   })
 
+  it('an unconfirmed order ends only when the MEMBER says they have checked: one control, and it is not a resend', () => {
+    const onDismiss = vi.fn()
+    render(<OrderProgress orders={[rec('unconfirmed', { orderId: '0xu' })]} onDismiss={onDismiss} />)
+    const buttons = screen.getAllByRole('button')
+    expect(buttons).toHaveLength(1)
+    expect(buttons[0]).toHaveTextContent('I have checked on Polymarket — stop tracking this')
+    // The sentence says NOT to send it again; no control offers to.
+    expect(screen.queryByRole('button', { name: /send|resubmit|retry|again|place/i })).toBeNull()
+    fireEvent.click(buttons[0])
+    expect(onDismiss).toHaveBeenCalledWith('0xu')
+  })
+
   it('Dismiss exists for endings only, and calls back with the id', () => {
     const onDismiss = vi.fn()
     render(<OrderProgress orders={[rec('cancelled'), rec('resting', { orderId: '0xr' })]} onDismiss={onDismiss} />)

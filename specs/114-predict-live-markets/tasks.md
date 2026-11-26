@@ -193,6 +193,16 @@ the seam they plug into is right from the start.
       refresh, PL-14 survives a reload, PL-15 a timed-out post shows unconfirmed and offers no
       resubmit. Flip `predict.order-progress`. Open the slice PR.
 
+- [ ] T036a Against a funded account, record what the venue answers for: `getOrder` on a
+      fill-and-kill order after it matched and after it was killed; `getOrder` on an id it never
+      received; whether a trade names its taker and maker order ids; what `after` means on the
+      trades read; and whether the venue's order id equals the EIP-712 hash for a passkey
+      (signature type 3) order. Until then the tracker never concludes "not delivered".
+- [ ] T036b The tracker's store is read, changed and written whole, so two tabs can overwrite
+      each other's record; and its poller picks the client shape from the login method rather
+      than the resolved signer. Neither loses funds; the first can lose an "unconfirmed" notice.
+- [ ] T036c An "Open orders" list for passkey sessions (the tracker already works for them).
+
 ## Phase 8: Slice 7 — the stream source (blocked on the feed backend)
 
 - [ ] T037 `services/relay-gateway/src/markets/{routes,upstream}.js` per

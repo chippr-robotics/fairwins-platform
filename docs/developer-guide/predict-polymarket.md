@@ -312,10 +312,20 @@ differs (sticky; then a computed id is never used for a lookup).
 name an address and refuses to sign); no cached session means `locked` — "sign in to trading" — never a prompt.
 It takes no submit function and the source is tested to contain no post call: `unconfirmed` is resolved by LOOKUP
 (`lookupOrder`: `getOrder`, then the member's trades if the order is not found) and never by sending again.
-A lookup that fails is not an event. An unconfirmed order becomes `not-delivered` only when the order was not
-found, the trades show no fill from it, that held for at least three reads over two minutes, AND `idScheme` is
-`verified`; otherwise it stays unconfirmed with instructions to check on Polymarket. An order the venue accepted
-is never concluded "not delivered" from absence.
+A lookup that fails is not an event.
+
+**The app never concludes "not delivered".** The reducer has the state, and nothing emits the event that leads
+to it. "Not found, and no trade names it" also describes an order that *filled* and that this lookup cannot see:
+whether the venue keeps a fill-and-kill order after it matched, whether its trades name the order they came from,
+and what `after` means on the trades read have not been checked against a real account. Being wrong in that
+direction tells a member an order was not placed when it was, and they place it again. So an unconfirmed order
+resolves only positively — the venue has it, or a trade names it — and otherwise stays unconfirmed, says how to
+check, and ends when the member presses "I have checked on Polymarket — stop tracking this". A first version did
+conclude it (three clean reads over two minutes on a verified id); review found it could fire for a filled order,
+because the trades window started when the post's answer *failed* rather than when the order was signed. The
+window now starts an hour before `signedAt`, a time taken before the post, so a slow failure or a wrong device
+clock does not leave the order's own fill out of the read. Turning the conclusion on is a decision for after
+those three behaviours have been seen on a funded account.
 
 **Cadence.** Tracker: only while the tab is visible and something the venue can still report is tracked; first look
 at once, then every 6 s backing off ×1.5 to 30 s while nothing changes, back to 6 s on a change; at most 8 orders a

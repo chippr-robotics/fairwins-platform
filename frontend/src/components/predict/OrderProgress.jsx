@@ -71,6 +71,12 @@ function Row({ record, onDismiss }) {
           Check on Polymarket ↗
         </a>
       )}
+      {record.state === 'unconfirmed' && onDismiss && (
+        // Nothing but the member can end an unconfirmed order: the app will not conclude it was not placed.
+        <button type="button" className="order-progress-dismiss" onClick={() => onDismiss(record.orderId)}>
+          I have checked on Polymarket — stop tracking this
+        </button>
+      )}
       {isTerminal(record.state) && onDismiss && (
         <button type="button" className="order-progress-dismiss" onClick={() => onDismiss(record.orderId)}>
           Dismiss

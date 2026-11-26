@@ -183,6 +183,18 @@ describe('negRisk — which exchange the signature is for', () => {
     expect(c.createMarketOrder).not.toHaveBeenCalled()
     expect(c.postOrder).not.toHaveBeenCalled()
   })
+
+  it('an exchange answer that is not a boolean REFUSES the order: nothing is built, signed or posted (never a guessed false)', async () => {
+    for (const answer of [undefined, null, 'false', 0]) {
+      const c = client()
+      c.getNegRisk.mockResolvedValue(answer)
+      await expect(submitMarketOrder(c, { ...ORDER, negRisk: undefined })).rejects.toThrow(/Nothing was signed/)
+      await expect(
+        submitRestingOrder(c, { tokenId: TOKEN, side: 'BUY', price: '0.57', size: '10', negRisk: undefined, tickSize: '0.01' }),
+      ).rejects.toThrow(/Nothing was signed/)
+      for (const fn of Object.values(c)) if (fn !== c.getNegRisk) expect(fn).not.toHaveBeenCalled()
+    }
+  })
 })
 
 describe('submitRestingOrder — a price the member named', () => {

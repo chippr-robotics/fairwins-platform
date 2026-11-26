@@ -284,6 +284,20 @@ export function signedOrderHash(order, negRisk) {
 }
 
 /**
+ * Which exchange contract the order is signed for: the stated flag, else the venue's own answer for this exact
+ * token. Anything that is not a boolean REFUSES the order before it is built. The SDK's lookup throws on an
+ * error answer but returns (and caches) `undefined` for an answer that simply lacks the field, and the order
+ * builder then treats that as "not neg-risk" — a guessed `false` about which contract verifies the signature.
+ */
+async function resolveNegRisk(client, tokenId, negRisk) {
+  const resolved = typeof negRisk === 'boolean' ? negRisk : await client.getNegRisk(String(tokenId))
+  if (typeof resolved !== 'boolean') {
+    throw new Error('Polymarket did not say which of its exchanges this market settles on, so the order was not built. Nothing was signed.')
+  }
+  return resolved
+}
+
+/**
  * Submit a MARKETABLE order: fill-and-kill at a price LIMIT. `limitPrice` is the worst price the member
  * accepted at review — the SDK signs it as the order's price, so the venue can never fill beyond it and
  * whatever is not filled at or inside it is cancelled, not charged. `amount` is USDC for a buy and shares
@@ -304,7 +318,7 @@ export async function submitMarketOrder(client, { tokenId, side, amount, limitPr
   // before the post. The exchange is resolved here exactly as the SDK would resolve it (a stated flag, else the
   // venue's answer for this token — a missing flag is never signed as `false`) and handed back to it, so the
   // same order is signed.
-  const resolvedNegRisk = typeof negRisk === 'boolean' ? negRisk : await client.getNegRisk(String(tokenId))
+  const resolvedNegRisk = await resolveNegRisk(client, tokenId, negRisk)
   const order = await client.createMarketOrder(
     {
       tokenID: String(tokenId),
@@ -331,7 +345,7 @@ export async function submitMarketOrder(client, { tokenId, side, amount, limitPr
  * @param {{ tokenId:string, side:'BUY'|'SELL', price:string, size:string, negRisk?:boolean, tickSize:string }} order
  */
 export async function submitRestingOrder(client, { tokenId, side, price, size, negRisk, tickSize }) {
-  const resolvedNegRisk = typeof negRisk === 'boolean' ? negRisk : await client.getNegRisk(String(tokenId))
+  const resolvedNegRisk = await resolveNegRisk(client, tokenId, negRisk)
   const order = await client.createOrder(
     { tokenID: String(tokenId), price: toSdkNumber(price), side: side === 'SELL' ? Side.SELL : Side.BUY, size: toSdkNumber(size) },
     { tickSize: String(tickSize), negRisk: resolvedNegRisk },
@@ -446,6 +460,8 @@ export function restingOrderSignedAmounts({ side, shares, limitPrice, tickSize }
   }
 }
 
+export const TRADES_SLACK_SECONDS = 3600
+
 /**
  * Look ONE order up by id with the member's own session (spec 114 slice 6). Never posts, never signs. Three
  * outcomes, because they mean three different things to the tracker:
@@ -480,7 +496,9 @@ export async function lookupOrder(client, { orderId, tokenId, side, since }) {
   // Not found as an order: did it match? The member's own trades name the order they came from.
   let trades
   try {
-    trades = await client.getTrades({ asset_id: String(tokenId), after: String(Math.max(0, Math.floor(since / 1000) - 60)) })
+    // An hour of slack before the time the order was signed: the device's clock may be wrong, and a trade left
+    // out of the window is a fill this lookup would never see.
+    trades = await client.getTrades({ asset_id: String(tokenId), after: String(Math.max(0, Math.floor(since / 1000) - TRADES_SLACK_SECONDS)) })
   } catch {
     return { kind: 'unreadable' }
   }

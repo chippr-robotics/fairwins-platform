@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { renderHook, act } from '@testing-library/react'
 import { WalletContext } from '../../contexts/WalletContext.js'
 import {
-  usePredictOrders, POLL_BASE_MS, ABSENT_READS_NEEDED, ABSENT_WINDOW_MS, NOT_DELIVERED_REASON, MAX_PER_ROUND,
+  usePredictOrders, POLL_BASE_MS, MAX_PER_ROUND,
 } from '../../hooks/usePredictOrders'
 import { newRecord, putRecord, loadStore, reduce } from '../../lib/predict/orderProgress'
 
@@ -214,36 +214,33 @@ describe('unconfirmed is resolved by lookup — and never by posting', () => {
     expect(result.current.orders[0].state).toBe('unconfirmed')
   })
 
-  it('NOT DELIVERED only after enough clean reads over a waiting window, and only once this device has seen the id scheme hold', async () => {
+  it('absence NEVER becomes "not delivered" — not with a verified id, not after an hour of clean reads: it stays unconfirmed', async () => {
+    // The dangerous direction. "Not found, and no trade names it" also describes an order that FILLED and that this
+    // lookup cannot see; telling the member it was not delivered is how they buy twice. Nothing here may conclude it.
     seed('unconfirmed')
     putRecord(ME, { ...loadStore(ME).orders[0] }, { idScheme: 'verified' })
     const { result, deps } = setup({ lookups: [{ kind: 'absent', trades: [] }] })
-    await tick(0) // read 1
-    await tick(9_000) // read 2
-    await tick(13_500) // read 3 — enough reads, 22.5 s in: the window has not elapsed
-    expect(loadStore(ME).orders[0].absentReads).toBe(ABSENT_READS_NEEDED)
+    for (let i = 0; i < 60; i++) await tick(60_000)
     expect(result.current.orders[0].state).toBe('unconfirmed')
-    await tick(ABSENT_WINDOW_MS)
-    expect(result.current.orders[0]).toMatchObject({ state: 'not-delivered', reason: NOT_DELIVERED_REASON })
+    expect(loadStore(ME).orders[0].absentReads).toBeGreaterThan(10) // it kept looking, and counted
+    expect(loadStore(ME).orders.some((r) => r.state === 'not-delivered')).toBe(false)
     noPosts(deps)
   })
 
-  it('too few reads, or too little time, is not enough: two clean reads moments apart stay unconfirmed', async () => {
-    seed('unconfirmed')
-    putRecord(ME, { ...loadStore(ME).orders[0] }, { idScheme: 'verified' })
-    const { result } = setup({ lookups: [{ kind: 'absent', trades: [] }] })
-    await tick(0)
-    await tick(POLL_BASE_MS * 1.5)
-    expect(result.current.orders[0].state).toBe('unconfirmed')
-    expect(loadStore(ME).orders[0].absentReads).toBe(2)
+  it('the hook has no path to "not-delivered" at all: its source never emits the absent event', async () => {
+    const src = (await import('../../hooks/usePredictOrders.js?raw')).default
+    expect(src).not.toMatch(/type:\s*'absent'/)
+    expect(src).not.toMatch(/'not-delivered'/)
   })
 
-  it('with the id scheme UNVERIFIED, absence never becomes "not delivered", however long it lasts: it stays unconfirmed', async () => {
-    seed('unconfirmed')
-    const { result } = setup({ lookups: [{ kind: 'absent', trades: [] }] })
-    for (let i = 0; i < 12; i++) await tick(60_000)
-    expect(loadStore(ME).idScheme).toBe('unknown')
-    expect(result.current.orders[0].state).toBe('unconfirmed')
+  it('the trades window starts from when the order was SIGNED, not from when its answer failed to arrive', async () => {
+    // A post can take minutes to fail. An order signed at T, matched at T+1s, whose answer was lost at T+100s, is
+    // recorded at T+100s — and a window starting there would leave its own fill out.
+    const signedAt = 1_000_000
+    seed('unconfirmed', { signedAt, createdAt: signedAt + 100_000 })
+    const { deps } = setup({ lookups: [{ kind: 'absent', trades: [] }] })
+    await tick(0)
+    expect(deps.lookupOrder.mock.calls[0][1].since).toBe(signedAt)
   })
 
   it('with a MISMATCHED scheme the computed id is not even looked up', async () => {

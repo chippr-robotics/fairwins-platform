@@ -110,6 +110,10 @@ matched → failed
 ```
 
 Terminal: `settled`, `rejected`, `not-delivered`, `cancelled`, `expired`, `failed`.
+As shipped, three of these are never reached: the app reads the venue and not the chain, so nothing
+emits `settled` or `failed`, and nothing emits `not-delivered` either, because "not found" cannot yet
+be told apart from "filled and no longer listed" (see the developer guide, "Order progress"). An
+`unconfirmed` order ends when the venue is found to hold it or when the member dismisses it.
 `unconfirmed` is never terminal and never rendered as a failure (FR-024). Records in a terminal
 state are pruned after 7 days.
 

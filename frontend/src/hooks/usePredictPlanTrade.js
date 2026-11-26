@@ -196,6 +196,9 @@ export function usePredictPlanTrade({
         if (!enabled) return null
       }
       let late = null
+      // Taken BEFORE the post. A post can take minutes to fail, and a time taken after it would put the order's
+      // own fill outside the window the tracker later reads trades from.
+      const signedAt = Date.now()
       const res = await trade.signAndPost((client) => send(client, reviewed), {
         beforeSign: async () => {
           const check = recheck()
@@ -222,6 +225,7 @@ export function usePredictPlanTrade({
             sizeUnit: r.kind === 'resting' || r.signed.side === 'SELL' ? 'shares' : 'USDC',
             limitPrice: r.signed.limitPrice,
             label,
+            signedAt,
           },
           res.outcomeUnknown
             ? { unconfirmed: true, reason: res.reason ?? null, posted: { computedId: res.orderHash ?? null } }

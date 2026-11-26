@@ -143,7 +143,8 @@ describe('the market-data budget (≤ 10 keys on an event page, in total)', () =
     renderAt(`/wallet?tab=predict&event=${SLUG}`)
     await screen.findByRole('heading', { level: 2, name: 'Fed Decision in December?' })
     expect(feed.held.size).toBe(9) // eight rows' Yes tokens + the first row's No
-    fireEvent.click(screen.getByRole('button', { name: 'Sell' }))
+    // Positions arrive on their own read, after the page's heading: wait for the control rather than assume it.
+    fireEvent.click(await screen.findByRole('button', { name: 'Sell' }))
     expect(feed.max).toBeLessThanOrEqual(10)
     expect([...feed.held.keys()]).toEqual(['polymarket:pos1'])
     // Closing the ticket resumes the page's own readings.

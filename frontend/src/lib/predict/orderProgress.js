@@ -161,7 +161,7 @@ export function reduce(record, event, now = Date.now()) {
 }
 
 /** A record for an order that has just been signed. `orderId` may be null: the venue's answer never carried one. */
-export function newRecord({ orderId, tokenId, side, kind, size, sizeUnit, limitPrice, label = null, idKnown = true }, now = Date.now()) {
+export function newRecord({ orderId, tokenId, side, kind, size, sizeUnit, limitPrice, label = null, idKnown = true, signedAt = null }, now = Date.now()) {
   const id = orderId ?? `unsent-${now}-${Math.random().toString(16).slice(2, 10)}`
   return {
     orderId: id,
@@ -178,6 +178,8 @@ export function newRecord({ orderId, tokenId, side, kind, size, sizeUnit, limitP
     settledSize: null,
     averageFillPrice: null, // the venue's order record carries no average; shown only if a source provides one
     createdAt: now,
+    // When the order was signed, taken before the post (createdAt is when the answer arrived, or failed to).
+    signedAt: Number.isFinite(signedAt) ? Math.min(signedAt, now) : now,
     updatedAt: now,
     reason: null,
     absentSince: null,
@@ -204,8 +206,7 @@ const EMPTY = { v: 1, orders: [], idScheme: 'unknown' }
 /**
  * `idScheme` records whether the order id we compute before posting has ever been seen to equal the id the venue
  * answered with: 'unknown' (no successful post yet), 'verified' (equal at least once), 'mismatch' (differed —
- * lookups by the computed id are then meaningless). It is what lets an unconfirmed order be called
- * not-delivered only when "not found" actually means something.
+ * lookups by the computed id are then meaningless, and are not made).
  */
 export function loadStore(account, now = Date.now()) {
   if (!account) return { ...EMPTY }

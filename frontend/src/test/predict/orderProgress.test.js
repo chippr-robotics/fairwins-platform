@@ -201,7 +201,7 @@ describe('the device store', () => {
     const raw = Object.entries(localStorage).find(([k]) => k.endsWith(STORE_KEY))[1]
     expect(raw).not.toMatch(/signature|secret|passphrase|apiKey|0xsig/i)
     expect(Object.keys(JSON.parse(raw).orders[0]).sort()).toEqual(
-      ['absentReads', 'absentSince', 'averageFillPrice', 'createdAt', 'filledSize', 'idKnown', 'kind', 'label', 'limitPrice', 'orderId', 'reason', 'settledSize', 'side', 'size', 'sizeUnit', 'state', 'tokenId', 'updatedAt'],
+      ['absentReads', 'absentSince', 'averageFillPrice', 'createdAt', 'filledSize', 'idKnown', 'kind', 'label', 'limitPrice', 'orderId', 'reason', 'settledSize', 'side', 'signedAt', 'size', 'sizeUnit', 'state', 'tokenId', 'updatedAt'],
     )
   })
 
