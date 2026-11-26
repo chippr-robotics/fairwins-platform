@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useLocation, useNavigate, useSearchParams } from 'react-router-dom'
 import EmptyState from '../account/EmptyState'
 import { usePredictEvents } from '../../hooks/usePredictEvents'
+import { useAddressText } from '../../hooks/useAddressText'
 import { usePredictDiscover } from '../../hooks/usePredictDiscover'
 import { classify } from '../../lib/markets/priceReading'
 import { ageMs, monotonicNow } from '../../lib/markets/serverClock'
@@ -149,11 +150,9 @@ function PredictList({ params, update, openRow, openEvent }) {
   const category = !live && !topic && isCategoryId(urlCat) ? urlCat : ''
   const sort = isSortId(urlSort) ? urlSort : DEFAULT_SORT
 
-  const [text, setText] = useState(urlQ)
-  useEffect(() => {
-    // Back/forward or an external link changed the address: follow it.
-    setText((t) => (t === urlQ ? t : urlQ))
-  }, [urlQ])
+  // The field follows the address when it changes from outside (Back, a shared link) and never
+  // lets its own older writes overwrite newer typing — see useAddressText for the race.
+  const [text, writeText] = useAddressText(urlQ)
 
   const searching = text.trim() !== ''
   const { status, events, hasMore, loadMore, loadingMore, stale, stamp, directions, legacy, retry } = usePredictEvents({
@@ -166,15 +165,16 @@ function PredictList({ params, update, openRow, openEvent }) {
   const discover = usePredictDiscover()
 
   const onSearch = (value) => {
-    setText(value)
-    update({ q: value.trim() === '' ? '' : value }, { replace: true })
+    const q = value.trim() === '' ? '' : value
+    writeText(value, q)
+    update({ q }, { replace: true })
   }
   const onCategory = (id) => update({ cat: id, topic: '', live: '' })
   const onTopic = (slug) => update({ topic: topic === slug ? '' : slug, cat: '', live: '' })
   const onLive = () => update({ live: live ? '' : '1', cat: '', topic: '' })
   const onSort = (id) => update({ sort: id === DEFAULT_SORT ? '' : id })
   const clearFilters = () => {
-    setText('')
+    writeText('', '')
     update({ q: '', cat: '', topic: '', live: '' })
   }
 
