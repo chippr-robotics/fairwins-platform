@@ -3583,23 +3583,31 @@
         {
           "id": "predict.game-scoreboard",
           "name": "A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
+          "tests": [
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-01",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-02",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-03",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-04",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-05",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-06"
+          ],
           "issue": "#1756"
         },
         {
           "id": "predict.game-field-and-plays",
           "name": "A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
+          "tests": [
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-01",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-03"
+          ],
           "issue": "#1756"
         },
         {

@@ -161,8 +161,14 @@ unavailable, no fight view is drawn and a sentence says so.
   clock, and MUST mark scoring plays in text.
 - **FR-007**: Each source MUST fail independently. A source that cannot be read is named in a
   sentence, the fields it would have supplied are absent, and no absent field is drawn as zero.
-- **FR-008**: Where the sources disagree about the score, the venue's MUST be shown and the play
-  detail MUST be marked as possibly behind.
+- **FR-008** *(amended 2026-11-27 on measurement — see research.md R1)*: Where a play source is
+  read for the game, the score, period, clock and status shown MUST be that source's, and where the
+  venue's own game feed says something different the page MUST say so in words and show what the
+  venue's feed says and when it last changed. Where no play source is read, the venue's feed is
+  shown and MUST NOT be drawn as live. *Originally: "the venue's MUST be shown and the play detail
+  MUST be marked as possibly behind." Measured through an NFL game, the venue's feed moved on
+  whole-minute ticks a median 34 s and up to 203 s BEHIND the play source, and never ahead — so
+  the original rule put the older score on top and described the newer detail as the late one.*
 - **FR-009**: Everything a graphic conveys MUST also be available as text, and no state may be
   carried by colour alone.
 - **FR-010**: The game view MUST NOT supply, change or gate any figure or control of an order

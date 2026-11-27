@@ -37,6 +37,7 @@ import {
 } from '../../lib/predict/eventPage'
 import TrustChip from './TrustChip'
 import DepthLadder from './DepthLadder'
+import GameView from './game/GameView'
 import './EventPage.css'
 
 const PriceHistoryChart = lazy(() => import('./PriceHistoryChart'))
@@ -215,6 +216,10 @@ export default function EventPage({ slug, onBack, onOpenRow, onOpenTicket, pause
           </p>
         )}
       </header>
+
+      {/* Spec 115: information beside the market, never an input to it. Renders nothing for an event with no
+          game, and nothing at all when the gateway's sports module is off (FR-013). */}
+      {event.game && <GameView game={event.game} listingStamp={stamp} />}
 
       <section className="event-page-section" aria-labelledby="event-page-outcomes">
         <h3 id="event-page-outcomes">Outcomes</h3>

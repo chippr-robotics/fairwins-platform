@@ -119,6 +119,19 @@
  *   NEWS_BASE_URL              Alphaday API host (keyless — no credential exists for this module)
  *   NEWS_CACHE_TTL_MS          per-slug cache TTL, clamped >= 300000 (the vendor's own cache floor)
  *   NEWS_TIMEOUT_MS / NEWS_RETRIES / NEWS_QUOTA_* / NEWS_KILLSWITCH   read plumbing (perps defaults)
+ *   SPORTS_ENABLED             'true' enables the /v1/sports/* live game proxy (spec 115; default false).
+ *                              Off => every route answers 503 sports_unconfigured. KEYLESS: both sources are
+ *                              public, neither is under a service agreement, so there is no credential here.
+ *   SPORTS_PLAYS_ENABLED       the ESPN plays source (situation + plays + score cross-check). Default true
+ *                              WHEN the module is on; 'false' => detail.state "off", nothing is fetched from ESPN.
+ *   SPORTS_KILLSWITCH          'true' => /v1/sports/* answers 503 sports_paused (ops kill)
+ *   SPORTS_VENUE_WS_URL        the venue's sports WebSocket (ws/wss; default wss://sports-api.polymarket.com/ws)
+ *   SPORTS_ESPN_BASE_URL       ESPN site API root (default https://site.api.espn.com/apis/site/v2/sports)
+ *   SPORTS_TIMEOUT_MS          per-request upstream deadline (default 6000)
+ *   SPORTS_SCOREBOARD_TTL_MS   ESPN scoreboard cache, clamped >= 10000 (default 10000)
+ *   SPORTS_SUMMARY_TTL_MS      ESPN game-summary cache, clamped >= 5000 (default 5000)
+ *   SPORTS_IDLE_CLOSE_MS       close the venue socket after this long with no request (default 300000)
+ *   SPORTS_QUOTA_PER_IP/_GLOBAL/_WINDOW_MS   read quotas (defaults 120/600/60000)
  *   PERPS_GAINS_REFERRER       PUBLIC attribution: FairWins gains referrer address
  *   PERPS_GMX_REF_CODE         PUBLIC attribution: GMX referral code (1-20 [A-Za-z0-9_])
  *   PERPS_HL_BUILDER_ADDRESS   PUBLIC attribution: FairWins Hyperliquid builder wallet
@@ -920,6 +933,48 @@ export function loadConfig(env = process.env, opts = {}) {
         quotaGlobal: int(env, 'NEWS_QUOTA_GLOBAL', 300),
         quotaWindowMs: int(env, 'NEWS_QUOTA_WINDOW_MS', 60_000),
         killSwitch: opt(env, 'NEWS_KILLSWITCH', 'false').toLowerCase() === 'true',
+      }
+    })(),
+    // Live game views (spec 115) — the fifth read-only proxy, on the news template. Keyless by design:
+    // the venue's sports feed and ESPN's site API are public and neither comes with a service
+    // agreement, so there is nothing for the secrets registry to hold and no payee/fee anywhere.
+    // The TTL floors are the upstream-load promise (FR-015): upstream calls are a function of games
+    // being viewed, never of members, and a lower value buys load, not freshness.
+    sports: (() => {
+      const enabled = opt(env, 'SPORTS_ENABLED', 'false').toLowerCase() === 'true'
+      const venueWsUrl = opt(env, 'SPORTS_VENUE_WS_URL', 'wss://sports-api.polymarket.com/ws')
+      const espnBaseUrl = opt(env, 'SPORTS_ESPN_BASE_URL', 'https://site.api.espn.com/apis/site/v2/sports')
+      if (enabled) {
+        const protoOk = (u, allowed) => {
+          try {
+            return allowed.includes(new URL(u).protocol)
+          } catch {
+            return false
+          }
+        }
+        // ws:/http: are admitted for fixture servers in tests; production config is wss:/https:.
+        if (!protoOk(venueWsUrl, ['wss:', 'ws:'])) throw new Error(`[relay-gateway] SPORTS_VENUE_WS_URL=${venueWsUrl} is not a valid ws(s) URL`)
+        if (!protoOk(espnBaseUrl, ['https:', 'http:'])) throw new Error(`[relay-gateway] SPORTS_ESPN_BASE_URL=${espnBaseUrl} is not a valid URL`)
+      }
+      const SCOREBOARD_FLOOR_MS = 10_000
+      const SUMMARY_FLOOR_MS = 5_000
+      const rawSb = int(env, 'SPORTS_SCOREBOARD_TTL_MS', SCOREBOARD_FLOOR_MS)
+      const rawSum = int(env, 'SPORTS_SUMMARY_TTL_MS', SUMMARY_FLOOR_MS)
+      if (rawSb < SCOREBOARD_FLOOR_MS) console.warn(`[relay-gateway] SPORTS_SCOREBOARD_TTL_MS=${rawSb} is below the 10s floor; clamped`)
+      if (rawSum < SUMMARY_FLOOR_MS) console.warn(`[relay-gateway] SPORTS_SUMMARY_TTL_MS=${rawSum} is below the 5s floor; clamped`)
+      return {
+        enabled,
+        playsEnabled: opt(env, 'SPORTS_PLAYS_ENABLED', 'true').toLowerCase() !== 'false',
+        venueWsUrl,
+        espnBaseUrl,
+        timeoutMs: int(env, 'SPORTS_TIMEOUT_MS', 6000),
+        scoreboardTtlMs: Math.max(rawSb, SCOREBOARD_FLOOR_MS),
+        summaryTtlMs: Math.max(rawSum, SUMMARY_FLOOR_MS),
+        idleCloseMs: int(env, 'SPORTS_IDLE_CLOSE_MS', 300_000),
+        quotaPerIp: int(env, 'SPORTS_QUOTA_PER_IP', 120),
+        quotaGlobal: int(env, 'SPORTS_QUOTA_GLOBAL', 600),
+        quotaWindowMs: int(env, 'SPORTS_QUOTA_WINDOW_MS', 60_000),
+        killSwitch: opt(env, 'SPORTS_KILLSWITCH', 'false').toLowerCase() === 'true',
       }
     })(),
     // Member API (spec 095): member-signed capability tokens granting custody-free, scoped access to

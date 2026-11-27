@@ -1787,6 +1787,138 @@
           }
         },
         {
+          "uid": "finops-stale-espn-sports-api",
+          "title": "FinOps source stale: ESPN sports API",
+          "condition": "C",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "for": "15m",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "__PROM_DATASOURCE_UID__",
+              "model": {
+                "refId": "A",
+                "expr": "fairwins_finops_source_configured{source=\"espn-sports-api\"} * on(source) (1 - fairwins_finops_source_up{source=\"espn-sports-api\"})",
+                "instant": true,
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "__PROM_DATASOURCE_UID__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "reducer": {
+                      "type": "last"
+                    }
+                  }
+                ],
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            }
+          ],
+          "labels": {
+            "severity": "warning",
+            "team": "finops",
+            "source": "espn-sports-api"
+          },
+          "annotations": {
+            "summary": "ESPN sports API is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#sports-sources-cost",
+            "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: ESPN sports API."
+          }
+        },
+        {
+          "uid": "finops-stale-polymarket-sports-feed",
+          "title": "FinOps source stale: Polymarket sports feed",
+          "condition": "C",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "for": "15m",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "__PROM_DATASOURCE_UID__",
+              "model": {
+                "refId": "A",
+                "expr": "fairwins_finops_source_configured{source=\"polymarket-sports-feed\"} * on(source) (1 - fairwins_finops_source_up{source=\"polymarket-sports-feed\"})",
+                "instant": true,
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "__PROM_DATASOURCE_UID__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "reducer": {
+                      "type": "last"
+                    }
+                  }
+                ],
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            }
+          ],
+          "labels": {
+            "severity": "warning",
+            "team": "finops",
+            "source": "polymarket-sports-feed"
+          },
+          "annotations": {
+            "summary": "Polymarket sports feed is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#sports-sources-cost",
+            "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: Polymarket sports feed."
+          }
+        },
+        {
           "uid": "finops-stale-gateway-upstream-usage",
           "title": "FinOps source stale: Gateway upstream usage",
           "condition": "C",

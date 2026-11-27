@@ -351,6 +351,69 @@ export function normalizeLive(raw) {
   }
 }
 
+const GAME_LEAGUE_RE = /^[a-z0-9][a-z0-9 .&-]{0,31}$/
+const TEAM_CODE_RE = /^[A-Za-z0-9.&-]{1,12}$/
+const GAME_START_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:?\d{2})$/
+
+function gameTeam(t) {
+  if (!t || typeof t !== 'object') return null
+  const codeRaw = typeof t.abbreviation === 'string' ? t.abbreviation.trim() : ''
+  return {
+    name: plainText(t.alias, 60) ?? plainText(t.name, 60),
+    code: TEAM_CODE_RE.test(codeRaw) ? codeRaw.toUpperCase() : null,
+  }
+}
+
+/**
+ * What the listing itself says about the game (`game.listed`): the venue's own text, unparsed, as old as the
+ * listing. Each field null when absent or blank; the whole object null when it gave none. `status` is only
+ * ever a word the listing's two booleans state (`ended`, or `live` and not ended) — nothing is inferred from
+ * a period label such as "NS".
+ */
+function normalizeListed(raw) {
+  const status = raw?.ended === true ? 'ended' : raw?.live === true ? 'in-progress' : null
+  const t = (v, max) => (typeof v === 'string' ? (plainText(v, max)?.trim() || null) : null)
+  const listed = { status, scoreText: t(raw?.score, 40), period: t(raw?.period, 20), clock: t(raw?.elapsed, 20) }
+  return Object.values(listed).every((v) => v == null) ? null : listed
+}
+
+/**
+ * The game an event names (spec 115 contract: gateway-sports-api.md), or null. A futures market
+ * has no `gameId`, so it gets null and the page shows no game view.
+ *
+ * HOME/AWAY IS STATED ONLY WHEN THE VENUE STATES IT: each team carries `ordering: "home"|"away"`,
+ * and the sides are named only when the two teams carry exactly one of each. Anything else
+ * (missing, both "home", one team) falls back to `teams: [...]` in the venue's order and no surface
+ * says "home" or "away" — a guessed side would put the wrong score under the wrong name.
+ * Team text is plain text; the listing's logo URLs and colours are not forwarded.
+ */
+export function normalizeGame(raw) {
+  const idRaw = raw?.gameId
+  const gameId =
+    typeof idRaw === 'number' ? idRaw : typeof idRaw === 'string' && /^\d{1,12}$/.test(idRaw) ? Number(idRaw) : NaN
+  if (!Number.isSafeInteger(gameId) || gameId <= 0) return null
+  const rawTeams = Array.isArray(raw.teams) ? raw.teams.slice(0, 2) : []
+  const teams = rawTeams.map(gameTeam).filter(Boolean)
+  const leagueRaw = [raw.sport?.sport, rawTeams[0]?.league].find((v) => typeof v === 'string' && v.trim() !== '')
+  const league = leagueRaw && GAME_LEAGUE_RE.test(leagueRaw.trim().toLowerCase()) ? leagueRaw.trim().toLowerCase() : null
+  const game = {
+    gameId,
+    league,
+    startTime: typeof raw.startTime === 'string' && GAME_START_RE.test(raw.startTime) ? raw.startTime : null,
+    listed: normalizeListed(raw),
+  }
+  const orderings = rawTeams.map((t) => t?.ordering)
+  const sided =
+    rawTeams.length === 2 &&
+    teams.length === 2 &&
+    ((orderings[0] === 'home' && orderings[1] === 'away') || (orderings[0] === 'away' && orderings[1] === 'home'))
+  if (sided) {
+    const homeIdx = orderings[0] === 'home' ? 0 : 1
+    return { ...game, home: teams[homeIdx], away: teams[1 - homeIdx] }
+  }
+  return { ...game, teams }
+}
+
 const isResolved = (raw) => raw?.closed === true && raw?.umaResolutionStatus === 'resolved'
 
 /**
@@ -439,6 +502,7 @@ export function normalizeEvent(raw, { detail = false } = {}) {
     mutuallyExclusive: Boolean(raw.negRisk),
     marketCount: rows.length,
     live: normalizeLive(raw),
+    game: normalizeGame(raw),
   }
   if (!detail) {
     const ranked = rows

@@ -1,0 +1,124 @@
+{
+  "events": [
+    {
+      "id": "401873080",
+      "date": "2026-11-26T21:30Z",
+      "shortName": "PHI @ DAL",
+      "competitions": [
+        {
+          "status": {
+            "period": 3,
+            "displayClock": "9:44",
+            "type": {
+              "state": "in",
+              "shortDetail": "9:44 - 3rd",
+              "name": "STATUS_IN_PROGRESS",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "28",
+              "team": {
+                "id": "6",
+                "abbreviation": "DAL"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "10",
+              "team": {
+                "id": "21",
+                "abbreviation": "PHI"
+              }
+            }
+          ],
+          "situation": {
+            "down": 2,
+            "yardLine": 75,
+            "distance": 6,
+            "downDistanceText": "2nd & 6 at PHI 25",
+            "possessionText": "PHI 25",
+            "isRedZone": false,
+            "possession": "21"
+          }
+        }
+      ]
+    },
+    {
+      "id": "401873081",
+      "date": "2026-11-26T18:00Z",
+      "shortName": "CHI @ DET",
+      "competitions": [
+        {
+          "status": {
+            "period": 4,
+            "displayClock": "0:00",
+            "type": {
+              "state": "post",
+              "shortDetail": "Final",
+              "name": "STATUS_FINAL",
+              "completed": true
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "35",
+              "team": {
+                "id": "8",
+                "abbreviation": "DET"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "39",
+              "team": {
+                "id": "3",
+                "abbreviation": "CHI"
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "401873082",
+      "date": "2026-11-27T01:20Z",
+      "shortName": "KC @ BUF",
+      "competitions": [
+        {
+          "status": {
+            "period": 0,
+            "displayClock": "0:00",
+            "type": {
+              "state": "pre",
+              "shortDetail": "11/26 - 8:20 PM EST",
+              "name": "STATUS_SCHEDULED",
+              "completed": false
+            }
+          },
+          "competitors": [
+            {
+              "homeAway": "home",
+              "score": "0",
+              "team": {
+                "id": "2",
+                "abbreviation": "BUF"
+              }
+            },
+            {
+              "homeAway": "away",
+              "score": "0",
+              "team": {
+                "id": "12",
+                "abbreviation": "KC"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
