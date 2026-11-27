@@ -1919,6 +1919,72 @@
           }
         },
         {
+          "uid": "finops-stale-ufc-fight-data",
+          "title": "FinOps source stale: UFC fight data",
+          "condition": "C",
+          "noDataState": "Alerting",
+          "execErrState": "Alerting",
+          "for": "15m",
+          "data": [
+            {
+              "refId": "A",
+              "relativeTimeRange": {
+                "from": 600,
+                "to": 0
+              },
+              "datasourceUid": "__PROM_DATASOURCE_UID__",
+              "model": {
+                "refId": "A",
+                "expr": "fairwins_finops_source_configured{source=\"ufc-fight-data\"} * on(source) (1 - fairwins_finops_source_up{source=\"ufc-fight-data\"})",
+                "instant": true,
+                "datasource": {
+                  "type": "prometheus",
+                  "uid": "__PROM_DATASOURCE_UID__"
+                }
+              }
+            },
+            {
+              "refId": "C",
+              "datasourceUid": "__expr__",
+              "model": {
+                "refId": "C",
+                "type": "threshold",
+                "expression": "A",
+                "conditions": [
+                  {
+                    "evaluator": {
+                      "type": "gt",
+                      "params": [
+                        0
+                      ]
+                    },
+                    "operator": {
+                      "type": "and"
+                    },
+                    "reducer": {
+                      "type": "last"
+                    }
+                  }
+                ],
+                "datasource": {
+                  "type": "__expr__",
+                  "uid": "__expr__"
+                }
+              }
+            }
+          ],
+          "labels": {
+            "severity": "warning",
+            "team": "finops",
+            "source": "ufc-fight-data"
+          },
+          "annotations": {
+            "summary": "UFC fight data is configured but could not be read for 15m. Its panels show no data; any total including it is PARTIAL. An unread source is not a zero. (A source that is merely not-configured does NOT reach this alert.)",
+            "runbook_url": "https://github.com/chippr-robotics/fairwins-platform/blob/main/docs/runbooks/finops-operations.md#sports-sources-cost",
+            "description": "Observed: {{ $values.A }}. Rule: FinOps source stale: UFC fight data."
+          }
+        },
+        {
           "uid": "finops-stale-gateway-upstream-usage",
           "title": "FinOps source stale: Gateway upstream usage",
           "condition": "C",

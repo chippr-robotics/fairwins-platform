@@ -349,7 +349,8 @@ cost panels, and the one that says where the QuickNode account's shared 50 req/s
 
 ### sports-sources-cost
 
-Two sources, one note: `espn-sports-api` (ESPN's public site API, plays/situation/scoreboard) and
+Three sources, one note (the third, `ufc-fight-data`, is UFC's own live JSON behind the fight view, `SPORTS_FIGHT_ENABLED`,
+switched off until a live card has been observed; same keyless $0-by-plan reasoning, `FINOPS_UFC_PLAN_USD`): `espn-sports-api` (ESPN's public site API, plays/situation/scoreboard) and
 `polymarket-sports-feed` (the venue's public sports WebSocket, scores and clock), both read by the
 relay-gateway live game module (spec 115, `SPORTS_ENABLED`).
 
@@ -363,7 +364,7 @@ refuse or reshape without notice, which is why each fails alone, is named in the
 its own off-switch (`SPORTS_PLAYS_ENABLED` for ESPN; `SPORTS_ENABLED`/`SPORTS_KILLSWITCH` for the module).
 
 **Every source that reuses the flat-subscription modeller must appear in `flatSubscriptions`** in
-`services/finops-exporter/src/config/index.js` — both do. Gateway request volume appears in
+`services/finops-exporter/src/config/index.js` — all three do. Gateway request volume appears in
 `gateway-upstream-usage` under the `sports` upstream label (bounded: it comes from the route table).
 Upstream traffic itself (ESPN calls, the one socket) is a function of games being viewed, not of members.
 

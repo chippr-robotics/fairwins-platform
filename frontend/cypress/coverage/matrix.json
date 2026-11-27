@@ -3613,12 +3613,16 @@
         {
           "id": "predict.fight-view",
           "name": "A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero",
-          "status": "absent",
-          "tier": "none",
-          "proposedTier": "no-chain",
-          "depth": "none",
+          "status": "covered",
+          "tier": "no-chain",
+          "depth": "flow",
           "risk": "information",
-          "tests": [],
+          "tests": [
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-07",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-08",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-09",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-10"
+          ],
           "issue": "#1756"
         }
       ]

@@ -593,6 +593,28 @@ const vendors = [
       'distinct from the venue\'s trading API the Predict surface already uses.',
   },
   {
+    id: 'ufc-fight-data',
+    kind: 'cost',
+    status: 'live',
+    label: 'UFC fight data',
+    metric: 'fairwins_finops_cost_usd_total',
+    unit: 'USD',
+    basis: 'modelled',
+    collector: 'flatSubscription', // keyless public JSON, no billing API — the declared plan IS the model
+    interval: VENDOR,
+    credential: null,
+    docs: 'finops-operations.md#sports-sources-cost',
+    meaning:
+      'The per-round figures and official result source behind the relay-gateway FIGHT view (spec 115 slice 3): ' +
+      'UFC\'s own public live JSON (event cards and per-fight round figures), read by the gateway only for fights ' +
+      'being viewed (final fights and cards are read once and kept; a bounded id probe finds new cards, because the ' +
+      'source has no index). Keyless and on NO service agreement: $0 by declared plan rate, catalogued so the ' +
+      'dependency is VISIBLE — if the source prices, restricts or reshapes the API, this line is where it lands. The ' +
+      'fight view itself ships switched off (SPORTS_FIGHT_ENABLED) until a live card has been observed; the entry is ' +
+      'live because the code path exists and its source is read when the switch is on. No revenue entry pairs with it ' +
+      '(no fee, no payee env). Gateway request volume shows in gateway-upstream-usage under the sports upstream label.',
+  },
+  {
     id: 'gateway-upstream-usage',
     kind: 'usage',
     status: 'live',

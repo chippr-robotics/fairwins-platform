@@ -1,0 +1,36 @@
+{
+ "id": "1386144",
+ "slug": "ufc-diy-ali8-2026-11-21",
+ "title": "UFC Fight Night: Diyar Nurgozhay vs. Alik Lorenz (Light Heavyweight, Prelims)",
+ "startTime": "2026-11-21T15:00:00Z",
+ "eventDate": "2026-11-21",
+ "gameId": 10924,
+ "score": "1-0|KO/TKO",
+ "elapsed": "00:24",
+ "period": "FT",
+ "live": false,
+ "ended": true,
+ "active": true,
+ "closed": true,
+ "sport": {
+  "sport": "ufc",
+  "ordering": "home"
+ },
+ "teams": [
+  {
+   "name": "Diyar Nurgozhay",
+   "league": "ufc",
+   "abbreviation": "diy",
+   "ordering": "home",
+   "record": "13-2-0"
+  },
+  {
+   "name": "Alik Lorenz",
+   "league": "ufc",
+   "abbreviation": "ali8",
+   "ordering": "away",
+   "record": "8-3-0"
+  }
+ ],
+ "markets": []
+}

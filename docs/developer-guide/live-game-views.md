@@ -72,11 +72,27 @@ Outcomes only when the event row carries `game`.
 Capture harness: `node scripts/ui/capture-predict-game.mjs` (13 states, both themes, 390 and 1280 wide).
 E2E: `frontend/cypress/e2e/fast/53-predict-game-view.cy.js` (PG-01…PG-06).
 
+## The fight screen (slice 3, off)
+
+`FightView` replaces the scoreboard for a `game` whose league is in `FIGHT_LEAGUES` (`ufc`), and renders
+nothing when the fight route is absent. `fightFeed.js` and `gameFeed.js` share `sportsRead.js` but each has
+its own reader, so one module being off is never remembered as the other being off.
+
+- Fighters by name only: no corners, photos or flags.
+- Figures are real tables (caption, row and column headers), one per round plus the source's own whole-fight
+  table when it gave one. "12 of 30" for landed of attempted; a dash with the accessible text "not reported"
+  for an absent figure; a reported 0 stays 0. Nothing is summed, compared or highlighted.
+- The result is in words: win (name, method, round, time), draw, no contest, or — attributed to the venue's
+  feed — cancelled. Judges' scores are shown as given, with no sum.
+- A finished fight inside its source's bounds reads "Up to date"; a source that is never live reads "Delayed"
+  only while the fight is running.
+
 ## Not built, not seen
 
-- The fight view (slice 3) and its off-switch.
+- **Nothing about a live fight has been observed.** Round, clock and figures mid-fight, and the venue's live
+  frame for a fight, are untested until the 2026-12-05 card (research R3). The fight route stays off until then.
+- An open fight listing at the venue (every fight event found was closed).
 - Any league other than NFL against the play source. Overtime, a red-zone situation, a rematch inside one
   week, and how long a finished game stays on the play source's scoreboard were not observed.
 - The dead-connection watchdog has run only against a fake socket; every real drop seen was a clean close.
 - Everything measured comes from one evening and one viewer. Nothing here has been load-tested.
-

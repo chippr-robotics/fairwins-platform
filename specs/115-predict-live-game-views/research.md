@@ -113,3 +113,78 @@ non-NFL league's codes. Anything short of exactly one match is `not-matched`.
 - ESPN's rate limits and terms — it is public and keyless with no service agreement; nothing here asserts it will stay so.
 - The venue first-connection UFC burst (replay vs one-off).
 - Stability across days: everything is one evening.
+
+## Slice 3 — fights (2026-11-27; completed cards only)
+
+**R3 is OPEN: nothing about a LIVE fight has been observed** (no live UFC frame, no in-progress ESPN competition, UFC's
+`LiveFightId`/`LiveRoundNumber`/`LiveRoundElapsedTime` null on every card read). The next chance is the 2026-12-05 card.
+
+### R3a — the three sources, from real payloads
+
+- **Venue.** 531 `ufc` frames, all `ended: true`: `Final` / `FT` with `score: "<home wins>-<away wins>|<method>"`
+  (`0-1|KO/TKO`; 421 of 421 matched against UFC's winner with home first), `Canceled` / `CAN` (88, no score), and a few
+  `Final` with `0-0` (draws) or no score at all. `elapsed` is the ENDING time (`02:08`), never a round; there is no round field.
+  Names are the fighters' (`"Alatengheili "` carries a trailing space; `Uroš` keeps its diacritic).
+- **ESPN** `…/mma/ufc/scoreboard`: one `competitions[i]` per fight with `status.period` (= round), `displayClock`,
+  `type.state`/`completed`, `format.regulation.periods`, `type.abbreviation` (weight class), `competitors[].athlete.displayName`
+  and `winner`. `?dates=YYYYMMDD` and a `YYYYMMDD-YYYYMMDD` range both return past cards (no param = the next card).
+  A scheduled fight prints period 0, clock `-`; a draw, a no contest and an unfought fight are ALL `winner: false/false`.
+  130 competitions across 7 cards were all `STATUS_FINAL`/`completed: true`.
+- **UFC** `…/api/v3/event/live/{id}.json` (card: fighters, `Outcome` Win/Loss/Draw/No Contest, `Result` Method/EndingRound/
+  EndingTime/FightScores per judge, `RuleSet.PossibleRounds`) and `…/fight/live/{id}.json` (`FightStats` + `RoundStats` per
+  fighter per round, 66 keys each). Methods seen in 1,227 fights over 113 cards (40 of them upcoming, no result): KO/TKO 444, Decision-Unanimous 437,
+  Submission 202, Decision-Split 78, Decision-Majority 12, TKO-Doctor's Stoppage 7, Could Not Continue 4, Overturned 2, DQ 1.
+  **Draw/Draw: 9. No Contest/No Contest: 6** (methods `Could Not Continue`, `Overturned`, and `KO/TKO`). **Cancelled: none** —
+  a cancelled bout simply leaves the card, so a cancellation is visible only as the venue's `Canceled`, and UFC and ESPN
+  contradict it for a fight that did happen (Nunes v Harrison, UFC 334: venue `Canceled`, UFC `Submission` R4 1:29). Judges
+  exist only for decisions (and the Overturned NC); a KO/submission has none.
+- **Missing event ids answer `200 {"LiveEventDetail":{}}`** (not 404) for every id beyond the last, so "found" must be tested on
+  the body. Ids are near date order only: 1345 = 2026-11-14, 1348 = 11-21, 1349 = 12-12 (upcoming), 1352 = 12-05 (the next card),
+  1355 = 2027-02-13; 1356 and up are empty (probed to 99999).
+- **Fight-view figure keys.** `FightStats`/`RoundStats` carry 66 per-fighter fields; the fixed list of ours is 16
+  (`ufc.js#FIGURE_KEYS` + `controlSeconds`). `TakedownsAccuracy` is null on fights with no takedown attempt and is not forwarded.
+
+### R3b — who leads status/round/clock, and why
+
+On **eight completed cards, 105 fights**, ESPN and UFC agreed on the ending round, ending clock and winner in **105 of 105**
+(and on "finished" in 105 of 105), so completed data cannot rank them. ESPN leads because: one cached read answers the whole card
+(UFC needs an event read per card plus a fight read per fight), `completed` is explicit, and it is the transport that was measured
+on football. UFC leads the RESULT and FIGURES because method, judges and draw/no-contest exist nowhere else. If ESPN is down the row
+falls back to UFC's `Final`/`Upcoming` only (never its live fields: they have never been seen non-null). The venue is last and never live.
+
+### R4 — matching across the three sources (names, normalised; exactly one or not-matched)
+
+- **UFC ↔ ESPN, 8 completed cards, 105 fights: 105 matched (100 %)**, including `Uroš Medić`/`Uros Medic` and `Ode' Osbourne`/
+  `Ode Osbourne`. Cards: 1343, 1345, 1348, 1332, 1339 (Oct–Nov 2026), 1297 (2026-02-21), 1293 (2025-12-06), 1259 (2025-06-14).
+- **Venue frames ↔ UFC fight, all 531 frames vs 113 cards (ids 1240–1352): 434 matched exactly one, 5 ambiguous, 92 none.**
+  The 92: 78 are `Canceled` frames (no such fight on any card, as above) and 14 `Final` frames whose pair is on no card read
+  (older than the ids probed, or a bout UFC never carded). The 5 ambiguous are rematches on two cards (e.g. Dvalishvili v Yan,
+  cards 1293 and 1336; Volkanovski v Lopes, 1251 and 1295): **a venue frame carries no date, so a rematch with no claim `start` is
+  `not-matched` (`ambiguous`)** — which is why the candidate window exists.
+- **All three sources on the same fight, 8 cards / 105 fights: 48 (46 %).** Every miss is on the venue side: **no frame for that
+  pair in the capture** (cards 1343/1345/1348/1332/1339: 3/6/4/7/5 missing; the two 2025 cards 11–13 missing). Whether the venue
+  never listed those bouts, listed and dropped them, or the capture simply began after their frames is **not determined**.
+  ESPN↔UFC misses: none.
+
+### R5 — UFC event discovery without an index: worst case
+
+Probe up from a configured anchor, stop after `probeMax` consecutive empty answers. Cold: `(highest − anchor + 1) + probeMax`
+event reads — **22 today** (anchor 1340, highest answering id 1355, probeMax 6) — once per process and shared. Refresh: after
+`discoveryTtlMs` (6 h, only if a fight request arrives) `probeMax` reads past the highest known id plus one per new card; a Final
+card is never re-read, a non-final one at most every 15 s (live) / 10 min (otherwise). Per viewed fight: one ESPN range read per
+≥ 10 s window, one UFC fight read per ≥ 15 s until the fight is Final and `OfficialStats` (then never). No background polling.
+A stale anchor costs more probes; an anchor above a card makes that card unreachable (`not-matched`).
+
+### Fight listings (`EventRow.game`)
+
+`normalizeGame` already yields a usable `game` for a fight, unchanged: gamma lists a fight as an event with `gameId`, `sport.sport`
+`ufc`, two `teams[]` with `ordering` home/away (the venue's, NOT corners; `abbreviation` is a meaningless slug such as `diy`/`ali8`,
+so a surface must show `name`, not `code`) and the same `score`/`period`/`elapsed`/`live`/`ended` fields as a game. Real example:
+event slug `ufc-diy-ali8-2026-11-21` (series 38). **Every fight event found was `closed: true`** (series 38, newest first, all
+already finished) and `normalizeEventPage` drops closed events, so the shape of an OPEN fight listing — and which fights the venue
+lists a market for ahead of a card — was **not observed**; nothing is assumed about it.
+
+### What was NOT verified
+
+Anything live (above); an open fight listing; a `cancelled` status from ESPN or UFC; ESPN's behaviour for a card straddling UTC
+midnight beyond the ±1 day range; the UFC source's rate limits and terms; stability across days.

@@ -14,4 +14,11 @@
 export const TRUST_BOUNDS = Object.freeze({
   plays: Object.freeze({ liveMs: 30_000, delayedMs: 120_000 }),
   venue: Object.freeze({ liveMs: null, delayedMs: 75_000 }),
+  // Fight view (slice 3). Switched off until observed on a live card (FR-020), so these are PROVISIONAL.
+  //  - `card` (ESPN MMA scoreboard): the same transport and cache floor as `plays`, so the same cache-window
+  //    multiples. Its live cadence for MMA has never been observed.
+  //  - `figures` (UFC's own JSON): NEVER live until its live cadence has been observed (2026-12-05 card);
+  //    delayed <= 120 s is a cache-window multiple, not a measurement.
+  card: Object.freeze({ liveMs: 30_000, delayedMs: 120_000 }),
+  figures: Object.freeze({ liveMs: null, delayedMs: 120_000 }),
 })

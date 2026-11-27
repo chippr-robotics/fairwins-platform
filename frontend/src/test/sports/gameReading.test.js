@@ -43,7 +43,7 @@ describe('a venue reading is NEVER live', () => {
   })
   it('no exported constructor takes a state, so a live venue reading cannot be written', async () => {
     const mod = await import('../../lib/sports/gameReading')
-    expect(Object.keys(mod).sort()).toEqual(['TRUST_BOUNDS', 'detailAgeMs', 'fromListed', 'fromRow', 'readScore', 'readStatus', 'reclassify', 'unknown'])
+    expect(Object.keys(mod).sort()).toEqual(['TRUST_BOUNDS', 'deriveState', 'detailAgeMs', 'fromListed', 'fromRow', 'readScore', 'readStatus', 'reclassify', 'unknown'])
     // even a row that claims to be the venue's while carrying a play-source shape is judged by its `source`
     expect(fromRow({ ...row(), source: 'venue', confirmedAt: SERVER_NOW }, SERVER_NOW, 0).isLive).toBe(false)
   })

@@ -788,12 +788,68 @@
         "uid": "${datasource}"
       },
       "type": "timeseries",
+      "title": "UFC fight data (modelled)",
+      "description": "The per-round figures and official result source behind the relay-gateway FIGHT view (spec 115 slice 3): UFC's own public live JSON (event cards and per-fight round figures), read by the gateway only for fights being viewed (final fights and cards are read once and kept; a bounded id probe finds new cards, because the source has no index). Keyless and on NO service agreement: $0 by declared plan rate, catalogued so the dependency is VISIBLE — if the source prices, restricts or reshapes the API, this line is where it lands. The fight view itself ships switched off (SPORTS_FIGHT_ENABLED) until a live card has been observed; the entry is live because the code path exists and its source is read when the switch is on. No revenue entry pairs with it (no fee, no payee env). Gateway request volume shows in gateway-upstream-usage under the sports upstream label.",
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 65
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "decimals": 2,
+          "noValue": "no value published — see “Source health” for whether this is unreadable or not-configured",
+          "color": {
+            "mode": "thresholds"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "text",
+                "value": null
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom"
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "fairwins_finops_cost_usd_total{source=\"ufc-fight-data\"}",
+          "legendFormat": "{{unit}} ({{basis}})"
+        }
+      ]
+    },
+    {
+      "id": 17,
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "type": "timeseries",
       "title": "The Graph (subgraph queries) (modelled)",
       "description": "Subgraph query spend, MODELLED from the declared plan rate. THE TIER IS WHICH ENDPOINT THE APP CALLS, not a setting: `api.studio.thegraph.com` is Subgraph Studio, the free development tier, where the cost really is $0 and no GRT is consumed. Publishing to the decentralized network and switching a `subgraphUrl` to `gateway.thegraph.com` changes that in one edit — query fees are then paid in GRT from a billing balance held on ARBITRUM ONE (GRT on Ethereum L1 does not pay them). The free allowance does not bill over, it FAILS, so this line is about a dependency as much as a dollar. `check:finops` C6 fails if a gateway URL appears while the plan price is still asserted at zero, because that transition is a one-character edit that would otherwise leave a confidently wrong $0 on the dashboard.",
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 0,
+        "x": 12,
         "y": 65
       },
       "fieldConfig": {
@@ -838,7 +894,7 @@
       ]
     },
     {
-      "id": 17,
+      "id": 18,
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -849,8 +905,8 @@
       "gridPos": {
         "h": 8,
         "w": 12,
-        "x": 12,
-        "y": 65
+        "x": 0,
+        "y": 73
       },
       "fieldConfig": {
         "defaults": {

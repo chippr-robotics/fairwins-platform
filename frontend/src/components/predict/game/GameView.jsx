@@ -14,10 +14,11 @@
  */
 import { useMemo } from 'react'
 import { useGameReading } from '../../../hooks/useGameReading'
-import { sidesOf, teamLabel, playsName, venueFeedName } from '../../../lib/sports/describe'
+import { sidesOf, teamLabel, playsName, venueFeedName, isFightGame } from '../../../lib/sports/describe'
 import { detailAgeMs, fromListed, reclassify, TRUST_BOUNDS } from '../../../lib/sports/gameReading'
 import { describeAge } from '../../../lib/markets/priceReading'
 import GameScoreboard from './GameScoreboard'
+import FightView from './FightView'
 import FootballField from './FootballField'
 import PlayList from './PlayList'
 import './GameView.css'
@@ -95,7 +96,17 @@ export function GameViewBody({ game, reading, detail, sources, serverNow, receiv
   )
 }
 
+/**
+ * A fight league gets the fight view INSTEAD of the scoreboard (a fight has no field and no score), and with
+ * the fight route absent it gets NOTHING — never a scoreboard built from fighter names. The two views are
+ * separate components so only one ever mounts, and only one's poller ever runs.
+ */
 export default function GameView({ game, listingStamp = null }) {
+  if (isFightGame(game)) return <FightView game={game} />
+  return <ScoreboardGameView game={game} listingStamp={listingStamp} />
+}
+
+function ScoreboardGameView({ game, listingStamp }) {
   const state = useGameReading(game)
   // Until the game route answers with a source, the listing's own words stand in — as a VENUE reading, aged
   // from the listing's confirmation (never live; nothing at all when that age cannot be measured).

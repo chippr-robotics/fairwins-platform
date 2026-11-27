@@ -2,7 +2,9 @@
  * Visual capture harness for spec 115 (Predict live game views) — the actor half of the actor-critic loop
  * (see .claude/skills/actor-critic-screens). Photographs the event page of a football game in every state the
  * view has: live, delayed, last known, not started, ended, play source unreadable, `teams` without home/away,
- * a non-integer score, and the module off (which must look like an event with no game at all).
+ * a non-integer score, and the module off (which must look like an event with no game at all). Slice 3 adds the
+ * fight view: scheduled, in progress, decision, KO, draw, the venue saying cancelled, a disagreement between
+ * sources, the figures source unreadable, and the fight module off.
  *
  * Usage:
  *   cd frontend && VITE_RELAYER_URL=http://localhost:8899 npx vite --port 5199 --strictPort --host 127.0.0.1
@@ -70,6 +72,37 @@ const SCENARIOS = [
   { id: 'off', game: HOME_AWAY, off: true },
 ]
 
+// ---- fights (slice 3) ---------------------------------------------------------------------------
+const FIGHT_GAME = { gameId: 13140, league: 'ufc', startTime: new Date(Date.now() - 6 * 86_400_000).toISOString(), teams: [{ name: 'Ciryl Gane', code: null }, { name: 'Josh Hokit', code: null }] }
+const NF = { knockdowns: null, sigStrikesLanded: null, sigStrikesAttempted: null, totalStrikesLanded: null, totalStrikesAttempted: null, headStrikesLanded: null, headStrikesAttempted: null, bodyStrikesLanded: null, bodyStrikesAttempted: null, legStrikesLanded: null, legStrikesAttempted: null, takedownsLanded: null, takedownsAttempted: null, reversals: null, submissionsAttempted: null, controlSeconds: null }
+const F = (o) => ({ ...NF, ...o })
+const R1 = [
+  F({ knockdowns: 0, sigStrikesLanded: 41, sigStrikesAttempted: 65, totalStrikesLanded: 41, totalStrikesAttempted: 66, headStrikesLanded: 34, headStrikesAttempted: 56, bodyStrikesLanded: 7, bodyStrikesAttempted: 9, legStrikesLanded: 0, legStrikesAttempted: 0, takedownsLanded: 0, takedownsAttempted: 0, reversals: 0, submissionsAttempted: 0, controlSeconds: 3 }),
+  F({ knockdowns: 0, sigStrikesLanded: 22, sigStrikesAttempted: 51, totalStrikesLanded: 30, totalStrikesAttempted: 60, headStrikesLanded: 20, headStrikesAttempted: 49, bodyStrikesLanded: 2, bodyStrikesAttempted: 2, legStrikesLanded: 0, legStrikesAttempted: 0, takedownsLanded: 1, takedownsAttempted: 6, reversals: 0, submissionsAttempted: 0, controlSeconds: 71 }),
+]
+// A partly-reported round: some figures null — shown as a dash with "not reported", never 0.
+const R2_PARTIAL = [F({ knockdowns: 1, sigStrikesLanded: 12, sigStrikesAttempted: 30, totalStrikesLanded: 12 }), F({ knockdowns: 0, sigStrikesLanded: 9, sigStrikesAttempted: 25 })]
+const OV = [
+  F({ knockdowns: 0, sigStrikesLanded: 237, sigStrikesAttempted: 343, totalStrikesLanded: 298, totalStrikesAttempted: 412, headStrikesLanded: 170, headStrikesAttempted: 273, bodyStrikesLanded: 63, bodyStrikesAttempted: 66, legStrikesLanded: 4, legStrikesAttempted: 4, takedownsLanded: 0, takedownsAttempted: 0, reversals: 0, submissionsAttempted: 0, controlSeconds: 4 }),
+  F({ knockdowns: 0, sigStrikesLanded: 146, sigStrikesAttempted: 283, totalStrikesLanded: 243, totalStrikesAttempted: 384, headStrikesLanded: 138, headStrikesAttempted: 273, bodyStrikesLanded: 8, bodyStrikesAttempted: 10, legStrikesLanded: 0, legStrikesAttempted: 0, takedownsLanded: 3, takedownsAttempted: 30, reversals: 0, submissionsAttempted: 0, controlSeconds: 277 }),
+]
+const FSRC = { venue: { state: 'read', label: 'Polymarket' }, card: { state: 'read', label: 'ESPN' }, figures: { state: 'read', label: 'UFC' } }
+const FBASE = (now) => ({ gameId: 13140, source: 'figures', status: 'ended', scheduledRounds: 5, weightClass: 'Heavyweight', round: 5, clock: '5:00', confirmedAt: now - 2000, changedAt: null, fighters: [{ name: 'Ciryl Gane' }, { name: 'Josh Hokit' }], result: null, venue: null, rounds: null, overall: null })
+const DEC = { source: 'figures', outcome: 'win', winner: 0, method: 'Decision - Unanimous', endingRound: 5, endingTime: '5:00', judges: [{ name: 'Adrian Castro', scores: [48, 47] }, { name: 'Junichiro Kamijo', scores: [49, 46] }, { name: 'Sal D\u2019Amato', scores: [48, 47] }] }
+const FIGHT_SCENARIOS = [
+  { id: 'fight-scheduled', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), source: 'card', status: 'scheduled', round: null, clock: null }) },
+  { id: 'fight-inprogress', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), source: 'card', status: 'in-progress', round: 2, clock: '3:12', rounds: [{ round: 1, figures: R1 }, { round: 2, figures: R2_PARTIAL }] }) },
+  { id: 'fight-decision', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), result: DEC, rounds: [{ round: 1, figures: R1 }, { round: 2, figures: R2_PARTIAL }], overall: OV }) },
+  { id: 'fight-ko', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), round: 1, clock: '0:24', result: { source: 'figures', outcome: 'win', winner: 1, method: 'KO/TKO', endingRound: 1, endingTime: '0:24', judges: [] }, rounds: [{ round: 1, figures: R1 }] }) },
+  { id: 'fight-draw', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), result: { source: 'figures', outcome: 'draw', winner: null, method: 'Decision - Majority', endingRound: 5, endingTime: '5:00', judges: [{ name: 'Adrian Castro', scores: [47, 47] }, { name: 'Junichiro Kamijo', scores: [48, 47] }, { name: 'Sal D\u2019Amato', scores: [47, 47] }] } }) },
+  { id: 'fight-venue-cancelled', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), source: 'venue', status: 'cancelled', round: null, clock: null, changedAt: now - 130_000, confirmedAt: now - 4000, result: { source: 'venue', outcome: 'cancelled', winner: null, method: null, endingRound: null, endingTime: null, judges: [] } }) },
+  { id: 'fight-disagree', game: FIGHT_GAME, fight: (now) => ({ ...FBASE(now), result: DEC, overall: OV, venue: { status: 'cancelled', scoreText: null, clock: null, changedAt: now - 180_000 } }) },
+  { id: 'fight-figures-unreadable', game: FIGHT_GAME, sources: { ...FSRC, figures: { state: 'unreadable', label: 'UFC', reason: 'upstream_error' } }, fight: (now) => ({ ...FBASE(now), source: 'card', result: { source: 'card', outcome: 'win', winner: 0, method: null, endingRound: 5, endingTime: '5:00', judges: [] } }) },
+  { id: 'fight-off', game: FIGHT_GAME, fightOff: true },
+]
+
+SCENARIOS.push(...FIGHT_SCENARIOS)
+
 function bookFor(tokenId, venueTime) {
   const mid = tokenId === TOKEN_YES ? 0.8 : 0.2
   const lv = (p, s) => [p.toFixed(3), s]
@@ -109,7 +142,12 @@ async function newPage(browser, { theme, size, sc }) {
     }
     return json(route, { error: { code: 'not_found' } }, 404)
   })
-  await context.route(/localhost:8899\/v1\/sports\//, async (route) => {
+  await context.route(/localhost:8899\/v1\/sports\/fights\//, async (route) => {
+    if (sc.fightOff) return json(route, { error: { code: 'sports_fight_unconfigured', reason: 'the fight view is switched off' } }, 503)
+    const now = Date.now()
+    return json(route, { serverNow: now, sources: sc.sources ?? FSRC, fight: sc.fight(now) })
+  })
+  await context.route(/localhost:8899\/v1\/sports\/games\//, async (route) => {
     if (sc.abort) return route.abort('failed')
     if (sc.off) return json(route, { error: { code: 'sports_unconfigured', reason: 'sports module is not enabled' } }, 503)
     const now = Date.now()
@@ -160,6 +198,7 @@ async function inspect(page, name) {
       clipped,
       interactive: view.querySelectorAll('button,a[href],input,select,[tabindex]').length,
       chip: view.querySelector('[data-testid="game-trust-chip"]')?.textContent ?? null,
+      tables: Array.from(view.querySelectorAll('table')).map((t) => ({ w: Math.round(t.getBoundingClientRect().width), scroll: t.scrollWidth > t.clientWidth + 1 })),
     }
   })
   REPORT.push({ name, ...res })
@@ -178,12 +217,16 @@ async function main() {
           await page.goto(`${BASE}/wallet?tab=predict&event=${SLUG}`, { waitUntil: 'domcontentloaded' })
           await page.addStyleTag({ content: '.dev-warning-banner,.notification{display:none!important}' })
           await page.waitForSelector('.event-page h2', { timeout: 60_000 })
-          if (sc.off) await page.waitForTimeout(1500)
+          if (sc.off || sc.fightOff) await page.waitForTimeout(1500)
           else await page.waitForSelector('.game-view', { timeout: 20_000 })
+          if (sc.id.startsWith('fight') && !sc.fightOff) {
+            const more = page.getByRole('button', { name: /more table/ })
+            if (await more.count()) await more.click()
+          }
           await page.waitForTimeout(900)
           const box = await page.locator('.predict-panel').first().evaluate((el) => { const r = el.getBoundingClientRect(); return { y: Math.max(0, r.top + window.scrollY - 70), h: Math.min(r.height + 70, 1500) } })
           await page.screenshot({ path: `${OUT}/${name}-page.png`, fullPage: true, clip: { x: 0, y: box.y, width: SIZES[size].width, height: box.h } })
-          if (!sc.off) await page.locator('.game-view').screenshot({ path: `${OUT}/${name}.png` })
+          if (!sc.off && !sc.fightOff) await page.locator('.game-view').screenshot({ path: `${OUT}/${name}.png` })
           await inspect(page, name)
           console.log('  shot', name)
         } catch (e) {

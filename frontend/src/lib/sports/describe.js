@@ -78,3 +78,44 @@ export function situationSentence(situation, names) {
 export const playsName = (sources) => sources?.plays?.label || 'the play-by-play source'
 export const venueFeedName = (sources) => (sources?.venue?.label ? `${sources.venue.label}'s game feed` : "the venue's feed")
 
+
+/** Leagues the venue lists as fights (no field, no score): they get the fight view INSTEAD of the scoreboard. One set. */
+export const FIGHT_LEAGUES = new Set(['ufc'])
+export const isFightGame = (game) => typeof game?.league === 'string' && FIGHT_LEAGUES.has(game.league.toLowerCase())
+
+/** Control time as m:ss from whole seconds the source reported; null otherwise (a unit change, not a derivation). */
+export function controlTime(seconds) {
+  if (!Number.isInteger(seconds) || seconds < 0) return null
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+
+export function resultSourceName(source, sources) {
+  const l = source ? sources?.[source]?.label : null
+  if (l) return l
+  return source === 'venue' ? 'the venue' : source === 'figures' ? 'the fight-statistics source' : 'the fight-card source'
+}
+
+const label = (n) => n ?? 'Fighter not named'
+
+export function outcomeWords(result, names, sources) {
+  if (!result) return null
+  const by = resultSourceName(result.source, sources)
+  switch (result.outcome) {
+    case 'win': {
+      const w = result.winner != null ? names[result.winner] : null
+      return `${label(w)} won`
+    }
+    case 'draw':
+      return 'Draw'
+    case 'no-contest':
+      return 'No contest'
+    case 'cancelled':
+      return result.source === 'venue'
+        ? `${result.source === 'venue' && sources?.venue?.label ? `${sources.venue.label}'s feed` : "The venue's feed"} lists this fight as cancelled`
+        : `This fight is listed as cancelled by ${by}`
+    default:
+      return 'The result was not reported'
+  }
+}
+
