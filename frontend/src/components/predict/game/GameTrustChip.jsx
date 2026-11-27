@@ -19,7 +19,10 @@ export default function GameTrustChip({ reading, ended = false }) {
   const key = COPY[reading?.state] ? reading.state : 'unknown'
   const copy = key === 'live' && ended ? ENDED_LIVE : COPY[key]
   const age = reading?.ageMs?.()
-  const ageText = copy.showAge && Number.isFinite(age) && Math.round(age / 1000) >= 1 ? describeAge(age) : null
+  // A venue reading's confirmation is its CONNECTION's (a heartbeat seconds ago); "Delayed · 6 s" would read
+  // as "the score is 6 s late", which nobody measured. The scoreboard's own line says when it last changed.
+  const venueDelayed = key === 'delayed' && reading?.source === 'venue'
+  const ageText = copy.showAge && !venueDelayed && Number.isFinite(age) && Math.round(age / 1000) >= 1 ? describeAge(age) : null
   return (
     <span className={`predict-trust-chip predict-trust-chip--${key}`} role="status" data-testid="game-trust-chip">
       <span className="predict-trust-dot" aria-hidden="true" />

@@ -1,4 +1,4 @@
-# Live game views (gateway side) — spec 115, slices 1 and 2
+# Live game views — spec 115, slices 1 and 2
 
 The fifth relay-gateway read proxy, shaped like `news/` (spec 109): `services/relay-gateway/src/sports/`,
 mounted unconditionally, `SPORTS_ENABLED` default **off** (⇒ `503 sports_unconfigured`), own quotas,
@@ -48,3 +48,35 @@ FinOps: `espn-sports-api` and `polymarket-sports-feed` (modelled $0; see
 
 Adding a league: verify BOTH its score ordering and its team-code differences against the ESPN scoreboard at
 the same moment, add the row to `leagues.js` with the numbers in research.md, and nothing else.
+
+## The screen
+
+`frontend/src/lib/sports/` and `frontend/src/components/predict/game/`, mounted by `EventPage.jsx` above
+Outcomes only when the event row carries `game`.
+
+- **`gameReading.js`** is the only way a score, clock or status reaches a component: `live`, `delayed`,
+  `last-known` or `unknown`, aged on the server's clock, by source. A venue reading cannot be built
+  live; `unknown` carries no figures.
+- **`gameFeed.js`** is the one place the app asks: `GET /v1/sports/games/:gameId`, with the listing's
+  identity when league and both team codes are present. Every 5 s in play while the tab is visible,
+  30 s before the start, one more read after "ended", nothing while hidden. A read in flight is shared,
+  and a gateway without the module is remembered until reload, so "off" costs one request.
+- **Before the route answers**, `game.listed` (what the listing itself said) is shown as a venue reading,
+  aged from the listing's own confirmation, never live.
+- **Words carry everything.** The field is an `aria-hidden` SVG beside a sentence with the same facts; the
+  line to gain is a different SHAPE from the ball; scoring plays say "Scored:". Source names come from the
+  envelope's `label`.
+- **No ticket coupling.** `src/test/sports/gameBoundary.test.js` fails if a ticket, plan or trade module
+  imports the game view.
+
+Capture harness: `node scripts/ui/capture-predict-game.mjs` (13 states, both themes, 390 and 1280 wide).
+E2E: `frontend/cypress/e2e/fast/53-predict-game-view.cy.js` (PG-01…PG-06).
+
+## Not built, not seen
+
+- The fight view (slice 3) and its off-switch.
+- Any league other than NFL against the play source. Overtime, a red-zone situation, a rematch inside one
+  week, and how long a finished game stays on the play source's scoreboard were not observed.
+- The dead-connection watchdog has run only against a fake socket; every real drop seen was a clean close.
+- Everything measured comes from one evening and one viewer. Nothing here has been load-tested.
+

@@ -1250,6 +1250,41 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
   and that fallback follows rules (5)–(7) too. See `docs/developer-guide/predict-polymarket.md` +
   `specs/114-predict-live-markets/`.
 
+- **Live game views (spec 115) are INFORMATION BESIDE A MARKET, and the freshest source leads.**
+  The Predict event page shows a scoreboard, and for football a field and the last plays, from the
+  fifth read proxy (`services/relay-gateway/src/sports/`, `SPORTS_ENABLED`, default off ⇒
+  `503 sports_unconfigured`). Six rules, each measured or got wrong once:
+  (1) **The play source leads where it is read; a venue reading is NEVER live.** Polymarket's game
+  feed speaks about a game only when it changes, on whole-minute ticks, and ran a median 34 s and up
+  to 203 s BEHIND ESPN, never ahead (research.md R1). FR-008 originally put the venue's score on top
+  and called the plays "possibly behind" — the wrong way round — and was amended. `TRUST_BOUNDS`
+  (`sports/bounds.js`, mirrored in `lib/sports/gameReading.js`) is the one statement: plays live
+  ≤ 30 s, delayed ≤ 120 s; venue `liveMs: null`, delayed ≤ 75 s. Do not give the venue a live bound.
+  (2) **A venue reading has two times.** `changedAt` is the game's last frame; `confirmedAt` is the
+  connection's last frame of any kind (a bare `null` about every 15 s), and only when the game's
+  frame arrived on the connection that is open now — a reconnect re-sends nothing. The chip for a
+  venue reading shows no age: "Delayed · 6 s" would say the score is 6 s late, which nobody measured.
+  (3) **A number exists only where a source gave one.** `Number('')` is 0; go through
+  `normalize.js#intOrNull`. A venue score is `{home, away}` only for a league in `leagues.js` whose
+  ordering was measured (NFL is away-home); everything else is `scoreText`, shown unparsed.
+  (4) **"Ended" needs the play source's own `completed`.** ESPN files a postponed or cancelled game
+  under the same `post` state as a finished one. And ended is the GAME's state — no surface says
+  anything about the market's resolution.
+  (5) **A device's claim never outlives its request.** The detail route takes `league/home/away/start`
+  so the play source can be matched before the venue speaks (it sends nothing on connect). Nothing is
+  keyed by `gameId` from a claim — that would let one request decide what everyone sees for a game.
+  A partial claim is a 400, so the app sends all three or none.
+  (6) **Module off costs ONE request, ever.** `lib/sports/gameFeed.js` shares an in-flight read and
+  remembers a missing module (404, `sports_unconfigured`) until reload; a pause is not remembered.
+  Found by running the Cypress spec, not by the unit tests: StrictMode mounts an effect twice.
+  Nothing under `lib/sports/` or `components/predict/game/` may be imported by a ticket, plan or
+  trade module (`src/test/sports/gameBoundary.test.js`), and the view has no control to press, no
+  motion on a score and no call to action. Neither source is under a service agreement: each fails
+  alone, is named, and has an off-switch (`SPORTS_PLAYS_ENABLED`, `SPORTS_KILLSWITCH`). Adding a
+  league means verifying its score order AND its team codes against the play source at the same
+  moment. The fight view (slice 3) is not built. See `docs/developer-guide/live-game-views.md` +
+  `specs/115-predict-live-game-views/`.
+
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan
 at specs/115-predict-live-game-views/plan.md

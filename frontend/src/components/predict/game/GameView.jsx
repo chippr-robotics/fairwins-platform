@@ -14,10 +14,10 @@
  */
 import { useMemo } from 'react'
 import { useGameReading } from '../../../hooks/useGameReading'
-import { sidesOf, teamLabel } from '../../../lib/sports/describe'
+import { sidesOf, teamLabel, playsName, venueFeedName } from '../../../lib/sports/describe'
 import { detailAgeMs, fromListed, reclassify, TRUST_BOUNDS } from '../../../lib/sports/gameReading'
 import { describeAge } from '../../../lib/markets/priceReading'
-import GameScoreboard, { playsName, venueFeedName } from './GameScoreboard'
+import GameScoreboard from './GameScoreboard'
 import FootballField from './FootballField'
 import PlayList from './PlayList'
 import './GameView.css'

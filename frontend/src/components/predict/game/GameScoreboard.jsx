@@ -9,28 +9,24 @@
  *    gateway's score is keyed home/away, no score is drawn against teams it cannot be tied to;
  *  - "Ended" is the GAME's state. The market settles separately, and the page says so in one sentence.
  */
-import { sidesOf, teamLabel, formatStart } from '../../../lib/sports/describe'
+import { sidesOf, teamLabel, formatStart, playsName, venueFeedName } from '../../../lib/sports/describe'
 import { describeAge } from '../../../lib/markets/priceReading'
 import { detailAgeMs } from '../../../lib/sports/gameReading'
 import GameTrustChip from './GameTrustChip'
 
 const DASH = '—'
 
-function Team({ name, score, tag }) {
+function Team({ name, score, tag, noFigure = false }) {
   return (
     <div className="game-team">
       <span className="game-team-name">
         {name ?? 'Team not named'}
         {tag && <span className="game-team-tag"> {tag}</span>}
       </span>
-      <span className="game-team-score">{score ?? DASH}</span>
+      {!noFigure && <span className="game-team-score">{score ?? DASH}</span>}
     </div>
   )
 }
-
-/** Neutral wording when the envelope names no source: never a hardcoded vendor. */
-export const playsName = (sources) => sources?.plays?.label || 'the play-by-play source'
-export const venueFeedName = (sources) => (sources?.venue?.label ? `${sources.venue.label}'s game feed` : "the venue's feed")
 
 /** One short line about whose figures these are (and, for the venue's feed, how often it speaks and when it last did). */
 function sourceLine(reading, sources, clock) {
@@ -60,15 +56,18 @@ export default function GameScoreboard({ game, reading, sources = null, clock = 
   const known = reading && reading.state !== 'unknown'
   const hasScoreboardScore = known && reading.score != null && reading.status !== 'scheduled'
   const ended = known && reading.status === 'ended'
+  // The source's own score text is on its own line below; a dash beside each team as well would read as
+  // "no score" next to a score.
+  const textScore = known && reading.score == null && Boolean(reading.scoreText) && reading.status !== 'scheduled'
 
   let teams
   if (sides.kind === 'homeAway') {
     teams = [
-      <Team key="away" name={teamLabel(sides.away)} score={hasScoreboardScore ? reading.score.away : null} tag="Away" />,
-      <Team key="home" name={teamLabel(sides.home)} score={hasScoreboardScore ? reading.score.home : null} tag="Home" />,
+      <Team key="away" name={teamLabel(sides.away)} score={hasScoreboardScore ? reading.score.away : null} tag="Away" noFigure={textScore} />,
+      <Team key="home" name={teamLabel(sides.home)} score={hasScoreboardScore ? reading.score.home : null} tag="Home" noFigure={textScore} />,
     ]
   } else if (sides.kind === 'teams') {
-    teams = sides.teams.map((t, i) => <Team key={i} name={teamLabel(t)} score={null} />)
+    teams = sides.teams.map((t, i) => <Team key={i} name={teamLabel(t)} score={null} noFigure={textScore} />)
   } else {
     teams = <p className="game-note">The venue did not name the teams.</p>
   }
@@ -87,7 +86,7 @@ export default function GameScoreboard({ game, reading, sources = null, clock = 
         </p>
       )}
       <div className="game-teams">{teams}</div>
-      {known && reading.score == null && reading.scoreText && reading.status !== 'scheduled' && (
+      {textScore && (
         <p className="game-score-text" data-testid="game-score-text">
           Score: {reading.scoreText}
         </p>

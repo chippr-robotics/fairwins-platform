@@ -73,3 +73,8 @@ export function situationSentence(situation, names) {
   if (parts.length === 0) return null
   return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1)).join('. ') + '.'
 }
+
+/** Neutral wording when the envelope names no source: never a hardcoded vendor. */
+export const playsName = (sources) => sources?.plays?.label || 'the play-by-play source'
+export const venueFeedName = (sources) => (sources?.venue?.label ? `${sources.venue.label}'s game feed` : "the venue's feed")
+

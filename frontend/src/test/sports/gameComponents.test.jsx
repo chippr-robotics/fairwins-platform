@@ -73,6 +73,8 @@ describe('GameScoreboard', () => {
   it('a non-integer score is the venue\'s own text, unparsed', () => {
     render(<GameScoreboard game={LISTING} reading={rd({ score: null, scoreText: '6-4, 3-2 (set 3)' })} />)
     expect(screen.getByTestId('game-score-text')).toHaveTextContent('Score: 6-4, 3-2 (set 3)')
+    // The text IS the score: a dash beside each team as well would read as "no score" next to a score.
+    expect(screen.queryByText('—')).not.toBeInTheDocument()
   })
 
   it('an unrecognised status is shown as the venue\'s words', () => {
@@ -324,3 +326,18 @@ describe('GameViewBody — source sentences', () => {
     expect((await axe(container)).violations).toEqual([])
   })
 })
+
+describe('GameTrustChip — a venue reading', () => {
+  it('says Delayed without an age: its confirmation is the connection\'s heartbeat, not a measure of how late the score is', () => {
+    render(<GameTrustChip reading={rd({ source: 'venue', changedAt: SERVER_NOW - 41_000 }, 6000)} />)
+    const chip = screen.getByTestId('game-trust-chip')
+    expect(chip).toHaveTextContent('Game information is delayed')
+    expect(chip.textContent).not.toMatch(/\d/)
+  })
+
+  it('a play-source reading that is delayed still shows its age', () => {
+    render(<GameTrustChip reading={rd({}, 40_000)} />)
+    expect(screen.getByTestId('game-trust-chip').textContent).toMatch(/Delayed · 40 s/)
+  })
+})
+

@@ -7,13 +7,14 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const gw = vi.hoisted(() => ({ url: 'http://gw.test' }))
 vi.mock('../../lib/predict/predictClient', () => ({ predictGatewayUrl: () => gw.url }))
 
-import { fetchGame, cadenceMs, pickRow, identityOf, POLL_MS, PRE_START_POLL_MS } from '../../lib/sports/gameFeed'
+import { fetchGame, cadenceMs, pickRow, identityOf, POLL_MS, PRE_START_POLL_MS, __resetGameFeedForTests } from '../../lib/sports/gameFeed'
 import { envelope, row, detail, LISTING, TEAMS_LISTING } from '../fixtures/sportsGames'
 
 const res = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 
 beforeEach(() => {
   gw.url = 'http://gw.test'
+  __resetGameFeedForTests()
 })
 
 describe('cadence', () => {
@@ -52,7 +53,7 @@ describe('fetchGame', () => {
   })
 
   it('sends the listing\'s identity as query params, omitting any that is null', async () => {
-    const f = vi.fn().mockResolvedValue(res(404, {}))
+    const f = vi.fn().mockResolvedValue(res(500, {}))
     await fetchGame(19618, { identity: identityOf(LISTING), fetchImpl: f })
     const u = new URL(f.mock.calls[0][0])
     expect(u.pathname).toBe('/v1/sports/games/19618')
@@ -112,3 +113,53 @@ describe('fetchGame', () => {
     expect(pickRow({ games: [row({ gameId: 2 })] }, 3)).toBeNull()
   })
 })
+
+describe('one request when the module is off (FR-013)', () => {
+  const okBody = () => envelope(row())
+
+  it('two reads of the same game at once share ONE request (StrictMode mounts an effect twice)', async () => {
+    let release
+    const f = vi.fn(() => new Promise((r) => { release = () => r(res(200, okBody())) }))
+    const a = fetchGame(19618, { fetchImpl: f })
+    const b = fetchGame(19618, { fetchImpl: f })
+    release()
+    const [ra, rb] = await Promise.all([a, b])
+    expect(f).toHaveBeenCalledTimes(1)
+    expect(ra.kind).toBe('ok')
+    expect(rb).toBe(ra)
+    // ...and the next read, after it finished, is a new request
+    await fetchGame(19618, { fetchImpl: vi.fn().mockResolvedValue(res(200, okBody())) })
+  })
+
+  it('a gateway without the module is remembered: no later page asks at all', async () => {
+    const f = vi.fn().mockResolvedValue(res(503, { error: { code: 'sports_unconfigured' } }))
+    expect((await fetchGame(1, { fetchImpl: f })).kind).toBe('absent')
+    expect((await fetchGame(2, { fetchImpl: f })).kind).toBe('absent')
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('a 404 from a gateway that predates the module is remembered too', async () => {
+    const f = vi.fn().mockResolvedValue(res(404, {}))
+    await fetchGame(1, { fetchImpl: f })
+    await fetchGame(2, { fetchImpl: f })
+    expect(f).toHaveBeenCalledTimes(1)
+  })
+
+  it('a PAUSE is not remembered: it is lifted without a deploy, so the next page view asks', async () => {
+    for (const code of ['sports_paused', 'killswitch_active']) {
+      __resetGameFeedForTests()
+      const f = vi.fn().mockResolvedValue(res(503, { error: { code } }))
+      expect((await fetchGame(1, { fetchImpl: f })).kind).toBe('absent')
+      expect((await fetchGame(1, { fetchImpl: f })).kind).toBe('absent')
+      expect(f).toHaveBeenCalledTimes(2)
+    }
+  })
+
+  it('an outage is never remembered as "off"', async () => {
+    const f = vi.fn().mockResolvedValue(res(503, { error: { code: 'upstream_unavailable' } }))
+    await fetchGame(1, { fetchImpl: f })
+    await fetchGame(1, { fetchImpl: f })
+    expect(f).toHaveBeenCalledTimes(2)
+  })
+})
+
