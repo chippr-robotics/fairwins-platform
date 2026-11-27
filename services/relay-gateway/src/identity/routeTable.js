@@ -86,6 +86,7 @@ export const ROUTE_TABLE = Object.freeze([
   r('GET', '/v1/news/:chainId/:asset', TIERS.ANONYMOUS, 'read', 'news'),
   r('GET', '/v1/sports/games', TIERS.ANONYMOUS, 'read', 'sports'),
   r('GET', '/v1/sports/games/:gameId', TIERS.ANONYMOUS, 'read', 'sports'),
+  r('GET', '/v1/sports/fights/:gameId', TIERS.ANONYMOUS, 'read', 'sports'),
   r('GET', '/v1/bitcoin/:network/fees', TIERS.ANONYMOUS, 'read', 'bitcoin'),
   r('GET', '/v1/bitcoin/:network/stamps', TIERS.ANONYMOUS, 'read', 'bitcoin'),
   r('GET', '/v1/bitcoin/:network/tx/:txid', TIERS.ANONYMOUS, 'read', 'bitcoin'),

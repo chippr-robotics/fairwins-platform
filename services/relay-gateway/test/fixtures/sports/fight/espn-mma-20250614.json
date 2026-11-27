@@ -1,0 +1,84 @@
+{
+ "events": [
+  {
+   "id": "600053732",
+   "name": "UFC Fight Night: Usman vs. Buckley",
+   "competitions": [
+    {
+     "id": "401776706",
+     "date": "2025-06-14T23:00Z",
+     "type": {
+      "abbreviation": "Light Heavyweight"
+     },
+     "competitors": [
+      {
+       "id": "3946951",
+       "winner": false,
+       "athlete": {
+        "displayName": "Paul Craig"
+       }
+      },
+      {
+       "id": "5060489",
+       "winner": false,
+       "athlete": {
+        "displayName": "Rodolfo Bellato"
+       }
+      }
+     ],
+     "status": {
+      "period": 1,
+      "displayClock": "4:59",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "name": "STATUS_FINAL"
+      }
+     },
+     "format": {
+      "regulation": {
+       "periods": 3
+      }
+     }
+    },
+    {
+     "id": "401769681",
+     "date": "2025-06-15T02:00Z",
+     "type": {
+      "abbreviation": "Middleweight"
+     },
+     "competitors": [
+      {
+       "id": "4684474",
+       "winner": false,
+       "athlete": {
+        "displayName": "Cody Brundage"
+       }
+      },
+      {
+       "id": "5211221",
+       "winner": false,
+       "athlete": {
+        "displayName": "Mansur Abdul-Malik"
+       }
+      }
+     ],
+     "status": {
+      "period": 3,
+      "displayClock": "0:36",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "name": "STATUS_FINAL"
+      }
+     },
+     "format": {
+      "regulation": {
+       "periods": 3
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

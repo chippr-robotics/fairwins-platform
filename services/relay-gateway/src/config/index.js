@@ -132,6 +132,17 @@
  *   SPORTS_SUMMARY_TTL_MS      ESPN game-summary cache, clamped >= 5000 (default 5000)
  *   SPORTS_IDLE_CLOSE_MS       close the venue socket after this long with no request (default 300000)
  *   SPORTS_QUOTA_PER_IP/_GLOBAL/_WINDOW_MS   read quotas (defaults 120/600/60000)
+ *   SPORTS_FIGHT_ENABLED       'true' enables GET /v1/sports/fights/:gameId (spec 115 slice 3; default FALSE, and
+ *                              independent of everything above — off => 503 sports_fight_unconfigured on that one
+ *                              route, no effect on the game routes). Stays off until a live card has been observed.
+ *   SPORTS_FIGHT_CARD_ENABLED / SPORTS_FIGHT_FIGURES_ENABLED   per-source off-switches (ESPN MMA scoreboard /
+ *                              UFC's own JSON), default true when the fight module is on
+ *   SPORTS_UFC_BASE_URL        UFC live JSON root (default https://d29dxerjsp82wz.cloudfront.net/api/v3)
+ *   SPORTS_UFC_ANCHOR_ID       first UFC event id the discovery probe reads (default 1340). UFC has no event index:
+ *                              the probe walks up from here and stops after SPORTS_UFC_PROBE_MAX consecutive empty
+ *                              ids (default 6). Cold cost (highest-anchor+1)+probeMax requests, then probeMax per refresh.
+ *   SPORTS_UFC_DISCOVERY_TTL_MS   how long a finished probe is trusted (default 21600000 = 6 h, min 600000)
+ *   SPORTS_FIGHT_CARD_TTL_MS / SPORTS_FIGHT_FIGURES_TTL_MS   cache floors 10000 / 15000
  *   PERPS_GAINS_REFERRER       PUBLIC attribution: FairWins gains referrer address
  *   PERPS_GMX_REF_CODE         PUBLIC attribution: GMX referral code (1-20 [A-Za-z0-9_])
  *   PERPS_HL_BUILDER_ADDRESS   PUBLIC attribution: FairWins Hyperliquid builder wallet
@@ -975,6 +986,33 @@ export function loadConfig(env = process.env, opts = {}) {
         quotaGlobal: int(env, 'SPORTS_QUOTA_GLOBAL', 600),
         quotaWindowMs: int(env, 'SPORTS_QUOTA_WINDOW_MS', 60_000),
         killSwitch: opt(env, 'SPORTS_KILLSWITCH', 'false').toLowerCase() === 'true',
+      }
+    })(),
+    // Fight view (spec 115 slice 3): a SEPARATE switch from the game views (FR-020), off by default.
+    fight: (() => {
+      const enabled = opt(env, 'SPORTS_FIGHT_ENABLED', 'false').toLowerCase() === 'true'
+      const ufcBaseUrl = opt(env, 'SPORTS_UFC_BASE_URL', 'https://d29dxerjsp82wz.cloudfront.net/api/v3')
+      if (enabled) {
+        let ok = false
+        try {
+          const proto = new URL(ufcBaseUrl).protocol
+          ok = proto === 'https:' || proto === 'http:'
+        } catch {
+          ok = false
+        }
+        if (!ok) throw new Error(`[relay-gateway] SPORTS_UFC_BASE_URL=${ufcBaseUrl} is not a valid URL`)
+      }
+      const flag = (name) => opt(env, name, 'true').toLowerCase() !== 'false'
+      return {
+        enabled,
+        cardEnabled: flag('SPORTS_FIGHT_CARD_ENABLED'),
+        figuresEnabled: flag('SPORTS_FIGHT_FIGURES_ENABLED'),
+        ufcBaseUrl,
+        anchorId: Math.max(1, int(env, 'SPORTS_UFC_ANCHOR_ID', 1340)),
+        probeMax: Math.min(20, Math.max(1, int(env, 'SPORTS_UFC_PROBE_MAX', 6))),
+        discoveryTtlMs: Math.max(int(env, 'SPORTS_UFC_DISCOVERY_TTL_MS', 21_600_000), 600_000),
+        cardTtlMs: Math.max(int(env, 'SPORTS_FIGHT_CARD_TTL_MS', 10_000), 10_000),
+        figuresTtlMs: Math.max(int(env, 'SPORTS_FIGHT_FIGURES_TTL_MS', 15_000), 15_000),
       }
     })(),
     // Member API (spec 095): member-signed capability tokens granting custody-free, scoped access to

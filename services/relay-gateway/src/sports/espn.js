@@ -19,6 +19,7 @@ import { stripTrailingSlashes } from '../strings.js'
 const SCOREBOARD_FLOOR_MS = 10_000
 const SUMMARY_FLOOR_MS = 5_000
 const MAX_SUMMARIES = 200
+const MAX_SCOREBOARDS = 120
 
 export class EspnUpstreamError extends Error {
   constructor(message, cause) {
@@ -94,8 +95,14 @@ export function createEspn({
 
   return {
     /** `{state:'read', fetchedAt, value: event[]}` or `{state:'unreadable', reason}`. */
-    scoreboard(espnPath) {
-      return through(sbCache, espnPath, sbTtl, async () => parseScoreboard(await getJson(`${base}/${espnPath}/scoreboard`)))
+    /**
+     * `dates` (optional) is a `YYYYMMDD-YYYYMMDD` range built by the caller from a card's own start time — never
+     * from request text — so the cache key space is days, bounded by the caller's window.
+     */
+    scoreboard(espnPath, { dates = null } = {}) {
+      const q = dates ? `?dates=${dates}` : ''
+      while (sbCache.size > MAX_SCOREBOARDS) sbCache.delete(sbCache.keys().next().value)
+      return through(sbCache, `${espnPath}${q}`, sbTtl, async () => parseScoreboard(await getJson(`${base}/${espnPath}/scoreboard${q}`)))
     },
     /** `eventId` must already be digits-only. `force` bypasses the TTL (the one final read of an ended game). */
     summary(espnPath, eventId, opts = {}) {

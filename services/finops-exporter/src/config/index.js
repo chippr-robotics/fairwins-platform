@@ -209,6 +209,7 @@ export function loadConfig(env = process.env) {
       // a price on one vendor never reads as a price on the other.
       'espn-sports-api': num(env.FINOPS_ESPN_PLAN_USD, 0),
       'polymarket-sports-feed': num(env.FINOPS_POLYMARKET_SPORTS_PLAN_USD, 0),
+      'ufc-fight-data': num(env.FINOPS_UFC_PLAN_USD, 0), // spec 115 slice 3: keyless like the two above
       // The Graph. Null by default like everything else: the free tier here is a property of WHICH
       // ENDPOINT the app calls (Studio vs. the decentralized gateway), and that can change in a
       // one-line edit to networks.js, so it must be asserted rather than assumed. `check:finops` C6

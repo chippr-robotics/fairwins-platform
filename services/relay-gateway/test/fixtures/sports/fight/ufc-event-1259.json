@@ -1,0 +1,140 @@
+{
+ "LiveEventDetail": {
+  "EventId": 1259,
+  "Name": "UFC Fight Night: Usman vs. Buckley",
+  "StartTime": "2025-06-14T23:00Z",
+  "Status": "Final",
+  "LiveEventId": null,
+  "LiveFightId": null,
+  "LiveRoundNumber": null,
+  "LiveRoundElapsedTime": null,
+  "FightCard": [
+   {
+    "FightId": 12102,
+    "Status": "Final",
+    "Fighters": [
+     {
+      "FighterId": 4201,
+      "Name": {
+       "FirstName": "Mansur",
+       "LastName": "Abdul-Malik"
+      },
+      "Outcome": {
+       "OutcomeId": 3,
+       "Outcome": "Draw"
+      }
+     },
+     {
+      "FighterId": 3523,
+      "Name": {
+       "FirstName": "Cody",
+       "LastName": "Brundage"
+      },
+      "Outcome": {
+       "OutcomeId": 3,
+       "Outcome": "Draw"
+      }
+     }
+    ],
+    "Result": {
+     "Method": "Overturned",
+     "EndingRound": 3,
+     "EndingTime": "0:36",
+     "FightScores": [
+      {
+       "JudgeId": 448,
+       "JudgeFirstName": "Will",
+       "JudgeLastName": "Fisher",
+       "Fighters": [
+        {
+         "FighterId": 4201,
+         "Score": 20
+        },
+        {
+         "FighterId": 3523,
+         "Score": 18
+        }
+       ]
+      },
+      {
+       "JudgeId": 357,
+       "JudgeFirstName": "Jon",
+       "JudgeLastName": "Marigliano",
+       "Fighters": [
+        {
+         "FighterId": 4201,
+         "Score": 19
+        },
+        {
+         "FighterId": 3523,
+         "Score": 19
+        }
+       ]
+      },
+      {
+       "JudgeId": 14,
+       "JudgeFirstName": "Sal",
+       "JudgeLastName": "D'amato",
+       "Fighters": [
+        {
+         "FighterId": 4201,
+         "Score": 19
+        },
+        {
+         "FighterId": 3523,
+         "Score": 19
+        }
+       ]
+      }
+     ]
+    },
+    "WeightClass": {
+     "Description": "Middleweight"
+    },
+    "RuleSet": {
+     "PossibleRounds": 3
+    }
+   },
+   {
+    "FightId": 12156,
+    "Status": "Final",
+    "Fighters": [
+     {
+      "FighterId": 2834,
+      "Name": {
+       "FirstName": "Paul",
+       "LastName": "Craig"
+      },
+      "Outcome": {
+       "OutcomeId": 4,
+       "Outcome": "No Contest"
+      }
+     },
+     {
+      "FighterId": 3864,
+      "Name": {
+       "FirstName": "Rodolfo",
+       "LastName": "Bellato"
+      },
+      "Outcome": {
+       "OutcomeId": 4,
+       "Outcome": "No Contest"
+      }
+     }
+    ],
+    "Result": {
+     "Method": "Could Not Continue",
+     "EndingRound": 1,
+     "EndingTime": "4:59",
+     "FightScores": []
+    },
+    "WeightClass": {
+     "Description": "Light Heavyweight"
+    },
+    "RuleSet": {
+     "PossibleRounds": 3
+    }
+   }
+  ]
+ }
+}

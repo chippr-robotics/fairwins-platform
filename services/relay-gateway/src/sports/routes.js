@@ -37,11 +37,35 @@ export function parseClaim(query) {
   return { league, home, away, startMs }
 }
 
+const NAME_RE = /^[\p{L}\p{M}][\p{L}\p{M} .'’-]{1,59}$/u
+const CLAIM_START_PAST_MS = 45 * 86_400_000
+const CLAIM_START_FUTURE_MS = 30 * 86_400_000
+
+/**
+ * The optional identity claim on the FIGHT route: two fighter names (`a`, `b`) and optionally `start`.
+ * Request-scoped like the game claim — never stored against the gameId, ignored once the venue has named
+ * the fight. `start` must sit within [now-45d, now+30d]: it picks which day range the gateway asks ESPN for,
+ * so an unbounded value would let a device choose upstream requests. Returns null when no claim field is present.
+ */
+export function parseFightClaim(query, nowMs) {
+  const { a, b, start } = query
+  if (a === undefined && b === undefined && start === undefined) return null
+  const bad = () => new GatewayError(400, 'invalid_params', 'a and b (two fighter names, 2-60 letters) must be given together; start is an optional ISO time within the last 45 / next 30 days')
+  if (typeof a !== 'string' || typeof b !== 'string' || !NAME_RE.test(a) || !NAME_RE.test(b)) throw bad()
+  let startMs = null
+  if (start !== undefined) {
+    if (typeof start !== 'string' || !START_RE.test(start)) throw bad()
+    startMs = Date.parse(start)
+    if (!Number.isFinite(startMs) || startMs < nowMs - CLAIM_START_PAST_MS || startMs > nowMs + CLAIM_START_FUTURE_MS) throw bad()
+  }
+  return { a, b, startMs }
+}
+
 /**
  * @param {object} config loadConfig() output (reads config.sports)
  * @param {{service: {games: Function, game: Function}, quotas: {hit: Function}, killSwitch: {isActive: Function}}} deps
  */
-export function createSportsRouter(config, { service, quotas, killSwitch }) {
+export function createSportsRouter(config, { service, quotas, killSwitch, fightService = null, now = Date.now }) {
   const sports = config.sports
   const router = express.Router()
 
@@ -95,11 +119,29 @@ export function createSportsRouter(config, { service, quotas, killSwitch }) {
     }
   })
 
+  // ---- GET /v1/sports/fights/:gameId (slice 3; SPORTS_FIGHT_ENABLED, default off) ---------------------
+  // Off answers 503 sports_fight_unconfigured and affects NOTHING above (FR-020). The module's own
+  // liveness checks come first, exactly like the game routes.
+  router.get('/v1/sports/fights/:gameId', async (req, res) => {
+    try {
+      requireLive()
+      if (!config.fight?.enabled || !fightService) {
+        throw new GatewayError(503, 'sports_fight_unconfigured', 'the fight view is not configured on this gateway')
+      }
+      if (!ID_RE.test(req.params.gameId)) throw new GatewayError(400, 'invalid_params', 'gameId must be a positive integer')
+      const claim = parseFightClaim(req.query, now())
+      guard(req)
+      res.json(await fightService.fight(Number(req.params.gameId), claim))
+    } catch (err) {
+      handleError(res, err)
+    }
+  })
+
   return router
 }
 
 /** /status contribution (the newsStatus convention). Config state only, no member data. */
-export function sportsStatus(config, { killSwitch, venue, service }) {
+export function sportsStatus(config, { killSwitch, venue, service, fightService = null }) {
   const s = config.sports
   return {
     enabled: s.enabled,
@@ -111,5 +153,6 @@ export function sportsStatus(config, { killSwitch, venue, service }) {
     // Live state of the one upstream socket (counts and times only — no game content).
     venue: s.enabled ? venue.status() : null,
     frozenGames: s.enabled ? service.status().frozen : null,
+    fight: { enabled: s.enabled && Boolean(config.fight?.enabled), ...(s.enabled && config.fight?.enabled && fightService ? fightService.status() : {}) },
   }
 }

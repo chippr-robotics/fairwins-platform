@@ -60,6 +60,8 @@ import { createSportsRouter, sportsStatus } from './sports/routes.js'
 import { createSportsService } from './sports/service.js'
 import { createVenueFeed } from './sports/venueFeed.js'
 import { createEspn } from './sports/espn.js'
+import { createFightService, parseMmaScoreboard } from './sports/fight.js'
+import { createUfc } from './sports/ufc.js'
 import { parseScoreboard as parseEspnScoreboard, parseSummary as parseEspnSummary, parseVenueFrame } from './sports/normalize.js'
 import { createAcrossClient } from './bridge/quotes.js'
 import { createBridgeRouter } from './bridge/routes.js'
@@ -546,7 +548,7 @@ export function createApp(config, deps = {}) {
     // also reports the venue socket's phase/frame counts (no game content), because "enabled" and
     // "actually receiving" are different facts. `sportsStatus` reads objects declared further down;
     // this closure only runs at request time.
-    const sports = sportsStatus(config, { killSwitch, venue: sportsVenue, service: sportsService })
+    const sports = sportsStatus(config, { killSwitch, venue: sportsVenue, service: sportsService, fightService: sportsFightService })
     // Member API visibility (spec 095): module state + which chains can answer a wager read + whether
     // the assistant has a credential. No member data, no key material, nothing about any token.
     // `memberApiAssistant` is declared further down; this closure only runs at request time.
@@ -1102,7 +1104,38 @@ export function createApp(config, deps = {}) {
     espn: sportsEspn,
     now: nowMs,
   })
-  app.use(createSportsRouter(config, { service: sportsService, quotas: sportsQuotas, killSwitch }))
+  // Slice 3 (fight view): its own flag, its own two sources (ESPN's MMA scoreboard through a second createEspn
+  // with the MMA parser, and UFC's own JSON). Constructed always (nothing opens until a request) and consulted
+  // only when SPORTS_FIGHT_ENABLED is on (FR-020).
+  const sportsEspnMma = createEspn({
+    baseUrl: config.sports.espnBaseUrl,
+    timeoutMs: config.sports.timeoutMs,
+    scoreboardTtlMs: config.fight.cardTtlMs,
+    summaryTtlMs: config.sports.summaryTtlMs,
+    now: nowMs,
+    parseScoreboard: parseMmaScoreboard,
+    parseSummary: () => ({}),
+    ...(deps.sportsFetch ? { fetchImpl: deps.sportsFetch } : {}),
+  })
+  const sportsUfc = createUfc({
+    baseUrl: config.fight.ufcBaseUrl,
+    anchorId: config.fight.anchorId,
+    probeMax: config.fight.probeMax,
+    discoveryTtlMs: config.fight.discoveryTtlMs,
+    figuresTtlMs: config.fight.figuresTtlMs,
+    timeoutMs: config.sports.timeoutMs,
+    now: nowMs,
+    ...(deps.sportsUfcFetch ?? deps.sportsFetch ? { fetchImpl: deps.sportsUfcFetch ?? deps.sportsFetch } : {}),
+  })
+  const sportsFightService = createFightService({
+    cardEnabled: config.fight.cardEnabled,
+    figuresEnabled: config.fight.figuresEnabled,
+    venue: sportsVenue,
+    espn: sportsEspnMma,
+    ufc: sportsUfc,
+    now: nowMs,
+  })
+  app.use(createSportsRouter(config, { service: sportsService, quotas: sportsQuotas, killSwitch, fightService: sportsFightService, now: nowMs }))
 
   // ---- GET/POST /v1/member/* (spec 095 member API; origin-locked via middleware) ---------------
   // Member-signed capability tokens granting custody-free, scoped access to a member's OWN data,

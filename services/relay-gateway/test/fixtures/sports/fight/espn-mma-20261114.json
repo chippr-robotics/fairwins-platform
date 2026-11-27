@@ -1,0 +1,158 @@
+{
+ "events": [
+  {
+   "id": "600061400",
+   "name": "UFC 334: Gane vs. Hokit",
+   "competitions": [
+    {
+     "id": "401913647",
+     "date": "2026-11-15T00:00Z",
+     "type": {
+      "abbreviation": "Welterweight"
+     },
+     "competitors": [
+      {
+       "id": "2615077",
+       "winner": true,
+       "athlete": {
+        "displayName": "Stephen Thompson"
+       }
+      },
+      {
+       "id": "4416297",
+       "winner": false,
+       "athlete": {
+        "displayName": "Charles Radtke"
+       }
+      }
+     ],
+     "status": {
+      "period": 3,
+      "displayClock": "2:54",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "name": "STATUS_FINAL"
+      }
+     },
+     "format": {
+      "regulation": {
+       "periods": 3
+      }
+     }
+    },
+    {
+     "id": "401922640",
+     "date": "2026-11-15T02:00Z",
+     "type": {
+      "abbreviation": "Welterweight"
+     },
+     "competitors": [
+      {
+       "id": "3943695",
+       "winner": false,
+       "athlete": {
+        "displayName": "Kevin Holland"
+       }
+      },
+      {
+       "id": "4685870",
+       "winner": false,
+       "athlete": {
+        "displayName": "Uroš Medić"
+       }
+      }
+     ],
+     "status": {
+      "period": 3,
+      "displayClock": "5:00",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "name": "STATUS_FINAL"
+      }
+     },
+     "format": {
+      "regulation": {
+       "periods": 3
+      }
+     }
+    },
+    {
+     "id": "401922638",
+     "date": "2026-11-15T02:00Z",
+     "type": {
+      "abbreviation": "W Bantamweight"
+     },
+     "competitors": [
+      {
+       "id": "2516131",
+       "winner": false,
+       "athlete": {
+        "displayName": "Amanda Nunes"
+       }
+      },
+      {
+       "id": "4332765",
+       "winner": true,
+       "athlete": {
+        "displayName": "Kayla Harrison"
+       }
+      }
+     ],
+     "status": {
+      "period": 4,
+      "displayClock": "1:29",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "name": "STATUS_FINAL"
+      }
+     },
+     "format": {
+      "regulation": {
+       "periods": 5
+      }
+     }
+    },
+    {
+     "id": "401913646",
+     "date": "2026-11-15T02:00Z",
+     "type": {
+      "abbreviation": "Heavyweight"
+     },
+     "competitors": [
+      {
+       "id": "4049391",
+       "winner": false,
+       "athlete": {
+        "displayName": "Josh Hokit"
+       }
+      },
+      {
+       "id": "4426000",
+       "winner": true,
+       "athlete": {
+        "displayName": "Ciryl Gane"
+       }
+      }
+     ],
+     "status": {
+      "period": 5,
+      "displayClock": "5:00",
+      "type": {
+       "state": "post",
+       "completed": true,
+       "name": "STATUS_FINAL"
+      }
+     },
+     "format": {
+      "regulation": {
+       "periods": 5
+      }
+     }
+    }
+   ]
+  }
+ ]
+}

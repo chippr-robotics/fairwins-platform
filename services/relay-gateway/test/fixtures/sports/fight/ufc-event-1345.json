@@ -1,0 +1,266 @@
+{
+ "LiveEventDetail": {
+  "EventId": 1345,
+  "Name": "UFC 334: Gane vs. Hokit",
+  "StartTime": "2026-11-14T22:00Z",
+  "Status": "Final",
+  "LiveEventId": null,
+  "LiveFightId": null,
+  "LiveRoundNumber": null,
+  "LiveRoundElapsedTime": null,
+  "FightCard": [
+   {
+    "FightId": 13140,
+    "Status": "Final",
+    "Fighters": [
+     {
+      "FighterId": 3327,
+      "Name": {
+       "FirstName": "Ciryl",
+       "LastName": "Gane"
+      },
+      "Outcome": {
+       "OutcomeId": 1,
+       "Outcome": "Win"
+      }
+     },
+     {
+      "FighterId": 4383,
+      "Name": {
+       "FirstName": "Josh",
+       "LastName": "Hokit"
+      },
+      "Outcome": {
+       "OutcomeId": 2,
+       "Outcome": "Loss"
+      }
+     }
+    ],
+    "Result": {
+     "Method": "Decision - Unanimous",
+     "EndingRound": 5,
+     "EndingTime": "5:00",
+     "FightScores": [
+      {
+       "JudgeId": 523,
+       "JudgeFirstName": "Adrian",
+       "JudgeLastName": "Castro",
+       "Fighters": [
+        {
+         "FighterId": 3327,
+         "Score": 48
+        },
+        {
+         "FighterId": 4383,
+         "Score": 47
+        }
+       ]
+      },
+      {
+       "JudgeId": 14,
+       "JudgeFirstName": "Sal",
+       "JudgeLastName": "D'amato",
+       "Fighters": [
+        {
+         "FighterId": 3327,
+         "Score": 48
+        },
+        {
+         "FighterId": 4383,
+         "Score": 47
+        }
+       ]
+      },
+      {
+       "JudgeId": 17,
+       "JudgeFirstName": "Chris",
+       "JudgeLastName": "Lee",
+       "Fighters": [
+        {
+         "FighterId": 3327,
+         "Score": 48
+        },
+        {
+         "FighterId": 4383,
+         "Score": 47
+        }
+       ]
+      }
+     ]
+    },
+    "WeightClass": {
+     "Description": "Heavyweight"
+    },
+    "RuleSet": {
+     "PossibleRounds": 5
+    }
+   },
+   {
+    "FightId": 13141,
+    "Status": "Final",
+    "Fighters": [
+     {
+      "FighterId": 4162,
+      "Name": {
+       "FirstName": "Kayla",
+       "LastName": "Harrison"
+      },
+      "Outcome": {
+       "OutcomeId": 1,
+       "Outcome": "Win"
+      }
+     },
+     {
+      "FighterId": 1719,
+      "Name": {
+       "FirstName": "Amanda",
+       "LastName": "Nunes"
+      },
+      "Outcome": {
+       "OutcomeId": 2,
+       "Outcome": "Loss"
+      }
+     }
+    ],
+    "Result": {
+     "Method": "Submission",
+     "EndingRound": 4,
+     "EndingTime": "1:29",
+     "FightScores": []
+    },
+    "WeightClass": {
+     "Description": "Women's Bantamweight"
+    },
+    "RuleSet": {
+     "PossibleRounds": 5
+    }
+   },
+   {
+    "FightId": 13143,
+    "Status": "Final",
+    "Fighters": [
+     {
+      "FighterId": 3486,
+      "Name": {
+       "FirstName": "Uros",
+       "LastName": "Medic"
+      },
+      "Outcome": {
+       "OutcomeId": 3,
+       "Outcome": "Draw"
+      }
+     },
+     {
+      "FighterId": 3086,
+      "Name": {
+       "FirstName": "Kevin",
+       "LastName": "Holland"
+      },
+      "Outcome": {
+       "OutcomeId": 3,
+       "Outcome": "Draw"
+      }
+     }
+    ],
+    "Result": {
+     "Method": "Decision - Majority",
+     "EndingRound": 3,
+     "EndingTime": "5:00",
+     "FightScores": [
+      {
+       "JudgeId": 416,
+       "JudgeFirstName": "David",
+       "JudgeLastName": "Bruce",
+       "Fighters": [
+        {
+         "FighterId": 3486,
+         "Score": 29
+        },
+        {
+         "FighterId": 3086,
+         "Score": 27
+        }
+       ]
+      },
+      {
+       "JudgeId": 228,
+       "JudgeFirstName": "Mike",
+       "JudgeLastName": "Bell",
+       "Fighters": [
+        {
+         "FighterId": 3486,
+         "Score": 28
+        },
+        {
+         "FighterId": 3086,
+         "Score": 28
+        }
+       ]
+      },
+      {
+       "JudgeId": 17,
+       "JudgeFirstName": "Chris",
+       "JudgeLastName": "Lee",
+       "Fighters": [
+        {
+         "FighterId": 3486,
+         "Score": 28
+        },
+        {
+         "FighterId": 3086,
+         "Score": 28
+        }
+       ]
+      }
+     ]
+    },
+    "WeightClass": {
+     "Description": "Welterweight"
+    },
+    "RuleSet": {
+     "PossibleRounds": 3
+    }
+   },
+   {
+    "FightId": 13145,
+    "Status": "Final",
+    "Fighters": [
+     {
+      "FighterId": 1944,
+      "Name": {
+       "FirstName": "Stephen",
+       "LastName": "Thompson"
+      },
+      "Outcome": {
+       "OutcomeId": 1,
+       "Outcome": "Win"
+      }
+     },
+     {
+      "FighterId": 4113,
+      "Name": {
+       "FirstName": "Charles",
+       "LastName": "Radtke"
+      },
+      "Outcome": {
+       "OutcomeId": 2,
+       "Outcome": "Loss"
+      }
+     }
+    ],
+    "Result": {
+     "Method": "KO/TKO",
+     "EndingRound": 3,
+     "EndingTime": "2:54",
+     "FightScores": []
+    },
+    "WeightClass": {
+     "Description": "Welterweight"
+    },
+    "RuleSet": {
+     "PossibleRounds": 3
+    }
+   }
+  ]
+ }
+}
