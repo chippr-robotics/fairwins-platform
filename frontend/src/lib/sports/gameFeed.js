@@ -11,13 +11,12 @@
  *           game — keep what is on screen and let it age; never replace it with zeros
  *
  * No request is made when no gateway is configured, so with the module off no request for game data leaves
- * the app (SC-006).
+ * the app (SC-006). The shared in-flight / remembered-absence machinery lives in sportsRead.js.
  */
-import { predictGatewayUrl } from '../predict/predictClient'
+import { createSportsReader } from './sportsRead'
 
 export const POLL_MS = 5_000
 export const PRE_START_POLL_MS = 30_000
-const FETCH_TIMEOUT_MS = 8_000
 
 /** The cadence for the next read, or null to stop. Ended is final; before the start is slow. */
 export function cadenceMs(status) {
@@ -50,68 +49,20 @@ export function identityOf(game) {
   return start ? { league, home, away, start } : { league, home, away }
 }
 
-const OFF_CODES = new Set(['sports_unconfigured', 'sports_paused', 'killswitch_active'])
+// Each feed has its OWN reader, so what one remembers never stops the other asking.
+const reader = createSportsReader({ rememberCodes: ['sports_unconfigured'] })
 
-/**
- * Two things are remembered here, and both exist to keep "module off" at ONE request (FR-013):
- *
- *  - `inflight`: a read already on its way is SHARED. React's StrictMode mounts an effect twice in
- *    development, and two surfaces can mount for the same game; without this each asked on its own.
- *  - `moduleMissing`: the gateway said the module is not there (404 from a gateway that predates it, or
- *    503 `sports_unconfigured`). That is a fact about the DEPLOYMENT, not about this page, so it is kept
- *    until the app reloads and no later page asks at all. A PAUSE (`sports_paused`, `killswitch_active`)
- *    is deliberately not kept: it is lifted without a deploy, and the next page view should find out.
- */
-const inflight = new Map()
-let moduleMissing = false
-
-export function __resetGameFeedForTests() {
-  inflight.clear()
-  moduleMissing = false
-}
+export const __resetGameFeedForTests = () => reader.reset()
 
 export function fetchGame(gameId, { identity = {}, fetchImpl } = {}) {
-  const base = predictGatewayUrl()
-  if (!base || gameId == null || gameId === '' || moduleMissing) return Promise.resolve({ kind: 'absent' })
-  const doFetch = fetchImpl ?? (typeof fetch === 'function' ? fetch : null)
-  if (!doFetch) return Promise.resolve({ kind: 'failed' })
+  if (gameId == null || gameId === '') return Promise.resolve({ kind: 'absent' })
   const qs = new URLSearchParams(identity).toString()
-  const url = `${base}/v1/sports/games/${encodeURIComponent(String(gameId))}${qs ? `?${qs}` : ''}`
-  const running = inflight.get(url)
-  if (running) return running
-  const p = readGame(doFetch, url, gameId).finally(() => inflight.delete(url))
-  inflight.set(url, p)
-  return p
-}
-
-async function readGame(doFetch, url, gameId) {
-  const controller = new AbortController()
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
-  try {
-    const res = await doFetch(url, { signal: controller.signal })
-    if (res.status === 404) {
-      moduleMissing = true
-      return { kind: 'absent' }
-    }
-    if (res.status === 503) {
-      let code = null
-      try {
-        code = (await res.json())?.error?.code ?? null
-      } catch {
-        /* a 503 with no body is an outage, not the module speaking */
-      }
-      if (code === 'sports_unconfigured') moduleMissing = true
-      // Only the module's own words mean "off". A bare 503 is a gateway/proxy outage: keep trying.
-      return OFF_CODES.has(code) ? { kind: 'absent' } : { kind: 'failed' }
-    }
-    if (!res.ok) return { kind: 'failed' }
-    const body = await res.json()
-    const row = pickRow(body, gameId)
-    if (!row || !Number.isFinite(body.serverNow ?? NaN)) return { kind: 'failed' }
-    return { kind: 'ok', row, serverNow: body.serverNow, sources: body.sources ?? null, detail: row.detail ?? body.detail ?? null }
-  } catch {
-    return { kind: 'failed' }
-  } finally {
-    clearTimeout(timer)
-  }
+  return reader.read(`/v1/sports/games/${encodeURIComponent(String(gameId))}${qs ? `?${qs}` : ''}`, {
+    fetchImpl,
+    parse: (body) => {
+      const row = pickRow(body, gameId)
+      if (!row || !Number.isFinite(body.serverNow ?? NaN)) return null
+      return { row, serverNow: body.serverNow, sources: body.sources ?? null, detail: row.detail ?? body.detail ?? null }
+    },
+  })
 }

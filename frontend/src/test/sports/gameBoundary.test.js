@@ -78,7 +78,7 @@ const ORDER_PATH = [
   /^components\/predict\/TradeConfirm\.jsx$/,
 ]
 /** What they must never reach. */
-const GAME_TREE = [/^lib\/sports(\/|$)/, /^hooks\/useGameReading(\.[jt]sx?)?$/, /^components\/predict\/game(\/|$)/]
+const GAME_TREE = [/^lib\/sports(\/|$)/, /^hooks\/use(Game|Fight)Reading(\.[jt]sx?)?$/, /^components\/predict\/game(\/|$)/]
 
 const resolveSpec = (file, spec) => (spec.startsWith('.') ? rel(resolve(dirname(file), spec)) : null)
 
@@ -97,7 +97,7 @@ describe('no order path imports the game view', () => {
     expect(names.some((n) => /^lib\/predict\/ticket/.test(n))).toBe(true)
   })
 
-  it('none of them imports lib/sports, useGameReading or components/predict/game', () => {
+  it('none of them imports lib/sports, useGameReading, useFightReading or components/predict/game', () => {
     const offenders = []
     for (const file of ordered) {
       for (const spec of specifiers(readFileSync(file, 'utf8'))) {
@@ -121,6 +121,19 @@ describe('no order path imports the game view', () => {
       }
     }
     expect(offenders).toEqual([])
+  })
+
+  it('the guarded tree includes the fight files (slice 3), so they cannot reach a ticket either', () => {
+    const tree = walk(SRC).filter((f) => GAME_TREE.some((re) => re.test(rel(f)))).map(rel)
+    expect(tree).toEqual(expect.arrayContaining([
+      'lib/sports/fightReading.js',
+      'lib/sports/fightFeed.js',
+      'lib/sports/sportsRead.js',
+      'hooks/useFightReading.js',
+      'components/predict/game/FightView.jsx',
+      'components/predict/game/FightFigures.jsx',
+      'components/predict/game/FightResult.jsx',
+    ]))
   })
 
   it('the detector sees a violation (multi-line, dynamic, re-export), so a pass means something', () => {

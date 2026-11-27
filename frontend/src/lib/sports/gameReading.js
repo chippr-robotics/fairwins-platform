@@ -39,13 +39,19 @@ export function readStatus(status) {
   return t ? { status: 'other', statusText: t } : { status: null, statusText: null }
 }
 
-function stateFor(source, age) {
-  const bounds = TRUST_BOUNDS[source]
+/**
+ * The ONE place an age and a bound pair become a state. A bound pair with `liveMs: null` can never produce
+ * `live`. Shared by the fight reading (fightReading.js) so the rule exists once; it returns a state NAME,
+ * it constructs nothing.
+ */
+export function deriveState(bounds, age) {
   if (!bounds || age == null) return 'unknown'
   if (bounds.liveMs != null && age <= bounds.liveMs) return 'live'
   if (age <= bounds.delayedMs) return 'delayed'
   return 'last-known'
 }
+
+const stateFor = (source, age) => deriveState(TRUST_BOUNDS[source], age)
 
 /** No value. Deliberately has no figure keys and no stamp. */
 export function unknown(reason = 'unknown') {

@@ -72,27 +72,27 @@ Outcomes only when the event row carries `game`.
 Capture harness: `node scripts/ui/capture-predict-game.mjs` (13 states, both themes, 390 and 1280 wide).
 E2E: `frontend/cypress/e2e/fast/53-predict-game-view.cy.js` (PG-01…PG-06).
 
+## The fight screen (slice 3, off)
+
+`FightView` replaces the scoreboard for a `game` whose league is in `FIGHT_LEAGUES` (`ufc`), and renders
+nothing when the fight route is absent. `fightFeed.js` and `gameFeed.js` share `sportsRead.js` but each has
+its own reader, so one module being off is never remembered as the other being off.
+
+- Fighters by name only: no corners, photos or flags.
+- Figures are real tables (caption, row and column headers), one per round plus the source's own whole-fight
+  table when it gave one. "12 of 30" for landed of attempted; a dash with the accessible text "not reported"
+  for an absent figure; a reported 0 stays 0. Nothing is summed, compared or highlighted.
+- The result is in words: win (name, method, round, time), draw, no contest, or — attributed to the venue's
+  feed — cancelled. Judges' scores are shown as given, with no sum.
+- A finished fight inside its source's bounds reads "Up to date"; a source that is never live reads "Delayed"
+  only while the fight is running.
+
 ## Not built, not seen
 
-- The fight view (slice 3) and its off-switch.
+- **Nothing about a live fight has been observed.** Round, clock and figures mid-fight, and the venue's live
+  frame for a fight, are untested until the 2026-12-05 card (research R3). The fight route stays off until then.
+- An open fight listing at the venue (every fight event found was closed).
 - Any league other than NFL against the play source. Overtime, a red-zone situation, a rematch inside one
   week, and how long a finished game stays on the play source's scoreboard were not observed.
 - The dead-connection watchdog has run only against a fake socket; every real drop seen was a clean close.
 - Everything measured comes from one evening and one viewer. Nothing here has been load-tested.
-
-
-## Slice 3 — the fight view (gateway side, OFF)
-
-`GET /v1/sports/fights/:gameId`, behind its OWN flag `SPORTS_FIGHT_ENABLED` (default false; off ⇒ `503 sports_fight_unconfigured`
-on that route and nothing else — FR-020). Three sources, each failing alone and named: `venue` (identity + its own words),
-`card` (ESPN's MMA scoreboard: status, round, clock — leads), `figures` (UFC's own JSON: figures, method, judges, the official
-outcome — leads the result). Contract: `specs/115-predict-live-game-views/contracts/fight-api.md`; measurements: research.md
-§ Slice 3. **It ships off because nothing about a live fight has been observed** (next chance: the 2026-12-05 card).
-
-- Names match by BOTH fighters, normalised (`fightNames.js`); exactly one or `not-matched`. A rematch without a `start` claim is ambiguous.
-- UFC has no event index: `ufc.js` probes ids up from `SPORTS_UFC_ANCHOR_ID` (bump it occasionally; it is a cost, not a correctness
-  setting, until it passes a card in use). Worst case and cadence are in the contract and research R5.
-- Figures are a FIXED list of keys of ours (`ufc.js#FIGURE_KEYS`), integers or `null`, never derived; draw / no contest come only
-  from UFC (ESPN marks them like an unfought fight); `cancelled` only from the venue.
-- The identity claim (`a`, `b`, `start`) is request-scoped and never stored; every cache is keyed by UFC's or ESPN's own ids.
-- Switching it on: confirm `/status` carries `sports.fight.enabled: true`, watch a live card against research R3, then decide.

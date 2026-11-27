@@ -29,9 +29,9 @@ See [the tiering policy](./e2e-testing-policy.md) for what belongs in which tier
 | Spec directories | 118 |
 | With a member-facing flow | 93 |
 | Member-facing flows | 223 |
-| 🟢 covered | 200 |
+| 🟢 covered | 201 |
 | 🟡 partial | 5 |
-| 🔴 absent | 9 |
+| 🔴 absent | 8 |
 | ⚪ out of scope | 9 |
 | **Covered but not proven** (status `covered`, depth below `flow`) | **13** |
 
@@ -634,7 +634,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 ## Information — read-only surfaces
 
-57 flows — 🟢 56 · 🟡 0 · 🔴 1 · ⚪ 0 · covered-but-not-proven 12
+57 flows — 🟢 57 · 🟡 0 · 🔴 0 · ⚪ 0 · covered-but-not-proven 12
 
 ### `005-multi-recipient-encryption` — Multi-recipient encryption
 
@@ -881,7 +881,7 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `predict.game-scoreboard` | A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-01, PG-02, PG-03, PG-04, PG-05, PG-06) |  |
 | `predict.game-field-and-plays` | A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-01, PG-03) |  |
-| `predict.fight-view` | A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
+| `predict.fight-view` | A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-07, PG-08, PG-09, PG-10) |  |
 
 ## No member consequence
 

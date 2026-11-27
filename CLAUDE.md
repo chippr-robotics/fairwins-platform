@@ -1282,8 +1282,19 @@ A subagent's report is a claim until `witness` has run the gates. The Copilot
   motion on a score and no call to action. Neither source is under a service agreement: each fails
   alone, is named, and has an off-switch (`SPORTS_PLAYS_ENABLED`, `SPORTS_KILLSWITCH`). Adding a
   league means verifying its score order AND its team codes against the play source at the same
-  moment. The fight view (slice 3) is not built. See `docs/developer-guide/live-game-views.md` +
-  `specs/115-predict-live-game-views/`.
+  moment.
+  **The fight view (slice 3) is BUILT AND OFF** — its own flag (`SPORTS_FIGHT_ENABLED`, off ⇒
+  `503 sports_fight_unconfigured` on the fight route only), remembered separately by the app so the
+  fight view being absent never stops a game view asking. It was built from COMPLETED cards: nothing
+  about a live fight (round, clock, mid-round figures, the venue's live frame) has been observed, and
+  research R3 decides when it is switched on. Three sources: the card source leads status, round and
+  clock; the figures source alone knows a draw or a no contest (the card source marks a draw, a no
+  contest and a fight not yet fought identically — never infer "no winner, so a draw"); the venue's
+  word is its own (it lists as cancelled a fight both other sources record as fought, so `cancelled`
+  is always attributed, never stated). Figures are sixteen keys of ours, a number the source reported
+  or `null`, side by side — no total, no percentage, no highlight of the larger number, no "leading".
+  A finished game or fight inside its bounds reads "Up to date", not "Delayed". See
+  `docs/developer-guide/live-game-views.md` + `specs/115-predict-live-game-views/`.
 
 For additional context about technologies to be used, project structure,
 shell commands, and other important information, read the current plan

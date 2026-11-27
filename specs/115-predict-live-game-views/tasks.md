@@ -33,6 +33,6 @@
 
 ## Slice 3 — fight view (ships off)
 
-- [ ] T014 `fight-api.md`, gateway `fight.js` against completed cards.
-- [ ] T015 `FightView`: rounds, clock, per-round figures side by side, result with judges' scores.
-- [ ] T016 Leave `SPORTS_FIGHT_ENABLED` off; R3 decides.
+- [x] T014 `fight-api.md`, gateway `fight.js` against completed cards.
+- [x] T015 `FightView`: rounds, clock, per-round figures side by side, result with judges' scores.
+- [x] T016 Leave `SPORTS_FIGHT_ENABLED` off; R3 decides.

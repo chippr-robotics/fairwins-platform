@@ -341,3 +341,17 @@ describe('GameTrustChip — a venue reading', () => {
   })
 })
 
+describe('GameTrustChip — a finished game or fight', () => {
+  it('is Up to date while its final is inside the bounds, even from a source that is never live', () => {
+    render(<GameTrustChip reading={rd({ source: 'venue', status: 'ended' }, 3000)} ended />)
+    const chip = screen.getByTestId('game-trust-chip')
+    expect(chip).toHaveTextContent('Game information is up to date')
+    expect(chip.textContent).not.toMatch(/Delayed|Live|\d/)
+  })
+
+  it('is Last known once the final is older than the bounds', () => {
+    render(<GameTrustChip reading={rd({ status: 'ended' }, 10 * 60_000)} ended />)
+    expect(screen.getByTestId('game-trust-chip')).toHaveTextContent('Showing the last known game information')
+  })
+})
+

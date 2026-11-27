@@ -213,3 +213,93 @@
   font-size: 0.8125rem;
   margin: 0;
 }
+
+/* Fight view (slice 3). Plain tables of the source's own numbers: no zebra, no bars, no emphasis on the larger
+   figure — nothing here compares one fighter with the other (FR-018). */
+.game-view .fight-names {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  font-size: 1.05rem;
+  font-weight: 600;
+  gap: 0.25rem 0.625rem;
+  margin: 0;
+}
+.game-view .fight-vs {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  font-weight: 400;
+}
+.game-view .fight-name {
+  overflow-wrap: anywhere;
+}
+.game-view .fight-result {
+  border-top: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding-top: 0.75rem;
+}
+.game-view .fight-result-line {
+  font-size: 1.125rem;
+  font-weight: 700;
+  margin: 0;
+}
+.game-view .fight-result-detail {
+  font-size: 0.9rem;
+  margin: 0;
+}
+.game-view .fight-figures {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.game-view .fight-table {
+  border-collapse: collapse;
+  font-size: 0.8125rem;
+  table-layout: fixed;
+  width: 100%;
+}
+.game-view .fight-table caption {
+  color: var(--text-primary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  padding-bottom: 0.25rem;
+  text-align: left;
+}
+.game-view .fight-table th,
+.game-view .fight-table td {
+  border-top: 1px solid var(--border-color);
+  overflow-wrap: anywhere;
+  padding: 0.3rem 0.25rem;
+  text-align: left;
+  vertical-align: top;
+}
+.game-view .fight-table thead th {
+  color: var(--text-secondary);
+  font-weight: 600;
+}
+.game-view .fight-table tbody th {
+  color: var(--text-secondary);
+  font-weight: 400;
+  width: 38%;
+}
+.game-view .fight-table .fight-num {
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.game-view .fight-more {
+  align-self: flex-start;
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  color: var(--accent-color);
+  cursor: pointer;
+  font-size: 0.875rem;
+  min-height: 44px;
+  padding: 0 0.875rem;
+}
+.game-view .fight-more:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
