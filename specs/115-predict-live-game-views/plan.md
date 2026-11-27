@@ -1,6 +1,6 @@
 # Implementation Plan: Predict live game views
 
-**Branch**: `claude/prediction-markets-kafka-q9rr8e` | **Spec**: [spec.md](./spec.md) | **Tracking**: #1756
+**Spec**: [spec.md](./spec.md) | **Tracking**: #1756
 
 ## Summary
 
