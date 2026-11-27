@@ -10,6 +10,6 @@
  * bounds are a few cache windows. See research.md R1 for the sample sizes behind each figure.
  */
 export const TRUST_BOUNDS = Object.freeze({
-  venue: Object.freeze({ liveMs: 90_000, delayedMs: 300_000 }),
+  venue: Object.freeze({ liveMs: 75_000, delayedMs: 300_000 }),
   plays: Object.freeze({ liveMs: 30_000, delayedMs: 120_000 }),
 })

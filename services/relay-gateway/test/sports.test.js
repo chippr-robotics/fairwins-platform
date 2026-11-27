@@ -32,8 +32,13 @@ const SITUATIONS = fx('espn-situations-401873080.json')
 const NFL_FRAME = { gameId: 19618, leagueAbbreviation: 'nfl', turn: 'phi', homeTeam: 'DAL', awayTeam: 'PHI', turnProviderId: '26', status: 'InProgress', score: '10-28', elapsed: '9:44', period: 'Q3', live: true, ended: false }
 const VAL_FRAME = { gameId: 1830762, leagueAbbreviation: 'val', homeTeam: 'Fluxo W7M', awayTeam: 'Elevate', status: 'running', score: '000-000|1-1|Bo3', period: '1/3', live: true, ended: false }
 const CRICKET_FRAME = { metadataGameId: 'id2703917576109864', leagueAbbreviation: 'cricket', score: '192-15', period: 'Live', live: true, ended: false }
-// The venue's ended-game shape: `ended: true` is the field the parser keys on (the NFL status word is not asserted).
-const ENDED_FRAME = { gameId: 19620, leagueAbbreviation: 'nfl', homeTeam: 'DET', awayTeam: 'CHI', status: 'Final', score: '39-35', period: 'VFT', live: false, ended: true }
+// The venue's REAL final frame (captured 2026-11-27 01:37:30Z for 19618, PHI 39 @ DAL 38), re-keyed to the CHI @ DET
+// game whose ESPN fixture is final. Note `turn: ""`, `elapsed: ""`, `period: "FT"`, and that it arrived ~3.5 min
+// after ESPN's own final (research R1).
+const REAL_FINAL_FRAME = { gameId: 19618, leagueAbbreviation: 'nfl', turn: '', homeTeam: 'DAL', awayTeam: 'PHI', turnProviderId: '9', status: 'Final', score: '39-38', elapsed: '', period: 'FT', live: false, ended: true, finishedTimestamp: '2026-11-27T01:37:30.524664232Z' }
+const ENDED_FRAME = { ...REAL_FINAL_FRAME, gameId: 19620, homeTeam: 'DET', awayTeam: 'CHI', score: '39-35' }
+// The frame the venue was still sending for that game when ESPN already said final (01:34:29Z): live, ended false.
+const END_Q4_FRAME = { gameId: 19618, leagueAbbreviation: 'nfl', turn: 'phi', homeTeam: 'DAL', awayTeam: 'PHI', turnProviderId: '26', status: 'InProgress', score: '39-38', elapsed: '0:00', period: 'End Q4', live: true, ended: false }
 
 // ---- harness -------------------------------------------------------------------------------------
 
@@ -596,6 +601,11 @@ describe('numbers exist only where a source gave one', () => {
     expect(f).toMatchObject({ score: null, scoreText: null, period: null, clock: null, status: 'in-progress' })
   })
 
+  it('the real final frame: ended, away-home score, empty turn/clock are null, period is the venue\'s own label', () => {
+    expect(parseVenueFrame(REAL_FINAL_FRAME, 9)).toMatchObject({ gameId: 19618, status: 'ended', score: { home: 38, away: 39 }, possession: null, clock: null, period: 'FT', scoreText: null })
+    expect(parseVenueFrame(END_Q4_FRAME, 9)).toMatchObject({ status: 'in-progress', period: 'End Q4', clock: '0:00', possession: 'away' })
+  })
+
   it('venue status words vary by league and map to three values or null', () => {
     const s = (o) => parseVenueFrame({ gameId: 1, leagueAbbreviation: 'x', ...o }, 0).status
     expect(s({ status: 'InProgress', live: true, ended: false })).toBe('in-progress')
@@ -614,6 +624,7 @@ describe('yard line (research R3): derived from the text, cross-checked against 
     expect(situations.length).toBeGreaterThanOrEqual(6)
     expect(situations.some((s) => s.possession === home.id)).toBe(true)
     expect(situations.some((s) => s.possession === away.id)).toBe(true)
+    expect(situations.some((s) => s.possession == null)).toBe(true) // the no-possession branch above actually ran
   })
 
   it('every captured situation derives, and the axis equals ESPN\'s numeric yardLine (0 = home goal line)', () => {
@@ -623,9 +634,10 @@ describe('yard line (research R3): derived from the text, cross-checked against 
       expect(axis).toBe(s.yardLine)
       const sit = normalizeSituation(s, home, away)
       expect(sit.yardLine).toBe(axis)
-      expect(sit.possession).toBe(s.possession === home.id ? 'home' : 'away')
-      // the line to gain is `distance` yards toward the goal being attacked, and appears in the sentence's own terms
-      expect(sit.lineToGain).toBe(sit.possession === 'home' ? axis + s.distance : axis - s.distance)
+      // Some captured situations carry no `possession` at all (ESPN omits it right after a score or kickoff):
+      // the side is then null, and so is the line to gain, which cannot be pointed in a direction.
+      expect(sit.possession).toBe(s.possession === home.id ? 'home' : s.possession === away.id ? 'away' : null)
+      expect(sit.lineToGain).toBe(sit.possession === 'home' ? axis + s.distance : sit.possession === 'away' ? axis - s.distance : null)
     }
   })
 

@@ -52,11 +52,13 @@ for the last two take no "live" flag, and `unknown` carries no figures at all.
 
 **What "confirmed" means differs by source, and the bounds come from measurement, not taste.**
 The plays source is polled: confirmed = the moment the gateway last read it. The venue feed is
-pushed and has no heartbeat — a 45 s listen on 2026-11-26 during an NFL third quarter delivered
+pushed, speaks about a game only when it changes, and its only heartbeat is a bare `null` every
+15 s — a 45 s listen on 2026-11-26 during an NFL third quarter delivered
 nothing for that game, while e-sports games repeated about every 20 s. So research task R1 measures
 the feed's per-league cadence through a full game before the bounds are fixed, and the gateway
-cross-checks the venue's reading with the plays source's scoreboard where one exists: a game is
-`live` when EITHER source confirmed it inside the live bound and they agree on the score.
+cross-checks the venue against the plays source where one exists. **R1 settled it (2026-11-27):** the
+venue ran a median 34 s behind the plays source, so the plays source leads where it is read and a
+venue reading is never drawn as live (contract § "Whose figures", spec FR-008 as amended).
 
 ### The gateway module
 
