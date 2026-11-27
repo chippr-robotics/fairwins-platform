@@ -56,6 +56,11 @@ import { createPerpsClients } from './perps/client.js'
 import { createPerpsRouter, perpsStatus } from './perps/routes.js'
 import { createNewsClient } from './news/client.js'
 import { createNewsRouter, newsStatus } from './news/routes.js'
+import { createSportsRouter, sportsStatus } from './sports/routes.js'
+import { createSportsService } from './sports/service.js'
+import { createVenueFeed } from './sports/venueFeed.js'
+import { createEspn } from './sports/espn.js'
+import { parseScoreboard as parseEspnScoreboard, parseSummary as parseEspnSummary, parseVenueFrame } from './sports/normalize.js'
 import { createAcrossClient } from './bridge/quotes.js'
 import { createBridgeRouter } from './bridge/routes.js'
 import { createMemberApiRouter, memberApiStatus } from './memberApi/routes.js'
@@ -536,6 +541,12 @@ export function createApp(config, deps = {}) {
     // both instruct an operator to run, so it has to be here for them to be able to run it.
     // Config state only — no member data, no credential (the vendor is keyless).
     const news = newsStatus(config, { killSwitch })
+    // Live game views (spec 115): same reasoning as `news` above — the routes mount unconditionally, so
+    // this block is the only way to tell an image carrying the module from one that predates it. It
+    // also reports the venue socket's phase/frame counts (no game content), because "enabled" and
+    // "actually receiving" are different facts. `sportsStatus` reads objects declared further down;
+    // this closure only runs at request time.
+    const sports = sportsStatus(config, { killSwitch, venue: sportsVenue, service: sportsService })
     // Member API visibility (spec 095): module state + which chains can answer a wager read + whether
     // the assistant has a credential. No member data, no key material, nothing about any token.
     // `memberApiAssistant` is declared further down; this closure only runs at request time.
@@ -582,7 +593,7 @@ export function createApp(config, deps = {}) {
           access: accessStatus(config, { signingKey: accessSigningKey, enforcement: accessEnforcement }),
         }
       : {}
-    res.json({ status: 'ok', build: buildIdentity(), chains, killSwitch: killSwitch.isActive(), fees, perps, news, memberApi, ...identityGated })
+    res.json({ status: 'ok', build: buildIdentity(), chains, killSwitch: killSwitch.isActive(), fees, perps, news, sports, memberApi, ...identityGated })
   }
   app.get('/healthz', healthLimiter, healthHandler)
   app.get('/status', healthLimiter, healthHandler)
@@ -1056,6 +1067,43 @@ export function createApp(config, deps = {}) {
     })
   )
 
+  // ---- GET /v1/sports/* (spec 115 live game views; origin-locked via middleware) ----------------
+  // Read-only, keyless: ONE lazily-opened upstream WebSocket (the venue's sports feed) plus ESPN's
+  // public site API, both behind the sports service seam (FR-014). Upstream load is a function of
+  // games being viewed, never of members. Mounting is unconditional so a disabled module answers
+  // 503 sports_unconfigured, never a bare 404. Advisory-only: nothing signs, nothing moves value.
+  const sportsQuotas = createQuotas({
+    signerPerWindow: config.sports.quotaPerIp,
+    globalPerWindow: config.sports.quotaGlobal,
+    windowMs: config.sports.quotaWindowMs,
+    now: nowMs,
+  })
+  const sportsVenue = createVenueFeed({
+    url: config.sports.venueWsUrl,
+    parseFrame: parseVenueFrame,
+    idleCloseMs: config.sports.idleCloseMs,
+    now: nowMs,
+    ...(deps.sportsWebSocket ? { WebSocketImpl: deps.sportsWebSocket } : {}),
+    ...(deps.sportsTimers ?? {}),
+  })
+  const sportsEspn = createEspn({
+    baseUrl: config.sports.espnBaseUrl,
+    timeoutMs: config.sports.timeoutMs,
+    scoreboardTtlMs: config.sports.scoreboardTtlMs,
+    summaryTtlMs: config.sports.summaryTtlMs,
+    now: nowMs,
+    parseScoreboard: parseEspnScoreboard,
+    parseSummary: parseEspnSummary,
+    ...(deps.sportsFetch ? { fetchImpl: deps.sportsFetch } : {}),
+  })
+  const sportsService = createSportsService({
+    playsEnabled: config.sports.enabled && config.sports.playsEnabled,
+    venue: sportsVenue,
+    espn: sportsEspn,
+    now: nowMs,
+  })
+  app.use(createSportsRouter(config, { service: sportsService, quotas: sportsQuotas, killSwitch }))
+
   // ---- GET/POST /v1/member/* (spec 095 member API; origin-locked via middleware) ---------------
   // Member-signed capability tokens granting custody-free, scoped access to a member's OWN data,
   // plus unsigned typed-data quotes and a conversational assistant. NOTHING here moves value: the
@@ -1224,7 +1272,7 @@ export function createApp(config, deps = {}) {
     res.status(400).json({ error: { code: 'bad_request', reason: 'invalid request body' } })
   })
 
-  return { app, killSwitch, identityCounters, upstreamCeilings, store, dedup }
+  return { app, killSwitch, identityCounters, upstreamCeilings, store, dedup, sportsVenue }
 }
 
 // ---- boot (only when run directly; tests import createApp) -----------------------------------

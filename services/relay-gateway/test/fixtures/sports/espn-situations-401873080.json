@@ -1,0 +1,93 @@
+{
+ "home": {
+  "id": "6",
+  "code": "DAL"
+ },
+ "away": {
+  "id": "21",
+  "code": "PHI"
+ },
+ "situations": [
+  {
+   "down": 1,
+   "yardLine": 79,
+   "distance": 10,
+   "downDistanceText": "1st & 10 at PHI 21",
+   "possessionText": "PHI 21",
+   "isRedZone": false,
+   "possession": "21"
+  },
+  {
+   "down": 2,
+   "yardLine": 75,
+   "distance": 6,
+   "downDistanceText": "2nd & 6 at PHI 25",
+   "possessionText": "PHI 25",
+   "isRedZone": false,
+   "possession": "21"
+  },
+  {
+   "down": 1,
+   "yardLine": 69,
+   "distance": 10,
+   "downDistanceText": "1st & 10 at PHI 31",
+   "possessionText": "PHI 31",
+   "isRedZone": false,
+   "possession": "21"
+  },
+  {
+   "down": 2,
+   "yardLine": 79,
+   "distance": 20,
+   "downDistanceText": "2nd & 20 at PHI 21",
+   "possessionText": "PHI 21",
+   "isRedZone": false,
+   "possession": "21"
+  },
+  {
+   "down": 3,
+   "yardLine": 76,
+   "distance": 17,
+   "downDistanceText": "3rd & 17 at PHI 24",
+   "possessionText": "PHI 24",
+   "isRedZone": false,
+   "possession": "21"
+  },
+  {
+   "down": 4,
+   "yardLine": 76,
+   "distance": 17,
+   "downDistanceText": "4th & 17 at PHI 24",
+   "possessionText": "PHI 24",
+   "isRedZone": false,
+   "possession": "21"
+  },
+  {
+   "down": 1,
+   "yardLine": 41,
+   "distance": 10,
+   "downDistanceText": "1st & 10 at DAL 41",
+   "possessionText": "DAL 41",
+   "isRedZone": false,
+   "possession": "6"
+  },
+  {
+   "down": 2,
+   "yardLine": 41,
+   "distance": 10,
+   "downDistanceText": "2nd & 10 at DAL 41",
+   "possessionText": "DAL 41",
+   "isRedZone": false,
+   "possession": "6"
+  },
+  {
+   "down": 1,
+   "yardLine": 60,
+   "distance": 10,
+   "downDistanceText": "1st & 10 at PHI 40",
+   "possessionText": "PHI 40",
+   "isRedZone": false,
+   "possession": "6"
+  }
+ ]
+}

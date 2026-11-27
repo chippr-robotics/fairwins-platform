@@ -347,6 +347,26 @@ cost panels, and the one that says where the QuickNode account's shared 50 req/s
   table) and re-bounded by the collector, which drops anything outside the expected sets rather
   than trusting the scrape target with a cardinality promise.
 
+### sports-sources-cost
+
+Two sources, one note: `espn-sports-api` (ESPN's public site API, plays/situation/scoreboard) and
+`polymarket-sports-feed` (the venue's public sports WebSocket, scores and clock), both read by the
+relay-gateway live game module (spec 115, `SPORTS_ENABLED`).
+
+Both are **keyless and on no service agreement**, and both are `modelled` at **$0 by declared plan**
+(`FINOPS_ESPN_PLAN_USD` / `FINOPS_POLYMARKET_SPORTS_PLAN_USD`, default `0`). The default is `0` rather than
+`null` for the Alphaday reason: there is no account, so there is no tier either could silently be on. They
+are catalogued so the dependency is **visible** — if either vendor ever prices the API, restricts it, or
+changes its shape, this line is where that lands, and the entry's own source-health alert is what notices a
+collector that stopped reading. What a $0 here does **not** say is that the sources are reliable: each can
+refuse or reshape without notice, which is why each fails alone, is named in the app's game view, and has
+its own off-switch (`SPORTS_PLAYS_ENABLED` for ESPN; `SPORTS_ENABLED`/`SPORTS_KILLSWITCH` for the module).
+
+**Every source that reuses the flat-subscription modeller must appear in `flatSubscriptions`** in
+`services/finops-exporter/src/config/index.js` — both do. Gateway request volume appears in
+`gateway-upstream-usage` under the `sports` upstream label (bounded: it comes from the route table).
+Upstream traffic itself (ESPN calls, the one socket) is a function of games being viewed, not of members.
+
 ### thegraph-cost
 
 **The tier is which endpoint the app calls — it is not a setting anywhere.**

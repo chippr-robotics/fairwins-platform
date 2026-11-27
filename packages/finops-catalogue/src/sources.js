@@ -552,6 +552,47 @@ const vendors = [
       'under the news upstream label.',
   },
   {
+    id: 'espn-sports-api',
+    kind: 'cost',
+    status: 'live',
+    label: 'ESPN sports API',
+    metric: 'fairwins_finops_cost_usd_total',
+    unit: 'USD',
+    basis: 'modelled',
+    collector: 'flatSubscription', // keyless public API, no billing API — the declared plan IS the model
+    interval: VENDOR,
+    credential: null,
+    docs: 'finops-operations.md#sports-sources-cost',
+    meaning:
+      'The play-by-play source behind the relay-gateway live game views (spec 115): ESPN\'s public site API, ' +
+      'read by the gateway (scoreboard cached >= 10 s, summary >= 5 s, single-flight) so upstream load is a ' +
+      'function of games being viewed, never of members. Keyless and on NO service agreement: the modelled ' +
+      'figure is $0 by declared plan rate, and the entry exists so the dependency is VISIBLE — if ESPN ever ' +
+      'prices, restricts or reshapes the API, this line is where the change lands rather than a surprise. ' +
+      'No revenue entry pairs with it: the module carries no fee, no referral, no payee env, so C2b has ' +
+      'nothing to claim. Gateway request volume shows in gateway-upstream-usage under the sports upstream label.',
+  },
+  {
+    id: 'polymarket-sports-feed',
+    kind: 'cost',
+    status: 'live',
+    label: 'Polymarket sports feed',
+    metric: 'fairwins_finops_cost_usd_total',
+    unit: 'USD',
+    basis: 'modelled',
+    collector: 'flatSubscription', // keyless public WebSocket, no billing API — the declared plan IS the model
+    interval: VENDOR,
+    credential: null,
+    docs: 'finops-operations.md#sports-sources-cost',
+    meaning:
+      'The live score/clock source behind the relay-gateway live game views (spec 115): the venue\'s public ' +
+      'sports WebSocket, held as ONE upstream connection by the gateway (opened on the first request, closed ' +
+      'after five idle minutes). Keyless and on NO service agreement: $0 by declared plan rate, catalogued so ' +
+      'the dependency is VISIBLE — a provider with a service agreement is added later behind the same seam, ' +
+      'and this line is where that change lands. No revenue entry pairs with it (no fee, no payee env). It is ' +
+      'distinct from the venue\'s trading API the Predict surface already uses.',
+  },
+  {
     id: 'gateway-upstream-usage',
     kind: 'usage',
     status: 'live',

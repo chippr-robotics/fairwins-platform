@@ -1,0 +1,407 @@
+{
+ "header": {
+  "competitions": [
+   {
+    "status": {
+     "type": {
+      "state": "in"
+     }
+    },
+    "competitors": [
+     {
+      "homeAway": "home",
+      "score": "28",
+      "team": {
+       "id": "6",
+       "abbreviation": "DAL"
+      }
+     },
+     {
+      "homeAway": "away",
+      "score": "10",
+      "team": {
+       "id": "21",
+       "abbreviation": "PHI"
+      }
+     }
+    ]
+   }
+  ]
+ },
+ "drives": {
+  "previous": [
+   {
+    "id": "4018730809",
+    "team": {
+     "id": "6",
+     "abbreviation": "DAL"
+    },
+    "plays": [
+     {
+      "id": "4018730801894",
+      "sequenceNumber": "189400",
+      "text": "J.Elliott kicks 58 yards from PHI 35 to DAL 7. K.Turpin to DAL 29 for 22 yards (D.Cooper).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "4:06"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730801917",
+      "sequenceNumber": "191700",
+      "text": "B.Jones reported in as eligible.  J.Williams up the middle to DAL 33 for 4 yards (J.Trotter; J.Campbell).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "4:01"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730801941",
+      "sequenceNumber": "194100",
+      "text": "D.Prescott pass short middle to J.Williams to DAL 38 for 5 yards (J.Trotter).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "3:22"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730801966",
+      "sequenceNumber": "196600",
+      "text": "B.Jones reported in as eligible.  J.Williams up the middle to DAL 40 for 2 yards (B.Young).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "2:40"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730801978",
+      "sequenceNumber": "197800",
+      "text": "Two-Minute Warning",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "2:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730801990",
+      "sequenceNumber": "199000",
+      "text": "D.Prescott pass incomplete deep left to C.Lamb (Q.Mitchell).PENALTY on PHI-Q.Mitchell, Illegal Contact, 5 yards, enforced at DAL 40 - No Play.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "2:00"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802031",
+      "sequenceNumber": "203100",
+      "text": "(Shotgun) D.Prescott pass short right to G.Pickens to PHI 42 for 13 yards (M.Carter).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "1:52"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802056",
+      "sequenceNumber": "205600",
+      "text": "(Shotgun) J.Williams up the middle to PHI 40 for 2 yards (J.Trotter; M.Ojomo).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "1:18"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802067",
+      "sequenceNumber": "206700",
+      "text": "Timeout #2 by DAL at 01:12.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "1:12"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802078",
+      "sequenceNumber": "207800",
+      "text": "(Shotgun) D.Prescott pass incomplete short left to G.Pickens (T.Woolen).PENALTY on PHI-T.Woolen, Defensive Pass Interference, 10 yards, enforced at PHI 40 - No Play.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "1:12"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802119",
+      "sequenceNumber": "211900",
+      "text": "(Shotgun) D.Prescott pass incomplete deep right to C.Lamb.PENALTY on PHI-Q.Mitchell, Defensive Pass Interference, 29 yards, enforced at PHI 30 - No Play.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "1:07"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802153",
+      "sequenceNumber": "215300",
+      "text": "B.Jones reported in as eligible.  J.Williams up the middle to PHI 2 for -1 yards (T.Robinson, J.Trotter).",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "1:01"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802171",
+      "sequenceNumber": "217100",
+      "text": "Timeout #1 by PHI at 00:20.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "0:20"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802189",
+      "sequenceNumber": "218900",
+      "text": "(Shotgun) D.Prescott pass incomplete short right to C.Lamb.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "0:20"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802219",
+      "sequenceNumber": "221900",
+      "text": "(Shotgun) D.Prescott pass short right to B.Spann-Ford for 2 yards, TOUCHDOWN NULLIFIED by Penalty.PENALTY on DAL-C.Lamb, Offensive Pass Interference, 10 yards, enforced at PHI 2 - No Play.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "0:16"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802238",
+      "sequenceNumber": "223800",
+      "text": "Timeout #2 by PHI at 00:12.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "0:12"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802256",
+      "sequenceNumber": "225600",
+      "text": "(Shotgun) D.Prescott pass short right to J.Williams for 12 yards, TOUCHDOWN. B.Aubrey extra point is GOOD, Center-T.Sieg, Holder-B.Anger.",
+      "period": {
+       "number": 2
+      },
+      "clock": {
+       "displayValue": "0:04"
+      },
+      "scoringPlay": true
+     }
+    ]
+   },
+   {
+    "id": "40187308013",
+    "team": {
+     "id": "21",
+     "abbreviation": "PHI"
+    },
+    "plays": [
+     {
+      "id": "4018730802624",
+      "sequenceNumber": "262400",
+      "text": "(Shotgun) W.Shipley right guard to PHI 25 for 4 yards (K.Clark).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "9:44"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802653",
+      "sequenceNumber": "265300",
+      "text": "(Shotgun) W.Shipley right tackle to PHI 31 for 6 yards (J.Thompson; C.Downs).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "9:08"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802675",
+      "sequenceNumber": "267500",
+      "text": "(Shotgun) J.Milton sacked at PHI 21 for -10 yards (S.James).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "8:28"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802695",
+      "sequenceNumber": "269500",
+      "text": "(Shotgun) W.Shipley left end to PHI 24 for 3 yards (M.Hooker; Q.Williams).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "7:48"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802717",
+      "sequenceNumber": "271700",
+      "text": "(Shotgun) J.Milton pass incomplete deep right to E.Moore (C.Downs).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "7:08"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802740",
+      "sequenceNumber": "274000",
+      "text": "B.Mann punts 68 yards to DAL 8, Center-R.Underwood. K.Turpin pushed ob at DAL 41 for 33 yards (R.Underwood).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "6:59"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802756",
+      "sequenceNumber": "275600",
+      "text": "Official Timeout at 06:46.",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "6:46"
+      },
+      "scoringPlay": false
+     }
+    ]
+   },
+   {
+    "id": "40187308014",
+    "team": {
+     "id": "6",
+     "abbreviation": "DAL"
+    },
+    "plays": [
+     {
+      "id": "4018730802771",
+      "sequenceNumber": "277100",
+      "text": " D.Prescott pass incomplete deep right to G.Pickens.",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "6:46"
+      },
+      "scoringPlay": false
+     },
+     {
+      "id": "4018730802806",
+      "sequenceNumber": "280600",
+      "text": "(Shotgun) D.Prescott pass short middle to C.Brown to PHI 40 for 19 yards (K.Moore; J.Campbell).",
+      "period": {
+       "number": 3
+      },
+      "clock": {
+       "displayValue": "6:38"
+      },
+      "scoringPlay": false
+     }
+    ]
+   }
+  ],
+  "current": {
+   "id": "40187308014",
+   "team": {
+    "id": "6",
+    "abbreviation": "DAL"
+   },
+   "plays": [
+    {
+     "id": "4018730802771",
+     "sequenceNumber": "277100",
+     "text": " D.Prescott pass incomplete deep right to G.Pickens.",
+     "period": {
+      "number": 3
+     },
+     "clock": {
+      "displayValue": "6:46"
+     },
+     "scoringPlay": false
+    },
+    {
+     "id": "4018730802806",
+     "sequenceNumber": "280600",
+     "text": "(Shotgun) D.Prescott pass short middle to C.Brown to PHI 40 for 19 yards (K.Moore; J.Campbell).",
+     "period": {
+      "number": 3
+     },
+     "clock": {
+      "displayValue": "6:38"
+     },
+     "scoringPlay": false
+    }
+   ]
+  }
+ }
+}

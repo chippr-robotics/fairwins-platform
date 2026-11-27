@@ -1,8 +1,11 @@
 # Gateway contract: `/v1/sports/*`
 
-Read-only. Origin-locked like every other proxy. Module off ⇒ every route answers
-`503 { "error": "sports_unconfigured" }`; killswitch ⇒ `503 { "error": "sports_paused" }`. A gateway
-that predates the module answers 404. The app treats all three the same way: no game view (FR-013).
+Read-only. Origin-locked like every other proxy. Errors use the estate envelope
+`{ "error": { "code", "reason" } }`: module off ⇒ every route answers `503` code `sports_unconfigured`;
+module killswitch ⇒ `503` `sports_paused`; the global killswitch ⇒ `503` `killswitch_active`; a bad id
+list ⇒ `400 invalid_params`; over quota ⇒ `429 quota_exceeded` + `Retry-After`. A gateway that predates
+the module answers 404. The app treats all of them the same way: no game view (FR-013). Order of checks:
+liveness, then parameters, then quota — a refused module never spends quota.
 
 ## The event listing gains `game`
 
@@ -30,7 +33,7 @@ surface says "home" or "away".
   "serverNow": 1795737600000,
   "sources": {
     "venue": { "state": "read" },                         // or "unreadable" + "reason"
-    "plays": { "state": "read" }                          // or "unreadable" | "off"
+    "plays": { "state": "read" }                          // or "unreadable" + "reason" | "off" | "not-needed"
   },
   "games": [
     {
@@ -38,6 +41,7 @@ surface says "home" or "away".
       "league": "nfl",
       "status": "in-progress",          // "scheduled" | "in-progress" | "ended" | null (not known)
       "score": { "home": 28, "away": 10 },   // null when not known; never 0 for "not known"
+      "scoreText": null,                // the venue's own string, ONLY when `score` is null and it sent one
       "period": "Q3",                   // the venue's own label, or null
       "clock": "10:39",                 // or null
       "possession": "home",             // "home" | "away" | null
@@ -50,7 +54,29 @@ surface says "home" or "away".
 ```
 
 - A requested id the gateway has nothing for is returned with every field `null` — it is not
-  dropped, and it is not an error.
+  dropped, and it is not an error. The gateway learns a game's identity (league, team codes) ONLY from
+  the venue's own frames for it, and the venue feed pushes nothing on connect (research R1): a game the
+  feed has not yet spoken about since the gateway's socket opened is this all-null row, with
+  `sources.venue` saying `read` (socket open, game silent) or `unreadable` (`connecting`/`reconnecting`/
+  `not_connected`). The app asks again; it is not an error and the row never carries a made-up figure.
+- `sources.plays.state`: `read` — every league needed by the requested games was read; `unreadable` +
+  `reason` (`upstream_unreachable` | `upstream_error`) — a needed read failed, and every figure that
+  source would have supplied is omitted; `off` — `SPORTS_PLAYS_ENABLED=false`; `not-needed` — no
+  requested game has a covered league (or none has been identified yet), so nothing was read.
+- `score` is `{home, away}` ONLY for a league whose venue ordering has been verified against the play
+  source (today: `nfl`, where the venue's string is **away-home**: `PHI @ DAL` reads `10-28`). For any
+  other league the venue's string is returned as `scoreText` and `score` is `null` — which number is
+  whose is never inferred.
+- `possession` comes from the venue's `turn` code and is `null` unless it equals one of the two team
+  codes the frame names.
+- `confirmedAt`/`confirmedBy`: the venue's `confirmedAt` is the gateway's clock when it last received a
+  frame for THAT game (an open socket confirms nothing). When the plays source read the same score, the
+  newer of the two counts and `confirmedBy` is `both`; on disagreement or one voice it is the venue's
+  own time. A row carries the venue's fields whenever the venue has spoken; the plays source supplies a
+  row only for a game the venue has not spoken about.
+- Trust bounds (ONE constant, `services/relay-gateway/src/sports/bounds.js#TRUST_BOUNDS`, mirrored by the
+  frontend; ages on the server clock against `confirmedAt`): `live` while age <= `liveMs`, `delayed`
+  while <= `delayedMs`, `last-known` beyond. See research.md R1 for where the numbers come from.
 - `score` for a sport whose venue score is not two integers (sets, maps) is `null` and
   `scoreText` carries the venue's own string. No surface parses `scoreText`.
 - `agree: false` ⇒ `score` is the venue's (FR-008).
@@ -58,7 +84,7 @@ surface says "home" or "away".
 
 ## `GET /v1/sports/games/:gameId` (slice 2)
 
-The row above, plus:
+The same envelope (`serverNow`, `sources`) with one element in `games`: the row above, plus:
 
 ```jsonc
 "detail": {
@@ -81,8 +107,14 @@ The row above, plus:
 ```
 
 `not-covered` = the league has no play source. `not-matched` = the gateway could not identify
-exactly one game at the play source for this venue game. Both are final for the request and neither
-is a failure; `unreadable` is a failure and names itself.
+exactly one game at the play source for this venue game (`reason`: `no_candidate`, `ambiguous`,
+`no_team_codes`, or `no_identity` when the venue has not yet spoken about the game). Both are final for
+the request and neither is a failure; `unreadable` (+ `reason`) is a failure and names itself — the
+situation, the plays and `behindVenue` are then omitted, the row is unaffected. `situation.yardLine` is
+derived from the source's own text ("PHI 25" is the 25 of PHI) and cross-checked against its numeric
+field; if the two disagree, or the team is not one of the two, it is `null`. `lineToGain` is `null`
+when it would lie beyond a goal line (goal-to-go). An ended game is read once more and then served from
+memory — no further upstream call is made for it (FR-016).
 
 Text fields are the source's text, returned as text. The gateway forwards no HTML, image or URL
 from a source.
