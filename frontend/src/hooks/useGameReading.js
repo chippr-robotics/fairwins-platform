@@ -13,13 +13,16 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import useVisiblePolling from './useVisiblePolling'
-import { fetchGame, cadenceMs, POLL_MS } from '../lib/sports/gameFeed'
+import { fetchGame, cadenceMs, identityOf, POLL_MS } from '../lib/sports/gameFeed'
 import { fromRow, reclassify } from '../lib/sports/gameReading'
 import { monotonicNow } from '../lib/markets/serverClock'
 
 const FRESH = Object.freeze({ id: null, phase: 'loading', answer: null })
 
-export function useGameReading(gameId) {
+export function useGameReading(game) {
+  const gameId = game?.gameId ?? null
+  const identity = useMemo(() => identityOf(game), [game])
+  const identityKey = JSON.stringify(identity)
   const [state, setState] = useState(FRESH)
   const [now, setNow] = useState(() => monotonicNow())
   const idRef = useRef(gameId)
@@ -30,7 +33,7 @@ export function useGameReading(gameId) {
 
   const task = useCallback(async () => {
     const id = gameId
-    const out = await fetchGame(id)
+    const out = await fetchGame(id, { identity })
     if (idRef.current !== id) return false
     if (out.kind === 'absent') {
       setState({ id, phase: 'absent', answer: null })
@@ -56,7 +59,7 @@ export function useGameReading(gameId) {
       }
     })
     return true
-  }, [gameId])
+  }, [gameId, identityKey]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     idRef.current = gameId
@@ -73,7 +76,8 @@ export function useGameReading(gameId) {
     resetKey: gameId,
   })
 
-  const ticking = phase === 'ready'
+  // Ticks until the module is known to be off: the reading AND the listing's stand-in both age on it.
+  const ticking = phase !== 'absent' && gameId != null
   useEffect(() => {
     if (!ticking) return undefined
     const id = setInterval(() => setNow(monotonicNow()), 1000)

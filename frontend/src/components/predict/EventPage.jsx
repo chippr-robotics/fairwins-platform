@@ -219,7 +219,7 @@ export default function EventPage({ slug, onBack, onOpenRow, onOpenTicket, pause
 
       {/* Spec 115: information beside the market, never an input to it. Renders nothing for an event with no
           game, and nothing at all when the gateway's sports module is off (FR-013). */}
-      {event.game && <GameView game={event.game} />}
+      {event.game && <GameView game={event.game} listingStamp={stamp} />}
 
       <section className="event-page-section" aria-labelledby="event-page-outcomes">
         <h3 id="event-page-outcomes">Outcomes</h3>

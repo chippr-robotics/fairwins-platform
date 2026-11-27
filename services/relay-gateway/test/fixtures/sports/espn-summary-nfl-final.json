@@ -1,305 +1,306 @@
 {
- "header": {
-  "competitions": [
-   {
-    "status": {
-     "type": {
-      "state": "post"
-     }
-    },
-    "competitors": [
-     {
-      "homeAway": "home",
-      "score": "35",
-      "team": {
-       "id": "8",
-       "abbreviation": "DET"
+  "header": {
+    "competitions": [
+      {
+        "status": {
+          "type": {
+            "state": "post",
+            "completed": true
+          }
+        },
+        "competitors": [
+          {
+            "homeAway": "home",
+            "score": "35",
+            "team": {
+              "id": "8",
+              "abbreviation": "DET"
+            }
+          },
+          {
+            "homeAway": "away",
+            "score": "39",
+            "team": {
+              "id": "3",
+              "abbreviation": "CHI"
+            }
+          }
+        ]
       }
-     },
-     {
-      "homeAway": "away",
-      "score": "39",
-      "team": {
-       "id": "3",
-       "abbreviation": "CHI"
+    ]
+  },
+  "drives": {
+    "previous": [
+      {
+        "id": "40187308123",
+        "team": {
+          "id": "3",
+          "abbreviation": "CHI"
+        },
+        "plays": [
+          {
+            "id": "4018730814430",
+            "sequenceNumber": "443000",
+            "text": "(Shotgun) C.Williams pass short right to S.Roush pushed ob at CHI 35 for 3 yards (D.Barnes).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "2:17"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814460",
+            "sequenceNumber": "446000",
+            "text": "(Shotgun) C.Williams pass incomplete deep middle to R.Odunze.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "2:13"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814483",
+            "sequenceNumber": "448300",
+            "text": " (Shotgun) C.Williams pass short left to D.Swift to CHI 41 for 6 yards (K.Joseph).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "2:09"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814496",
+            "sequenceNumber": "449600",
+            "text": "Two-Minute Warning",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "2:00"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814508",
+            "sequenceNumber": "450800",
+            "text": "C.Williams right end pushed ob at CHI 43 for 2 yards (R.McCreary).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "2:00"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814542",
+            "sequenceNumber": "454200",
+            "text": "(No Huddle, Shotgun) C.Williams pass incomplete short middle to S.Carlson (R.McCreary).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:56"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814565",
+            "sequenceNumber": "456500",
+            "text": "(Shotgun) C.Williams pass short middle to R.Odunze to DET 46 for 11 yards (D.Reed; T.Nowaske).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:51"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814590",
+            "sequenceNumber": "459000",
+            "text": "(No Huddle, Shotgun) C.Williams pass incomplete short left to K.Monangai.PENALTY on DET-D.Reed, Face Mask, 15 yards, enforced at DET 46 - No Play.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:29"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814624",
+            "sequenceNumber": "462400",
+            "text": "(Shotgun) S.Ahmed right end to DET 26 for 5 yards (B.Branch).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:21"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814635",
+            "sequenceNumber": "463500",
+            "text": "Timeout #2 by DET at 01:12.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:12"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814646",
+            "sequenceNumber": "464600",
+            "text": "(Shotgun) C.Williams pass incomplete short left to K.Raymond.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:12"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814676",
+            "sequenceNumber": "467600",
+            "text": "(Shotgun) D.Swift left end to DET 21 for 5 yards (K.Joseph).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "1:08"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814687",
+            "sequenceNumber": "468700",
+            "text": "Timeout #3 by DET at 00:53.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:53"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814698",
+            "sequenceNumber": "469800",
+            "text": "(Shotgun) C.Williams pass short right to D.Swift to DET 9 for 12 yards (A.Lucas; N.Whiteside).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:53"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814730",
+            "sequenceNumber": "473000",
+            "text": "D.Swift up the middle to DET 6 for 3 yards (D.Barnes).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:17"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814741",
+            "sequenceNumber": "474100",
+            "text": "Timeout #3 by CHI at 00:13.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:13"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814752",
+            "sequenceNumber": "475200",
+            "text": "(Shotgun) C.Williams pass incomplete short left to D.Swift (D.Barnes).",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:13"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814782",
+            "sequenceNumber": "478200",
+            "text": "Rome Odunze 6 Yd pass from Caleb Williams (Cairo Santos Kick)",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:03"
+            },
+            "scoringPlay": true
+          }
+        ]
+      },
+      {
+        "id": "40187308124",
+        "team": {
+          "id": "8",
+          "abbreviation": "DET"
+        },
+        "plays": [
+          {
+            "id": "4018730814858",
+            "sequenceNumber": "485800",
+            "text": "C.Santos kicks 65 yards from CHI 35 to end zone, Touchback to the DET 35.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:03"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814875",
+            "sequenceNumber": "487500",
+            "text": "J.Goff pass short left to A.St. Brown to DET 44 for 9 yards. Lateral to J.Williams to CHI 47 for 9 yards. Lateral to J.Gibbs to DET 47 for -6 yards. Lateral to J.Goff to 50 for 3 yards. Lateral to J.Gibbs to CHI 39 for 11 yards.PENALTY on DET-J.Gibbs, Illegal Forward Pass, 0 yards, enforced at CHI 39.",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:03"
+            },
+            "scoringPlay": false
+          },
+          {
+            "id": "4018730814931",
+            "sequenceNumber": "493100",
+            "text": "END GAME",
+            "period": {
+              "number": 4
+            },
+            "clock": {
+              "displayValue": "0:00"
+            },
+            "scoringPlay": false
+          }
+        ]
       }
-     }
     ]
-   }
-  ]
- },
- "drives": {
-  "previous": [
-   {
-    "id": "40187308123",
-    "team": {
-     "id": "3",
-     "abbreviation": "CHI"
-    },
-    "plays": [
-     {
-      "id": "4018730814430",
-      "sequenceNumber": "443000",
-      "text": "(Shotgun) C.Williams pass short right to S.Roush pushed ob at CHI 35 for 3 yards (D.Barnes).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "2:17"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814460",
-      "sequenceNumber": "446000",
-      "text": "(Shotgun) C.Williams pass incomplete deep middle to R.Odunze.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "2:13"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814483",
-      "sequenceNumber": "448300",
-      "text": " (Shotgun) C.Williams pass short left to D.Swift to CHI 41 for 6 yards (K.Joseph).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "2:09"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814496",
-      "sequenceNumber": "449600",
-      "text": "Two-Minute Warning",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "2:00"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814508",
-      "sequenceNumber": "450800",
-      "text": "C.Williams right end pushed ob at CHI 43 for 2 yards (R.McCreary).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "2:00"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814542",
-      "sequenceNumber": "454200",
-      "text": "(No Huddle, Shotgun) C.Williams pass incomplete short middle to S.Carlson (R.McCreary).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:56"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814565",
-      "sequenceNumber": "456500",
-      "text": "(Shotgun) C.Williams pass short middle to R.Odunze to DET 46 for 11 yards (D.Reed; T.Nowaske).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:51"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814590",
-      "sequenceNumber": "459000",
-      "text": "(No Huddle, Shotgun) C.Williams pass incomplete short left to K.Monangai.PENALTY on DET-D.Reed, Face Mask, 15 yards, enforced at DET 46 - No Play.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:29"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814624",
-      "sequenceNumber": "462400",
-      "text": "(Shotgun) S.Ahmed right end to DET 26 for 5 yards (B.Branch).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:21"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814635",
-      "sequenceNumber": "463500",
-      "text": "Timeout #2 by DET at 01:12.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:12"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814646",
-      "sequenceNumber": "464600",
-      "text": "(Shotgun) C.Williams pass incomplete short left to K.Raymond.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:12"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814676",
-      "sequenceNumber": "467600",
-      "text": "(Shotgun) D.Swift left end to DET 21 for 5 yards (K.Joseph).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "1:08"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814687",
-      "sequenceNumber": "468700",
-      "text": "Timeout #3 by DET at 00:53.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:53"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814698",
-      "sequenceNumber": "469800",
-      "text": "(Shotgun) C.Williams pass short right to D.Swift to DET 9 for 12 yards (A.Lucas; N.Whiteside).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:53"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814730",
-      "sequenceNumber": "473000",
-      "text": "D.Swift up the middle to DET 6 for 3 yards (D.Barnes).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:17"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814741",
-      "sequenceNumber": "474100",
-      "text": "Timeout #3 by CHI at 00:13.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:13"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814752",
-      "sequenceNumber": "475200",
-      "text": "(Shotgun) C.Williams pass incomplete short left to D.Swift (D.Barnes).",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:13"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814782",
-      "sequenceNumber": "478200",
-      "text": "Rome Odunze 6 Yd pass from Caleb Williams (Cairo Santos Kick)",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:03"
-      },
-      "scoringPlay": true
-     }
-    ]
-   },
-   {
-    "id": "40187308124",
-    "team": {
-     "id": "8",
-     "abbreviation": "DET"
-    },
-    "plays": [
-     {
-      "id": "4018730814858",
-      "sequenceNumber": "485800",
-      "text": "C.Santos kicks 65 yards from CHI 35 to end zone, Touchback to the DET 35.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:03"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814875",
-      "sequenceNumber": "487500",
-      "text": "J.Goff pass short left to A.St. Brown to DET 44 for 9 yards. Lateral to J.Williams to CHI 47 for 9 yards. Lateral to J.Gibbs to DET 47 for -6 yards. Lateral to J.Goff to 50 for 3 yards. Lateral to J.Gibbs to CHI 39 for 11 yards.PENALTY on DET-J.Gibbs, Illegal Forward Pass, 0 yards, enforced at CHI 39.",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:03"
-      },
-      "scoringPlay": false
-     },
-     {
-      "id": "4018730814931",
-      "sequenceNumber": "493100",
-      "text": "END GAME",
-      "period": {
-       "number": 4
-      },
-      "clock": {
-       "displayValue": "0:00"
-      },
-      "scoringPlay": false
-     }
-    ]
-   }
-  ]
- }
+  }
 }

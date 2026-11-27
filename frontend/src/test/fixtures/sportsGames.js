@@ -6,6 +6,7 @@ export const LISTING = {
   gameId: 19618,
   league: 'nfl',
   startTime: '2026-11-26T21:30:00Z',
+  listed: { status: 'in-progress', scoreText: '10-28', period: 'Q3', clock: '10:39' },
   home: { name: 'Cowboys', code: 'DAL' },
   away: { name: 'Eagles', code: 'PHI' },
 }
@@ -28,9 +29,11 @@ export const row = (over = {}) => ({
   period: 'Q3',
   clock: '10:39',
   possession: 'home',
+  source: 'plays',
   confirmedAt: SERVER_NOW - 2000,
-  confirmedBy: 'venue',
+  changedAt: null,
   agree: true,
+  venue: null,
   ...over,
 })
 
@@ -57,13 +60,18 @@ export const detail = (over = {}) => ({
   confirmedAt: SERVER_NOW - 3000,
   situation: situation(),
   plays: plays(),
-  behindVenue: false,
   ...over,
 })
 
+/** A venue-sourced row: its own frame time, never live whatever its age. */
+export const venueRow = (over = {}) =>
+  row({ source: 'venue', score: { home: 21, away: 10 }, possession: null, changedAt: SERVER_NOW - 40_000, confirmedAt: SERVER_NOW - 5000, agree: null, ...over })
+
+export const SOURCES = { venue: { state: 'read', label: 'Polymarket' }, plays: { state: 'read', label: 'ESPN' } }
+
 export const envelope = (r, over = {}) => ({
   serverNow: SERVER_NOW,
-  sources: { venue: { state: 'read' }, plays: { state: 'read' } },
+  sources: SOURCES,
   games: [r],
   ...over,
 })

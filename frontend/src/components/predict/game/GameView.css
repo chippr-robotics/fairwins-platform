@@ -208,3 +208,8 @@
 .game-view .game-play-scored {
   font-weight: 700;
 }
+.game-view .game-source {
+  color: var(--text-secondary);
+  font-size: 0.8125rem;
+  margin: 0;
+}

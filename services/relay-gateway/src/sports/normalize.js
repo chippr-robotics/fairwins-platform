@@ -82,10 +82,38 @@ export function parseVenueFrame(raw, receivedAt) {
 
 const ESPN_STATE = { pre: 'scheduled', in: 'in-progress', post: 'ended' }
 
+/**
+ * ESPN's `post` means "no longer on the schedule as upcoming", not "played to a finish": a postponed
+ * or cancelled game is also `post`, with `completed: false`. Calling that `ended` would put "Ended"
+ * beside a market for a game that was never played, and freeze it. So `ended` needs ESPN's own
+ * `completed: true`; a `post` without it has NO state we can name (ESPN's text still rides in
+ * `periodText`, e.g. "Postponed").
+ */
+export function espnState(type) {
+  const state = ESPN_STATE[type?.state] ?? null
+  if (state === 'ended' && type?.completed !== true) return null
+  return state
+}
+
+/**
+ * Play-list period label. ESPN's summary gives a play only a period NUMBER, so 1-4 are labelled Q1-Q4
+ * and anything else (overtime — never observed, research R3) is null rather than a guess.
+ */
 export function footballPeriodLabel(n) {
-  if (!Number.isInteger(n) || n < 1) return null
-  if (n <= 4) return `Q${n}`
-  return n === 5 ? 'OT' : `${n - 4}OT`
+  return Number.isInteger(n) && n >= 1 && n <= 4 ? `Q${n}` : null
+}
+
+/**
+ * ESPN's own period text for a game row, from `status.type.shortDetail`: "9:44 - 3rd" -> "3rd",
+ * "Final" -> "Final". Nothing is mapped or invented: a pre-game shortDetail is a date string and
+ * is not a period, so it is null; an unrecognised shape is forwarded whole as ESPN's text.
+ */
+export function espnPeriodText(state, shortDetail) {
+  if (state === 'pre') return null
+  const t = text(shortDetail, 40)
+  if (!t) return null
+  const m = /^\S+ - (.+)$/.exec(t)
+  return m ? m[1] : t
 }
 
 /** The ball's position on the 0-100 axis from the HOME goal line (0) to the AWAY goal line (100), or null. */
@@ -163,13 +191,20 @@ export function parseScoreboard(body) {
     const away = normalizeCompetitor(awayRaw)
     const startMs = typeof e.date === 'string' && Number.isFinite(Date.parse(e.date)) ? Date.parse(e.date) : null
     const periodN = intOrNull(comp.status?.period, 20)
-    const state = ESPN_STATE[comp.status?.type?.state] ?? null
+    const state = espnState(comp.status?.type)
+    // A scheduled game has no score and no clock: ESPN prints "0" and "0:00" there, which are filler, not figures.
+    const scheduled = state === 'scheduled'
+    if (scheduled) {
+      home.score = null
+      away.score = null
+    }
     out.push({
       id,
       startMs,
       state,
       period: periodN != null && periodN > 0 ? periodN : null,
-      clock: text(comp.status?.displayClock, 20),
+      periodText: espnPeriodText(comp.status?.type?.state, comp.status?.type?.shortDetail),
+      clock: scheduled ? null : text(comp.status?.displayClock, 20),
       home,
       away,
       situation: normalizeSituation(comp.situation, home, away),
@@ -214,7 +249,7 @@ export function parseSummary(body) {
     }
   }
   plays.sort((a, b) => (a.seq != null && b.seq != null ? b.seq - a.seq : b.order - a.order))
-  const state = ESPN_STATE[header?.status?.type?.state] ?? null
+  const state = espnState(header?.status?.type)
   return {
     state,
     plays: plays.slice(0, MAX_PLAYS).map(({ id, period, clock, text: t, scoring, side }) => ({ id, period, clock, text: t, scoring, side })),
@@ -228,6 +263,7 @@ const sameScore = (a, b) => a != null && b != null && a.home === b.home && a.awa
 export const emptyRow = (gameId) => ({
   gameId,
   league: null,
+  source: null,
   status: null,
   score: null,
   scoreText: null,
@@ -235,53 +271,62 @@ export const emptyRow = (gameId) => ({
   clock: null,
   possession: null,
   confirmedAt: null,
-  confirmedBy: null,
+  changedAt: null,
   agree: null,
+  venue: null,
 })
 
+const playScoreOf = (e) => (e.home.score != null && e.away.score != null ? { home: e.home.score, away: e.away.score } : null)
+
 /**
- * One row from what each source said. `venue` is `{frame, at}`, `play` is `{event, at}` (the plays
- * source's scoreboard event and the time it was read) — either may be null.
+ * One row from what each source said. `venue` is `{frame, changedAt, confirmedAt}` (the feed's read),
+ * `play` is `{event, at, league}` (the plays source's scoreboard event and when it was read) — either may be null.
  *
- * Where the sources disagree the VENUE's score is returned (FR-008). When the venue has spoken, every
- * field of the row is the venue's: mixing a venue score with an ESPN clock would present two moments
- * as one. The plays source supplies the row only when the venue has said nothing about the game.
+ * WHOSE FIGURES (spec 115 amended FR-008, research R1): the venue's feed is a minute-tick sample that
+ * ran a median 34 s (max 203 s) behind ESPN and never ahead, so where the play source was read AND matched
+ * the row is the play source's (status incl. ended, score, period text, clock, possession); the venue's own
+ * figures ride beside it in `venue`, and `agree` compares the scores. Otherwise the row is the venue's, and
+ * otherwise it is all null with `source: null`. Figures from two moments are never mixed in one row.
  */
 export function buildRow(gameId, venue, play) {
-  if (venue) {
-    const f = venue.frame
-    const playScore = play?.event && play.event.home.score != null && play.event.away.score != null ? { home: play.event.home.score, away: play.event.away.score } : null
-    const agree = f.score && playScore ? sameScore(f.score, playScore) : null
+  const f = venue?.frame ?? null
+  const venueView = f
+    ? { status: f.status, score: f.score, scoreText: f.scoreText, period: f.period, clock: f.clock, changedAt: venue.changedAt }
+    : null
+  if (play?.event) {
+    const e = play.event
+    const score = playScoreOf(e)
+    return {
+      gameId,
+      league: play.league ?? f?.league ?? null,
+      source: 'plays',
+      status: e.state,
+      score,
+      scoreText: null,
+      period: e.periodText,
+      clock: e.clock,
+      possession: e.situation?.possession ?? null,
+      confirmedAt: play.at,
+      changedAt: null,
+      agree: f?.score && score ? sameScore(f.score, score) : null,
+      venue: venueView,
+    }
+  }
+  if (f) {
     return {
       gameId,
       league: f.league,
+      source: 'venue',
       status: f.status,
       score: f.score,
       scoreText: f.scoreText,
       period: f.period,
       clock: f.clock,
       possession: f.possession,
-      // Both sources spoke and agree: the newer confirmation counts. Disagreement or one voice: the venue's own.
-      confirmedAt: agree === true ? Math.max(venue.at, play.at) : venue.at,
-      confirmedBy: agree === true ? 'both' : 'venue',
-      agree,
-    }
-  }
-  if (play?.event) {
-    const e = play.event
-    const score = e.home.score != null && e.away.score != null ? { home: e.home.score, away: e.away.score } : null
-    return {
-      gameId,
-      league: play.league ?? null,
-      status: e.state,
-      score,
-      scoreText: null,
-      period: footballPeriodLabel(e.period),
-      clock: e.clock,
-      possession: e.situation?.possession ?? null,
-      confirmedAt: play.at,
-      confirmedBy: 'plays',
+      confirmedAt: venue.confirmedAt,
+      changedAt: venue.changedAt,
       agree: null,
+      venue: null,
     }
   }
   return emptyRow(gameId)

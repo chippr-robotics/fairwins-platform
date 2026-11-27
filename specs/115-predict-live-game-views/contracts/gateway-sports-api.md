@@ -77,7 +77,7 @@ source, never ahead. So:
   last successful read.
 - Otherwise, a game the venue has spoken about: `source: "venue"`. `changedAt` is the gateway's
   clock when the venue last sent a frame for THAT game. `confirmedAt` is the last moment the venue's
-  connection proved itself alive (it sends a heartbeat every 15 s; any frame counts) — but only if
+  connection proved itself alive (it sends a heartbeat about every 15 s; any frame counts, and a connection silent for 60 s is treated as dead and reconnected — research R1) — but only if
   the game's frame arrived on the connection that is open now; after a reconnect the feed re-sends
   nothing, so `confirmedAt` falls back to `changedAt` until the game's next frame.
 - Otherwise `source: null` and every figure is `null`. The row is not dropped and it is not an error.
@@ -113,8 +113,10 @@ new, and the venue itself was measured minutes behind the game.
 
 Optional query: `league`, `home`, `away` (team codes), `start` (ISO time) — the game's identity
 from the event listing, so the play source can be matched before the venue's feed has spoken about
-the game (it sends nothing on connect). They are validated (`league` in the gateway's table, codes
-`^[A-Z0-9]{2,5}$`, a parseable time), used ONLY while the venue has not named the game itself, and
+the game (it sends nothing on connect). They are validated (`league` `^[a-z0-9][a-z0-9 .&-]{0,31}$`, codes
+`^[A-Z0-9]{2,5}$`, a parseable ISO time; `league`+`home`+`away` together or not at all, else `400
+invalid_params`; a well-formed league the gateway has no play source for is `detail.state: "not-covered"`,
+not a 400), used ONLY while the venue has not named the game itself, and
 never stored against the `gameId`: the venue's own frame, once it arrives, is the identity. A match
 needs exactly one play-source game for those two teams, within 30 minutes of `start` when given.
 Anything the gateway remembers about a matched game is keyed by the play source's own event id.

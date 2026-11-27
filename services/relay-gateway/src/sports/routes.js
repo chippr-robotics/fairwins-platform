@@ -13,6 +13,29 @@ import { callerQuotaKey } from '../identity/quotaKey.js'
 
 const MAX_IDS = 10
 const ID_RE = /^[1-9]\d{0,11}$/
+const LEAGUE_RE = /^[a-z0-9][a-z0-9 .&-]{0,31}$/
+const CODE_RE = /^[A-Z0-9]{2,5}$/
+const START_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,9})?)?(Z|[+-]\d{2}:?\d{2})$/
+
+/**
+ * The optional identity claim on the detail route (`league`, `home`, `away`, `start`). Shape-validated and
+ * request-scoped: it is handed to the service for THIS call only and is never stored. A well-formed league
+ * the gateway has no play source for is not a 400 — it is `not-covered`, like a game the venue named.
+ * Returns null when no claim field is present; throws when the claim is partial or malformed.
+ */
+export function parseClaim(query) {
+  const { league, home, away, start } = query
+  if (league === undefined && home === undefined && away === undefined && start === undefined) return null
+  const bad = () => new GatewayError(400, 'invalid_params', 'league, home and away must be given together: league [a-z0-9 .&-], team codes [A-Z0-9]{2,5}, start an ISO time')
+  if (![league, home, away].every((v) => typeof v === 'string')) throw bad()
+  if (!LEAGUE_RE.test(league) || !CODE_RE.test(home) || !CODE_RE.test(away)) throw bad()
+  let startMs = null
+  if (start !== undefined) {
+    if (typeof start !== 'string' || !START_RE.test(start) || !Number.isFinite(Date.parse(start))) throw bad()
+    startMs = Date.parse(start)
+  }
+  return { league, home, away, startMs }
+}
 
 /**
  * @param {object} config loadConfig() output (reads config.sports)
@@ -64,8 +87,9 @@ export function createSportsRouter(config, { service, quotas, killSwitch }) {
     try {
       requireLive()
       if (!ID_RE.test(req.params.gameId)) throw new GatewayError(400, 'invalid_params', 'gameId must be a positive integer')
+      const claim = parseClaim(req.query)
       guard(req)
-      res.json(await service.game(Number(req.params.gameId)))
+      res.json(await service.game(Number(req.params.gameId), claim))
     } catch (err) {
       handleError(res, err)
     }

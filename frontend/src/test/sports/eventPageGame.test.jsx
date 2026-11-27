@@ -11,7 +11,7 @@ import { __resetPriceHistoryCache } from '../../hooks/usePriceHistory'
 import * as client from '../../lib/predict/predictClient'
 import { fetchGame } from '../../lib/sports/gameFeed'
 import { detailBody } from '../fixtures/predictEvents'
-import { LISTING, row, detail, SERVER_NOW } from '../fixtures/sportsGames'
+import { LISTING, row, venueRow, detail, SERVER_NOW } from '../fixtures/sportsGames'
 
 vi.mock('../../lib/markets/feed', () => ({ subscribe: () => () => {} }))
 vi.mock('recharts', async () => {
@@ -56,7 +56,7 @@ describe('EventPage + game view', () => {
     fetchGame.mockResolvedValue(ok(row(), { detail: detail() }))
     await mount({ game: LISTING })
     const view = await screen.findByTestId('game-view')
-    expect(fetchGame).toHaveBeenCalledWith(19618)
+    expect(fetchGame).toHaveBeenCalledWith(19618, { identity: { league: 'nfl', home: 'DAL', away: 'PHI', start: LISTING.startTime } })
     expect(screen.getByTestId('game-field')).toBeInTheDocument()
     expect(screen.getByTestId('game-plays')).toBeInTheDocument()
     const outcomes = document.getElementById('event-page-outcomes')
@@ -83,9 +83,53 @@ describe('EventPage + game view', () => {
     expect(document.getElementById('event-page-outcomes')).not.toBeNull()
   })
 
-  it('before the first answer nothing is drawn either', async () => {
+  it('before the first answer, with the listing\'s own words, shows them as a VENUE reading: delayed, never live', async () => {
     fetchGame.mockImplementation(() => new Promise(() => {}))
     await mount({ game: LISTING })
+    const view = await screen.findByTestId('game-view')
+    expect(view).toHaveTextContent('Score: 10-28')
+    expect(screen.getByTestId('game-trust-chip')).toHaveTextContent('Game information is delayed')
+    expect(screen.getByTestId('game-trust-chip')).not.toHaveTextContent('is live')
+    expect(screen.getByTestId('game-source')).toHaveTextContent('updates about once a minute')
+    expect(screen.queryByTestId('game-field')).toBeNull()
+  })
+
+  it('the listing\'s words are replaced as soon as the route answers with a source', async () => {
+    fetchGame.mockResolvedValue(ok(row(), { detail: detail() }))
+    await mount({ game: LISTING })
+    await screen.findByTestId('game-field')
+    expect(screen.getByTestId('game-trust-chip')).toHaveTextContent('Game information is live')
+    expect(screen.queryByText('Score: 10-28')).toBeNull()
+  })
+
+  it('a route answer with source:null falls back to the listing\'s words; with no listing words, to a plain sentence', async () => {
+    fetchGame.mockResolvedValue(ok(row({ source: null, score: null, confirmedAt: null })))
+    await mount({ game: LISTING })
+    expect(await screen.findByText('Score: 10-28')).toBeInTheDocument()
+    document.body.innerHTML = ''
+    await mount({ game: { ...LISTING, listed: null } })
+    expect(screen.getByTestId('game-status')).toHaveTextContent('not available')
+  })
+
+  it('no listing words and nothing answered yet: nothing is drawn', async () => {
+    fetchGame.mockImplementation(() => new Promise(() => {}))
+    await mount({ game: { ...LISTING, listed: null } })
     expect(screen.queryByTestId('game-view')).toBeNull()
+  })
+
+  it('a listing whose age cannot be measured is not shown', async () => {
+    fetchGame.mockImplementation(() => new Promise(() => {}))
+    client.fetchEvent.mockResolvedValue({ ...detailBody({ game: LISTING }), confirmedAt: undefined, serverNow: undefined })
+    render(<EventPage slug="fed-decision-in-december" onBack={() => {}} onOpenRow={() => {}} />)
+    await screen.findByRole('heading', { level: 2, name: 'Fed Decision in December?' })
+    await act(async () => {})
+    expect(screen.queryByTestId('game-view')).toBeNull()
+  })
+
+  it('a venue-sourced answer is shown delayed with its feed line', async () => {
+    fetchGame.mockResolvedValue(ok(venueRow({ confirmedAt: SERVER_NOW })))
+    await mount({ game: LISTING })
+    await screen.findByTestId('game-view')
+    expect(screen.getByTestId('game-trust-chip')).toHaveTextContent('Game information is delayed')
   })
 })

@@ -3591,7 +3591,9 @@
             "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-01",
             "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-02",
             "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-03",
-            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-04"
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-04",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-05",
+            "frontend/cypress/e2e/fast/53-predict-game-view.cy.js::PG-06"
           ],
           "issue": "#1756"
         },

@@ -10,6 +10,8 @@
  *  - "Ended" is the GAME's state. The market settles separately, and the page says so in one sentence.
  */
 import { sidesOf, teamLabel, formatStart } from '../../../lib/sports/describe'
+import { describeAge } from '../../../lib/markets/priceReading'
+import { detailAgeMs } from '../../../lib/sports/gameReading'
 import GameTrustChip from './GameTrustChip'
 
 const DASH = '—'
@@ -26,6 +28,19 @@ function Team({ name, score, tag }) {
   )
 }
 
+/** Neutral wording when the envelope names no source: never a hardcoded vendor. */
+export const playsName = (sources) => sources?.plays?.label || 'the play-by-play source'
+export const venueFeedName = (sources) => (sources?.venue?.label ? `${sources.venue.label}'s game feed` : "the venue's feed")
+
+/** One short line about whose figures these are (and, for the venue's feed, how often it speaks and when it last did). */
+function sourceLine(reading, sources, clock) {
+  if (reading.source === 'plays') return `From ${playsName(sources)}.`
+  if (reading.source !== 'venue') return null
+  const base = `Score from ${venueFeedName(sources)}, which updates about once a minute.`
+  const age = reading.changedAt != null && clock ? detailAgeMs(reading.changedAt, clock.serverNow, clock.receivedAt, clock.now) : null
+  return Number.isFinite(age) && Math.round(age / 1000) >= 1 ? `${base} Last changed ${describeAge(age)} ago.` : base
+}
+
 function statusLine(reading, game) {
   const status = reading?.status
   if (status === 'scheduled') {
@@ -40,7 +55,7 @@ function statusLine(reading, game) {
   return 'Status not reported'
 }
 
-export default function GameScoreboard({ game, reading }) {
+export default function GameScoreboard({ game, reading, sources = null, clock = null }) {
   const sides = sidesOf(game)
   const known = reading && reading.state !== 'unknown'
   const hasScoreboardScore = known && reading.score != null && reading.status !== 'scheduled'
@@ -66,6 +81,11 @@ export default function GameScoreboard({ game, reading }) {
         </p>
         {reading && <GameTrustChip reading={reading} ended={ended} />}
       </div>
+      {known && (
+        <p className="game-source" data-testid="game-source">
+          {sourceLine(reading, sources, clock)}
+        </p>
+      )}
       <div className="game-teams">{teams}</div>
       {known && reading.score == null && reading.scoreText && reading.status !== 'scheduled' && (
         <p className="game-score-text" data-testid="game-score-text">

@@ -16,7 +16,7 @@ import { createApp } from '../src/server.js'
 import { createKillSwitch } from '../src/policy/killswitch.js'
 import { createVenueFeed } from '../src/sports/venueFeed.js'
 import { matchEvent, espnCode } from '../src/sports/match.js'
-import { deriveYardLine, intOrNull, parseScoreboard, parseSummary, parseVenueFrame, normalizeSituation } from '../src/sports/normalize.js'
+import { deriveYardLine, espnState, intOrNull, parseScoreboard, parseSummary, parseVenueFrame, normalizeSituation } from '../src/sports/normalize.js'
 import { TRUST_BOUNDS } from '../src/sports/bounds.js'
 import { normalizeGame, normalizeEvent } from '../src/polymarket/normalize.js'
 import { testConfig, mockProviders, mockEngine, ORIGIN_SECRET, TEST_NOW } from './helpers.js'
@@ -210,24 +210,28 @@ describe('GET /v1/sports/games', () => {
     const h = makeApp()
     const [a, b, c] = await Promise.all([get(h.app, LIST), get(h.app, LIST), get(h.app, '/v1/sports/games?ids=19618,5')])
     expect(a.status).toBe(200)
-    expect(a.body.sources.venue).toEqual({ state: 'unreadable', reason: 'connecting' }) // the socket never opened and the request still answered
-    expect(b.body.games[0]).toEqual({ gameId: 19618, league: null, status: null, score: null, scoreText: null, period: null, clock: null, possession: null, confirmedAt: null, confirmedBy: null, agree: null })
+    expect(a.body.sources.venue).toEqual({ state: 'unreadable', reason: 'connecting', label: 'Polymarket' }) // the socket never opened and the request still answered
+    expect(a.body.sources.plays).toEqual({ state: 'not-needed', label: 'ESPN' })
+    expect(b.body.games[0]).toEqual({ gameId: 19618, league: null, source: null, status: null, score: null, scoreText: null, period: null, clock: null, possession: null, confirmedAt: null, changedAt: null, agree: null, venue: null })
     expect(c.body.games.map((g) => g.gameId)).toEqual([19618, 5])
     expect(FakeWS.instances).toHaveLength(1)
     expect(FakeWS.instances[0].url).toBe('wss://sports-api.polymarket.com/ws')
     expect(h.calls).toHaveLength(0) // nothing to cross-check, so ESPN is not asked
   })
 
-  it('NFL: venue score is away-home, possession from `turn`, and the ESPN cross-check agrees (one upstream call for N requests)', async () => {
+  it('NFL: the row is the PLAY SOURCE\'s (ESPN text for the period), the venue rides beside it, scores agree (one upstream call for N requests)', async () => {
     const h = makeApp()
     await warm(h, [NFL_FRAME])
+    h.clock.advance(30_000)
     const [r1, r2, r3] = await Promise.all([get(h.app, LIST), get(h.app, LIST), get(h.app, LIST)])
     const g = r1.body.games[0]
-    expect(g).toMatchObject({ gameId: 19618, league: 'nfl', status: 'in-progress', score: { home: 28, away: 10 }, period: 'Q3', clock: '9:44', possession: 'away', confirmedBy: 'both', agree: true })
-    expect(g.confirmedAt).toBe(TEST_NOW * 1000)
-    expect(r1.body.sources).toEqual({ venue: { state: 'read' }, plays: { state: 'read' } })
+    expect(g).toMatchObject({ gameId: 19618, league: 'nfl', source: 'plays', status: 'in-progress', score: { home: 28, away: 10 }, period: '3rd', clock: '9:44', possession: 'away', changedAt: null, agree: true })
+    expect(g.confirmedAt).toBe(TEST_NOW * 1000 + 30_000) // the ESPN read, not the venue frame
+    expect(g.venue).toEqual({ status: 'in-progress', score: { home: 28, away: 10 }, scoreText: null, period: 'Q3', clock: '9:44', changedAt: TEST_NOW * 1000 })
+    expect(g).not.toHaveProperty('confirmedBy')
+    expect(r1.body.sources).toEqual({ venue: { state: 'read', label: 'Polymarket' }, plays: { state: 'read', label: 'ESPN' } })
     expect(r2.body.games[0]).toEqual(g)
-    expect(r3.body.serverNow).toBe(TEST_NOW * 1000)
+    expect(r3.body.serverNow).toBe(TEST_NOW * 1000 + 30_000)
     expect(h.calls).toEqual(['https://site.api.espn.com/apis/site/v2/sports/football/nfl/scoreboard'])
   })
 
@@ -235,8 +239,8 @@ describe('GET /v1/sports/games', () => {
     const h = makeApp()
     await warm(h, [VAL_FRAME])
     const res = await get(h.app, '/v1/sports/games?ids=1830762')
-    expect(res.body.games[0]).toMatchObject({ gameId: 1830762, league: 'val', status: 'in-progress', score: null, scoreText: '000-000|1-1|Bo3', period: '1/3', possession: null, confirmedBy: 'venue', agree: null })
-    expect(res.body.sources.plays).toEqual({ state: 'not-needed' })
+    expect(res.body.games[0]).toMatchObject({ gameId: 1830762, league: 'val', status: 'in-progress', source: 'venue', score: null, scoreText: '000-000|1-1|Bo3', period: '1/3', possession: null, agree: null, venue: null })
+    expect(res.body.sources.plays).toEqual({ state: 'not-needed', label: 'ESPN' })
     expect(h.calls).toHaveLength(0)
   })
 
@@ -248,23 +252,24 @@ describe('GET /v1/sports/games', () => {
     expect(g.scoreText).toBe('35-39')
   })
 
-  it('where both agree the newer confirmation counts: a fresh ESPN read re-confirms an older venue frame', async () => {
+  it('a play-sourced row is confirmed by the ESPN read; its age restarts only with the next read', async () => {
     const h = makeApp()
     await warm(h, [NFL_FRAME])
     h.clock.advance(40_000)
     const g = (await get(h.app, LIST)).body.games[0]
-    expect(g).toMatchObject({ confirmedBy: 'both', agree: true, confirmedAt: TEST_NOW * 1000 + 40_000 })
+    expect(g).toMatchObject({ source: 'plays', agree: true, confirmedAt: TEST_NOW * 1000 + 40_000 })
   })
 
-  it('where the sources disagree the venue score is returned and agree is false', async () => {
+  it('where the sources disagree the PLAY SOURCE\'s score is the row\'s, the venue\'s is shown beside it, agree is false', async () => {
     const sb = structuredClone(SCOREBOARD)
     sb.events[0].competitions[0].competitors.find((c) => c.homeAway === 'away').score = '7'
     const h = makeApp({ scoreboard: sb })
     await warm(h, [NFL_FRAME])
     const g = (await get(h.app, LIST)).body.games[0]
-    expect(g.score).toEqual({ home: 28, away: 10 })
+    expect(g.source).toBe('plays')
+    expect(g.score).toEqual({ home: 28, away: 7 })
+    expect(g.venue.score).toEqual({ home: 28, away: 10 })
     expect(g.agree).toBe(false)
-    expect(g.confirmedBy).toBe('venue')
   })
 
   it('a game ESPN does not list exactly once is not-matched and the row is still the venue row', async () => {
@@ -272,7 +277,7 @@ describe('GET /v1/sports/games', () => {
     await warm(h, [{ ...NFL_FRAME, gameId: 99, homeTeam: 'ZZZ', awayTeam: 'YYY' }])
     const res = await get(h.app, '/v1/sports/games/99')
     expect(res.body.games[0].detail).toEqual({ state: 'not-matched', reason: 'no_candidate' })
-    expect(res.body.games[0]).toMatchObject({ score: { home: 28, away: 10 }, confirmedBy: 'venue', agree: null })
+    expect(res.body.games[0]).toMatchObject({ source: 'venue', score: { home: 28, away: 10 }, agree: null, venue: null })
   })
 
   it('ESPN down while the venue is up: the plays source is named unreadable and its data omitted', async () => {
@@ -280,8 +285,8 @@ describe('GET /v1/sports/games', () => {
     h.ctl.fail = true
     await warm(h, [NFL_FRAME])
     const res = await get(h.app, LIST)
-    expect(res.body.sources).toEqual({ venue: { state: 'read' }, plays: { state: 'unreadable', reason: 'upstream_unreachable' } })
-    expect(res.body.games[0]).toMatchObject({ score: { home: 28, away: 10 }, confirmedBy: 'venue', agree: null })
+    expect(res.body.sources).toEqual({ venue: { state: 'read', label: 'Polymarket' }, plays: { state: 'unreadable', reason: 'upstream_unreachable', label: 'ESPN' } })
+    expect(res.body.games[0]).toMatchObject({ source: 'venue', score: { home: 28, away: 10 }, agree: null })
     // A failure is cached for the window: a viewer polling does not hammer a down upstream.
     await get(h.app, LIST)
     expect(h.calls).toHaveLength(1)
@@ -290,35 +295,51 @@ describe('GET /v1/sports/games', () => {
   it('an ESPN 5xx is named upstream_error', async () => {
     const h = makeApp({ fetchImpl: async () => jsonRes({}, 503) })
     await warm(h, [NFL_FRAME])
-    expect((await get(h.app, LIST)).body.sources.plays).toEqual({ state: 'unreadable', reason: 'upstream_error' })
+    expect((await get(h.app, LIST)).body.sources.plays).toEqual({ state: 'unreadable', reason: 'upstream_error', label: 'ESPN' })
   })
 
-  it('venue down while ESPN is up: the last frame keeps its OWN age (ESPN disagrees, so it cannot refresh it), the venue source is named, plays still read', async () => {
-    const sb = structuredClone(SCOREBOARD)
-    sb.events[0].competitions[0].competitors.find((c) => c.homeAway === 'away').score = '7'
-    const h = makeApp({ scoreboard: sb })
+  it('venue down while ESPN is up: the row is ESPN\'s with the venue\'s last frame beside it at its OWN age; the venue source is named', async () => {
+    const h = makeApp()
     await warm(h, [NFL_FRAME])
     const t0 = h.clock.ms
     FakeWS.instances[0].drop()
     h.clock.advance(500)
     const res = await get(h.app, LIST)
-    expect(res.body.sources.venue).toEqual({ state: 'unreadable', reason: 'reconnecting' })
-    expect(res.body.sources.plays).toEqual({ state: 'read' })
-    expect(res.body.games[0].confirmedAt).toBe(t0) // not refreshed by the ESPN read
-    h.clock.advance(19_500) // the backoff has since opened a new socket that has not connected
-    const later = await get(h.app, LIST)
-    expect(later.body.sources.venue).toEqual({ state: 'unreadable', reason: 'connecting' })
-    expect(later.body.serverNow - later.body.games[0].confirmedAt).toBe(20_000)
+    expect(res.body.sources.venue).toEqual({ state: 'unreadable', reason: 'reconnecting', label: 'Polymarket' })
+    expect(res.body.sources.plays).toEqual({ state: 'read', label: 'ESPN' })
+    expect(res.body.games[0]).toMatchObject({ source: 'plays', confirmedAt: t0 + 500 })
+    expect(res.body.games[0].venue.changedAt).toBe(t0)
+  })
+
+  it('a venue-sourced row (ESPN off the air): changedAt = the game\'s frame; confirmedAt = the heartbeat while the same connection is open, else changedAt', async () => {
+    const h = makeApp()
+    h.ctl.fail = true
+    await warm(h, [NFL_FRAME])
+    const t0 = h.clock.ms
+    h.clock.advance(15_000)
+    FakeWS.instances[0].send('null') // the heartbeat
+    let g = (await get(h.app, LIST)).body.games[0]
+    expect(g).toMatchObject({ source: 'venue', changedAt: t0, confirmedAt: t0 + 15_000 })
+    // After a reconnect the feed re-sends nothing: confirmation falls back to the game's own frame time.
+    FakeWS.instances[0].drop()
+    h.clock.advance(1_000)
+    FakeWS.instances[1].open()
+    FakeWS.instances[1].send('null')
+    g = (await get(h.app, LIST)).body.games[0]
+    expect(g).toMatchObject({ source: 'venue', changedAt: t0, confirmedAt: t0 })
+    FakeWS.instances[1].send(NFL_FRAME)
+    g = (await get(h.app, LIST)).body.games[0]
+    expect(g.changedAt).toBe(g.confirmedAt)
   })
 
   it('PLAYS disabled: sources.plays off, detail off, and ESPN is never asked', async () => {
     const h = makeApp({ env: { SPORTS_PLAYS_ENABLED: 'false' } })
     await warm(h, [NFL_FRAME])
     const list = await get(h.app, LIST)
-    expect(list.body.sources.plays).toEqual({ state: 'off' })
+    expect(list.body.sources.plays).toEqual({ state: 'off', label: 'ESPN' })
     const det = await get(h.app, DETAIL)
     expect(det.body.games[0].detail).toEqual({ state: 'off' })
-    expect(det.body.games[0].score).toEqual({ home: 28, away: 10 })
+    expect(det.body.games[0]).toMatchObject({ source: 'venue', score: { home: 28, away: 10 } })
     expect(h.calls).toHaveLength(0)
   })
 
@@ -362,13 +383,13 @@ describe('GET /v1/sports/games', () => {
 // ---- detail --------------------------------------------------------------------------------------
 
 describe('GET /v1/sports/games/:gameId', () => {
-  it('situation, newest-first plays (<=12), sides from the drive, behindVenue false; one summary call for N viewers', async () => {
+  it('situation, newest-first plays (<=12), sides from the drive; one summary call for N viewers', async () => {
     const h = makeApp()
     await warm(h, [NFL_FRAME])
     const rs = await Promise.all([get(h.app, DETAIL), get(h.app, DETAIL), get(h.app, DETAIL)])
     const d = rs[0].body.games[0].detail
     expect(d.state).toBe('read')
-    expect(d.behindVenue).toBe(false)
+    expect(d).not.toHaveProperty('behindVenue')
     expect(d.plays.length).toBeLessThanOrEqual(12)
     expect(d.plays.length).toBeGreaterThan(0)
     const ids = d.plays.map((p) => Number(p.id))
@@ -394,17 +415,6 @@ describe('GET /v1/sports/games/:gameId', () => {
     expect(h.calls.filter((u) => u.includes('/summary'))).toHaveLength(2)
   })
 
-  it('behindVenue is true when ESPN has not caught up with the venue', async () => {
-    const sb = structuredClone(SCOREBOARD)
-    sb.events[0].competitions[0].competitors.find((c) => c.homeAway === 'home').score = '21'
-    const h = makeApp({ scoreboard: sb })
-    await warm(h, [NFL_FRAME])
-    const g = (await get(h.app, DETAIL)).body.games[0]
-    expect(g.detail.behindVenue).toBe(true)
-    expect(g.agree).toBe(false)
-    expect(g.score).toEqual({ home: 28, away: 10 })
-  })
-
   it('a summary that fails alone is named and its data omitted; the venue row is unaffected', async () => {
     const h = makeApp({
       fetchImpl: async (url) => {
@@ -415,7 +425,7 @@ describe('GET /v1/sports/games/:gameId', () => {
     await warm(h, [NFL_FRAME])
     const g = (await get(h.app, DETAIL)).body.games[0]
     expect(g.detail).toEqual({ state: 'unreadable', reason: 'upstream_error' })
-    expect(g.score).toEqual({ home: 28, away: 10 })
+    expect(g).toMatchObject({ source: 'venue', score: { home: 28, away: 10 } }) // the plays source failed: the row falls back to the venue
   })
 
   it('an uncovered league is not-covered; a game the venue has not spoken about is not-matched (no identity)', async () => {
@@ -432,11 +442,10 @@ describe('GET /v1/sports/games/:gameId', () => {
     const h = makeApp({ scoreboard: sb, summary: SUMMARY_FINAL })
     await warm(h, [ENDED_FRAME])
     const first = (await get(h.app, '/v1/sports/games/19620')).body.games[0]
-    expect(first.status).toBe('ended')
+    expect(first).toMatchObject({ source: 'plays', status: 'ended', period: 'Final', agree: true })
     expect(first.score).toEqual({ home: 35, away: 39 }) // away-home: 39-35, DET (home) 35
     expect(first.detail.state).toBe('read')
     expect(first.detail.situation).toBeNull()
-    expect(first.agree).toBe(true)
     const after = h.calls.length
     expect(h.calls.filter((u) => u.includes('/summary'))).toHaveLength(1)
     h.clock.advance(600_000)
@@ -457,6 +466,106 @@ describe('GET /v1/sports/games/:gameId', () => {
     const d = (await get(h.app, '/v1/sports/games/19620')).body.games[0].detail
     expect(d.state).toBe('read')
     expect(h.calls.filter((u) => u.includes('/summary'))).toHaveLength(1)
+  })
+})
+
+// ---- identity claims on the detail route ----------------------------------------------------------
+
+describe('identity claim (league, home, away, start)', () => {
+  const CLAIM = '?league=nfl&home=DAL&away=PHI&start=2026-11-26T21:30:00Z'
+
+  it('matches the play source before the venue has spoken about the game, for that request only', async () => {
+    const h = makeApp()
+    await get(h.app, LIST) // opens the socket; the venue says nothing about 19618
+    const claimed = (await get(h.app, DETAIL + CLAIM)).body.games[0]
+    expect(claimed).toMatchObject({ source: 'plays', status: 'in-progress', period: '3rd', score: { home: 28, away: 10 }, venue: null })
+    expect(claimed.detail.state).toBe('read')
+    // Nothing was remembered against the gameId: the same gameId without the claim is still unknown.
+    const plain = (await get(h.app, DETAIL)).body.games[0]
+    expect(plain).toMatchObject({ source: null, score: null })
+    expect(plain.detail).toEqual({ state: 'not-matched', reason: 'no_identity' })
+    const list = (await get(h.app, LIST)).body.games[0]
+    expect(list.source).toBeNull()
+  })
+
+  it('a WRONG claim cannot change what another request for the same gameId gets', async () => {
+    const h = makeApp()
+    await warm(h, [NFL_FRAME])
+    // Someone claims 19618 is KC @ BUF (and the venue has spoken: the claim is ignored) ...
+    const wrong = (await get(h.app, DETAIL + '?league=nfl&home=BUF&away=KC')).body.games[0]
+    expect(wrong.score).toEqual({ home: 28, away: 10 })
+    expect(wrong.detail.situation.yardLineText).toBe('PHI 25')
+    // ... and another request gets exactly the true answer.
+    const other = (await get(h.app, DETAIL)).body.games[0]
+    expect(other).toEqual(wrong)
+  })
+
+  it('a wrong claim for a game the venue has NOT named only misleads its own request', async () => {
+    const h = makeApp()
+    await get(h.app, LIST)
+    const lie = (await get(h.app, '/v1/sports/games/19618?league=nfl&home=BUF&away=KC')).body.games[0]
+    expect(lie).toMatchObject({ source: 'plays', status: 'scheduled' }) // it was told KC @ BUF, so that is what it got
+    const truth = (await get(h.app, DETAIL + CLAIM)).body.games[0]
+    expect(truth).toMatchObject({ source: 'plays', status: 'in-progress', score: { home: 28, away: 10 } })
+  })
+
+  it('the venue\'s frame overrides a claim', async () => {
+    const h = makeApp()
+    await warm(h, [NFL_FRAME])
+    const g = (await get(h.app, DETAIL + '?league=nfl&home=BUF&away=KC&start=2026-11-27T01:20:00Z')).body.games[0]
+    expect(g.league).toBe('nfl')
+    expect(g.score).toEqual({ home: 28, away: 10 }) // PHI @ DAL, not KC @ BUF
+  })
+
+  it('a pre-kickoff game matched by claim is `scheduled` from the play source, with no filler score or clock', async () => {
+    const h = makeApp()
+    await get(h.app, LIST)
+    const g = (await get(h.app, '/v1/sports/games/19621?league=nfl&home=BUF&away=KC&start=2026-11-27T01:20:00Z')).body.games[0]
+    expect(g).toMatchObject({ source: 'plays', status: 'scheduled', score: null, clock: null, period: null, possession: null })
+  })
+
+  it('start is honoured: a kickoff more than 30 minutes away is not-matched', async () => {
+    const h = makeApp()
+    await get(h.app, LIST)
+    const g = (await get(h.app, '/v1/sports/games/19621?league=nfl&home=BUF&away=KC&start=2026-11-27T05:00:00Z')).body.games[0]
+    expect(g.detail).toEqual({ state: 'not-matched', reason: 'no_candidate' })
+    expect(g.source).toBeNull()
+  })
+
+  it('an ended game is frozen under the play source\'s event id: a claim cannot reach it through another gameId', async () => {
+    const h = makeApp({ summary: SUMMARY_FINAL })
+    await get(h.app, LIST)
+    const real = '?league=nfl&home=DET&away=CHI'
+    await get(h.app, '/v1/sports/games/19620' + real)
+    const summaries = () => h.calls.filter((u) => u.includes('/summary')).length
+    expect(summaries()).toBe(1)
+    // Another gameId claiming the same teams meets the same frozen event: no second read, same answer. (The
+    // frozen map is keyed by event id; there is no gameId -> event map for a claim to poison.)
+    const alias = (await get(h.app, '/v1/sports/games/777' + real)).body.games[0]
+    expect(alias.status).toBe('ended')
+    expect(summaries()).toBe(1)
+    // And a gameId only ever learns an event from the VENUE's frame: this one, claimed and not named, stays unmapped.
+    const bare = (await get(h.app, '/v1/sports/games/777')).body.games[0]
+    expect(bare.source).toBeNull()
+  })
+
+  it('validates the claim: partial, malformed, lower-case codes and bad times are 400, and nothing upstream is touched', async () => {
+    const h = makeApp()
+    const bad = ['?league=nfl', '?league=nfl&home=DAL', '?league=nfl&home=dal&away=PHI', '?league=NFL&home=DAL&away=PHI', '?league=nfl&home=DALLAS&away=PHI', '?league=nfl&home=DAL&away=PHI&start=tomorrow', '?home=DAL&away=PHI', '?league=nfl&home=DAL&away=PHI&start=', '?league=nfl&league=x&home=DAL&away=PHI']
+    for (const q of bad) {
+      const res = await get(h.app, DETAIL + q)
+      expect(res.status, q).toBe(400)
+      expect(res.body.error.code).toBe('invalid_params')
+    }
+    expect(FakeWS.instances).toHaveLength(0)
+    expect(h.calls).toHaveLength(0)
+  })
+
+  it('a well-formed league with no play source is not-covered, not a 400', async () => {
+    const h = makeApp()
+    const g = (await get(h.app, '/v1/sports/games/5?league=cbb&home=UCLA&away=STMRY')).body.games[0]
+    expect(g.detail).toEqual({ state: 'not-covered' })
+    expect(h.calls).toHaveLength(0)
   })
 })
 
@@ -495,7 +604,8 @@ describe('venue feed', () => {
     ws.send({ ...NFL_FRAME, score: '10-35' })
     const hit = f.read(19618)
     expect(hit.frame.score).toEqual({ home: 35, away: 10 })
-    expect(hit.at).toBe(1_005_000)
+    expect(hit.changedAt).toBe(1_005_000)
+    expect(hit.confirmedAt).toBe(1_005_000)
     expect(f.status().games).toBe(1)
     expect(f.read(404)).toBeNull()
   })
@@ -551,12 +661,18 @@ describe('venue feed', () => {
     const ws = FakeWS.instances[0]
     ws.open()
     ws.send(NFL_FRAME)
-    clock.advance(299_000)
+    const beat = (ms) => {
+      for (let t = 0; t < ms; t += 15_000) {
+        clock.advance(15_000)
+        ws.send('null') // the feed's heartbeat keeps the connection alive for the watchdog
+      }
+    }
+    beat(285_000)
     f.touch() // a request inside the window restarts the idle clock
-    clock.advance(299_000)
+    beat(285_000)
     expect(ws.closed).toBe(false)
     expect(f.read(19618)).not.toBeNull()
-    clock.advance(1_001)
+    clock.advance(15_001)
     expect(ws.closed).toBe(true)
     expect(f.state()).toEqual({ state: 'unreadable', reason: 'not_connected' })
     expect(f.read(19618)).toBeNull()
@@ -565,6 +681,31 @@ describe('venue feed', () => {
     expect(FakeWS.instances).toHaveLength(1)
     f.touch()
     expect(FakeWS.instances).toHaveLength(2)
+  })
+
+  it('a connection with no frame of any kind for 60 s is dead: closed and reconnected, and its games drop to their own frame time', () => {
+    const { f, clock } = feed()
+    f.touch()
+    const ws = FakeWS.instances[0]
+    ws.open()
+    ws.send(NFL_FRAME)
+    for (let i = 0; i < 6; i += 1) {
+      clock.advance(15_000)
+      ws.send('null')
+    }
+    expect(FakeWS.instances).toHaveLength(1) // heartbeats keep it alive
+    expect(f.read(19618).confirmedAt).toBe(1_000_000 + 90_000)
+    clock.advance(75_000) // silence: the watchdog (checking every 15 s) declares it dead once 60 s pass
+    expect(ws.closed).toBe(true)
+    expect(f.status().heartbeatDrops).toBe(1)
+    expect(f.state()).toEqual({ state: 'unreadable', reason: 'reconnecting' })
+    clock.advance(1_000)
+    expect(FakeWS.instances).toHaveLength(2)
+    FakeWS.instances[1].open()
+    FakeWS.instances[1].send('null')
+    const r = f.read(19618) // the game's frame came on the OLD connection
+    expect(r.changedAt).toBe(1_000_000)
+    expect(r.confirmedAt).toBe(1_000_000)
   })
 
   it('stops reconnecting when nobody is asking any more', () => {
@@ -701,10 +842,10 @@ describe('summary parsing', () => {
 })
 
 describe('trust bounds', () => {
-  it('are one frozen constant, venue wider than plays because the venue feed has no heartbeat', () => {
+  it('are ONE frozen constant: plays 30/120 s, the venue NEVER live and delayed to 75 s', () => {
     expect(Object.isFrozen(TRUST_BOUNDS)).toBe(true)
-    expect(TRUST_BOUNDS.venue.liveMs).toBeGreaterThan(TRUST_BOUNDS.plays.liveMs)
-    for (const b of Object.values(TRUST_BOUNDS)) expect(b.delayedMs).toBeGreaterThan(b.liveMs)
+    expect(TRUST_BOUNDS.plays).toEqual({ liveMs: 30_000, delayedMs: 120_000 })
+    expect(TRUST_BOUNDS.venue).toEqual({ liveMs: null, delayedMs: 75_000 })
   })
 })
 
@@ -725,6 +866,7 @@ describe('EventRow.game', () => {
       gameId: 19618,
       league: 'nfl',
       startTime: '2026-11-26T21:30:00Z',
+      listed: null,
       home: { name: 'Cowboys', code: 'DAL' },
       away: { name: 'Eagles', code: 'PHI' },
     })
@@ -747,12 +889,20 @@ describe('EventRow.game', () => {
       expect(g.teams.map((t) => t.code)).toEqual(['PHI', 'DAL'])
     }
     expect(normalizeGame(one).teams).toHaveLength(1)
-    expect(normalizeGame({ gameId: 5 })).toEqual({ gameId: 5, league: null, startTime: null, teams: [] })
+    expect(normalizeGame({ gameId: 5 })).toEqual({ gameId: 5, league: null, startTime: null, listed: null, teams: [] })
   })
   it('a bad code or start time becomes null, not a guess', () => {
     const g = normalizeGame({ ...GAMMA_GAME, startTime: 'tomorrow', teams: GAMMA_GAME.teams.map((t) => ({ ...t, abbreviation: '<b>' })) })
     expect(g.startTime).toBeNull()
     expect(g.home.code).toBeNull()
+  })
+  it('listed: what the listing itself says, unparsed, each field null when absent, the whole null when it gave none', () => {
+    const listed = (o) => normalizeGame({ ...GAMMA_GAME, ...o }).listed
+    expect(listed({ live: true, ended: false, score: '10-28', period: 'Q3', elapsed: '10:39' })).toEqual({ status: 'in-progress', scoreText: '10-28', period: 'Q3', clock: '10:39' })
+    expect(listed({ live: false, ended: true, score: '39-35', period: 'VFT', elapsed: '' })).toEqual({ status: 'ended', scoreText: '39-35', period: 'VFT', clock: null })
+    expect(listed({ period: 'NS' })).toEqual({ status: null, scoreText: null, period: 'NS', clock: null }) // "NS" is text, not a status
+    expect(listed({ live: false, ended: false, score: '', period: ' ', elapsed: null })).toBeNull()
+    expect(listed({})).toBeNull()
   })
   it('rides every EventRow: null for a futures market, the game for a game market', () => {
     const base = { slug: 'nfl-phi-dal-2026-11-26', title: 'Eagles vs. Cowboys', markets: [] }
@@ -761,3 +911,24 @@ describe('EventRow.game', () => {
     expect(normalizeEvent({ ...base, ...GAMMA_GAME }, { detail: true }).game.league).toBe('nfl')
   })
 })
+
+describe('sports: a game that left the schedule without being played is not "ended"', () => {
+  it('needs the play source to say the game was completed', () => {
+    expect(espnState({ state: 'post', completed: true })).toBe('ended')
+    expect(espnState({ state: 'post', completed: false, name: 'STATUS_POSTPONED' })).toBe(null)
+    expect(espnState({ state: 'post' })).toBe(null)
+    expect(espnState({ state: 'in', completed: false })).toBe('in-progress')
+    expect(espnState({ state: 'pre', completed: false })).toBe('scheduled')
+    expect(espnState(undefined)).toBe(null)
+  })
+
+  it('a postponed game keeps the source\'s own words and no state', () => {
+    const sb = fx('espn-scoreboard-nfl.json')
+    const ev = structuredClone(sb.events.find((e) => e.competitions[0].status.type.state === 'post'))
+    ev.competitions[0].status.type = { state: 'post', completed: false, name: 'STATUS_POSTPONED', shortDetail: 'Postponed' }
+    const [e] = parseScoreboard({ events: [ev] })
+    expect(e.state).toBe(null)
+    expect(e.periodText).toBe('Postponed')
+  })
+})
+

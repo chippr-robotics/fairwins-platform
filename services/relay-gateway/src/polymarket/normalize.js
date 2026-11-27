@@ -365,6 +365,19 @@ function gameTeam(t) {
 }
 
 /**
+ * What the listing itself says about the game (`game.listed`): the venue's own text, unparsed, as old as the
+ * listing. Each field null when absent or blank; the whole object null when it gave none. `status` is only
+ * ever a word the listing's two booleans state (`ended`, or `live` and not ended) — nothing is inferred from
+ * a period label such as "NS".
+ */
+function normalizeListed(raw) {
+  const status = raw?.ended === true ? 'ended' : raw?.live === true ? 'in-progress' : null
+  const t = (v, max) => (typeof v === 'string' ? (plainText(v, max)?.trim() || null) : null)
+  const listed = { status, scoreText: t(raw?.score, 40), period: t(raw?.period, 20), clock: t(raw?.elapsed, 20) }
+  return Object.values(listed).every((v) => v == null) ? null : listed
+}
+
+/**
  * The game an event names (spec 115 contract: gateway-sports-api.md), or null. A futures market
  * has no `gameId`, so it gets null and the page shows no game view.
  *
@@ -387,6 +400,7 @@ export function normalizeGame(raw) {
     gameId,
     league,
     startTime: typeof raw.startTime === 'string' && GAME_START_RE.test(raw.startTime) ? raw.startTime : null,
+    listed: normalizeListed(raw),
   }
   const orderings = rawTeams.map((t) => t?.ordering)
   const sided =

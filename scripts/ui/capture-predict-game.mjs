@@ -30,7 +30,7 @@ const TOKEN_NO = '52114319501245915516055106046884209969926127482827954674443846
 const SLUG = 'eagles-vs-cowboys'
 const AXE = readFileSync(resolve(process.cwd(), '../node_modules/axe-core/axe.min.js'), 'utf8')
 
-const HOME_AWAY = { gameId: 19618, league: 'nfl', startTime: '2026-11-26T21:30:00Z', home: { name: 'Cowboys', code: 'DAL' }, away: { name: 'Eagles', code: 'PHI' } }
+const HOME_AWAY = { gameId: 19618, league: 'nfl', startTime: '2026-11-26T21:30:00Z', listed: { status: 'in-progress', scoreText: '10-28', period: 'Q3', clock: '10:39' }, home: { name: 'Cowboys', code: 'DAL' }, away: { name: 'Eagles', code: 'PHI' } }
 const TEAMS = { gameId: 19618, league: 'nfl', startTime: '2026-11-26T21:30:00Z', teams: [{ name: 'Eagles', code: 'PHI' }, { name: 'Cowboys', code: 'DAL' }] }
 const eventFor = (game) => ({
   slug: SLUG, title: 'Eagles vs. Cowboys', category: 'sports', volume: '2400000.5', volume24h: '120000', endDate: '2030-12-10T12:00:00Z',
@@ -49,16 +49,20 @@ const PLAYS = [
 ]
 const SITUATION = { possession: 'home', yardLine: 37, yardLineText: 'DAL 37', down: 4, distance: 18, downDistanceText: '4th & 18 at DAL 37', lineToGain: 55, redZone: false }
 
-const BASE_ROW = { gameId: 19618, league: 'nfl', status: 'in-progress', score: { home: 28, away: 10 }, period: 'Q3', clock: '10:39', possession: 'home', confirmedBy: 'both', agree: true }
-const detailRead = (now, over = {}) => ({ state: 'read', confirmedAt: now - 3000, situation: SITUATION, plays: PLAYS, behindVenue: false, ...over })
+const BASE_ROW = { gameId: 19618, league: 'nfl', source: 'plays', status: 'in-progress', score: { home: 28, away: 10 }, scoreText: null, period: 'Q3', clock: '10:39', possession: 'home', changedAt: null, agree: true, venue: null }
+const detailRead = (now, over = {}) => ({ state: 'read', confirmedAt: now - 3000, situation: SITUATION, plays: PLAYS, ...over })
+const VENUE_ROW = (now, over = {}) => ({ ...BASE_ROW, source: 'venue', score: { home: 21, away: 10 }, possession: null, confirmedAt: now - 5000, changedAt: now - 40_000, agree: null, detail: { state: 'not-covered', situation: null, plays: [] }, ...over })
 
 /** scenario → { listing, answer(now) } ; answer returns { status, body } or null for "module off". */
 const SCENARIOS = [
+  { id: 'venue-only', game: HOME_AWAY, answer: (now) => VENUE_ROW(now) },
+  { id: 'venue-last-known', game: HOME_AWAY, answer: (now) => VENUE_ROW(now, { confirmedAt: now - 150_000, changedAt: now - 300_000 }) },
+  { id: 'disagree', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, confirmedAt: now - 2000, agree: false, venue: { status: 'in-progress', score: { home: 21, away: 10 }, scoreText: null, period: 'Q3', clock: '10:39', changedAt: now - 120_000 }, detail: detailRead(now) }) },
+  { id: 'listing', game: HOME_AWAY, abort: true },
   { id: 'live', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, confirmedAt: now - 2000, detail: detailRead(now) }) },
   { id: 'delayed', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, confirmedAt: now - 45_000, detail: detailRead(now, { confirmedAt: now - 45_000 }) }) },
   { id: 'last-known', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, confirmedAt: now - 180_000, detail: detailRead(now, { confirmedAt: now - 180_000 }) }) },
-  { id: 'plays-unreadable', game: HOME_AWAY, sources: { venue: { state: 'read' }, plays: { state: 'unreadable', reason: 'timeout' } }, answer: (now) => ({ ...BASE_ROW, confirmedBy: 'venue', agree: null, confirmedAt: now - 2000, detail: { state: 'unreadable', confirmedAt: null, situation: null, plays: [], behindVenue: false } }) },
-  { id: 'behind', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, agree: false, confirmedAt: now - 2000, detail: detailRead(now, { behindVenue: true }) }) },
+  { id: 'plays-unreadable', game: HOME_AWAY, sources: { venue: { state: 'read', label: 'Polymarket' }, plays: { state: 'unreadable', reason: 'upstream_error', label: 'ESPN' } }, answer: (now) => VENUE_ROW(now, { detail: { state: 'unreadable', confirmedAt: null, situation: null, plays: [] } }) },
   { id: 'scheduled', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, status: 'scheduled', score: null, period: null, clock: null, possession: null, agree: null, confirmedAt: now - 2000, detail: { state: 'not-covered', situation: null, plays: [] } }) },
   { id: 'ended', game: HOME_AWAY, answer: (now) => ({ ...BASE_ROW, status: 'ended', score: { home: 31, away: 24 }, period: 'Final', clock: null, possession: null, confirmedAt: now - 2000, detail: detailRead(now, { situation: null }) }) },
   { id: 'teams', game: TEAMS, answer: (now) => ({ ...BASE_ROW, confirmedAt: now - 2000, detail: detailRead(now) }) },
@@ -106,9 +110,10 @@ async function newPage(browser, { theme, size, sc }) {
     return json(route, { error: { code: 'not_found' } }, 404)
   })
   await context.route(/localhost:8899\/v1\/sports\//, async (route) => {
-    if (sc.off) return json(route, { error: 'sports_unconfigured' }, 503)
+    if (sc.abort) return route.abort('failed')
+    if (sc.off) return json(route, { error: { code: 'sports_unconfigured', reason: 'sports module is not enabled' } }, 503)
     const now = Date.now()
-    return json(route, { serverNow: now, sources: sc.sources ?? { venue: { state: 'read' }, plays: { state: 'read' } }, games: [sc.answer(now)] })
+    return json(route, { serverNow: now, sources: sc.sources ?? { venue: { state: 'read', label: 'Polymarket' }, plays: { state: 'read', label: 'ESPN' } }, games: [sc.answer(now)] })
   })
   const page = await context.newPage()
   await page.addInitScript(({ theme, account }) => {

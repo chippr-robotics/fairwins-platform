@@ -12,6 +12,10 @@
 //   PG-02 the module off: the page is exactly what it was — no game view, no placeholder, one request only
 //   PG-03 a source that stops answering: last known, never Live; play detail unreadable is named, no plays
 //   PG-04 the event page with a game view has no serious or critical accessibility violations
+//   PG-05 a game only the venue's feed has spoken about: Delayed (never Live), the feed named from the envelope,
+//         and the game's identity sent from the event listing
+//   PG-06 the play source and the venue's feed disagree: the play source's score is shown, and one line says what
+//         the venue's feed shows and when it last changed
 // =============================================================================
 
 const ACCOUNT = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
@@ -26,6 +30,7 @@ const GAME = {
   gameId: 19618,
   league: 'nfl',
   startTime: '2026-11-26T21:30:00Z',
+  listed: { status: 'in-progress', scoreText: '10-28', period: 'Q3', clock: '10:39' },
   home: { name: 'Cowboys', code: 'DAL' },
   away: { name: 'Eagles', code: 'PHI' },
 }
@@ -72,7 +77,8 @@ const world = { game: 'live', ageMs: 2000 }
 
 function playDetail(state = 'read') {
   const serverNow = Date.now()
-  if (state === 'unreadable') return { state: 'unreadable', confirmedAt: null, situation: null, plays: [], behindVenue: false }
+  if (state === 'unreadable') return { state: 'unreadable', confirmedAt: null, situation: null, plays: [] }
+  if (state === 'not-covered') return { state: 'not-covered', confirmedAt: null, situation: null, plays: [] }
   return {
     state: 'read',
     confirmedAt: serverNow - 3000,
@@ -90,7 +96,6 @@ function playDetail(state = 'read') {
       { id: 'p3', period: 'Q3', clock: '10:44', text: 'Pass incomplete to CeeDee Lamb.', scoring: false, side: 'home' },
       { id: 'p2', period: 'Q3', clock: '11:20', text: 'Jake Elliott 42 yard field goal is GOOD.', scoring: true, side: 'away' },
     ],
-    behindVenue: false,
   }
 }
 
@@ -110,26 +115,37 @@ function gateways() {
   })
 
   cy.intercept({ method: 'GET', url: SPORTS }, (req) => {
-    if (world.game === 'off') return req.reply({ statusCode: 503, body: { error: 'sports_unconfigured' } })
+    if (world.game === 'off') return req.reply({ statusCode: 503, body: { error: { code: 'sports_unconfigured', reason: 'sports module is not enabled' } } })
     const serverNow = Date.now()
+    const venueOnly = world.game === 'venue'
+    const playsUnreadable = world.game === 'plays-unreadable'
     const row = {
       gameId: 19618,
       league: 'nfl',
+      source: venueOnly || playsUnreadable ? 'venue' : 'plays',
       status: 'in-progress',
-      score: { home: 28, away: 10 },
+      score: venueOnly || playsUnreadable ? { home: 21, away: 10 } : { home: 28, away: 10 },
+      scoreText: null,
       period: 'Q3',
       clock: '10:39',
-      possession: 'home',
+      possession: venueOnly || playsUnreadable ? null : 'home',
       confirmedAt: serverNow - world.ageMs,
-      confirmedBy: 'venue',
-      agree: true,
-      detail: playDetail(world.game === 'plays-unreadable' ? 'unreadable' : 'read'),
+      changedAt: venueOnly || playsUnreadable ? serverNow - 40_000 : null,
+      agree: world.game === 'disagree' ? false : venueOnly || playsUnreadable ? null : true,
+      venue:
+        world.game === 'disagree'
+          ? { status: 'in-progress', score: { home: 21, away: 10 }, scoreText: null, period: 'Q3', clock: '10:39', changedAt: serverNow - 120_000 }
+          : null,
+      detail: playDetail(playsUnreadable ? 'unreadable' : venueOnly ? 'not-covered' : 'read'),
     }
     req.reply({
       statusCode: 200,
       body: {
         serverNow,
-        sources: { venue: { state: 'read' }, plays: { state: world.game === 'plays-unreadable' ? 'unreadable' : 'read' } },
+        sources: {
+          venue: { state: 'read', label: 'Polymarket' },
+          plays: { state: playsUnreadable ? 'unreadable' : 'read', label: 'ESPN' },
+        },
         games: [row],
       },
     })
@@ -172,6 +188,12 @@ describe('Predict — the live game view (spec 115)', () => {
       cy.contains('.game-team', 'Eagles').should('contain.text', '10')
       cy.get('[data-testid="game-status"]').should('have.text', 'In progress · Q3 · 10:39')
       cy.get('[data-testid="game-trust-chip"]').should('contain.text', 'Game information is live')
+      cy.get('[data-testid="game-source"]').should('have.text', 'From ESPN.')
+    })
+    // The game's identity rode along from the event listing.
+    cy.get('@game.all').then((calls) => {
+      const q = new URL(calls[0].request.url).searchParams
+      expect(Object.fromEntries(q)).to.deep.equal({ league: 'nfl', home: 'DAL', away: 'PHI', start: '2026-11-26T21:30:00Z' })
     })
     // Above the markets list, not below it.
     cy.get('[data-testid="game-view"]').then(($g) => {
@@ -217,10 +239,29 @@ describe('Predict — the live game view (spec 115)', () => {
 
   it('[PG-03] predict.game-field-and-plays — an unreadable play source is named, with no field and no plays; the scoreboard stays', () => {
     openEvent('plays-unreadable')
-    cy.get('.game-view', { timeout: 20000 }).should('contain.text', 'play-by-play source (ESPN)')
+    cy.get('.game-view', { timeout: 20000 }).should('contain.text', 'Play detail could not be read from ESPN')
     cy.get('[data-testid="game-field"]').should('not.exist')
     cy.get('[data-testid="game-plays"]').should('not.exist')
-    cy.get('.game-view').should('contain.text', 'Cowboys').and('contain.text', '28')
+    // The row falls back to the venue's feed: Delayed, never Live.
+    cy.get('[data-testid="game-trust-chip"]').should('contain.text', 'Game information is delayed')
+    cy.get('.game-view').should('contain.text', 'Cowboys').and('contain.text', '21')
+  })
+
+  it('[PG-05] predict.game-scoreboard — a venue-only game is Delayed, never Live, and names its feed and cadence', () => {
+    openEvent('venue', 5000)
+    cy.get('[data-testid="game-trust-chip"]', { timeout: 20000 })
+      .should('contain.text', 'Game information is delayed')
+      .and('not.contain.text', 'is live')
+    cy.get('[data-testid="game-source"]').should('contain.text', "Score from Polymarket's game feed, which updates about once a minute. Last changed")
+    cy.get('[data-testid="game-field"]').should('not.exist')
+  })
+
+  it('[PG-06] predict.game-scoreboard — when the feeds disagree the play source\'s score is shown and one line says what the venue\'s feed shows', () => {
+    openEvent('disagree')
+    cy.get('[data-testid="game-disagree"]', { timeout: 20000 })
+      .should('contain.text', "Polymarket's own game feed still shows Eagles 10, Cowboys 21 (last changed")
+    cy.contains('.game-team', 'Cowboys').should('contain.text', '28')
+    cy.get('.game-view').should('not.contain.text', 'may be behind the score')
   })
 
   it('[PG-04] predict.game-scoreboard — the event page with a game view has no serious or critical accessibility violations', () => {

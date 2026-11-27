@@ -3,9 +3,17 @@
  *
  * Shape of the feed (research R1, measured 2026-11-27): no auth, no subscribe message, no ping. It
  * pushes one JSON object per game state change / periodic refresh; control frames are a bare JSON
- * `null`. There is no heartbeat, so SILENCE IS NOT AN OUTAGE — a game can go a minute without a
- * frame while the socket is perfectly healthy — and that is why a frame's age is reported to the
- * caller as `at` and trust is decided from the age, never from "the socket is open".
+ * `null`, which doubles as the connection's heartbeat. A GAME's silence is not an outage (a game can
+ * go minutes without a frame), so a game's age is reported as `changedAt` and the connection's
+ * liveness separately as `confirmedAt`.
+ *
+ * HEARTBEAT (research R1, all four captures): the feed sends a bare JSON `null` about every 15 s
+ * (median gap 15.3 s); across 2,602 intra-connection frame gaps the p99 was 20.8 s and the maximum
+ * 41.5 s. So a connection is judged DEAD after `deadAfterMs` = 60 s with no frame of any kind (~4
+ * heartbeats, 1.4x the worst gap seen) and is closed and reconnected. A frame for a game records
+ * `changedAt`; `confirmedAt` is the last frame of any kind on the open connection, but only when that
+ * game's frame arrived on THIS connection (a reconnect re-sends nothing, so a game's confirmation
+ * falls back to its own `changedAt` until its next frame).
  *
  * Rules this module keeps:
  *  - LAZY: nothing is opened until a request calls `touch()`. CLOSED after `idleCloseMs` (5 min)
@@ -24,6 +32,7 @@ const DEFAULTS = Object.freeze({
   backoffBaseMs: 1_000,
   backoffMaxMs: 30_000,
   maxGames: 5_000,
+  deadAfterMs: 60_000,
 })
 
 /**
@@ -34,7 +43,7 @@ const DEFAULTS = Object.freeze({
  *   now?: () => number,
  *   setTimer?: (fn: () => void, ms: number) => unknown,
  *   clearTimer?: (handle: unknown) => void,
- *   idleCloseMs?: number, backoffBaseMs?: number, backoffMaxMs?: number, maxGames?: number,
+ *   idleCloseMs?: number, deadAfterMs?: number, backoffBaseMs?: number, backoffMaxMs?: number, maxGames?: number,
  *   log?: (msg: string) => void,
  * }} opts
  */
@@ -54,6 +63,7 @@ export function createVenueFeed(opts) {
     backoffBaseMs = DEFAULTS.backoffBaseMs,
     backoffMaxMs = DEFAULTS.backoffMaxMs,
     maxGames = DEFAULTS.maxGames,
+    deadAfterMs = DEFAULTS.deadAfterMs,
     log = () => {},
   } = opts
 
@@ -68,6 +78,10 @@ export function createVenueFeed(opts) {
   let openedAt = null
   let lastError = null
   let totalFrames = 0
+  let connId = 0
+  let lastAnyAt = null // last frame of ANY kind on the current connection
+  let deadTimer = null
+  let deadDrops = 0
 
   function armIdle() {
     if (idleTimer != null) clearTimer(idleTimer)
@@ -84,6 +98,7 @@ export function createVenueFeed(opts) {
     reconnectTimer = null
     if (idleTimer != null) clearTimer(idleTimer)
     idleTimer = null
+    stopWatchdog()
     const s = socket
     socket = null
     phase = 'closed'
@@ -102,7 +117,37 @@ export function createVenueFeed(opts) {
     }
   }
 
+  function stopWatchdog() {
+    if (deadTimer != null) clearTimer(deadTimer)
+    deadTimer = null
+  }
+
+  function armWatchdog() {
+    stopWatchdog()
+    deadTimer = setTimer(() => {
+      deadTimer = null
+      if (phase !== 'open') return
+      if (now() - (lastAnyAt ?? openedAt ?? 0) > deadAfterMs) {
+        // A connection that has not even sent its heartbeat is dead whatever the socket claims.
+        deadDrops += 1
+        lastError = 'heartbeat_lost'
+        const s = socket
+        socket = null
+        if (s) {
+          s.onopen = s.onmessage = s.onerror = s.onclose = null
+          try {
+            s.close()
+          } catch {
+            /* already gone */
+          }
+        }
+        scheduleReconnect()
+      } else armWatchdog()
+    }, Math.max(1, Math.floor(deadAfterMs / 4)))
+  }
+
   function scheduleReconnect() {
+    stopWatchdog()
     phase = 'backoff'
     const delay = Math.min(backoffMaxMs, backoffBaseMs * 2 ** attempts)
     attempts += 1
@@ -113,6 +158,7 @@ export function createVenueFeed(opts) {
   }
 
   function onFrame(data) {
+    lastAnyAt = now() // any frame — including the bare `null` heartbeat and junk — proves the connection alive
     let parsed
     try {
       parsed = JSON.parse(typeof data === 'string' ? data : String(data))
@@ -131,7 +177,7 @@ export function createVenueFeed(opts) {
     }
     if (!frame || !Number.isSafeInteger(frame.gameId)) return
     games.delete(frame.gameId) // re-insert at the tail
-    games.set(frame.gameId, { frame, at })
+    games.set(frame.gameId, { frame, at, connId })
     while (games.size > maxGames) games.delete(games.keys().next().value)
   }
 
@@ -142,6 +188,8 @@ export function createVenueFeed(opts) {
       return
     }
     phase = 'connecting'
+    connId += 1
+    lastAnyAt = null
     let s
     try {
       s = new WebSocketImpl(url)
@@ -158,6 +206,7 @@ export function createVenueFeed(opts) {
       attempts = 0
       openedAt = now()
       lastError = null
+      armWatchdog()
     }
     s.onmessage = (ev) => {
       if (socket !== s) return
@@ -181,9 +230,16 @@ export function createVenueFeed(opts) {
       armIdle()
       if (phase === 'closed') connect()
     },
-    /** The newest frame for a game, or null when the feed has not said anything about it. */
+    /**
+     * The newest frame for a game with its two times, or null when the feed has not said anything about it.
+     * `changedAt`: when the feed last sent a frame for THIS game. `confirmedAt`: the last frame of any kind
+     * on the open connection, only if the game's frame arrived on that same connection; else `changedAt`.
+     */
     read(gameId) {
-      return games.get(gameId) ?? null
+      const e = games.get(gameId)
+      if (!e) return null
+      const onThisConnection = phase === 'open' && e.connId === connId && lastAnyAt != null
+      return { frame: e.frame, changedAt: e.at, confirmedAt: onThisConnection ? Math.max(lastAnyAt, e.at) : e.at }
     },
     /**
      * `read` — the socket is open (silence about a game is then just silence);
@@ -194,7 +250,7 @@ export function createVenueFeed(opts) {
       return { state: 'unreadable', reason: phase === 'connecting' ? 'connecting' : phase === 'backoff' ? 'reconnecting' : 'not_connected' }
     },
     status() {
-      return { phase, games: games.size, frames: totalFrames, lastFrameAt, openedAt, lastError, reconnectAttempts: attempts }
+      return { phase, games: games.size, frames: totalFrames, lastFrameAt: lastAnyAt ?? lastFrameAt, openedAt, lastError, reconnectAttempts: attempts, heartbeatDrops: deadDrops }
     },
     close() {
       shutdown('close')

@@ -23,9 +23,17 @@ game nobody asks about is not read; an ended game is read once more and then fro
   ordering was measured against ESPN; everything else is `scoreText`.
 - **Each source fails alone and is named** (`sources.venue`, `sources.plays`); a failed source's data is
   omitted, never zeroed, never stale-as-live.
-- **`confirmedAt` is this gateway's clock when a source last said the thing.** An open socket confirms
-  nothing: the feed has no heartbeat and a quiet game is silent. Trust bounds are `sports/bounds.js#TRUST_BOUNDS`.
-- **Disagreement returns the venue's score** and `agree: false`.
+- **`confirmedAt` is this gateway's clock when a source last said the thing.** Trust bounds are
+  `sports/bounds.js#TRUST_BOUNDS` (plays 30/120 s; venue never live, delayed to 75 s).
+- **Whose figures (amended FR-008):** the play source's where read and matched (`source: "plays"`), else the venue's,
+  else null. The venue was measured a median 34 s behind ESPN and never ahead, so the older figure never goes on top; the
+  venue's own figures ride beside the row (`venue`) and `agree` compares scores. Figures from two moments are never mixed.
+- **Venue liveness is the connection's, not the game's:** `changedAt` = the game's last frame; `confirmedAt` = the last
+  frame of any kind (the ~15 s `null` heartbeat) on the open connection, only if the game's frame arrived on it. 60 s of
+  total silence = dead connection, reconnect. A venue reading is never `live`.
+- **A device claim never outlives its request.** The detail route's `league/home/away/start` is used only while the
+  venue has not named the game; nothing is keyed by gameId from a claim (`frozen` is keyed by the play source's event
+  id; `identified` is written only from venue frames).
 - **Source text is forwarded as text.** No HTML, URL, image or logo field is ever copied across.
 - **Matching is exactly-one-or-`not-matched`** (`match.js`); the team-code alias table (`leagues.js`) holds
   only differences that were observed.

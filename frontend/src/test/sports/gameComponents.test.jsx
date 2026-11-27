@@ -11,9 +11,9 @@ import PlayList from '../../components/predict/game/PlayList'
 import GameTrustChip from '../../components/predict/game/GameTrustChip'
 import { GameViewBody } from '../../components/predict/game/GameView'
 import { fromRow, unknown } from '../../lib/sports/gameReading'
-import { LISTING, TEAMS_LISTING, SERVER_NOW, row, situation, plays, detail } from '../fixtures/sportsGames'
+import { LISTING, TEAMS_LISTING, SERVER_NOW, SOURCES, row, venueRow, situation, plays, detail } from '../fixtures/sportsGames'
 
-const rd = (over, ageMs = 2000) => fromRow(row({ confirmedAt: SERVER_NOW - ageMs, ...over }), SERVER_NOW, performance.now())
+const rd = (over = {}, ageMs = 2000) => fromRow(row({ confirmedAt: SERVER_NOW - ageMs, ...over }), SERVER_NOW, performance.now())
 const NAMES = { home: 'Cowboys', away: 'Eagles' }
 
 describe('GameScoreboard', () => {
@@ -203,18 +203,76 @@ describe('GameViewBody — source sentences', () => {
     expect(screen.queryByText(/may be behind the score/)).toBeNull()
   })
 
-  it('behindVenue or agree:false adds the one line that play detail may be behind the score', () => {
-    body({ detail: detail({ behindVenue: true }) })
-    expect(screen.getByText(/play detail may be behind the score/i)).toBeInTheDocument()
+  it('the old "play detail may be behind the score" line is gone (it was the wrong way round)', () => {
+    body({ reading: rd({ agree: false, venue: { score: { home: 21, away: 10 }, changedAt: SERVER_NOW - 120_000 } }) })
+    expect(screen.queryByText(/may be behind the score/i)).toBeNull()
   })
-  it('agree:false does the same', () => {
-    body({ reading: rd({ agree: false }) })
-    expect(screen.getByText(/play detail may be behind the score/i)).toBeInTheDocument()
+
+  describe('disagreement (amended FR-008)', () => {
+    const venue = { score: { home: 21, away: 10 }, changedAt: SERVER_NOW - 120_000 }
+    it('plays-sourced, agree:false, venue present: one line says what the venue\'s feed shows and when it changed', () => {
+      body({ reading: rd({ agree: false, venue }), sources: SOURCES })
+      expect(screen.getByTestId('game-disagree').textContent).toBe(
+        "Polymarket's own game feed still shows Eagles 10, Cowboys 21 (last changed 2 min ago).",
+      )
+      expect(screen.getByText('28')).toBeInTheDocument() // the play source's score is the one shown
+    })
+    it('uses the venue\'s scoreText unparsed when it has no attributable score, and a neutral name without a label', () => {
+      body({ reading: rd({ agree: false, venue: { scoreText: '10-21', changedAt: null } }) })
+      expect(screen.getByTestId('game-disagree').textContent).toBe("The venue's own game feed still shows 10-21.")
+    })
+    it('says only that it differs when the venue gave neither', () => {
+      body({ reading: rd({ agree: false, venue: { changedAt: null } }) })
+      expect(screen.getByTestId('game-disagree').textContent).toMatch(/still shows something different\.$/)
+    })
+    it('no line when they agree, when only one source spoke, or when the venue block is absent', () => {
+      body({ reading: rd({ agree: true, venue }) })
+      expect(screen.queryByTestId('game-disagree')).toBeNull()
+      body({ reading: rd({ agree: null, venue: null }) })
+      expect(screen.queryByTestId('game-disagree')).toBeNull()
+      body({ reading: rd({ agree: false, venue: null }) })
+      expect(screen.queryByTestId('game-disagree')).toBeNull()
+    })
+    it('never on a venue-sourced reading (it has nothing to disagree with)', () => {
+      body({ reading: rd({ source: 'venue', agree: false, venue }) })
+      expect(screen.queryByTestId('game-disagree')).toBeNull()
+    })
+  })
+
+  describe('venue-sourced reading', () => {
+    const v = (over = {}, age = 5000) => rd({ ...venueRow(), confirmedAt: SERVER_NOW - age, ...over })
+    it('is Delayed (never Live) with one line naming the feed from the envelope, its cadence and when it changed', () => {
+      body({ reading: v(), detail: null, sources: SOURCES })
+      expect(screen.getByTestId('game-trust-chip')).toHaveTextContent('Game information is delayed')
+      expect(screen.getByTestId('game-trust-chip')).not.toHaveTextContent('is live')
+      expect(screen.getByTestId('game-source').textContent).toBe(
+        "Score from Polymarket's game feed, which updates about once a minute. Last changed 40 s ago.",
+      )
+    })
+    it('falls back to neutral words when the envelope names no source', () => {
+      body({ reading: v(), detail: null, sources: null })
+      expect(screen.getByTestId('game-source').textContent).toMatch(/^Score from the venue's feed, which updates about once a minute\./)
+    })
+    it('is Last known past 75 s', () => {
+      body({ reading: v({}, 90_000), detail: null, sources: SOURCES })
+      expect(screen.getByTestId('game-trust-chip')).toHaveTextContent('last known')
+    })
+    it('a plays-sourced reading names its source from the envelope, neutrally when absent', () => {
+      body({ sources: SOURCES })
+      expect(screen.getByTestId('game-source').textContent).toBe('From ESPN.')
+      document.body.innerHTML = ''
+      body({ sources: null })
+      expect(screen.getByTestId('game-source').textContent).toBe('From the play-by-play source.')
+    })
+    it('contains no hardcoded vendor name: with no labels the page never says ESPN or Polymarket', () => {
+      const { container } = body({ sources: null, detail: { state: 'unreadable', situation: null, plays: [] } })
+      expect(container.textContent).not.toMatch(/ESPN|Polymarket/)
+    })
   })
 
   it('detail unreadable: names the source, shows NO play fields and no behind-the-broadcast sentence', () => {
-    body({ detail: { state: 'unreadable', confirmedAt: null, situation: situation(), plays: plays() } })
-    expect(screen.getByText(/could not be read from the play-by-play source \(ESPN\)/)).toBeInTheDocument()
+    body({ detail: { state: 'unreadable', confirmedAt: null, situation: situation(), plays: plays() }, sources: SOURCES })
+    expect(screen.getByText('Play detail could not be read from ESPN, so no field or plays are shown.')).toBeInTheDocument()
     expect(screen.queryByTestId('game-field')).toBeNull()
     expect(screen.queryByTestId('game-plays')).toBeNull()
     expect(screen.queryByText(/behind the broadcast/)).toBeNull()
@@ -234,8 +292,14 @@ describe('GameViewBody — source sentences', () => {
   })
 
   it('the venue feed unreadable is named in a sentence', () => {
-    body({ sources: { venue: { state: 'unreadable', reason: 'closed' }, plays: { state: 'off' } } })
-    expect(screen.getByText(/venue's game feed could not be read/)).toBeInTheDocument()
+    body({ sources: { venue: { state: 'unreadable', reason: 'closed', label: 'Polymarket' }, plays: { state: 'off' } } })
+    expect(screen.getByText(/Polymarket's game feed could not be read/)).toBeInTheDocument()
+  })
+
+  it('teams without home/away still shows the row\'s scoreText, as the venue\'s own text', () => {
+    render(<GameScoreboard game={TEAMS_LISTING} reading={rd({ score: null, scoreText: '10-28' })} />)
+    expect(screen.getByTestId('game-score-text')).toHaveTextContent('Score: 10-28')
+    expect(screen.queryByText(/does not say which team/)).toBeNull()
   })
 
   it('teams without home/away: the field is not drawn (it cannot be oriented) but plays still show', () => {

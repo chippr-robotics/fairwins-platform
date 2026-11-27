@@ -7,8 +7,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 const gw = vi.hoisted(() => ({ url: 'http://gw.test' }))
 vi.mock('../../lib/predict/predictClient', () => ({ predictGatewayUrl: () => gw.url }))
 
-import { fetchGame, cadenceMs, pickRow, POLL_MS, PRE_START_POLL_MS } from '../../lib/sports/gameFeed'
-import { envelope, row, detail } from '../fixtures/sportsGames'
+import { fetchGame, cadenceMs, pickRow, identityOf, POLL_MS, PRE_START_POLL_MS } from '../../lib/sports/gameFeed'
+import { envelope, row, detail, LISTING, TEAMS_LISTING } from '../fixtures/sportsGames'
 
 const res = (status, body) => ({ status, ok: status >= 200 && status < 300, json: async () => body })
 
@@ -46,16 +46,43 @@ describe('fetchGame', () => {
     expect(f.mock.calls[0][0]).toBe('http://gw.test/v1/sports/games/a%2Fb%3Fc')
   })
 
-  it('accepts the row as the whole body, too (the contract does not pin the single-game shape)', async () => {
+  it('the envelope is pinned: a bare row as the whole body is a failure, not a game', async () => {
     const f = vi.fn().mockResolvedValue(res(200, { serverNow: 5, ...row() }))
-    expect((await fetchGame(19618, { fetchImpl: f })).kind).toBe('ok')
+    expect((await fetchGame(19618, { fetchImpl: f })).kind).toBe('failed')
+  })
+
+  it('sends the listing\'s identity as query params, omitting any that is null', async () => {
+    const f = vi.fn().mockResolvedValue(res(404, {}))
+    await fetchGame(19618, { identity: identityOf(LISTING), fetchImpl: f })
+    const u = new URL(f.mock.calls[0][0])
+    expect(u.pathname).toBe('/v1/sports/games/19618')
+    expect(Object.fromEntries(u.searchParams)).toEqual({ league: 'nfl', home: 'DAL', away: 'PHI', start: '2026-11-26T21:30:00Z' })
+    await fetchGame(1, { identity: identityOf({ ...LISTING, startTime: null }), fetchImpl: f })
+    expect(Object.fromEntries(new URL(f.mock.calls[1][0]).searchParams)).toEqual({ league: 'nfl', home: 'DAL', away: 'PHI' })
+    await fetchGame(1, { fetchImpl: f })
+    expect(f.mock.calls[2][0]).toBe('http://gw.test/v1/sports/games/1')
+  })
+
+  it('identityOf sends NONE for a teams-only listing, a missing listing, or a malformed code', () => {
+    expect(identityOf(TEAMS_LISTING)).toEqual({})
+    expect(identityOf(null)).toEqual({})
+  })
+
+  it('a PARTIAL identity sends none of league/home/away, and start is never sent alone (the gateway answers 400)', () => {
+    expect(identityOf({ ...LISTING, home: { code: 'dal' } })).toEqual({})
+    expect(identityOf({ ...LISTING, away: { name: 'Eagles', code: null } })).toEqual({})
+    expect(identityOf({ ...LISTING, home: null })).toEqual({})
+    expect(identityOf({ ...LISTING, league: null })).toEqual({})
+    expect(identityOf({ ...LISTING, league: '' })).toEqual({})
+    expect(identityOf({ gameId: 1, startTime: LISTING.startTime })).toEqual({})
   })
 
   it.each([
     ['sports_unconfigured', 503],
     ['sports_paused', 503],
-  ])('503 %s is absent', async (code, status) => {
-    const f = vi.fn().mockResolvedValue(res(status, { error: code }))
+    ['killswitch_active', 503],
+  ])('503 error.code %s is absent', async (code, status) => {
+    const f = vi.fn().mockResolvedValue(res(status, { error: { code, reason: 'x' } }))
     expect((await fetchGame(1, { fetchImpl: f })).kind).toBe('absent')
   })
 
@@ -63,8 +90,10 @@ describe('fetchGame', () => {
     expect((await fetchGame(1, { fetchImpl: vi.fn().mockResolvedValue(res(404, {})) })).kind).toBe('absent')
   })
 
-  it('a bare 503, a 500, a transport error and a non-game body are FAILED, not absent', async () => {
+  it('a bare 503, a 503 with another code, a 429, a 500, a transport error and a non-game body are FAILED, not absent', async () => {
     expect((await fetchGame(1, { fetchImpl: vi.fn().mockResolvedValue({ status: 503, ok: false, json: async () => { throw new Error('x') } }) })).kind).toBe('failed')
+    expect((await fetchGame(1, { fetchImpl: vi.fn().mockResolvedValue(res(503, { error: { code: 'upstream_unavailable' } })) })).kind).toBe('failed')
+    expect((await fetchGame(1, { fetchImpl: vi.fn().mockResolvedValue(res(429, { error: { code: 'quota_exceeded' } })) })).kind).toBe('failed')
     expect((await fetchGame(1, { fetchImpl: vi.fn().mockResolvedValue(res(500, {})) })).kind).toBe('failed')
     expect((await fetchGame(1, { fetchImpl: vi.fn().mockRejectedValue(new Error('net')) })).kind).toBe('failed')
     expect((await fetchGame(19618, { fetchImpl: vi.fn().mockResolvedValue(res(200, { games: [] })) })).kind).toBe('failed')

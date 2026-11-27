@@ -5,7 +5,7 @@
  * sorted into exactly three outcomes, because the page treats them differently:
  *
  *   ok      a game answer (the row + envelope), to be read through gameReading.js
- *   absent  the module is off (503 sports_unconfigured / sports_paused), the gateway predates it (404), or no
+ *   absent  the module is off (503 sports_unconfigured / sports_paused / killswitch_active), the gateway predates it (404), or no
  *           gateway is configured at all — the page draws NOTHING and does not ask again (FR-013)
  *   failed  a transport failure, a timeout, a 5xx that is not the module's own, or an answer that is not a
  *           game — keep what is on screen and let it age; never replace it with zeros
@@ -26,16 +26,33 @@ export function cadenceMs(status) {
   return POLL_MS
 }
 
-/** The envelope may carry the row under `games` (list shape) or be the row itself; either way, ONE row. */
+/** The envelope is `{ serverNow, sources, games: [row] }` and nothing else (contract pinned). ONE row for the id. */
 export function pickRow(body, gameId) {
-  if (!body || typeof body !== 'object') return null
-  if (Array.isArray(body.games)) {
-    return body.games.find((g) => g && String(g.gameId) === String(gameId)) ?? null
-  }
-  return body.gameId != null && String(body.gameId) === String(gameId) ? body : null
+  if (!body || typeof body !== 'object' || !Array.isArray(body.games)) return null
+  return body.games.find((g) => g && String(g.gameId) === String(gameId)) ?? null
 }
 
-export async function fetchGame(gameId, { fetchImpl } = {}) {
+/**
+ * The game's identity from the event listing, for the play source to match before the venue's feed has named
+ * the game: { league, home, away (team codes) [, start] }. All three of league/home/away or none; `start` is
+ * optional beside them and never sent alone. A `teams`-only listing sends NONE.
+ */
+export function identityOf(game) {
+  if (!game || typeof game !== 'object') return {}
+  const code = (t) => (typeof t?.code === 'string' && /^[A-Z0-9]{2,5}$/.test(t.code) ? t.code : null)
+  const league = typeof game.league === 'string' && game.league !== '' ? game.league : null
+  const home = code(game.home)
+  const away = code(game.away)
+  // The gateway answers 400 to a PARTIAL claim: league, home and away go together or not at all, and
+  // `start` rides only alongside them, never alone.
+  if (!league || !home || !away) return {}
+  const start = typeof game.startTime === 'string' && Number.isFinite(Date.parse(game.startTime)) ? game.startTime : null
+  return start ? { league, home, away, start } : { league, home, away }
+}
+
+const OFF_CODES = new Set(['sports_unconfigured', 'sports_paused', 'killswitch_active'])
+
+export async function fetchGame(gameId, { identity = {}, fetchImpl } = {}) {
   const base = predictGatewayUrl()
   if (!base || gameId == null || gameId === '') return { kind: 'absent' }
   const doFetch = fetchImpl ?? (typeof fetch === 'function' ? fetch : null)
@@ -44,17 +61,18 @@ export async function fetchGame(gameId, { fetchImpl } = {}) {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
   try {
-    const res = await doFetch(`${base}/v1/sports/games/${encodeURIComponent(String(gameId))}`, { signal: controller.signal })
+    const qs = new URLSearchParams(identity).toString()
+    const res = await doFetch(`${base}/v1/sports/games/${encodeURIComponent(String(gameId))}${qs ? `?${qs}` : ''}`, { signal: controller.signal })
     if (res.status === 404) return { kind: 'absent' }
     if (res.status === 503) {
       let code = null
       try {
-        code = (await res.json())?.error ?? null
+        code = (await res.json())?.error?.code ?? null
       } catch {
         /* a 503 with no body is an outage, not the module speaking */
       }
       // Only the module's own words mean "off". A bare 503 is a gateway/proxy outage: keep trying.
-      return code === 'sports_unconfigured' || code === 'sports_paused' ? { kind: 'absent' } : { kind: 'failed' }
+      return OFF_CODES.has(code) ? { kind: 'absent' } : { kind: 'failed' }
     }
     if (!res.ok) return { kind: 'failed' }
     const body = await res.json()

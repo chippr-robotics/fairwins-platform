@@ -879,7 +879,7 @@ establish the outcome. They are listed in full at the end of this document.
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `predict.game-scoreboard` | A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-01, PG-02, PG-03, PG-04) |  |
+| `predict.game-scoreboard` | A live game's score, period and clock beside its market, marked delayed or last known when it stops being confirmed | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-01, PG-02, PG-03, PG-04, PG-05, PG-06) |  |
 | `predict.game-field-and-plays` | A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-01, PG-03) |  |
 | `predict.fight-view` | A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero | 🔴 absent | none | — (proposed: no-chain) | #1756 |  |
 

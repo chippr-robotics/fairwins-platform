@@ -14,7 +14,7 @@ here is a statement about other leagues' ESPN data, other days, or load. Numbers
 - **Shape.** One JSON object per game state: `gameId` (integer), `leagueAbbreviation`, `homeTeam`, `awayTeam`, `status`,
   `score`, `elapsed`, `period`, `live`, `ended`; NFL adds `turn` (lower-case team code) and `turnProviderId`; final frames
   add `finishedTimestamp`. Bare JSON `null` control frames: 536 seen, ignored. Cricket frames carry `metadataGameId`
-  (a string) and **no** `gameId` — they cannot be keyed and are dropped. No ping, no heartbeat.
+  (a string) and **no** `gameId` — they cannot be keyed and are dropped. No ping from our side.
 - **What arrives on connect.** First connection: a burst of **531 distinct `ufc` games, all `ended: true`**, within ~50 s
   (103 in the first 10 s); zero live games. Five later connections: 1–4 frames in the first 10 s, all e-sports/tennis/
   football-other, **never an NFL frame**. So a freshly opened socket knows nothing about a given game until that game's
@@ -50,15 +50,34 @@ here is a statement about other leagues' ESPN data, other days, or load. Numbers
 - **Connection stability.** 4 unexpected closes (code 1006) in ~141 socket-minutes, each followed by a clean reconnect
   that took < 3 s here. A drop loses nothing a re-ask cannot rebuild except the next-frame wait above.
 
+- **Heartbeat (checked across all four capture files).** The bare `null` frame IS a heartbeat: **540 of them**, gap between
+  consecutive nulls min 1.5 s, median 15.3–15.7 s (per file), max 27.6 / 29.2 / 44.4 / 42.9 s. Within one connection, across
+  **2,602** gaps between frames of ANY kind: p99 **20.8 s**, max **41.5 s** (the first file alone peaked at 18.7 s; the later
+  files, captured while three sockets shared the machine, had longer gaps — a capture-side stall is not ruled out).
+  **Bound derived:** a connection is dead after **60 s** with no frame of any kind (≈ 4 heartbeats, 1.4× the worst gap
+  seen), checked every 15 s, so detection takes 60–75 s; it is then closed and reconnected. Hence the earlier "silence is not
+  an outage" holds for a GAME, not for the CONNECTION: `confirmedAt` of a venue row is the last frame of any kind on the open
+  connection (only if the game's frame arrived on it), `changedAt` the game's own last frame. Not observed: a connection that
+  stayed open but silent (every drop seen was a clean code-1006 close); the watchdog's value is untested against a real one.
+
 ### Trust bounds (one constant: `services/relay-gateway/src/sports/bounds.js#TRUST_BOUNDS`)
 
 | source | live | delayed | beyond | basis |
 | :-- | :-- | :-- | :-- | :-- |
-| `venue` (age of the newest frame for THAT game) | ≤ 75 s | ≤ 300 s | last-known | tick is 60 s (min gap 60 s, p50 60 s); +15 s for jitter. A bound under 60 s would call the healthy feed delayed most of the time. 300 s ≈ the p90 NFL gap (302 s); the 485/663/723 s silences are `last-known`, said so. |
-| `plays` (age of the last successful ESPN read) | ≤ 30 s | ≤ 120 s | last-known | scoreboard cache floor is 10 s; 30 s is three cache windows, 120 s a few missed polls. ESPN failed 0 of 940 polls, so there is no failure-rate basis — these are cache-window multiples, not measured outages. |
+| `plays` (age of the last successful ESPN read) | ≤ 30 s | ≤ 120 s | last known | scoreboard cache floor is 10 s; 30 s is three cache windows, 120 s a few missed polls. ESPN failed 0 of 940 polls, so these are cache-window multiples, not measured outages. |
+| `venue` (age of `confirmedAt`) | **never** | ≤ 75 s | last known | the venue was a median 34 s (max 203 s) behind ESPN and sends a game only on change, so even a fresh venue figure is not "now". With heartbeat-based `confirmedAt`, 75 s = five heartbeats. |
 
-`live` means the **age** is small, not that the picture is current: the venue's median lag behind ESPN is 34 s on top
-of its age, and neither is the broadcast. The surface says so in words (spec FR-011).
+`live` (plays only) means the **age** is small, not that the picture is current: neither source is the broadcast. The surface says so in words (spec FR-011).
+
+### Whose figures (amended FR-008)
+
+Because the venue never led ESPN (min lag −5 s = sampling noise, median 34 s, max 203 s) and its final came 3.5 min later, a
+row is the play source's wherever it was read AND matched; the venue's own figures ride beside it (`venue`), `agree`
+compares scores. **ESPN period text mapping:** the game row uses ESPN's own `status.type.shortDetail` with its leading
+"clock - " removed (`"9:44 - 3rd"` → `3rd`; `"Final"` → `Final`); a scheduled game's `shortDetail` is a date, so period is null,
+and its filler score `0` / clock `0:00` are dropped (null). Seen: `3rd`, `4th`, `1st`, `Final`, scheduled. **Not seen:**
+overtime (`Final/OT`?), halftime, "End of 3rd", delayed/suspended — whatever ESPN sends is forwarded as its text, never
+re-labelled. The play list (summary) gives only a period NUMBER, so plays carry Q1–Q4 for 1–4 and null otherwise.
 
 ## R2 — team codes, venue vs ESPN (NFL)
 
