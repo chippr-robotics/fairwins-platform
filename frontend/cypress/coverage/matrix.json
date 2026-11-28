@@ -3626,6 +3626,46 @@
           "issue": "#1756"
         }
       ]
+    },
+    {
+      "id": "116-multi-naming-services",
+      "title": "Multi-service name resolution (ENS + HENS + Zcash Names)",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "naming.hens-forward",
+          "name": "A .etc name in an EVM recipient field resolves via HENS on chain 61, the resolved address is shown in full and re-resolved at confirm",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1760"
+        },
+        {
+          "id": "naming.family-refusal",
+          "name": "A recognised name whose service yields a different address family (e.g. .zcash in an EVM field) is refused by name with no network call",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "disclosure",
+          "tests": [],
+          "issue": "#1760"
+        },
+        {
+          "id": "naming.unreadable-not-notfound",
+          "name": "An unreachable RPC or ZNS resolver, or a resolver failing the viewing-key check, never renders as 'name not found' and yields no address",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1760"
+        }
+      ]
     }
   ]
 }
