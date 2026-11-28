@@ -3626,6 +3626,46 @@
           "issue": "#1756"
         }
       ]
+    },
+    {
+      "id": "116-multi-naming-services",
+      "title": "Multi-service name resolution (ENS + HENS)",
+      "memberFacing": true,
+      "flows": [
+        {
+          "id": "naming.hens-forward",
+          "name": "A .etc name in an EVM recipient field resolves via HENS on ETC mainnet (61) on every build, the record it came from is disclosed, and the address is shown in full and re-resolved at confirm",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "custody",
+          "tests": [],
+          "issue": "#1760"
+        },
+        {
+          "id": "naming.reverse-prefers-ens",
+          "name": "An address with a forward-verified HENS primary name shows it; an address holding both an ENS and a HENS name shows the ENS name",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "disclosure",
+          "tests": [],
+          "issue": "#1760"
+        },
+        {
+          "id": "naming.unreadable-not-notfound",
+          "name": "An unreachable ETC RPC renders the name as could-not-be-checked, never 'name not found', and yields no address",
+          "status": "absent",
+          "tier": "none",
+          "proposedTier": "no-chain",
+          "depth": "none",
+          "risk": "information",
+          "tests": [],
+          "issue": "#1760"
+        }
+      ]
     }
   ]
 }
