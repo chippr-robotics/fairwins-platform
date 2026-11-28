@@ -351,11 +351,11 @@ establish the outcome. They are listed in full at the end of this document.
 | `sigil.sign-message` | Acting as the Sigil account, Protect ▸ Verify signs a message through the deferred ceremony and the app's own offline check verifies it to the Sigil address | 🟢 covered | settled | `no-chain` | `51-protect-sigil.cy.js` (SIG-03) |  |
 | `sigil.operate-as-send` | Operating as the Sigil account, a send settles on chain, the Sigil account (not the connected wallet) pays, the chain recovers Sigil as the sender, and the broadcast hash is written back to the disk usage log | 🟢 covered | settled | `on-chain` | `46-sigil-operate-as-send.cy.js` (SGO-01) |  |
 
-### `116-multi-naming-services` — Multi-service name resolution (ENS + HENS + Zcash Names)
+### `116-multi-naming-services` — Multi-service name resolution (ENS + HENS)
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `naming.hens-forward` | A .etc name in an EVM recipient field resolves via HENS on chain 61, the resolved address is shown in full and re-resolved at confirm | 🔴 absent | none | — (proposed: no-chain) | #1760 |  |
+| `naming.hens-forward` | A .etc name in an EVM recipient field resolves via HENS on ETC mainnet (61) on every build, the record it came from is disclosed, and the address is shown in full and re-resolved at confirm | 🔴 absent | none | — (proposed: no-chain) | #1760 |  |
 
 ## Disclosure — a member consents to a cost
 
@@ -447,11 +447,11 @@ establish the outcome. They are listed in full at the end of this document.
 |---|---|---|---|---|---|---|
 | `predict.amount-first-ticket` | Enter an amount and see average price, shares, payout, maximum loss and every fee before signing; a non-live price yields no figures | 🟢 covered | flow | `no-chain` | `52-predict-live.cy.js` (PL-09, PL-10, PL-11, PL-12) |  |
 
-### `116-multi-naming-services` — Multi-service name resolution (ENS + HENS + Zcash Names)
+### `116-multi-naming-services` — Multi-service name resolution (ENS + HENS)
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `naming.family-refusal` | A recognised name whose service yields a different address family (e.g. .zcash in an EVM field) is refused by name with no network call | 🔴 absent | none | — (proposed: no-chain) | #1760 |  |
+| `naming.reverse-prefers-ens` | An address with a forward-verified HENS primary name shows it; an address holding both an ENS and a HENS name shows the ENS name | 🔴 absent | none | — (proposed: no-chain) | #1760 |  |
 
 ## Access — gating, identity and permission
 
@@ -895,11 +895,11 @@ establish the outcome. They are listed in full at the end of this document.
 | `predict.game-field-and-plays` | A football game's field position, down and distance and last plays, absent with a stated reason when play detail cannot be read | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-01, PG-03) |  |
 | `predict.fight-view` | A fight's card, round and clock, per-round figures and official result, with unreported figures absent and never zero | 🟢 covered | flow | `no-chain` | `53-predict-game-view.cy.js` (PG-07, PG-08, PG-09, PG-10) |  |
 
-### `116-multi-naming-services` — Multi-service name resolution (ENS + HENS + Zcash Names)
+### `116-multi-naming-services` — Multi-service name resolution (ENS + HENS)
 
 | Flow | What a member does | Status | Depth | Tier | Evidence / issue | Note |
 |---|---|---|---|---|---|---|
-| `naming.unreadable-not-notfound` | An unreachable RPC or ZNS resolver, or a resolver failing the viewing-key check, never renders as 'name not found' and yields no address | 🔴 absent | none | — (proposed: no-chain) | #1760 |  |
+| `naming.unreadable-not-notfound` | An unreachable ETC RPC renders the name as could-not-be-checked, never 'name not found', and yields no address | 🔴 absent | none | — (proposed: no-chain) | #1760 |  |
 
 ## No member consequence
 
