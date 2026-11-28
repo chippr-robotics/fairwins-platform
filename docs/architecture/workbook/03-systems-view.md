@@ -224,7 +224,7 @@ alto config: `ALTO_ENTRYPOINTS=0x5FF137D4…2789` (EntryPoint v0.6), `ALTO_PORT=
 
 | Container | Image | Namespace | Ports | Limits |
 |---|---|---|---|---|
-| `fairwins-gateway-gateway` | `…/fairwins-relay-gateway:spec109-7110b663` | **owner** | `127.0.0.1:8788:8788`; internal `METRICS_PORT=9091` never published | 0.5 / 320m |
+| `fairwins-gateway-gateway` | `…/fairwins-relay-gateway:v1.21.2-dc1b6ab2` | **owner** | `127.0.0.1:8788:8788`; internal `METRICS_PORT=9091` never published | 0.5 / 320m |
 | `fairwins-gateway-engine` (OZ Relayer) | `…/fairwins-relay-engine:multichain-v1.5.0` | joiner | none | 0.35 / 320m |
 | `fairwins-gateway-finops` | `…/fairwins-finops-exporter:spec107-1ac148bf` | joiner | none; binds `127.0.0.1:9464` | 0.2 / 192m |
 | `fairwins-gateway-alloy` | `grafana/alloy:v1.10.2` | joiner | none; own UI pinned to `127.0.0.1:12345` | 0.15 / 192m |
